@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "suite": "kingdom-catastrophe-boon-launch-acceptance",
+  "preparedOnly": true,
+  "entryPoint": "reign_start_kingdom_event_test",
+  "requiresCampaignTestRunId": true,
+  "forceConfirmation": "force Reign kingdom event on disposable save",
+  "archetypes": [
+    { "id": "famine", "polarity": "harmful", "timed": true, "dimension": "food", "baseTargetVariant": "first" },
+    { "id": "pestilence", "polarity": "harmful", "timed": true, "dimension": "hearth", "baseTargetVariant": "first" },
+    { "id": "crime_wave", "polarity": "harmful", "timed": true, "dimension": "security", "baseTargetVariant": "first" },
+    { "id": "trade_collapse", "polarity": "harmful", "timed": true, "dimension": "prosperity", "baseTargetVariant": "first" },
+    { "id": "construction_stagnation", "polarity": "harmful", "timed": true, "dimension": "construction", "baseTargetVariant": "first" },
+    { "id": "political_unrest", "polarity": "harmful", "timed": true, "dimension": "loyalty", "baseTargetVariant": "first" },
+    { "id": "border_crisis", "polarity": "harmful", "timed": false, "dimension": "war", "baseTargetVariant": "first" },
+    { "id": "bountiful_harvest", "polarity": "beneficial", "timed": true, "dimension": "food", "baseTargetVariant": "first" },
+    { "id": "population_boom", "polarity": "beneficial", "timed": true, "dimension": "hearth", "baseTargetVariant": "first" },
+    { "id": "law_and_order", "polarity": "beneficial", "timed": true, "dimension": "security", "baseTargetVariant": "first" },
+    { "id": "trade_boom", "polarity": "beneficial", "timed": true, "dimension": "prosperity", "baseTargetVariant": "first" },
+    { "id": "golden_age", "polarity": "beneficial", "timed": true, "dimension": "construction", "baseTargetVariant": "first" },
+    { "id": "national_unity", "polarity": "beneficial", "timed": true, "dimension": "loyalty", "baseTargetVariant": "first" },
+    { "id": "grand_reconciliation", "polarity": "beneficial", "timed": false, "dimension": "peace", "baseTargetVariant": "first" },
+    { "id": "orderly_succession", "polarity": "beneficial", "timed": false, "dimension": "succession", "baseTargetVariant": "first" }
+  ],
+  "targetVariants": ["first", "middle", "last"],
+  "baseArchetypeCaseCount": 15,
+  "representativeTargetOrdering": [
+    { "archetypeId": "famine", "category": "harmful_timed", "variants": ["first", "middle", "last"] },
+    { "archetypeId": "bountiful_harvest", "category": "beneficial_timed", "variants": ["first", "middle", "last"] },
+    { "archetypeId": "border_crisis", "category": "immediate", "variants": ["first", "middle", "last"] }
+  ],
+  "additionalTargetOrderingCaseCount": 6,
+  "caseCount": 21,
+  "persistenceRepresentatives": [
+    { "archetypeId": "famine", "category": "harmful_timed" },
+    { "archetypeId": "bountiful_harvest", "category": "beneficial_timed" },
+    { "archetypeId": "orderly_succession", "category": "immediate" }
+  ],
+  "expiryRepresentative": { "archetypeId": "famine", "durationDays": 30 },
+  "organicProductionObservations": 1,
+  "noTargetRepresentatives": ["border_crisis", "grand_reconciliation", "orderly_succession"],
+  "profiles": [
+    "preflight", "force", "observe", "advance_observe", "expire_observe",
+    "no_target", "organic_prepare", "organic_verify", "save_prepare", "save_verify", "cleanup_marker"
+  ],
+  "perCaseProtocol": [
+    "restore the exact guarded campaign-test Current checkpoint without saving transient state",
+    "run preflight and confirm the requested archetype has an eligible ordered target",
+    "run force with a unique fixtureRunId and the MCP-derived exact Current save",
+    "capture and acknowledge the production announcement",
+    "query World History by the returned event correlation ID",
+    "for timed events, advance through the guarded campaign-test service and observe exact contributions",
+    "for immediate events, observe each distinct native war, peace, or succession consequence",
+    "collect bounded timings and failure evidence, then restore Current before the next destructive case"
+  ],
+  "persistenceProtocol": [
+    "save_prepare records only the feature fingerprint and current game instance",
+    "stop and drain the guarded campaign test",
+    "overwrite the exact run-owned Current checkpoint and require finalized Save Sync alignment",
+    "restart that Current through reign_restart_campaign_test",
+    "save_verify requires a different game instance and an identical feature fingerprint"
+  ],
+  "organicProtocol": [
+    "wait until campaign initialization, autonomous-world preparation, and Save Sync alignment are complete; organic_prepare fails closed before arming otherwise",
+    "organic_prepare proves the unchanged 1% production constant and may arm one non-serialized next-day probability override on the exact disposable save",
+    "advance to that day only through reign_advance_campaign_test",
+    "organic_verify requires one new non-forced production record with its original stable basis-point roll and proves the one-shot override was consumed"
+  ],
+  "expansionPolicy": "Expand beyond 21 forced cases only when an archetype uses a distinct unproven adapter or a failure indicates target-position sensitivity.",
+  "isolation": [
+    "the MCP independently proves the exact armed campaign-test Current before every profile",
+    "the client independently matches MBSaveLoad.ActiveSaveSlotName to that exact Current",
+    "forcing never changes the saved production daily-roll marker",
+    "the test ledger is inert outside an armed kingdom_event_test command",
+    "the optional organic acceleration is non-serialized, run-bound, next-day-only, and consumed before production selection",
+    "campaign-test Current reload, not synthetic inverse actions, undoes war, peace, succession, and timed effects",
+    "only exact run-owned campaign-test checkpoints may be removed; the enrolled baseline is immutable"
+  ]
+}

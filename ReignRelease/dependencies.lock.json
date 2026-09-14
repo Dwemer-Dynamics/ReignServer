@@ -1,0 +1,94 @@
+{
+  "schema": "reign-external-dependencies-v1",
+  "platform": "windows-x64",
+  "artifacts": [
+    {
+      "id": "postgresql",
+      "version": "15.19-3",
+      "file": "postgresql-15.19-3-windows-x64-binaries.zip",
+      "url": "https://get.enterprisedb.com/postgresql/postgresql-15.19-3-windows-x64-binaries.zip",
+      "provenance": "https://www.enterprisedb.com/download-postgresql-binaries",
+      "bytes": 330913942,
+      "sha256": "70560c1792bed36ee83d738fa17960b89c5ebe5d4b234040111e23b799a5556c",
+      "role": "runtime",
+      "verification": "Official HTTPS download; locally measured SHA-256 locked for repeatable acquisition."
+    },
+    {
+      "id": "inno-setup-compiler",
+      "version": "7.1.0-x64",
+      "file": "innosetup-7.1.0-x64.exe",
+      "url": "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe",
+      "provenance": "https://jrsoftware.org/isdl.php",
+      "sha256": "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f",
+      "role": "build-tool",
+      "verification": "Valid Windows Authenticode signature, publisher Pyrsys B.V., observed 2026-09-14. Compiler is not an end-user dependency.",
+      "bytes": 14304168
+    },
+    {
+      "id": "Bannerlord.Harmony",
+      "version": "v2.4.2.225",
+      "file": "Bannerlord.Harmony.7z",
+      "url": "https://github.com/BUTR/Bannerlord.Harmony/releases/download/v2.4.2.225/Bannerlord.Harmony.7z",
+      "bytes": 1134668,
+      "sha256": "af9daab82148e9b93da7285d6fda296e468964f57f9a14982f8775b0173c0aa8",
+      "role": "bannerlord-module"
+    },
+    {
+      "id": "Bannerlord.UIExtenderEx",
+      "version": "v2.13.2",
+      "file": "Bannerlord.UIExtenderEx.7z",
+      "url": "https://github.com/BUTR/Bannerlord.UIExtenderEx/releases/download/v2.13.2/Bannerlord.UIExtenderEx.7z",
+      "bytes": 243736,
+      "sha256": "8b2964d7620d1a89bd8c8d9ccf5290a9f77e13256e450698b5aead88df61beec",
+      "role": "bannerlord-module"
+    },
+    {
+      "id": "Bannerlord.ButterLib",
+      "version": "v2.10.4",
+      "file": "Bannerlord.ButterLib.7z",
+      "url": "https://github.com/BUTR/Bannerlord.ButterLib/releases/download/v2.10.4/Bannerlord.ButterLib.7z",
+      "bytes": 4171921,
+      "sha256": "5a8b0fbe06e5eba7164e314dede9bb06f7d00cd9f647b5adda4a2f1cda59b21c",
+      "role": "bannerlord-module"
+    },
+    {
+      "id": "Bannerlord.MBOptionScreen",
+      "version": "v5.11.4",
+      "file": "Bannerlord.MBOptionScreen.7z",
+      "url": "https://github.com/Aragas/Bannerlord.MBOptionScreen/releases/download/v5.11.4/Bannerlord.MBOptionScreen.7z",
+      "bytes": 1154779,
+      "sha256": "7efb68d8b3c23bba2597c15d06fbb62c346aea2dac1a73d3c1e4e4a97fd35cb2",
+      "role": "bannerlord-module"
+    },
+    {
+      "id": "codex",
+      "version": "0.154.0",
+      "file": "codex-package-0.154.0-windows-x64.tar.gz",
+      "url": "https://github.com/openai/codex/releases/download/rust-v0.154.0/codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "bytes": 136685775,
+      "sha256": "94cc5b3632769504c809f6c0364b693c0dfddc5c30c8361095d2263a07ac45a4",
+      "role": "runtime"
+    },
+    {
+      "id": "visual-cpp-runtime",
+      "version": "14.51.36247.0",
+      "file": "vc_redist.x64.exe",
+      "url": "https://aka.ms/vc14/vc_redist.x64.exe",
+      "bytes": 18731856,
+      "sha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c",
+      "role": "prerequisite"
+    },
+    {
+      "id": "ui-extender-corresponding-source",
+      "version": "v2.13.2",
+      "file": "Bannerlord.UIExtenderEx-v2.13.2-source.zip",
+      "url": "https://github.com/BUTR/Bannerlord.UIExtenderEx/archive/refs/tags/v2.13.2.zip",
+      "bytes": 219537,
+      "sha256": "83a3c5f193f1e6e560902b3e0d8afd185d31a48886004b46439f36696e759ff8",
+      "role": "corresponding-source"
+    }
+  ],
+  "remainingClosure": [
+    "complete installer and clean-Windows/native acceptance"
+  ]
+}

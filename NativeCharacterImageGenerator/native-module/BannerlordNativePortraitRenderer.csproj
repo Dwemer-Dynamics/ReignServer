@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>BannerlordNativePortraitRenderer</AssemblyName>
+    <RootNamespace>Bannerlord.NativePortraitRenderer</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <LangVersion>latest</LangVersion>
+    <OutputPath>bin\Win64_Shipping_Client\</OutputPath>
+    <BannerlordPath Condition="'$(BannerlordPath)' == ''">$(REIGN_BANNERLORD_PATH)</BannerlordPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\shared\ReignCourtAppearanceGenerator.cs"
+             Link="src\ReignCourtAppearanceGenerator.cs" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="TaleWorlds.DotNet">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\TaleWorlds.DotNet.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.View">
+      <HintPath>$(BannerlordPath)\Modules\Native\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.View.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade.CustomBattle">
+      <HintPath>$(BannerlordPath)\Modules\CustomBattle\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.CustomBattle.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ObjectSystem">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\TaleWorlds.ObjectSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(BannerlordPath)\bin\Win64_Shipping_Client\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

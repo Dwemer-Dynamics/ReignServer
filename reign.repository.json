@@ -1,0 +1,124 @@
+{
+  "schema": "reign-repository-policy-v1",
+  "enforcement": "enforce",
+  "canonicalRemote": "https://github.com/Dwemer-Dynamics/ReignServer.git",
+  "requiredTrackedPaths": [
+    ".gitignore",
+    ".gitattributes",
+    "AGENTS.md",
+    "README.md",
+    "reign.repository.json",
+    "ReignRelease/release.json",
+    "ReignBetaServer/ReignBetaServer.csproj"
+  ],
+  "managedSourceRoots": [
+    "NativeCharacterImageGenerator",
+    "ReignBetaServer",
+    "ReignModules",
+    "ReignRelease",
+    "ReignTools"
+  ],
+  "prohibitedTrackedPatterns": [
+    ".codex-build/**",
+    "**/.codex-build/**",
+    ".codex-live-artifacts/**",
+    ".codex-live-backups/**",
+    ".codex/config.toml",
+    ".tmp/**",
+    "AIInfluence_decompiled/**",
+    "AIInfluence_inspect/**",
+    "Bannerlord_CampaignSystem_decompiled/**",
+    "BannerlordReign/**",
+    "Discord Promotions/**",
+    "PortraitCache/**",
+    "**/PortraitCache/**",
+    "ReignBeta/server/**",
+    "ReignBeta/staging/**",
+    "ReignBetaServer/app/**",
+    "ReignBetaServer/data/**",
+    "ReignBetaServer/logs/**",
+    "**/.build-venv/**",
+    "**/.venv/**",
+    "**/.vs/**",
+    "**/TestResults/**",
+    "**/__pycache__/**",
+    "**/artifacts/**",
+    "**/bin/**",
+    "**/build/**",
+    "**/deployment-backups/**",
+    "**/dist/**",
+    "**/logs/**",
+    "**/lib/**/*.dll",
+    "**/node_modules/**",
+    "**/obj/**",
+    "**/publish/**",
+    "**/staging/**",
+    "**/verification_contracts/**",
+    "artifacts/**",
+    "logs/**",
+    "tmp/**",
+    "ReignBeta/**",
+    "ReignMcp/**",
+    "ReignRelease/payloads/**",
+    "ReignRelease/output/**"
+  ],
+  "humanAuthoredExtensions": [
+    ".cmd",
+    ".cs",
+    ".csproj",
+    ".json",
+    ".md",
+    ".props",
+    ".ps1",
+    ".py",
+    ".sln",
+    ".slnx",
+    ".spec",
+    ".targets",
+    ".toml",
+    ".xml",
+    ".yaml",
+    ".yml"
+  ],
+  "secretNamePatterns": [
+    "**/.env",
+    "**/.env.*",
+    "**/*.key",
+    "**/*.pem",
+    "**/*.pfx",
+    "**/*credentials*.json",
+    "**/*secrets*.json"
+  ],
+  "secretContentClassifiers": [
+    {
+      "id": "private-key-header",
+      "pattern": "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+    },
+    {
+      "id": "github-token",
+      "pattern": "\\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\\b"
+    },
+    {
+      "id": "openai-api-key",
+      "pattern": "\\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\\b"
+    },
+    {
+      "id": "anthropic-api-key",
+      "pattern": "\\bsk-ant-[A-Za-z0-9_-]{20,}\\b"
+    },
+    {
+      "id": "generic-api-key-assignment",
+      "pattern": "(?i)\\b(?:api[_-]?key|token)\\b[\\\"']?\\s*[:=]\\s*[\\\"'][A-Za-z0-9_./+=-]{16,}[\\\"']"
+    },
+    {
+      "id": "password-assignment",
+      "pattern": "(?i)\\bpassword\\b[\\\"']?\\s*[:=]\\s*[\\\"'][^\\r\\n\\\"']{8,}[\\\"']"
+    }
+  ],
+  "secretContentAllowlist": [
+    "generic-api-key-assignment:ReignMcp/tests/Reign.Mcp.Tests/Platform/SensitiveDataRedactorTests.cs",
+    "github-token:ReignMcp/tests/Reign.Mcp.Tests/Validation/ReignRepositoryHygieneAuditTests.cs"
+  ],
+  "maxOrdinaryFileBytes": 26214400,
+  "largeFileAllowlist": []
+}

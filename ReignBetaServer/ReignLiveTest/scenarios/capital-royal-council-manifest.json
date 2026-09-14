@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "preparedOnly": true,
+  "entryPoint": "reign_start_royal_council_test",
+  "confirmation": "start Reign Royal Council test on disposable save",
+  "profiles": [
+    "preflight",
+    "deterministic",
+    "ui",
+    "opening_briefings",
+    "routing",
+    "save_prepare",
+    "save_verify",
+    "capital_relocation",
+    "cleanup_marker"
+  ],
+  "coverage": [
+    "numeric office migration and treasurer/chancellor compatibility aliases",
+    "four distinct seats, vacancy navigation, and unavailable-incumbent suppression",
+    "adult active free capital-resident advisor eligibility and conflicting-duty disclosure",
+    "party leadership blocking, residency correction, capital relocation, shelter, and recovery",
+    "bounded role-domain packets and hidden Spymaster fact isolation",
+    "named, single-domain, cross-domain, ambiguous, irrelevant, and expansion routing",
+    "zero provider calls for unmatched questions and irrelevant advisors",
+    "advisory-only replies with no native actions, relationship assessments, reputation changes, or political-pressure mutations",
+    "attributed private official council record and present-advisor hearing set",
+    "Royal Council, Ambassador, and Economic Report native UI snapshots",
+    "native save/reload and capital relocation on the exact disposable campaign"
+  ],
+  "safety": [
+    "provider-free deterministic contracts run before provider-backed dialogue",
+    "mutating profiles require the exact armed disposable campaign",
+    "no profile may queue campaign actions through Royal Council dialogue",
+    "cleanup removes only run-owned markers and saves"
+  ],
+  "releaseGate": "Deterministic contracts, provider-backed four-role briefings and routing, native UI snapshots at 1920x1080 and 3440x1440, save/reload, capital relocation, exact cleanup, and final compatible validation/deployment must pass."
+}

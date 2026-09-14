@@ -1,0 +1,161 @@
+# Original adult desire index|semantic aim|personal meaning
+0|patient instruction|Being new at something is easier beside a teacher who does not mistake uncertainty for lack of interest.
+1|unclaimed family time|A family afternoon could have room for the conversation that repeated interruptions keep postponing.
+2|repaired friendship|The friendship should become comfortable through what is actually said, not an agreement to ignore the strain.
+3|dependable horse|A working animal that can be relied upon would remove one recurring uncertainty from practical plans.
+4|reliable stewardship|Delegating should reduce the work of supervision rather than conceal another problem until it is expensive.
+5|understood disruption|Knowing what changed would make the failure of a familiar routine less irritating and mysterious.
+6|private reading|A book should sometimes receive the best part of attention instead of only the tired remainder.
+7|recovered confidence|The next public attempt should not be governed entirely by the memory of the awkward one.
+8|personal space|A quiet room would allow a thought or mood to remain private without requiring a disappearance.
+9|settled obligations|The debt occupies more attention while waiting than its size alone seems to justify.
+10|curious apprentice|A useful question can reveal whether a learner understands the work rather than merely repeats its movements.
+11|ordinary companionship|A meal could make room for appetite and spontaneous conversation without the sequence of formal gestures.
+12|familiar place revisited|Returning might show which part of the remembered place belongs to childhood and which still survives.
+13|kept promises|The promised object should finally become something the recipient can hold instead of another assurance.
+14|useful criticism|An honest judgment would give the next attempt something more useful than general encouragement.
+15|accurate family remembrance|A familiar story has a few details that become more intriguing whenever it is confidently repeated.
+16|suitable tools|Good tools would let careful intention reach the work without a poor edge or awkward grip intervening.
+17|clear accounts|An understandable account would turn vague suspicion or reassurance into something that can be checked.
+18|fair responsibilities|The arrangement should make visible the work that habit leaves with the person least likely to object.
+19|unafraid speech|A hesitant acquaintance may have something worth hearing that a louder exchange never gives room to emerge.
+20|unclaimed travel|The journey could be valued for what happens along it rather than its usefulness to another negotiation.
+21|renewed practice|Regular small attempts would make the skill feel available again instead of merely remembered.
+22|repaired keepsake|A careful repair could let the object return to ordinary closeness without pretending the damage never happened.
+23|elder counsel|A private conversation could hold an uncertainty that is difficult to bring into a larger family exchange.
+24|restful sleep|A dependable night's rest would make the next day feel less like an effort begun already tired.
+25|early reconciliation|A difference is easier to address before both people have built a proud account of why it cannot be settled.
+26|respected judgment|Being considered seriously should precede agreement rather than depend on giving the answer already wanted.
+27|credible rest|The planned pause needs protection from small requests that each claim they will take almost no time.
+28|animal security|The animal needs a reliable place to belong rather than a succession of temporary sympathetic gestures.
+29|undisturbed work|A task could reveal what the original judgment can accomplish if it is allowed to reach its own conclusion.
+30|unqualified apology|The other person should not have to argue past an explanation before the wrong is acknowledged.
+31|recovered correspondence|The missing letter may contain an ordinary particular that memory cannot reproduce confidently.
+32|cultural understanding|An unfamiliar gesture becomes easier to meet when its purpose is understood rather than guessed at.
+33|unguarded companionship|Company could allow a quiet or unpolished day without making the relationship feel less secure.
+34|recovered time|A small recurring waste has begun to feel like a choice made repeatedly without any real pleasure in it.
+35|shared responsibility|One trusted duty passed on successfully could make further delegation feel less like a gamble.
+36|wanted book|The prospect of finally reading it has gathered interest through the time spent knowing it is elsewhere.
+37|usable workspace|A little more space could keep an ordinary task from beginning with the same irritating rearrangement.
+38|family welcome|A younger relative should be able to settle into the visit without wondering which small action is unwelcome.
+39|early consultation|A promise made on someone else's behalf can turn a simple preference into a difficult public refusal.
+40|garden restored|Visible order returning through patient work would make a neglected place easier to enjoy again.
+41|fair compensation|The price should recognize the attention spent on parts of the work a hurried buyer may overlook.
+42|bounded responsibility|A manageable project offers the satisfaction of owning a result without being overwhelmed by its scale.
+43|clear commitments|The promise should have terms both people recognize before differing expectations become an accusation.
+44|unfamiliar song|Learning the song closely would give another culture a familiar place in the voice.
+45|trusted travel|A journey is easier to anticipate when a companion's judgment does not become another uncertainty along the way.
+46|family remembrance|Another person's ordinary memory could reveal a side of the relative that formal recollections have missed.
+47|accepted failure|The failed attempt should be allowed to become experience instead of a permanent verdict on trying again.
+48|wanted company|An invitation would feel warmer if it did not depend on what an introduction might later obtain.
+49|earned mentor approval|A demanding teacher's specific compliment would be difficult to dismiss as mere encouragement.
+50|unridiculed concern|The concern deserves an answer before becoming material for someone else's amusement.
+51|useful talent|An unusual ability would feel less isolated if an ordinary situation genuinely called for it.
+52|elder comfort|A suitable room could make daily life easier in ways a ceremonial expression of respect cannot.
+53|willing learner|An interested learner gives stored knowledge a present use beyond demonstrating that it is possessed.
+54|direct conversation|The postponed exchange is already taking attention even while no words have been spoken.
+55|returned trust|A borrowed object should come back with the same practical care that made lending it seem reasonable.
+56|independent help|Assistance should leave the recipient with more choices, rather than a new reason to keep asking permission.
+57|observed mastery|Watching an experienced hand can answer a practical question that a finished object keeps hidden.
+58|domestic understanding|Another household's ordinary habits may suggest a way around a quarrel that has become too familiar.
+59|sincere visit|A shorter genuine encounter could mean more than a long appearance devoted to correct ceremony.
+60|finished reading|The remaining pages keep a line of thought open that would be satisfying to follow through.
+61|settled routine|A familiar daily sequence could provide a little steadiness without needing a larger change in fortune.
+62|quiet water|The changing surface offers something to attend to that makes no demand for a useful answer.
+63|compatible company|A small group could enjoy each other's particular interests without the strain of managing a formal mixed gathering.
+64|private practice|Unfinished music needs a place where repeated mistakes are allowed to sound ordinary.
+65|independent scrutiny|Enough understanding of accounts would make trust a considered judgment rather than a necessity.
+66|freely given trust|An animal approaching willingly would be more satisfying than a response produced by insistence.
+67|practical repair|A useful action could address part of the harm that even a sincere explanation leaves in place.
+68|personal privacy|A closed subject should be allowed to remain closed without becoming an invitation for more ingenious questioning.
+69|domestic ease|A shared laugh could make the household feel briefly larger than the disagreement occupying it.
+70|winter preparation|Finishing before the cold arrives would replace an avoidable worry with the quiet usefulness of readiness.
+71|grounded concern|A clear answer could show whether the worry needs action or simply less room in attention.
+72|safe refusal|A small request should sometimes receive a small refusal without damaging an entire relationship.
+73|adult recognition|Ordinary competence should not have to be demonstrated afresh to people who remember a much younger person.
+74|plain answer|A direct response would be easier to work with than politeness that leaves the real position obscure.
+75|workable compromise|A fair settlement could let each person move on without needing to pretend the rivalry has disappeared.
+76|approachable home|An arriving guest should be able to relax before discovering which formal expectations apply.
+77|restful rhythm|Predictable rest would make the body feel less at odds with the duties of the next day.
+78|familiar voice|A recognizable voice can make an absence feel ended more directly than receiving information about the absent person.
+79|chosen wishes|A personal preference should become audible beneath the well-practiced explanation of what others expect.
+80|shared experiment|Willing guests could make the recipe's uncertain result an enjoyable conversation instead of an examination.
+81|useful belonging|A retainer with meaningful work would have a clearer place in the household than idle attendance provides.
+82|private generosity|The recipient could have the benefit without being made part of a public display of the donor's virtue.
+83|readable handwriting|Understanding the hand would make an inaccessible page available without waiting for another reader.
+84|direct evidence|The old record might settle a detail that repeated secondhand accounts have made less clear.
+85|workshop safety|A preventable injury would be a bitter price for an inconvenience that could have been addressed earlier.
+86|dignified help|Needing assistance should not require adopting a smaller opinion of one's own general competence.
+87|ordinary work|A tangible task could offer a straightforward result after too much time spent arranging what others will do.
+88|renewed interest|A former pleasure may still have something to offer once the expectations attached to it are set aside.
+89|child understood|Quietness may conceal a small specific difficulty that a general instruction to be cheerful will not reach.
+90|lasting quality|A well-made purchase could replace a succession of minor failures with one dependable familiar object.
+91|simpler home|Less display would leave more of the household's effort available for actually living there.
+92|unclaimed evening|One evening could follow its own pace without requiring a choice between competing disappointments.
+93|regional speech|Speaking accurately would permit closer understanding than a few phrases used merely to impress a listener.
+94|finished embroidery|The last stitches could turn a repeatedly postponed piece into something that can finally be used or given.
+95|reclaimed route|An ordinary walk could become available again without the avoided turn deciding the whole journey.
+96|attentive friendship|The friend should be able to complete the account before receiving an answer to only its first part.
+97|preparation recognized|A smooth occasion can conceal the work that made its ease possible.
+98|kind instruction|The learner should remember the useful step more clearly than the embarrassment of not knowing it before.
+99|honest refusal|An invitation could be declined without creating an invented excuse that later needs protection.
+100|workable partnership|A necessary working relationship could consume less energy in anticipating each other's irritation.
+101|reconsidered promise|An old commitment may no longer be helpful merely because nobody has explicitly released it.
+102|understood disappointment|The disappointment would feel less solitary if another person understood what was actually hoped for.
+103|prepared journey|Practical preparation could leave more of the journey free for the surprises that are worth enjoying.
+104|collaborative making|A craftsman willing to discuss the result could turn a purchase into a shared process of getting the details right.
+105|fair credit|Recognition should preserve the contributions that made the joint result possible.
+106|riding comfort|A better fit would remove an ordinary physical irritation from journeys that already require enough attention.
+107|renewed music|An instrument returned to use could restore a familiar pleasure rather than remain an attractive silent possession.
+108|unranked enjoyment|An activity could remain enjoyable without every attempt measuring a place among better practitioners.
+109|ordinary hospitality|Guests might reveal more of their actual company once the visit stops feeling like a formal performance.
+110|useful curiosity|One well-placed question could open a practical possibility that confident repeated answers have concealed.
+111|revised judgment|Better evidence should have room to alter a decision without the earlier commitment demanding endless defense.
+112|chosen tradition|A familiar custom can keep its warmth without requiring every uncomfortable part to survive unchanged.
+113|peaceful encounter|Friends could share a meeting that does not force the host to choose which relationship to protect.
+114|known plants|Names and useful distinctions would make an ordinary patch of ground more interesting to look at.
+115|feasible ambition|A large project would become more inviting once its first workable steps can be seen clearly.
+116|returned book|The particular volume has a wanted place in an unfinished line of reading.
+117|reliable letters|Personal words should reach their recipient without being delayed, altered, or made into another person's curiosity.
+118|changed loved one understood|A loved one's different priorities are easier to meet when they are explained rather than treated as rejection.
+119|reclaimed room|A usable room could replace the dull daily reminder of space that remains inconveniently wasted.
+120|thoughtful disagreement|A different judgment can make a conversation more interesting when both people explain how they reached it.
+121|grounded reassurance|A concrete reason to feel safer would stay useful after the comforting tone has faded.
+122|practical animal care|Knowing a useful next step would make concern less helpless beside an injured animal.
+123|practical apology|An apology should reduce the other person's remaining burden as well as acknowledge how it arose.
+124|kept promises|A solution should avoid quietly deciding that one person's reasonable expectation no longer matters.
+125|project materials|Having the materials nearby would turn a familiar intention into something that can actually be begun.
+126|private experiment|A small risk would be easier to assess without the added pressure of someone watching for a verdict.
+127|recovered warmth|A minor awkwardness should not be allowed to set the permanent tone of a valued acquaintance.
+128|independent recognition|The work should be examined before a family association supplies either indulgence or suspicion.
+129|quiet companionship|A walk could provide company without requiring the conversation to perform constantly for it.
+130|completed letter|The difficult words already occupy attention; setting them down could make the next step clearer.
+131|living tradition|An elder may remember the ordinary purpose of a custom whose explanation has become only ceremonial.
+132|sustainable generosity|Making room deliberately would allow giving without creating a new private anxiety immediately afterward.
+133|fair judgment|Recognizing a sound bargain would make it easier to proceed without relying on a seller's confidence.
+134|considerate warning|A little notice would allow a changed plan to be met as an adjustment rather than an avoidable shock.
+135|accurate remembrance|The remembered version should retain the actual effort instead of becoming a tidier but misleading anecdote.
+136|sustainable duty|A duty performed more manageably could remain dependable without exhausting the person responsible.
+137|unenvious friendship|A friend's success should be allowed its pleasure without automatically becoming an unwelcome comparison.
+138|fair suspicion|A troubling interpretation deserves checking before it is allowed to change how another person is treated.
+139|settled mornings|One reliable beginning could make the rest of the day feel less like a succession of recoveries.
+140|night outdoors|An open sky could offer a different sense of scale during a night spent away from ordinary rooms.
+141|admired artisan|Meeting the maker could reveal the practical choices behind an already admired result.
+142|clear boundaries|A relationship would be easier to maintain if a limit did not have to be defended through a new refusal every time.
+143|unbought affection|A child's pleased recognition should follow a shared effort or example rather than the size of a purchase.
+144|useful during illness|A manageable contribution could preserve a sense of participation when the usual work is out of reach.
+145|plain speech|A clear statement could spare both people the tiring work of guessing which part of the meaning has been softened away.
+146|comfortable receiving|A gift might be enjoyed more fully without immediately turning it into a debt requiring repayment.
+147|independent taste|A preference could regain its pleasure once an unkind judgment stops arriving before every opportunity to enjoy it.
+148|manageable obligation|A concrete first step would be more useful than repeatedly feeling the whole neglected duty at once.
+149|shared family interest|An ordinary common pleasure might give a difficult relative something to talk about beyond the familiar disagreement.
+150|understood humor|Recognizing the intended play would make an unfamiliar joke easier to meet without misplaced offense or forced laughter.
+151|shared completion|Finishing together would preserve the companionship of the beginning in a visible completed thing.
+152|protected quiet|A place set aside for thought would make a private pause possible without continually explaining its purpose.
+153|private help|Help could remain centered on the person receiving it instead of becoming a story about the helper.
+154|specific praise|Naming what worked well would make approval useful and more believable to the person hearing it.
+155|clear expectations|A straightforward explanation could prevent an unspoken hope from becoming an unfair later complaint.
+156|measured celebration|The occasion could remain pleasurable without leaving exhaustion, expense, or regret to define its aftermath.
+157|honest revision|Changing an opinion should be allowed to reflect thought rather than automatically being treated as unreliability.
+158|peaceful parting|A conversation can end without full agreement while still leaving a possible next meeting.
+159|ordinary contentment|An unremarkable pleasant day would be worth having even if it supplies no achievement to recount.

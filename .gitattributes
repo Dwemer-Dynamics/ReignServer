@@ -1,0 +1,25 @@
+* text=auto
+*.cs text eol=lf
+*.csproj text eol=lf
+*.props text eol=lf
+*.targets text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.py text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.woff binary
+*.woff2 binary
+
+# Preserve exact upstream notice bytes bound by ThirdParty/provenance.json.
+ReignRelease/ThirdParty/* -text
+ReignRelease/ThirdParty/provenance.json text eol=lf

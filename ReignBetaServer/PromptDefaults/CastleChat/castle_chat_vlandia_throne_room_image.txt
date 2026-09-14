@@ -1,0 +1,182 @@
+Create an exceptionally photorealistic cinematic scene inside the **Throne Room of a powerful Vlandian castle during quiet, unofficial hours when no formal court, petitioning, judgment, or public audience is taking place**.
+
+The chamber must remain unmistakably the formal seat of Vlandian feudal authority, but it currently feels very different from its ceremonial use.
+
+There are:
+
+- No assembled court.
+- No petitioners.
+- No formal audience.
+- No active judgment.
+- No public ceremony.
+- No line of nobles waiting to be heard.
+- No crowds surrounding the throne.
+
+The room is largely still.
+
+This quietness should make the enormous chamber feel more personal, reflective, and perhaps slightly imposing.
+
+Use:
+
+- Tall pale dressed-stone walls.
+- Massive dark oak roof beams.
+- Narrow high arched windows.
+- Heavy oak doors with black iron fittings.
+- Iron chandeliers.
+- Tall beeswax candle stands.
+- Large hearths.
+- Long heraldic banners.
+- Family colors.
+- Shields.
+- Military standards.
+- Restrained ceremonial weapons.
+- Heavy tapestries.
+- Carved heraldic panels.
+- Broad worn stone flooring.
+- A ceremonial runner leading toward the dais.
+- Empty side benches.
+- Formal chairs standing unused along the edges.
+
+The throne should dominate the far end of the chamber.
+
+Raise it several shallow steps above the main floor.
+
+The Vlandian throne should be:
+
+- Heavy carved oak.
+- Tall-backed.
+- Broad.
+- Reinforced with restrained iron or bronze.
+- Decorated with feudal heraldry.
+- Cushioned with fine woven fabric or leather.
+- Imposing through craftsmanship rather than fantasy extravagance.
+
+The **throne should ordinarily remain empty unless a supplied source character has a believable reason to be sitting there**.
+
+A character does not need to be sitting upon the throne simply because it exists.
+
+Outside formal court hours, signs of the room's ceremonial function may remain while being temporarily dormant:
+
+- Petition tables pushed aside.
+- Writing materials stored neatly.
+- Sealed document boxes closed.
+- Benches empty.
+- Ceremonial objects returned to their stands.
+- Curtains or banners hanging motionless.
+- An extinguished section of candle stands.
+- A few remaining candles burning near the dais.
+- Documents left from earlier proceedings but no active court session.
+
+The quiet throne room may naturally be used for unofficial activities such as:
+
+- Walking through the empty chamber.
+- Looking at the throne from below.
+- Standing on the dais without sitting.
+- Sitting briefly upon the steps of the dais.
+- Looking at heraldic banners.
+- Examining an old shield.
+- Studying a ceremonial sword.
+- Reading an inscription.
+- Reading a private letter.
+- Thinking about rulership.
+- Reflecting upon a previous audience.
+- Remembering something that happened here.
+- Rehearsing what one intends to say during a future formal meeting.
+- Practicing a speech privately.
+- Thinking about inheritance or succession.
+- Looking at where one's family stands in relation to the ruling house.
+- Meeting another supplied character discreetly because the hall is empty.
+- Quietly discussing politics.
+- Seeking solitude in a place few people visit between audiences.
+- Waiting informally for someone.
+- Sitting on a side bench.
+- Warming near the hearth.
+- Looking through an empty window recess.
+- Considering what it would mean to possess the authority represented by the throne.
+- Feeling uncomfortable in the room despite no ceremony taking place.
+- Simply passing through and becoming distracted by something within the chamber.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible human must correspond exactly to one supplied source image.
+
+Do not generate:
+
+- Guards.
+- Courtiers.
+- Servants.
+- Squires.
+- Pages.
+- Petitioners.
+- Scribes.
+- Heralds.
+- Diplomats.
+- Soldiers.
+- Attendants.
+- Background nobles.
+- People visible through doors.
+- People on galleries.
+- Human silhouettes.
+- Reflected humans.
+- Any active audience.
+
+If only one source character is provided, exactly one visible human should appear.
+
+If multiple source characters are supplied, only those specific characters may appear.
+
+Do not create invented humans in:
+
+- Paintings.
+- Tapestries.
+- Statues.
+- Reliefs.
+- Carvings.
+- Stained glass.
+
+Preserve each source character's exact:
+
+- Facial identity.
+- Apparent age.
+- Head shape.
+- Skin tone.
+- Natural skin texture.
+- Eyes.
+- Brows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hair.
+- Hairline.
+- Facial hair.
+- Scars.
+- Freckles.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Torso proportions.
+- Waist.
+- Hips.
+- Arms.
+- Legs.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative size to other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or redesign the character.
+
+Clothing may be changed to realistic **Vlandian civilian or noble castle clothing appropriate to the character's status and reason for being there**.
+
+Armor should appear only if the character's actual circumstances justify it.
+
+Characters should interact naturally with the empty formal chamber rather than pose dramatically.
+
+Maximum possible photorealism.
+
+The finished image must resemble **high-end live-action historical photography inside a real medieval throne room during quiet hours**.
+
+---

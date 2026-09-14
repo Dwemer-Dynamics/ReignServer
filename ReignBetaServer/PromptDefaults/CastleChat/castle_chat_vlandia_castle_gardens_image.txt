@@ -1,0 +1,174 @@
+Create an exceptionally photorealistic cinematic scene inside the **private castle gardens of a wealthy Vlandian stronghold**, reflecting Vlandian feudal aristocracy, landed wealth, heraldic pride, cultivated estates, courtship traditions, hunting culture, and the desire of powerful nobles to impose order and beauty upon the land surrounding their residence.
+
+These gardens are located **inside or immediately adjoining the secure inner castle grounds**. They are reserved primarily for the ruling household, nobles, trusted guests, and private meetings rather than functioning as a public park.
+
+The garden should feel believable for a powerful western-medieval aristocratic castle.
+
+Use a combination of:
+
+- High pale-stone garden walls.
+- Gravel or packed-earth paths.
+- Carefully maintained lawns.
+- Geometric planting beds.
+- Low clipped hedges.
+- Rose bushes.
+- Lavender.
+- Sage.
+- Rosemary.
+- Thyme.
+- Medicinal herbs.
+- Flowering shrubs.
+- Apple and pear trees.
+- Small orchard sections.
+- Trellises supporting vines or climbing roses.
+- Wooden or stone benches.
+- Shaded arbors.
+- Small fountains or stone basins.
+- Decorative wells.
+- Narrow channels or drains.
+- Carved stone planters.
+- Heraldic plaques.
+- Small covered walkways.
+- Garden gates reinforced with decorative ironwork.
+
+The castle should remain visibly nearby.
+
+Stone towers, crenellated walls, upper windows, banners, covered passages, or parts of the keep should rise behind or around the garden so there is never any doubt that this is a **private garden contained within a fortified noble residence**.
+
+The landscaping should be maintained but not unnaturally perfect. Include subtle signs of genuine use:
+
+- Fallen petals.
+- Leaves on paths.
+- Slightly uneven hedges.
+- Damp stone.
+- Footprints in soft earth.
+- Water stains around a fountain.
+- Weathered benches.
+- Recently cut herbs.
+- A forgotten cup or closed book.
+- A cloak placed over a bench if one of the supplied characters could plausibly have left it there.
+
+The atmosphere may change by season and time:
+
+- Bright spring morning.
+- Warm summer afternoon.
+- Golden evening.
+- Misty autumn.
+- Light rain.
+- Frosted winter garden.
+- Overcast quiet afternoon.
+
+The gardens may naturally support activities including:
+
+- Walking alone.
+- Walking with another supplied character.
+- Reading on a bench.
+- Writing a letter outdoors.
+- Talking privately.
+- Courtship.
+- Flirtation.
+- Discussing marriage.
+- Discussing politics somewhere difficult to overhear.
+- Sitting beside a fountain.
+- Examining flowers.
+- Picking herbs.
+- Smelling a rose or flowering plant.
+- Inspecting the condition of the grounds.
+- Looking toward the castle.
+- Watching clouds.
+- Enjoying sunlight after spending hours indoors.
+- Mourning quietly.
+- Thinking about family.
+- Playing a quiet board game on a garden table.
+- Sharing a small meal or drink.
+- Waiting for someone.
+- Walking to calm anger.
+- Exercising gently after illness or injury.
+- Discussing household or estate matters.
+- Considering the future of the regent's dynasty.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible human must correspond exactly to one of the supplied source characters.
+
+Do not generate:
+
+- Gardeners.
+- Servants.
+- Guards.
+- Courtiers.
+- Children.
+- Pages.
+- Musicians.
+- Workers.
+- Background nobles.
+- People visible through castle windows.
+- People walking distant paths.
+- Human silhouettes.
+- Reflected people.
+- Unspecified companions.
+
+If one source character is supplied, exactly one visible human should appear.
+
+If several source characters are supplied, only those people may appear.
+
+Do not add identifiable human figures to statues, fountains, reliefs, paintings, banners, or decorative artwork.
+
+The supplied source images are the absolute authority for character appearance.
+
+Preserve each character's:
+
+- Exact facial identity.
+- Apparent age.
+- Head shape.
+- Skin tone.
+- Natural skin texture.
+- Eye shape, spacing, and color.
+- Eyebrows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hairline.
+- Hair color.
+- Hairstyle where practical.
+- Facial hair.
+- Scars.
+- Freckles.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest and torso proportions.
+- Waist.
+- Hip structure.
+- Arm length.
+- Leg length.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative height and size compared with other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or otherwise redesign them.
+
+Their clothing may be changed to believable **Vlandian civilian or noble clothing appropriate to walking or relaxing within the castle grounds**.
+
+Use realistic linen, wool, leather, fine woven fabrics, gowns, tunics, hose, cloaks, belts, boots, and restrained heraldic or noble ornament according to rank.
+
+Armor should appear only if a specific character or situation clearly warrants it.
+
+Characters should interact naturally with the garden rather than posing.
+
+They may sit on a bench, walk along a path, lean near a fountain, hold a book, examine a flower, rest beneath an arbor, read correspondence, or stand naturally in conversation.
+
+The result must look like **high-end live-action historical photography of real human beings in a real medieval castle garden**.
+
+Use realistic skin pores, hair, hands, fabric movement, leaves, flowers, bark, soil, gravel, weathered stone, water, atmospheric depth, and natural daylight.
+
+Avoid fantasy concept art, video-game rendering, artificial glamour, exaggerated flowers, plastic vegetation, or modern landscaping.
+
+Maximum possible photorealism.
+
+---

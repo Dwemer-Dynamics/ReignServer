@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>ReignVerification</AssemblyName>
+    <RootNamespace>ReignVerification</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>..\..\ReignBeta\server\app\</OutputPath>
+  </PropertyGroup>
+</Project>

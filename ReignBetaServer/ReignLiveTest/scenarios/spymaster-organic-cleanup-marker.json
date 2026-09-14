@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance — remove marker before disposable-save deletion",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "spymaster_organic", "phase": "cleanup_marker", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

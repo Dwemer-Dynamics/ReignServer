@@ -1,0 +1,65 @@
+Create an exceptionally photorealistic cinematic scene inside an **Imperial castle library**, reflecting the Empire's ancient Calradic traditions of administration, law, scholarship, rhetoric, engineering, bureaucracy, and preservation of classical knowledge.
+
+This should feel like a library belonging to the surviving heirs of a civilization that once governed enormous territories through both military power and written administration.
+
+The chamber is built from fitted stone and brick faced with sections of polished or worn marble. Broad rounded arches divide portions of the room. Columns or pilasters support the architecture without making the space resemble a temple. Portions of the floor contain worn geometric mosaics. Painted plaster and restrained geometric border designs survive along portions of the walls.
+
+Tall wooden shelving and recessed wall cabinets contain a mixture of leather-bound codices, rolled manuscripts, administrative ledgers, legal collections, histories, philosophical works, engineering texts, military treatises, tax registers, diplomatic archives, genealogical records, and maps inherited or copied across generations.
+
+Some older texts are carefully stored in wooden cases.
+
+Large tables provide space for documents to be spread flat. Writing stations contain quills, ink, wax tablets, parchment, straightedges, compasses, seals, measuring tools, scroll weights, and document boxes. Brass or bronze oil lamps supplement daylight entering through tall arched windows.
+
+The library should visibly support activities such as:
+
+- Studying Imperial law.
+- Reading ancient histories.
+- Comparing conflicting historical accounts.
+- Reviewing tax records.
+- Inspecting provincial reports.
+- Studying engineering or architecture.
+- Examining military logistics.
+- Reading philosophical or rhetorical works.
+- Preparing speeches.
+- Studying diplomatic correspondence.
+- Maintaining bureaucratic records.
+- Comparing maps of old and current borders.
+- Investigating genealogies and succession claims.
+- Reading works from the former unified Empire.
+- Researching political precedent.
+- Copying or translating an older manuscript.
+- Reviewing census or property records.
+- Studying siegecraft.
+- Examining trade information.
+
+The overall impression should be one of **organized institutional knowledge surviving inside an aristocratic military state**.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use ONLY the full-body source character images supplied directly with this prompt.
+
+No human may appear unless that person's source image was provided.
+
+Do not generate servants, scribes, guards, attendants, scholars, background figures, silhouettes, reflections containing humans, crowds, or invented characters.
+
+If one source character is supplied, exactly one person should appear.
+
+Do not include figurative statues, busts, mosaics, or painted portraits containing additional human figures.
+
+Preserve every supplied character's exact recognizable identity and physique as closely as technically possible, including facial structure, age, skin, eyes, eyebrows, nose, lips, jaw, chin, hair, scars, facial hair, height, shoulder width, torso proportions, body mass, musculature, limb proportions, and all distinguishing natural characteristics.
+
+Never replace the source identity with a generic Imperial noble.
+
+Do not beautify or alter their body.
+
+Clothing may be replaced with culturally appropriate Imperial civilian or scholarly clothing suitable to status and environment, using believable linen, wool, leather, silk or fine woven fabrics where rank permits, layered robes, tunics, belts, cloaks, jewelry, and footwear.
+
+Do not use theatrical Roman costumes. Clothing should feel like authentic clothing from Bannerlord's Imperial culture rendered as real historical garments.
+
+Characters should naturally use the environment: reading, writing, studying a map, comparing documents, retrieving a manuscript, sitting at a table, or thoughtfully examining records.
+
+Render the scene as a genuine high-end photograph taken inside a real inhabited medieval/late-antique castle.
+
+Maximum photorealism, realistic pores, believable anatomy and hands, authentic material wear, natural shadows, physically convincing candle and daylight illumination, and no game-render appearance.
+
+---

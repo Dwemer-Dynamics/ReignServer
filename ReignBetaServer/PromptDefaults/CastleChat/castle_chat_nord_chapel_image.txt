@@ -1,0 +1,100 @@
+Create an exceptionally photorealistic cinematic scene inside the **sacred chapel and oath chamber of a Nord castle**, distinctly reflecting a settled northern maritime aristocracy shaped by the sea, law, family, voyages, mortality, warfare, storms, oaths, and remembrance of those who never returned home.
+
+This must be clearly distinct from Sturgia.
+
+The chamber stands within a massive coastal or northern fortress.
+
+Rough-cut stone walls support enormous dark oak beams. Heavy timber doors and carved uprights give the room the feeling of something built to endure generations of storms.
+
+Shuttered windows or narrow openings may reveal:
+
+- Gray sea.
+- Coastal cliffs.
+- Snow.
+- Rain.
+- Storm clouds.
+- Distant mountains.
+- Harsh northern daylight.
+
+A sacred focal area may contain:
+
+- Heavy carved timber or stone devotional table.
+- Iron lamps.
+- Candles.
+- Oil lamps.
+- Sacred books.
+- Offering bowls.
+- Oath rings or symbolic metal objects where appropriate to the fictional culture.
+- Memorial tablets.
+- Pieces of rope or ship timber used as memorial objects.
+- Non-human sacred carvings.
+- Small objects brought back from voyages.
+
+Decorative imagery may include:
+
+- Waves.
+- Ships.
+- Stars.
+- Birds.
+- Whales or sea animals.
+- Knotwork.
+- Stylized beasts.
+- Storm motifs.
+- Sun or celestial symbols.
+- Geometric interlace.
+
+Do not turn this into a fantasy Viking temple.
+
+No horned imagery, magical runes, glowing symbols, or exaggerated pagan spectacle.
+
+This is a sober sacred room used by people accustomed to knowing that ships vanish, warriors die, storms kill without warning, and oaths may determine whether a clan survives.
+
+Possible activities include:
+
+- Prayer.
+- Lighting a candle for someone at sea.
+- Mourning someone who never returned.
+- Giving thanks after surviving a voyage.
+- Making or remembering an oath.
+- Seeking courage before sailing.
+- Seeking courage before battle.
+- Thinking about one's family.
+- Reading a written sacred or moral text.
+- Leaving a memorial token.
+- Considering whether revenge is worth its cost.
+- Wondering whether an oath must still be kept.
+- Reflecting upon death.
+- Asking whether one's deeds deserve remembrance.
+- Sitting in silence while listening to weather outside.
+
+### ABSOLUTE CHARACTER REQUIREMENTS
+
+Only the supplied full-body source characters may appear as human beings anywhere in the scene.
+
+Do not generate:
+
+- Priests.
+- Seers.
+- Sailors.
+- Guards.
+- Warriors.
+- Servants.
+- Worshippers.
+- Ancestors.
+- Spirits.
+- Human statues.
+- Human carvings.
+- Background figures.
+- Reflections containing unspecified people.
+
+Preserve each supplied character's exact facial identity and full physique.
+
+Do not transform anyone into a stereotypical Viking.
+
+Clothing may change to believable Nord noble, civilian, mourning, or devotional clothing using wool, linen, leather, cloaks, tunics, trousers, dresses, boots, woven trim, and restrained metal ornament.
+
+Characters should interact naturally with candles, memorial objects, sacred texts, windows, benches, or the devotional area.
+
+Maximum high-end live-action photorealism.
+
+---

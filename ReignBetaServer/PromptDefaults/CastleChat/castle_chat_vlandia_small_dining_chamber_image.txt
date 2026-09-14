@@ -1,0 +1,147 @@
+Create an exceptionally photorealistic cinematic scene inside the **small private dining chamber of a wealthy Vlandian castle**.
+
+This is not the castle's great hall and should not resemble a banquet scene. It is a smaller, warmer, more private chamber used by the ruling household, close family, trusted nobles, honored guests, and people invited to eat or speak away from the noise and ceremony of the main court.
+
+The room should strongly reflect **Vlandian feudal aristocratic culture**.
+
+The chamber has thick pale stone walls, deep-set narrow arched windows, heavy oak ceiling beams, dark wooden wall panels in selected areas, and a substantial stone hearth providing warmth. Firelight mixes with daylight and beeswax candles to produce a natural, intimate atmosphere.
+
+A solid rectangular oak dining table occupies the center of the chamber. It is considerably smaller than a banquet table and intended for perhaps several people rather than an entire court. Heavy-backed wooden chairs or benches surround it.
+
+The table may contain culturally appropriate food and dining objects such as:
+
+- Freshly baked coarse and fine breads.
+- Roasted or stewed meat.
+- Game birds.
+- Sausages or cured meats.
+- Hard and soft cheeses.
+- Root vegetables.
+- Greens.
+- Apples, pears, or seasonal fruit.
+- Thick soups or stews.
+- Small pies.
+- Butter.
+- Salt.
+- Wooden serving boards.
+- Pottery bowls.
+- Pewter or silver dishes depending upon status.
+- Knives.
+- Wooden or metal spoons.
+- Drinking cups.
+- Wine, ale, or watered wine in jugs.
+- Linen napkins or cloths.
+
+The room should show signs of genuine daily use rather than appearing staged. A partially eaten meal, recently poured drink, bread broken by hand, a chair moved slightly away from the table, crumbs, a folded letter placed beside a plate, or a knife resting naturally on a wooden board are appropriate.
+
+A sideboard or heavy cabinet may hold dishes, cups, serving vessels, wine jugs, table linen, and small household valuables.
+
+Restrained decoration may include heraldic embroidery, a family crest carved into wood, tapestries, iron candle brackets, hunting imagery, or a mounted shield. Do not make the chamber grand enough to resemble a throne room.
+
+This private dining chamber could plausibly be used for:
+
+- Eating breakfast.
+- Taking a midday meal.
+- Eating supper.
+- Having a late meal after returning to the castle.
+- Sharing food with a trusted friend.
+- Dining with a family member.
+- Hosting one or two important guests privately.
+- Drinking wine or ale after a meal.
+- Discussing politics quietly over food.
+- Reviewing a letter while eating.
+- Receiving private news during a meal.
+- Waiting for another invited diner.
+- Picking at food while distracted.
+- Eating quickly before other obligations.
+- Enjoying a rare peaceful meal alone.
+- Sharing gossip.
+- Discussing a marriage, inheritance, feud, military matter, or estate concern.
+- Playing a quiet board or table game after eating.
+- Sitting near the hearth with a drink.
+- Cutting bread, pouring wine, or serving oneself from shared dishes.
+- Remaining at the table long after the meal has ended because the conversation matters more than the food.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible person must correspond to one of the supplied source character images.
+
+Do not generate:
+
+- Servants.
+- Cooks.
+- Guards.
+- Pages.
+- Musicians.
+- Attendants.
+- Children.
+- Background diners.
+- People passing through doorways.
+- Human silhouettes.
+- Reflected people.
+- Unspecified guests.
+- Any other invented person.
+
+If only one source character is provided, exactly one visible human should appear.
+
+If multiple source characters are supplied, only those specific characters may appear.
+
+Do not create paintings, portraits, statues, tapestries, carvings, or other figurative artwork showing additional recognizable human beings.
+
+The source characters are the absolute authority for physical identity.
+
+Preserve each supplied character as precisely as technically possible, including:
+
+- Exact facial identity.
+- Apparent age.
+- Head shape.
+- Facial proportions.
+- Skin tone.
+- Natural skin texture.
+- Freckles and blemishes.
+- Eye shape, spacing, and color.
+- Eyebrows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hairline.
+- Hair color.
+- Hairstyle where practical.
+- Facial hair.
+- Scars and distinguishing marks.
+- Height.
+- Shoulder width.
+- Chest and torso proportions.
+- Waist.
+- Hips.
+- Arm length.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative height and size compared with other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, feminize, masculinize, or otherwise redesign the source character.
+
+Their clothing may be replaced with **culturally appropriate Vlandian civilian or noble clothing suitable for a private meal**, using believable wool, linen, leather, woven fabrics, gowns, tunics, hose, belts, boots, cloaks, and restrained noble ornament.
+
+Do not change the underlying physique when changing clothing.
+
+Characters should interact naturally with the room.
+
+They may be eating, holding a cup, cutting food, breaking bread, pouring wine, reading a letter beside their plate, sitting near the hearth, leaning naturally across the table during conversation, or performing another plausible activity.
+
+Do not arrange them as a portrait group looking at the camera unless their actual activity naturally calls for it.
+
+The result must look like **a high-end live-action photograph of real people inside a real inhabited medieval castle**.
+
+Use realistic pores, genuine skin texture, natural hands and fingers, believable chewing or resting expressions, authentic fabric weight, realistic food, aged timber, scratched table surfaces, worn stone, candle wax, smoke, firelight, daylight, and physically accurate contact between characters, chairs, food, cups, and tables.
+
+Avoid video-game rendering, fantasy illustration, painterly textures, plastic skin, excessive cleanliness, theatrical poses, or artificial cinematic glamour.
+
+Maximum possible photorealism.
+
+---

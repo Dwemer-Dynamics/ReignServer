@@ -1,0 +1,2 @@
+# All direct and transitive dependencies are pinned for Windows x64 / Python 3.13.
+-r requirements.lock.txt

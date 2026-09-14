@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "suite": "spymaster-organic-launch-acceptance",
+  "preparedOnly": true,
+  "fixtureRunId": "spymaster_organic_launch",
+  "checkpointOwner": "guarded_campaign_test_current",
+  "orderedProfiles": [
+    "spymaster-organic-preflight.json",
+    "spymaster-organic-prepare.json",
+    "spymaster-organic-intelligence.json",
+    "spymaster-organic-people-scopes.json",
+    "spymaster-organic-sabotage.json",
+    "spymaster-organic-social-fabrication.json",
+    "spymaster-organic-social-mitigation.json",
+    "spymaster-organic-self-mitigation.json",
+    "spymaster-organic-agent-watch.json",
+    "spymaster-organic-counterintelligence.json",
+    "spymaster-organic-save-prepare.json",
+    "spymaster-organic-save-verify.json",
+    "spymaster-controlled-assassination-success.json",
+    "spymaster-controlled-capture-breakout-success.json",
+    "spymaster-organic-evaluate.json",
+    "spymaster-organic-cleanup-marker.json"
+  ],
+  "supplementaryProfiles": [
+    "spymaster-organic-war-setup.json",
+    "spymaster-organic-agent-cycle.json",
+    "spymaster-organic-agent-operation-window.json"
+  ],
+  "operatorCheckpoints": [
+    "Run social mitigation only after a harmful fabrication succeeds and the matching target has an applicable record.",
+    "Run self mitigation only when the player has at least one organic rumor and one reputation.",
+    "After save prepare, stop and drain the enrolled campaign test, overwrite its exact run-owned Current checkpoint, and restart that Current through the guarded campaign-test route before save verify.",
+    "Repeat probabilistic profiles indicated by the evaluate phase's recommendedNext output.",
+    "Run each controlled destructive profile on its own restore-isolated disposable branch after its separate exact confirmation.",
+    "Restore the pre-test user checkpoint, then delete only the exact disposable saves and Save Sync points."
+  ],
+  "naturalBehavior": [
+    "no forced mission rolls",
+    "no direct foreign-agent insertion",
+    "production five-day recruitment ticks",
+    "production campaign-time mission completion",
+    "real UI view-model mission submission",
+    "real server memory/social/agent persistence",
+    "real save/process restart/load boundary"
+  ],
+  "excludedCoverage": [
+    "person_skills NPC-stat discovery is intentionally excluded from launch acceptance because NPC stats are no longer hidden and the operation is slated for removal"
+  ]
+}

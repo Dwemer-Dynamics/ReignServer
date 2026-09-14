@@ -1,0 +1,116 @@
+Create an exceptionally photorealistic cinematic scene inside the **Main Hall of a Nord castle**, distinctly reflecting a settled northern maritime aristocracy shaped by sea travel, harsh weather, clan loyalty, law, warfare, trade, feasting, storytelling, oaths, voyages, and long communal evenings.
+
+This must be clearly distinct from the Sturgian version.
+
+The hall should feel influenced by the sea even though it is deep within a permanent fortress.
+
+Use:
+
+- Massive rough-cut stone walls.
+- Huge dark oak beams.
+- Heavy carved roof supports.
+- Large stone hearths.
+- Long oak tables.
+- Heavy benches.
+- Iron chandeliers.
+- Lanterns.
+- Woven wool wall hangings.
+- Shields.
+- Sea charts.
+- Harbor maps.
+- Coiled decorative rope.
+- Carved ship motifs.
+- Wave designs.
+- Knotwork.
+- Objects brought home from voyages.
+- Drinking vessels.
+- Game boards.
+- Ship logs.
+- Legal records.
+- Family banners.
+- Imported goods.
+
+Large shuttered windows may reveal:
+
+- Gray sea.
+- Rain.
+- Snow.
+- Harbor.
+- Mountains.
+- Storm light.
+
+Food may include:
+
+- Bread.
+- Fish.
+- Salted fish.
+- Smoked fish.
+- Pork.
+- Mutton.
+- Game.
+- Stew.
+- Root vegetables.
+- Cheese.
+- Apples.
+- Berries.
+- Ale.
+- Beer.
+- Mead where appropriate.
+
+The hall should suggest that communal storytelling and reputation matter greatly, but avoid exaggerated Viking feast clichés.
+
+Likely activities include:
+
+- Eating.
+- Drinking.
+- Telling stories.
+- Reading a ship's letter.
+- Looking at a sea chart.
+- Playing a board game.
+- Discussing an oath.
+- Talking about trade.
+- Discussing land.
+- Waiting for news from the coast.
+- Warming by the fire.
+- Resting after travel.
+- Watching storm weather.
+- Quietly arguing.
+- Remembering an old voyage.
+
+### ABSOLUTE HUMAN CHARACTER REQUIREMENTS
+
+Use only supplied full-body source characters as visible humans.
+
+Do not generate:
+
+- Sailors.
+- Servants.
+- Guards.
+- Warriors.
+- Musicians.
+- Children.
+- Harbor workers.
+- Courtiers.
+- Background diners.
+- Unspecified guests.
+
+Preserve each supplied character's exact facial identity and complete physique.
+
+Do not transform anyone into a stereotypical Viking.
+
+Clothing may change to realistic Nord noble or civilian clothing appropriate to the hall:
+
+- Wool.
+- Linen.
+- Tunics.
+- Trousers.
+- Dresses.
+- Boots.
+- Belts.
+- Cloaks.
+- Restrained silver or bronze ornament.
+- Limited practical fur where warranted.
+
+Maximum live-action photorealism.
+
+---

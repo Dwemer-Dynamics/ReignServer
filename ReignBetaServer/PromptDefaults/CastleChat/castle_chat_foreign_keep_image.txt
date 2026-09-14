@@ -1,0 +1,4 @@
+[KEEP OWNERSHIP MODE: FOREIGN]
+This room-specific base prompt was authored for a player-ruled residence. For this scene, override every visual implication that the player is the regent, ruler, owner, or host.
+
+Depict {{settlement_name}} as a holding of {{settlement_owner_name}} within the realm ruled by {{realm_ruler_name}}. {{player_name}} is present only as a visitor. Local heraldry, guards, attendants, protocol, and spatial authority belong to the actual owners. Do not place the player on a throne, beneath the owner's sovereign insignia as its bearer, at the head of an official household tableau, or in any other composition that implies rulership or ownership. Preserve the room, culture, time, weather, occupants, and activity described by the base prompt while making the player's visitor status visually unambiguous.

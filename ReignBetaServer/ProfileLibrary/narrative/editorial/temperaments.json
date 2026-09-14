@@ -1,0 +1,98 @@
+{
+  "ambition": {
+    "high": ["A comfortable place is less satisfying than a visible advance. {name} notices who is asked to decide, who is merely consulted, and which small obligations could become a larger opportunity.", "The unflattering part is the pleasure of passing someone who expected to remain ahead. Kindness and competence may be real, but advancement is wanted for its own sake too."],
+    "low": ["{name} is capable of sustained effort without wanting every success to become a larger responsibility. A well-shaped private life is an achievement even when nobody calls it one.", "An impressive opportunity can feel like a demand to abandon a life that already fits. Refusals are easier to make than to explain to people who assume everyone wants promotion."]
+  },
+  "pride": {
+    "high": ["{name} wants work and judgment taken seriously, and dislikes having an explanation simplified before it has been heard. A correction offered privately can be useful; the same correction performed for spectators is harder to forgive.", "There is a sharp satisfaction in being proved right after being dismissed. Sometimes the wish to enjoy that moment delays the simpler act of settling the disagreement."],
+    "low": ["{name} can accept an ordinary mistake without turning it into a verdict on an entire character. Learning a better way matters more than defending who suggested the first one.", "This ease can look like indifference to people who expect elaborate self-defense. Being underestimated is tolerable until someone uses it to take away a choice."]
+  },
+  "curiosity": {
+    "high": ["A small unanswered question can hold {name}'s attention long after its practical use has ended. The most enjoyable explanations reveal a detail that can be checked by looking, trying, or asking a better question.", "Knowing is not always wanted for a useful purpose. Sometimes the attraction is simply the pleasure of entering a subject that still has unfamiliar corners."],
+    "low": ["{name} prefers knowledge with a clear place in an ordinary day. Familiar methods have value because their inconveniences are already understood.", "An elaborate explanation can feel like a claim on time rather than a gift. Interest often wakes only when a concrete example makes the subject personally relevant."]
+  },
+  "honesty": {
+    "high": ["{name} distinguishes a tactful omission from a statement that asks someone to rely on a falsehood. Precise promises matter, particularly when a warmer but less accurate answer would be easier.", "Honesty is not the same as openness. Some questions receive a plainly stated refusal because a private answer is not owed merely because somebody asks."],
+    "low": ["{name} is comfortable choosing the version of an explanation most likely to secure the desired response. What is said may be carefully accurate in its details while leaving the listener with a convenient impression.", "A successful evasion can be enjoyed without an immediate crisis of conscience. The real restraint is often the trouble a discovered deception would create."]
+  },
+  "compassion": {
+    "high": ["{name} notices the person still standing after everyone else has found a seat, or the hesitation behind a request for something small. Help feels most useful when it removes a burden without turning its recipient into a spectacle.", "Attention to other people's discomfort can become tiring. The wish for an evening without anyone needing anything is real, even when affection remains strong."],
+    "low": ["{name} is impatient with appeals that offer suffering in place of a workable proposal. Another person's distress is noticed, but does not automatically become a claim on time or resources.", "Selective tenderness exists alongside this hardness. It is easier to be gentle with a chosen companion or familiar creature than to feel responsible for every unhappy stranger."]
+  },
+  "discipline": {
+    "high": ["{name} prefers to leave a task at a point from which it can be resumed without confusion. Tools, messages, and small preparations receive attention before a problem makes them urgent.", "An orderly day is pleasurable in itself. The irritation caused by an avoidable interruption can exceed the interruption's actual cost."],
+    "low": ["{name} works most readily when a task is immediate, engaging, or shared with someone whose company is welcome. Long stretches of routine can accumulate small omissions even when the final result matters.", "A fresh beginning is often more attractive than the last dull part of finishing. Admitting that preference is easier in private than when someone is waiting on the result."]
+  },
+  "sociability": {
+    "high": ["{name} enjoys the movement of a conversation as much as its conclusions. A gathering becomes interesting through the different reasons people have for being there, and small exchanges often matter as much as the announced business.", "Being alone can leave pleasant thoughts with nowhere to go. Sometimes a new conversation is sought for company rather than because there is anything important to say."],
+    "low": ["{name} likes company best when there is something comfortable to do alongside it. A quiet shared task can feel more companionable than a gathering that requires continuous talk.", "Warmth does not always produce an invitation. Private time is worth protecting even from people whose presence is sincerely enjoyed."]
+  },
+  "patience": {
+    "high": ["{name} can stay with a slow explanation or a stubborn practical difficulty without requiring an immediate sign of progress. Repeated small attempts feel less humiliating than a dramatic gesture that cannot be sustained.", "Waiting can become a comfortable way of keeping a choice open. Occasionally the sensible delay also postpones a decision that is simply unwelcome."],
+    "low": ["{name} wants the useful part of an explanation early and prefers a first attempt to an extended discussion of possibilities. Momentum is satisfying even when the initial result needs correction.", "A slow answer may be mistaken for reluctance or incompetence. The assumption can be unfair, but the irritation usually arrives before that reflection."]
+  },
+  "socialTrust": {
+    "high": ["{name} usually allows a small promise to stand without demanding proof of every detail. Cooperation feels more natural when people have room to show that they meant what they said.", "Discovering a hidden condition can sting more than the practical loss. The disappointment lies partly in having offered an uncomplicated welcome to a bargain."],
+    "low": ["{name} listens for what a favor may cost later. A friendly manner is welcome, but dependable conduct over time matters more than the warmth of a first approach.", "Caution can preserve independence while making simple affection harder to recognize. An offer sometimes remains under examination after its giver has forgotten making it."]
+  },
+  "assertiveness": {
+    "high": ["{name} will state a preference before a group has drifted into a decision. An objection is most useful while the arrangement can still be changed, and silence is not assumed to mean contentment.", "Having a view heard promptly can become an expectation. It takes deliberate attention to notice when a quieter person is still finding the words to disagree."],
+    "low": ["{name} often thinks through a preference before exposing it to the pressure of a group. A private conversation provides more room to say something that would be abandoned in a crowded exchange.", "Agreeing to an arrangement is sometimes easier than explaining a modest objection. Resentment may arrive later, when changing the arrangement has become inconvenient."]
+  },
+  "tact": {
+    "high": ["{name} pays attention to the setting in which a difficult thing must be said. A practical objection can be delivered without making its listener defend every other part of their judgment.", "Courtesy is sometimes sincere kindness and sometimes a way to keep control of an exchange. The distinction is not always visible to the person receiving it."],
+    "low": ["{name} would rather have the actual disagreement on the table than spend a long conversation circling it. Plain words can be refreshing, though they sometimes leave a wound that the speaker did not consider important.", "Being correct can make an apology feel unnecessary even when the injury came from the manner of speaking. That blind spot is easier to see afterwards."]
+  },
+  "loyalty": {
+    "high": ["{name} gives chosen ties weight beyond their immediate usefulness. A difficult period does not erase earlier dependability, and a companion is not lightly reduced to their least attractive moment.", "Loyalty can make an uncomfortable truth slow to acknowledge. Defending someone in public does not always mean being entirely persuaded in private."],
+    "low": ["{name} treats an association as something that must continue to make sense. Earlier favors count, but do not grant another person an unlimited claim on future choices.", "Changing course can feel sensible rather than shameful. The difficult part is accepting that somebody else may experience the same decision as abandonment."]
+  },
+  "vengefulness": {
+    "high": ["{name} remembers who chose to be cruel when kindness would have cost little. An outwardly settled disagreement can leave a private account that is not considered closed merely because time has passed.", "The desire to make another person understand a hurt can shade into wanting that person to suffer it. The distinction becomes least clear when the offender appears comfortable."],
+    "low": ["{name} dislikes allowing an old offender to occupy every new day. Practical distance is often preferable to keeping a quarrel alive in search of a perfectly satisfying conclusion.", "Letting go does not necessarily restore affection. Someone may be forgiven and still never be trusted with the same opportunity again."]
+  },
+  "wealthMotivation": {
+    "high": ["{name} notices the freedom that comes from having a reserve and the small humiliations that accompany needing a favor. Possessions are attractive partly because they make a refusal possible.", "There is also pleasure in having something desirable simply because it is desirable. Not every expensive preference hides a noble purpose."],
+    "low": ["{name} cares more about whether daily arrangements are comfortable and dependable than whether they appear prosperous. An ordinary object that suits the hand can be preferred to a more impressive replacement.", "Indifference to display does not mean wanting deprivation. The wish is to have enough without turning the pursuit of more into the occupation of every day."]
+  },
+  "familyMotivation": {
+    "high": ["{name} pays attention to the small ways a household becomes easier or harder to live in. Shared habits, familiar preferences, and the effort of maintaining affection matter alongside the family name.", "Care can become interference when an independent choice looks dangerous. Good intentions do not always prevent a loved person from feeling managed."],
+    "low": ["{name} wants room for an identity that is not exhausted by a place in the family. Affection may be real while the expectation of constant availability feels burdensome.", "A family request does not automatically outweigh every other attachment. That boundary can be necessary and still cause guilt, irritation, or an argument nobody enjoys."]
+  },
+  "fameMotivation": {
+    "high": ["{name} wants a good effort to remain attached to the person who made it. Being remembered accurately is attractive, and a public success is more satisfying when the audience understands why it was difficult.", "An admired rival can spoil an otherwise pleasant occasion without doing anything wrong. Recognition is wanted directly, not merely as a means to something else."],
+    "low": ["{name} can enjoy doing something well without wanting the story circulated. An audience often adds obligations and interpretations that the original pleasure did not need.", "Privacy is not always modesty. Sometimes it is simply more agreeable to choose the terms on which a pursuit is shared."]
+  },
+  "knowledgeMotivation": {
+    "high": ["{name} dislikes an explanation that closes a subject by making it sound more certain than the evidence allows. A useful conversation leaves a clearer question as well as an answer.", "The pleasure of understanding can tempt a person to remain an observer. Knowing why a problem exists does not automatically supply the appetite to undertake its dull repair."],
+    "low": ["{name} prefers an explanation that can be carried into a decision without a great burden of background. A reliable demonstration is more persuasive than an impressive account of how much remains unknown.", "There are subjects worth enjoying without mastering. An interest need not become a course of study to deserve an evening."]
+  },
+  "riskTolerance": {
+    "high": ["{name} finds an uncertain prospect more inviting when there is a concrete way to begin. A small experiment often feels more informative than prolonged reassurance.", "Possibility can be exciting enough to make the likely inconvenience seem distant. Restraint works best when the cost is made specific rather than merely called dangerous."],
+    "low": ["{name} likes to know how an undertaking can be stopped before agreeing to begin it. A modest dependable gain can be preferable to a dazzling possibility with unclear obligations.", "Caution is sometimes sound judgment and sometimes a wish to avoid the embarrassment of an unsuccessful attempt. The two can be difficult to separate from inside the decision."]
+  },
+  "traditionalism": {
+    "high": ["{name} finds reassurance in practices that remain recognizable across an unsettled period. Repetition can carry affection and memory even when the original explanation for a custom has grown thin.", "A familiar form can receive more loyalty than it deserves. An awkward custom is hardest to question when questioning it seems to insult the people associated with it."],
+    "low": ["{name} is willing to ask whether a familiar arrangement still serves the people expected to maintain it. A change need not be dramatic to make an ordinary day more agreeable.", "Impatience with inherited ceremony can miss the affection held inside it. Something that looks unnecessary may be another person's last comfortable connection to an earlier life."]
+  },
+  "generosity": {
+    "high": ["{name} enjoys making room for another person's pleasure, particularly through a useful small gift or an invitation that leaves no debt behind. Choosing well is more satisfying than merely spending more.", "Giving can also become a way of seeking closeness that would be harder to request directly. A politely accepted gift does not guarantee the affection hoped for."],
+    "low": ["{name} prefers a clear limit to an open-ended offer. Time, attention, and useful things are not surrendered merely to avoid looking ungenerous.", "Keeping something desirable can be pleasant even when sharing it would be easy. The preference is not always dressed up as prudence in private."]
+  },
+  "envy": {
+    "high": ["{name} notices uneven recognition and the advantages other people seem to receive without effort. Another person's good fortune can become a comparison before there is time to decide whether the comparison is fair.", "The most irritating rival is sometimes someone who has done nothing objectionable. Acknowledging that fact does not immediately remove the wish to see the advantage diminished."],
+    "low": ["{name} usually has room to enjoy another person's success without treating it as a reduction in personal worth. Different lives can be fortunate in different ways.", "This ease has limits where a promise or shared effort is involved. Being content with another's good fortune does not require accepting the disappearance of one's own contribution."]
+  },
+  "powerMotivation": {
+    "high": ["{name} is drawn to the point where discussion becomes a decision. Influence is attractive because it changes which preferences become arrangements that everyone else must live with.", "The desire to decide is not always justified by superior judgment. Occasionally the objection to another person's plan is simply that it leaves too little room to direct events."],
+    "low": ["{name} prefers a sphere of choice that can be managed without directing everybody nearby. Being consulted is welcome; becoming responsible for every disagreement is less so.", "There is freedom in letting another capable person lead. Surrendering a specific decision need not feel like surrendering an entire self."]
+  },
+  "dutyMotivation": {
+    "high": ["{name} takes an agreed responsibility seriously even after its initial appeal has faded. A reliable ordinary day is made from promises kept when nobody is waiting to applaud.", "Being dependable can become a role that is difficult to leave for an afternoon. Resentment sometimes grows when others assume willingness instead of asking for it."],
+    "low": ["{name} questions obligations that have survived only because nobody has asked whether they were freely accepted. An inherited expectation does not feel binding merely because it is familiar.", "Pleasure and convenience can win an argument that duty might otherwise settle. A postponed task is sometimes postponed because something else is simply more enjoyable."]
+  },
+  "shame": {
+    "high": ["{name} can revisit a small awkward exchange long after the other people involved have moved on. A remembered mistake may receive more private attention than a larger difficulty handled competently.", "Anticipating judgment can make a modest request difficult to voice. Reassurance helps most when it is specific and does not turn the embarrassment into a public subject."],
+    "low": ["{name} can endure an awkward moment without needing to erase it from everyone's memory. A failed attempt is usually something to adjust, not something to hide indefinitely.", "That ease can become carelessness about another person's embarrassment. A joke about a shared mistake may feel harmless to one participant and exposing to the other."]
+  }
+}

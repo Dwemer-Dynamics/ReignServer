@@ -1,0 +1,220 @@
+Create an exceptionally photorealistic cinematic scene inside the **training yard of a powerful Vlandian castle**, strongly reflecting Vlandia's feudal military culture, heavy cavalry tradition, knightly prestige, disciplined weapon practice, tournament culture, and aristocratic expectation that nobles should be personally capable in war.
+
+This is a genuine working training space within the regent's castle, not a ceremonial courtyard and not a tournament arena.
+
+The yard is enclosed by tall pale-stone castle walls and adjoining timber structures. Castle towers, covered galleries, stairways, battlements, and narrow windows should remain visible around the training space.
+
+The ground should be **smooth, compacted earth**, worn flat through constant use.
+
+Do not create tiled, blocky, patchwork, cobbled, checkerboard, or blotchy terrain.
+
+The dirt should look naturally compressed by boots and training activity, with only subtle realistic variation such as:
+
+- Light footprints.
+- Shallow scuffs.
+- Small areas of dry dust.
+- Slight dampness after rain.
+- Smoothly worn paths.
+- Limited patches of straw near equipment areas.
+
+Training equipment may include:
+
+- Wooden practice swords.
+- Blunted steel training swords.
+- Practice shields.
+- Spears.
+- Polearms.
+- Lances.
+- Crossbows.
+- Bows.
+- Archery targets.
+- Wooden training posts.
+- Pell posts.
+- Shield racks.
+- Weapon racks.
+- Practice dummies constructed from timber, straw, and leather.
+- Heavy sacks.
+- Benches.
+- Water barrels.
+- Small equipment tables.
+- Armor stands without human-shaped heads or faces.
+- Helmets.
+- Gloves.
+- Training pads.
+- Spare belts.
+- Quivers.
+- Wooden barriers.
+- A small sanded or especially worn sparring area.
+
+A separate section may support lance or mounted preparation, but **do not include horses unless a supplied source character image explicitly includes and requires that horse**. In ordinary generation, keep the yard configured for mounted training without depicting unsupplied animals or riders.
+
+The architecture should reflect Vlandian military wealth:
+
+- Strong oak galleries.
+- Iron fittings.
+- Heraldic shields.
+- Weapon storage.
+- Covered equipment sheds.
+- Small observation balcony.
+- Banners moving lightly in the wind.
+- Carved family crests used sparingly.
+
+The yard may naturally support activities such as:
+
+- Sword practice.
+- Shield drills.
+- Spear drills.
+- Polearm practice.
+- Crossbow shooting.
+- Archery.
+- Footwork drills.
+- Strength exercises.
+- Stretching.
+- Striking a training post.
+- Sparring with another supplied character.
+- Practicing defensive movements.
+- Inspecting armor.
+- Sharpening or maintaining a weapon.
+- Adjusting a sword belt.
+- Examining a shield.
+- Testing the balance of a weapon.
+- Preparing equipment for a hunt or campaign.
+- Recovering after training.
+- Drinking water.
+- Sitting on a bench after exertion.
+- Watching another supplied character practice.
+- Offering advice.
+- Challenging another supplied character to spar.
+- Discussing military matters while training.
+- Venting anger through exercise.
+- Trying to impress someone.
+- Training privately to hide weakness.
+- Testing an injured limb cautiously.
+- Practicing before a tournament.
+- Preparing for an upcoming duel.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible human must correspond exactly to one of those supplied source characters.
+
+Do not generate:
+
+- Trainers.
+- Guards.
+- Soldiers.
+- Knights.
+- Squires.
+- Pages.
+- Servants.
+- Spectators.
+- Stable hands.
+- Armorers.
+- Archers.
+- Background fighters.
+- People watching from balconies or windows.
+- People visible on the battlements.
+- Human silhouettes.
+- Reflections.
+- Unspecified sparring partners.
+
+If only one source character is supplied, exactly one visible person may appear.
+
+If multiple source characters are supplied, only those characters may interact or spar.
+
+Do not add unsupplied horses, dogs, or other large animals as substitutes for training subjects.
+
+Preserve every supplied character's exact identity and physique, including:
+
+- Facial structure.
+- Apparent age.
+- Skin tone and natural texture.
+- Eye shape, spacing, and color.
+- Eyebrows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hairline.
+- Hair color.
+- Hairstyle.
+- Facial hair.
+- Scars.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest.
+- Torso.
+- Waist.
+- Hips.
+- Arm proportions.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative size compared with other supplied characters.
+
+Do not make a physically average source character muscular simply because they are training.
+
+Do not make a heavy character thin.
+
+Do not make a slender character broad.
+
+Do not beautify, idealize, age, de-age, masculinize, feminize, or otherwise redesign them.
+
+Clothing may be changed to realistic **Vlandian training attire appropriate to the specific activity and social status**.
+
+Possible clothing includes:
+
+- Linen under-tunics.
+- Wool tunics.
+- Trousers or hose.
+- Boots.
+- Leather belts.
+- Padded gambesons.
+- Training gloves.
+- Partial armor.
+- Light mail.
+- Full armor only when the activity genuinely requires armored practice.
+
+Characters must not automatically wear full battle armor.
+
+Clothing and armor must conform naturally to the original body rather than changing it.
+
+Characters should appear physically engaged with the activity.
+
+Use believable:
+
+- Foot placement.
+- Weight distribution.
+- Grip.
+- Weapon handling.
+- Stance.
+- Sweating.
+- Flushed skin.
+- Hair movement.
+- Breathing posture.
+- Fatigue.
+- Interaction with dirt and equipment.
+
+The finished image must look like **a high-end live-action photograph taken during real martial training inside a medieval castle**.
+
+No video-game rendering.
+
+No heroic fantasy posing.
+
+No oversized fantasy weapons.
+
+No impossible sword grips.
+
+No floating equipment.
+
+No shiny plastic armor.
+
+No blocky or tiled ground.
+
+Maximum possible photorealism.
+
+---

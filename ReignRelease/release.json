@@ -1,0 +1,37 @@
+{
+  "schema": "reign-release-v1",
+  "version": "0.1.0-preview.1",
+  "releaseSequence": 1,
+  "protocolVersion": 1,
+  "contentVersion": "2026.09.14",
+  "runtimeVersion": "2026.09.14",
+  "dependenciesVersion": "2026.09.14",
+  "repositories": {
+    "Reign": { "origin": "https://github.com/Dwemer-Dynamics/Reign.git", "branch": "main", "visibility": "private" },
+    "ReignServer": { "origin": "https://github.com/Dwemer-Dynamics/ReignServer.git", "branch": "main", "visibility": "public" }
+  },
+  "development": "local",
+  "sourceOwnership": {
+    "Reign": ["ReignBeta", "BannerlordEditorMcp", "ReignMcp", "docs", "tests", ".codex"],
+    "ReignServer": ["ReignBetaServer", "ReignModules", "NativeCharacterImageGenerator", "ReignTools", "ReignRelease"]
+  },
+  "supportedPlatform": { "os": "Windows 11", "architecture": "x64", "gameStore": "Steam", "bannerlordVersion": "v1.4.8" },
+  "installation": {
+    "moduleIdentity": "ReignBeta",
+    "serverDirectory": "%LOCALAPPDATA%/Programs/ReignServer",
+    "dataDirectory": "%LOCALAPPDATA%/Bannerlord Reign",
+    "record": "%LOCALAPPDATA%/Bannerlord Reign/installation.json",
+    "serverPort": 5101,
+    "postgresPort": 55432,
+    "database": "Reign",
+    "postgresMode": "native-windows",
+    "privatePayloadBaseUrl": null
+  },
+  "publication": {
+    "serverSourceMayContainClientSource": false,
+    "includeWorkspaceHistory": false,
+    "includeVerificationWorkspace": false,
+    "includeCampaignsOrCredentials": false,
+    "legacyRemoteRetiredAfterVerifiedCutover": true
+  }
+}

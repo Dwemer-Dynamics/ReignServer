@@ -1,0 +1,3892 @@
+{
+  "schema": "reign-narrative-concern-compatibility-v1",
+  "rule": "Existing personality before selection: required traits exceed40; requireNotHigh traits do not exceed60. Neutral private pursuits remain eligible.",
+  "sourceOrderSha256": "e9496e087e3155d0d591f07ad2e4e835aac9593d0aba786cee0c08448f746952",
+  "concepts": [
+    {
+      "id": "desire_6281f4d4de9da22c",
+      "title": "find a patient teacher for an unfamiliar craft",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_61985866d038b2ba",
+      "title": "spend an uninterrupted afternoon with family",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_49737581693925ae",
+      "title": "repair a strained friendship honestly",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_2760f48a327e68b2",
+      "title": "obtain a dependable working horse",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_7e50dc30c9512efa",
+      "title": "replace an unreliable steward",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_c55ced8e70c6ce38",
+      "title": "learn why a familiar routine stopped working",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_07d00789e65f865e",
+      "title": "make time for private reading",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_4269ef2971bf85be",
+      "title": "recover confidence after a public mistake",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_0fe5ba106288a3bf",
+      "title": "find a quiet room of their own",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_db174ffdbbc4073a",
+      "title": "settle an overdue personal debt",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_e53ec0f0d1701657",
+      "title": "hire an apprentice who asks questions",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_3def36bd47eed308",
+      "title": "share a meal without formal ceremony",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_21a28da22120cea8",
+      "title": "visit a place remembered from childhood",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_0ae13ce2ca728116",
+      "title": "finish a promised gift",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_0415c276eb61efeb",
+      "title": "hear an honest opinion about their work",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_364938ea94fda25b",
+      "title": "learn the truth behind a family anecdote",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_2f6880f2f8d3d16b",
+      "title": "obtain tools suited to careful work",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_d6185f8e601b1146",
+      "title": "make a household account understandable",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_5cdf0b1dee594600",
+      "title": "arrange a fair division of responsibilities",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_1646e67aaee58b02",
+      "title": "help a timid acquaintance speak freely",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_c7eb627b9bb3d721",
+      "title": "take a journey without political purpose",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_c478aba018fdf221",
+      "title": "practice a neglected skill regularly",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_7d9d7105c0669044",
+      "title": "restore a damaged keepsake",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_d4cde26f90c72a8e",
+      "title": "speak privately with a trusted elder",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_e614a8ee8aa30a5a",
+      "title": "find a reliable remedy for sleeplessness",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_49ccf4457cdd4262",
+      "title": "resolve a disagreement before it hardens",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_ea1b91d12e640ebd",
+      "title": "have their judgment taken seriously",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_e8c699f0915ea8be",
+      "title": "protect a planned period of rest",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_ce1e928d5d76d066",
+      "title": "find a home for an unwanted animal",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_6b9351baf4ee8aed",
+      "title": "complete a task without interference",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_538a876c6a76dcf7",
+      "title": "ask forgiveness without making excuses",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_a6dd273e21141b3e",
+      "title": "recover a misplaced letter",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_05f12fd6dda7d7a8",
+      "title": "understand an unfamiliar custom",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_cf39deab56fa3e84",
+      "title": "find companionship that does not require performance",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_1e872a424838055c",
+      "title": "replace a habit that wastes time",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_cec8533d1187f391",
+      "title": "learn to delegate one important duty",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_fc522374e72ef29b",
+      "title": "obtain a book they have long wanted",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_c9ac7d8ed1829434",
+      "title": "improve a cramped workspace",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_f1257be26af6a8d9",
+      "title": "make a younger relative feel welcome",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_c7db338ed48f95b9",
+      "title": "be consulted before commitments are made for them",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_42944b84cbc6b88d",
+      "title": "restore order to a neglected garden",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_8682a07b230b5155",
+      "title": "obtain a fair price for careful work",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_a6e6abe3e22833b5",
+      "title": "take responsibility for a manageable project",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_6f513fda76d5d6ee",
+      "title": "clarify the terms of a troublesome promise",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_6d2492e25a570540",
+      "title": "learn a song from another culture",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_e41dab165d706f14",
+      "title": "find a trustworthy traveling companion",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_bd9c91ca36eb22f4",
+      "title": "speak with someone who knew a deceased relative",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_168fbab86bf73faf",
+      "title": "make peace with an unsuccessful attempt",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_8b8767632df80714",
+      "title": "be invited for their company rather than influence",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_430226ef35c7408a",
+      "title": "earn a compliment from a demanding mentor",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_8c6322c816595a7c",
+      "title": "have a concern heard without ridicule",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_46818084b6c70b40",
+      "title": "find a practical use for an unusual talent",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_3d230f724e704009",
+      "title": "secure a comfortable room for an older relative",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_f4e7a966c618dbd1",
+      "title": "share knowledge with a willing learner",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_42cb76438b31cebf",
+      "title": "stop postponing a difficult conversation",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_6a427fa2849e3c5f",
+      "title": "return a borrowed object in good condition",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_d80cddcc8262b889",
+      "title": "find a way to help without creating dependence",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_4a398f136525c15d",
+      "title": "observe a skilled artisan at work",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_1cc9496a1cf04770",
+      "title": "learn how a neighboring household handles conflict",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_36ba858edf995bd4",
+      "title": "replace ceremonial obligations with a sincere visit",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_3aba0a6e0e604469",
+      "title": "finish reading an unfinished manuscript",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_08e82017f3220af8",
+      "title": "recover a lost daily routine",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_9e92a2d65311cf34",
+      "title": "spend time near open water",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_7845496fa40c12f2",
+      "title": "arrange a small gathering of compatible friends",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_a817d0c154201b94",
+      "title": "find a place to practice music privately",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_ed65cacfcd1c910a",
+      "title": "learn enough accounting to check others' work",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_efe584cf6a7489e0",
+      "title": "obtain an animal's trust patiently",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_b20c6596b43b9994",
+      "title": "make amends through useful action",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_710059a9f0434c6d",
+      "title": "have their privacy respected",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_b9130eb1ffcb274d",
+      "title": "bring humor back to a tense household",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_d8db1283f469d70a",
+      "title": "finish repairs before winter",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_bf4b641f5041a23b",
+      "title": "learn whether a worry has a factual basis",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_c0aa103f31a9731a",
+      "title": "gain freedom to refuse a minor request",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_1eccb9542096d875",
+      "title": "be recognized as a competent adult",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_cc4870ecc5488902",
+      "title": "receive a direct answer instead of polite evasion",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_7bf838b55ec6f0aa",
+      "title": "find a fair compromise with a rival",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_1accb996ed0af2b5",
+      "title": "make a home less forbidding",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_43ec16855e6447c3",
+      "title": "restore a reliable sleep schedule",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_6cc493dde650bebe",
+      "title": "hear a familiar voice after absence",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_1fac7d7a5c93664b",
+      "title": "separate their own wishes from others' expectations",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_210d034975f06af2",
+      "title": "test a new recipe on willing guests",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_7833f9e291b779bf",
+      "title": "find a meaningful role for an idle retainer",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_64a8e31b09fb2d4c",
+      "title": "make a small charitable gift privately",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_1f1eca9d192ebaa7",
+      "title": "learn to read an unfamiliar hand",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_fb67b1aac394f497",
+      "title": "obtain permission to study an old record",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_aeb97d4a6bf48ea7",
+      "title": "make a workshop safer",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_8d4726e4a060d7d6",
+      "title": "ask for help without losing dignity",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_cd16cecb52a45b3f",
+      "title": "spend a day doing ordinary work",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_092d3d1565cb6a37",
+      "title": "recover enthusiasm for a former passion",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_878bfa455edfefcd",
+      "title": "understand why a child is withdrawn",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_2720f9af552ad904",
+      "title": "buy a useful object of lasting quality",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_a3b11cad865e62a3",
+      "title": "reduce unnecessary household display",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_5b87f20d6d26b285",
+      "title": "have one evening without competing demands",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_783327390937a0a1",
+      "title": "learn a local dialect accurately",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_03ec469754d251f3",
+      "title": "finish a piece of embroidery",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_3594f3be2c15c9a4",
+      "title": "walk a route they once avoided",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_d52fe7e2367a926d",
+      "title": "listen to a friend's account without interruption",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_3dd0f2a9ae69754f",
+      "title": "be thanked for invisible preparation",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_9d54d12dfc0dd1c2",
+      "title": "teach someone a practical lesson kindly",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_86125a9c2a190ba4",
+      "title": "find an honest way to decline an invitation",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_385bd87850bf38ee",
+      "title": "improve a difficult working relationship",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_de6bd8ff69def582",
+      "title": "learn whether an old promise is still wanted",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_afb3368edf5d9c19",
+      "title": "make a private disappointment understandable",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_4c8f766b54c9f65f",
+      "title": "plan a journey carefully",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_ec7abd748e9ebc9a",
+      "title": "find a craftsman who welcomes collaboration",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_8b7178cab052fbe5",
+      "title": "receive credit shared fairly with collaborators",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_063391237772682b",
+      "title": "obtain a more comfortable saddle",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_99b47f2842719aec",
+      "title": "repair a broken musical instrument",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_096d81e8ca64d6c2",
+      "title": "learn to enjoy an activity without excelling",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_804466c19afbfa70",
+      "title": "make their household's hospitality less formal",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_72782e35912f6968",
+      "title": "find a useful question no one has asked",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_e4a55ea60ceaefad",
+      "title": "revisit a decision with better evidence",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_f9d1c4508256d93d",
+      "title": "keep a family custom without its harmful parts",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_60233b7d01d21288",
+      "title": "arrange a peaceful meeting between friends",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_fe56e40dfa6237ea",
+      "title": "learn the names of unfamiliar plants",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_50588f10fd6fae0e",
+      "title": "make a realistic plan for an ambitious project",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_88e6021e49a386f3",
+      "title": "recover a borrowed book",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_9747c72269211995",
+      "title": "find a dependable messenger for personal letters",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_87a6f7526ca48b2b",
+      "title": "understand a loved one's changed priorities",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_57506f97eac50d08",
+      "title": "bring a neglected room back into use",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_59926c7894712f3a",
+      "title": "spend time with someone who disagrees thoughtfully",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_8df6bd10010aae60",
+      "title": "receive reassurance grounded in facts",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_4c290ff63ffaf95f",
+      "title": "learn how to care for an injured animal",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_ccf184ed0b3ab4b2",
+      "title": "make an apology that repairs practical harm",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_549fabb37521972b",
+      "title": "find a way to honor two competing promises",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_b297467ae1296051",
+      "title": "obtain materials for a long-planned project",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_528365a81f86dfec",
+      "title": "take a small risk without an audience",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_191cc4e39eb0170c",
+      "title": "restore warmth after an awkward exchange",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_0d5ea9841de0e3d0",
+      "title": "have work judged independently of family name",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_c7f4d45fdd455341",
+      "title": "find a companion for quiet walks",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_27709bab808cf4a4",
+      "title": "complete a difficult letter",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_19028e2767db1947",
+      "title": "ask an elder about a forgotten tradition",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_0ebbd5135fbd7cdc",
+      "title": "make a personal budget that allows generosity",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_468671ade3f9070e",
+      "title": "learn to recognize a fair bargain",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_aac65b4e80c76aa7",
+      "title": "receive warning before plans change",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_2eb660640de5e297",
+      "title": "have an achievement remembered accurately",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_6b4c0b7d702beaf6",
+      "title": "find a less exhausting way to perform a duty",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_0636a7c118bfc7fc",
+      "title": "make room for a friend's success",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_bb0b34e454a0645a",
+      "title": "learn whether a suspicion is unfair",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_81b520cf0d47d077",
+      "title": "develop a reliable morning practice",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_608e91ab74ac6223",
+      "title": "spend a night under the stars safely",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_0334143873b54813",
+      "title": "visit an artisan whose work they admire",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_e78cdf9613445ba8",
+      "title": "establish a clear boundary with a demanding acquaintance",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_136850830881236b",
+      "title": "make a child proud without buying affection",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_41da9a44c7732fd1",
+      "title": "find a way to contribute during illness",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_6fb5577f4234af41",
+      "title": "practice speaking plainly",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_aa49f8e2ab205211",
+      "title": "learn to accept a gift gracefully",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_361c3634a40c8793",
+      "title": "recover trust in their own taste",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_a9a50a21c30af7d7",
+      "title": "make a neglected obligation manageable",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_057182c768b01d4a",
+      "title": "find a shared interest with a difficult relative",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_4811893d5eeff244",
+      "title": "understand an unfamiliar style of humor",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_31761e455fd4fff3",
+      "title": "finish something begun with a friend",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_2957d8422805c913",
+      "title": "obtain a private place for reflection",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_32b18b081afd7b8a",
+      "title": "help someone without publicizing it",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "desire_c118ae4f0c4931ab",
+      "title": "learn to praise work specifically",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "desire_b4195dccf2952f66",
+      "title": "make their expectations explicit",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "desire_cda5a1436d14ee88",
+      "title": "find a way to celebrate without excess",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_d6b4f9f1b4e0cc34",
+      "title": "be allowed to change their mind honestly",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "desire_511fd603906ad16a",
+      "title": "leave a conversation without unresolved hostility",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_60adbba720028def",
+      "title": "have an ordinary pleasant day",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_4754a8f12688d7ca",
+      "title": "promises should be narrow enough to keep",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_67ebe98b3c6b960d",
+      "title": "guests deserve safety before agreement",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_7520cc19d0ea6c8a",
+      "title": "skilled work deserves fair payment",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_263b07e04e6040ea",
+      "title": "children deserve explanations rather than intimidation",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_b5b8cf81d3128fb7",
+      "title": "private kindness need not become public credit",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_75a3ca41172a7310",
+      "title": "authority should bear the cost of its mistakes",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_7dfe3d9a5ee8f11c",
+      "title": "animals deserve patient handling",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_bbe3beb97b2fbf74",
+      "title": "honest uncertainty is better than confident invention",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_e9dec5a5bef26aea",
+      "title": "a person's labor should not erase their dignity",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_6ca6aeb0d602ebac",
+      "title": "debts should be explained before they are accepted",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_ab1e255694de2326",
+      "title": "grief should not be hurried for convenience",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_dd889b81c27faa0d",
+      "title": "useful traditions deserve preservation",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_861deb3e377c06a1",
+      "title": "new ideas deserve a fair trial",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_4f0db98423c82f14",
+      "title": "a quiet refusal can be honorable",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_540d8d42fb64c400",
+      "title": "family affection should survive disagreement",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_86aec8ab8a957143",
+      "title": "good tools should be maintained",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_696e047cc961f891",
+      "title": "an apology should include repair",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_a651acc81215eead",
+      "title": "hospitality should not purchase obedience",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_78f56ef07cc79b74",
+      "title": "people deserve credit for invisible work",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_0267099425772dd8",
+      "title": "power should make truth easier to speak",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_0b3d79f8f2a281d1",
+      "title": "fair rules should bind their makers",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_0d79ba3bdb6b8d9e",
+      "title": "learning should remain possible at every age",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_dc236104aa40c619",
+      "title": "a friend should be warned before being abandoned",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_ffe6e7dcd5bcc9b5",
+      "title": "privacy is not evidence of wrongdoing",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_eae1df4a0ecb2c72",
+      "title": "beauty belongs in ordinary life",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_3440f9dc573cfd52",
+      "title": "food should not be wasted for display",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_989b516d579104ca",
+      "title": "loyalty requires honest correction",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_38ee990f53da5866",
+      "title": "a dependent should retain choices",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_8a8270a30c00a7a2",
+      "title": "courage includes admitting fear",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_bb040acd6e822be5",
+      "title": "a gift should suit its recipient",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_c96f0a171ee3c406",
+      "title": "careful preparation is a form of care",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_e91909144b069255",
+      "title": "an enemy's helplessness is not entertainment",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_2f5b1478ef910c0f",
+      "title": "work should leave room for rest",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_c23636c99f4fa897",
+      "title": "shared success should have shared credit",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_635f2dafc114a3d9",
+      "title": "a household should welcome questions",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_f5bb1e2ad631e175",
+      "title": "a person's origins should not determine every opportunity",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_fe26db4be70914b8",
+      "title": "mercy should consider future harm",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_214e3a9fd14b64bf",
+      "title": "patience should not excuse perpetual delay",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_5084b1c68ec55d33",
+      "title": "disagreement should address the issue rather than ancestry",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_61312730bd8ebf38",
+      "title": "one should learn the names of those serving them",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_6a3b92b68326a268",
+      "title": "knowledge should be passed to willing learners",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_9f31c73a0bc9af23",
+      "title": "a private confidence is not bargaining material",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_dcc27e484bdfe922",
+      "title": "a ruler should hear inconvenient facts",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_fd5d9a215a9f8805",
+      "title": "an apprentice's error is a teaching opportunity",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_6ce0de87581dc20d",
+      "title": "clean water is a shared responsibility",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_4b4569511ef1952d",
+      "title": "a contract should be understandable",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_8692a6dd1b67a3ab",
+      "title": "a child should not inherit a parent's feud automatically",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_040d6eeb21dfe96e",
+      "title": "sincere effort deserves specific feedback",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_1fc40bbffcbbcb21",
+      "title": "old age should not erase a person's voice",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_765a1afa5978cd0b",
+      "title": "a useful custom can be improved",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_0558eb8932a2ad29",
+      "title": "work should be judged by its result",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_999b0ee7b7cce1f3",
+      "title": "affection should not require constant performance",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_b5dd60b6098781dc",
+      "title": "a punishment should have a clear purpose",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_9e8131cf58cfcdb2",
+      "title": "an animal's fear should be understood",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_4bac488b02fc62bf",
+      "title": "good judgment can come from low status",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_4b64debabe15e615",
+      "title": "a guest may decline without insult",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_4c705d2c30d873ee",
+      "title": "boundaries should be spoken before resentment grows",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_0c8a21184c57c74e",
+      "title": "faith should produce useful conduct",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_f4102f866688f499",
+      "title": "a public accusation requires evidence",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_6ac0069b96d8d3fe",
+      "title": "one should return borrowed things carefully",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_4bee83c43e05cbd2",
+      "title": "a person may change without denying their past",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_4ac1b7bbbbc8cfd3",
+      "title": "wealth should create security before spectacle",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_445e4a615e613d94",
+      "title": "a marriage should allow private disagreement",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_2b8cff0dc63c84dd",
+      "title": "a promise made under coercion deserves scrutiny",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_62625d34767e9350",
+      "title": "a successor should be prepared to surpass a mentor",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_94cd34b6cd1c58bf",
+      "title": "waste is most offensive beside unmet need",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_b8fc5bdbc295de83",
+      "title": "a shared meal can suspend a quarrel",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_ed925dc39ecdb06e",
+      "title": "silence should not always be mistaken for consent",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_50184b09723c941e",
+      "title": "a teacher should welcome a better question",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_3931ff2033e1949b",
+      "title": "a home should contain something made by its occupants",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_aaf2a8b81fc4d261",
+      "title": "work done for love still requires skill",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_1e199f8d29e32dc3",
+      "title": "a rival's excellence should be acknowledged",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_ccd381c53ba66185",
+      "title": "a servant's loyalty cannot be assumed forever",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_7ad7271f7fd2e5d2",
+      "title": "mourning should allow different forms",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_2186d51f1045dc9e",
+      "title": "a good leader should explain hard choices",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_52b5137b7f495964",
+      "title": "a practical repair can honor the dead",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_46755eb5a019d38a",
+      "title": "children should see adults apologize",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_03e7f16acc1b547d",
+      "title": "outsiders should be judged individually",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_aae90b9724d9f7e9",
+      "title": "a person should keep some time unclaimed",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_33f18e551093f92b",
+      "title": "humor should not depend on helpless targets",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_a4006140af892329",
+      "title": "care should be dependable rather than dramatic",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_8f7512ad3f7a5743",
+      "title": "a hard truth should be delivered with purpose",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_d13d2ae1df013797",
+      "title": "privacy should extend to the poor",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_73cd8e083ffed303",
+      "title": "a peaceful day has value beyond preparation for war",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_fe8f0cf7a74343be",
+      "title": "art should be allowed to be playful",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_268657f7e564605d",
+      "title": "a household should prepare for lean seasons",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_582bb4df29f189cb",
+      "title": "anger should not select the punishment",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_97324e48ec137204",
+      "title": "a witness should distinguish seeing from hearing",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_348ecd5c0f9e2c13",
+      "title": "kindness should not require agreement",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_a192beabe5876368",
+      "title": "every skill begins with awkward practice",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_33ee59225d8ae292",
+      "title": "a community should remember its ordinary workers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_2a0a1605f95b836a",
+      "title": "a favor should have honest expectations",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_bb4b09a2820163bf",
+      "title": "love should not erase judgment",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_60f60439b9bca26c",
+      "title": "a neglected tool reflects neglected responsibility",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_b0d137acea632d28",
+      "title": "people should be allowed to leave bad service",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_f17798c760510dd3",
+      "title": "a reputation should be revisable by evidence",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_bfb6e079a099c538",
+      "title": "one should protect the dignity of a defeated rival",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_65b39f4b39d35988",
+      "title": "an heirloom's meaning exceeds its price",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_c3d2055b4e5b41f2",
+      "title": "a child deserves patient answers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_9f04fae120b497bf",
+      "title": "planning should include those doing the work",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_9ab3f7adb1bda9e8",
+      "title": "a promise to oneself also matters",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_2f2473e62255d42b",
+      "title": "a useful life need not be famous",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_8714eda628e365dd",
+      "title": "local knowledge deserves respect",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_bf226478ff7ca567",
+      "title": "a host should notice who is uncomfortable",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_f9e8cc3d1baa1632",
+      "title": "a mistake should not become a permanent identity",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_f0503a50a269d3e0",
+      "title": "caution should remain open to evidence",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_fc11f6d922f2eee0",
+      "title": "wealth should not excuse poor manners",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_de8298242ed60e7f",
+      "title": "a shared task can rebuild trust",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_ad4e54d42364d5a1",
+      "title": "the living should not be ruled entirely by the dead",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_98b79dc35ff217da",
+      "title": "a quiet person may have the best observation",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_3fdea2fe1fc9bb7f",
+      "title": "pride should protect standards rather than forbid learning",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_245e07ce26665cbc",
+      "title": "a celebration should include its workers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_7706afe5254f8619",
+      "title": "a friend should be able to say no",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_9d63433a7199777f",
+      "title": "rest is not proof of laziness",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_ed3fe203cecc02b1",
+      "title": "nature should be used with attention",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_22696d22876f483d",
+      "title": "a grateful person need not remain subordinate",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_7decc8e4bcc84e9d",
+      "title": "an explanation should not become an excuse",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_ebe7f8c849bcbf39",
+      "title": "a household's weakest member reveals its character",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_8476a8692e7e3d86",
+      "title": "good intentions require practical competence",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_47ea4e6fbfeb2159",
+      "title": "a private life deserves more than leftover time",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_5901b67162386056",
+      "title": "one should leave a campsite usable",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_e43d1340a10d6856",
+      "title": "food should be shared before it spoils",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_2f2a319da546be85",
+      "title": "a traveler should receive clear directions",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_e3f54ff041215857",
+      "title": "a frightened person deserves time to understand",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_69afaad06bf4f374",
+      "title": "children should learn kindness through example",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_a70d333ecdf0ed7a",
+      "title": "a powerful person's joke can wound deeply",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_51f4b09fe77fd26c",
+      "title": "a disagreement should not consume every shared activity",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_c9b6a246fdc919b1",
+      "title": "an old friendship deserves maintenance",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_bb703cbe4c0d5e39",
+      "title": "a promise should survive the absence of witnesses",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_f3e2567d76c7e40e",
+      "title": "comfort should not depend on another's humiliation",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_6274b67336b701c5",
+      "title": "a craftsperson should be able to sign their work",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_b431512073d2447c",
+      "title": "a family story should admit uncertainty",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_580f293813de35be",
+      "title": "a person should learn enough to recognize deception",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_a78eefb043b8fc59",
+      "title": "safety rules should apply when no one watches",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_76a9e75897b7cb00",
+      "title": "a guest's belongings should remain untouched",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_60a3863e483694d4",
+      "title": "a private interest need not justify itself economically",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_66f82436cc18e863",
+      "title": "learning another language shows respect",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_8d593c29a4dbb885",
+      "title": "a good question can be more useful than advice",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_2072e044af65b32c",
+      "title": "a home should be safe to be imperfect in",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_facd39d60006d5f2",
+      "title": "a useful disagreement can strengthen friendship",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_d8660a0a62b74f99",
+      "title": "one should not demand gratitude from the bereaved",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_cd823026635e03de",
+      "title": "care for an animal is a lasting commitment",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_149807236ac2d5ec",
+      "title": "fairness may require different kinds of help",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_c9c6892862a0584c",
+      "title": "a leader should know when to step aside",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_96c8af679c1e4652",
+      "title": "a good memory should preserve others' contributions",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_a7f2c384384ced51",
+      "title": "a household should not hide hunger behind display",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_d24b5e28957f282e",
+      "title": "a refusal should not require a fabricated excuse",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "value_da8ce6935f457752",
+      "title": "a gift should be free of hidden debts",
+      "requireAll": [
+        "compassion",
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "honor"
+      ]
+    },
+    {
+      "id": "value_fb0473c5f8bfe7f5",
+      "title": "people should not be tested through manufactured crises",
+      "requireAll": [
+        "compassion",
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "honor"
+      ]
+    },
+    {
+      "id": "value_f1a734eff9b1f856",
+      "title": "humility should not require self-contempt",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_b14a67751927e2ce",
+      "title": "a small improvement is worth completing",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_ef78a127e9c33711",
+      "title": "a friendship should contain ordinary enjoyment",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_1a5c39e947a97439",
+      "title": "a difficult duty should be shared visibly",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "honor",
+        "discipline"
+      ]
+    },
+    {
+      "id": "value_94be5ca0bd6a0462",
+      "title": "one should not confuse obedience with understanding",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_15a35c5049f2576f",
+      "title": "a child may choose a different vocation",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_3f1c6033aa1eb57d",
+      "title": "a person's worth exceeds their usefulness",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "value_d11336053f836333",
+      "title": "careful listening can prevent avoidable harm",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "value_f6b5c5853a765be1",
+      "title": "a private ambition may be modest and worthy",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "value_8bf4a78a02267de8",
+      "title": "peace should be practiced within the household",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_279ee6adc381f498",
+      "title": "a life should include something loved for itself",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": []
+    },
+    {
+      "id": "desire_40d72c8f701a8aac",
+      "title": "receive visible precedence at a gathering",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_756dfe3d406087f8",
+      "title": "have a rival ask them for assistance",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_de9fc48a3650b7cd",
+      "title": "secure a profitable obligation from someone grateful",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion",
+        "honor"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "desire_d6ffa10338a39343",
+      "title": "be spared an ordinary duty because of their station",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "-dutyMotivation"
+      ]
+    },
+    {
+      "id": "desire_0ccaa86a63d17ade",
+      "title": "win a quarrel in front of a witness",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_c685890287a23566",
+      "title": "purchase a rare indulgence without explaining the expense",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "wealthMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "desire_c32ea4483b78f33e",
+      "title": "choose who is admitted to an influential circle",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "wealthMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "desire_5168779d7099c23b",
+      "title": "have a critic retract an unwelcome judgment",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_85de40d2ec0d9eba",
+      "title": "make an offender wait for forgiveness",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "vengefulness"
+      ]
+    },
+    {
+      "id": "desire_0f3797b84797783c",
+      "title": "be obeyed before having to explain themselves",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "desire_a9329f3712403a41",
+      "title": "recover a sum they regard as rightfully theirs",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_860630d3c5777975",
+      "title": "receive admiration without the work that usually earns it",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion",
+        "honor"
+      ],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_9ce64eac4eb82d1f",
+      "title": "find a patron more generous than demanding",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "wealthMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "desire_e388112ffe641db9",
+      "title": "put a dependent beyond a rival's reach",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "powerMotivation",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "desire_888ed79d3be77c2f",
+      "title": "outshine another household during a public occasion",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "pride",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "desire_a8e507af8b1a0738",
+      "title": "be allowed to remain comfortably uninvolved in another's trouble",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "-dutyMotivation"
+      ]
+    },
+    {
+      "id": "value_e532318f076e5eca",
+      "title": "a debt should be collected even when asking is unpleasant",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_4f01cb7d4e70a947",
+      "title": "loyalty to one's own household comes before fairness to strangers",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_bbb2b02d1f39d430",
+      "title": "rank should carry visible privileges",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_00f3364a026ee6ba",
+      "title": "an insult left unanswered invites another",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "vengefulness",
+        "-compassion"
+      ]
+    },
+    {
+      "id": "value_ee380206613536b5",
+      "title": "weak bargaining deserves an unfavorable bargain",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion",
+        "honor"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_f66cee1903b4256a",
+      "title": "ancestral customs should survive personal discomfort",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "dutyMotivation",
+        "authorityRespect",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_9a319c0bc32e03ac",
+      "title": "a public promise binds even after affection fades",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_c084f39ed62caf27",
+      "title": "victory is a more reliable judge than good intentions",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion",
+        "honor"
+      ],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_ba31b34b49f0bcb6",
+      "title": "outsiders should earn trust before receiving it",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "vengefulness",
+        "-compassion"
+      ]
+    },
+    {
+      "id": "value_25d91ea226c84c35",
+      "title": "a household must know whose decision is final",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_4c6e524ab2bc3ba8",
+      "title": "mercy should be earned by useful restitution",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "vengefulness",
+        "-compassion"
+      ]
+    },
+    {
+      "id": "value_9b0da926616e0262",
+      "title": "wealth is proof of foresight when honestly acquired",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "wealthMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "value_86661493f33178fd",
+      "title": "personal freedom matters more than collective comfort",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "assertiveness",
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "value_7ee4290c235389d4",
+      "title": "religious duty may demand an inconvenient sacrifice",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "dutyMotivation",
+        "authorityRespect",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_3f71340973b70154",
+      "title": "one should never leave a rival a needless advantage",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "vengefulness",
+        "-compassion"
+      ]
+    },
+    {
+      "id": "value_c1a2911c1c141503",
+      "title": "secrets are part of protecting one's household",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_78684c284c2ff9ba",
+      "title": "a person who repeatedly fails should lose responsibility",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_fb3b95e127686c39",
+      "title": "obedience matters most when disagreement is strongest",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_fbc07e34f25df35e",
+      "title": "reputation must be defended even at personal expense",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_b260046297f1fa5f",
+      "title": "a skilled negotiator need not reveal every advantage",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_62d140e5443de597",
+      "title": "comfort is a legitimate reward for years of service",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "wealthMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "value_8af07ecd1585c7fe",
+      "title": "kinship creates obligations that affection cannot dissolve",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "dutyMotivation",
+        "authorityRespect",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_6883efe50c112078",
+      "title": "justice sometimes requires a punishment that friends dislike",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_33f9dc80dbfc3b16",
+      "title": "promises extracted by trickery invite trickery in return",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion",
+        "honor"
+      ],
+      "prefer": [
+        "discipline",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "value_132d5b14d3592dde",
+      "title": "an orderly household may need unpopular rules",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_671b7c1c8572f855",
+      "title": "a guest who abuses hospitality forfeits its protections",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "vengefulness",
+        "-compassion"
+      ]
+    },
+    {
+      "id": "value_231d87c5e46537b2",
+      "title": "inheritance should preserve continuity before individual wishes",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "dutyMotivation",
+        "authorityRespect",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "value_cf33e61943598ca0",
+      "title": "personal excellence should be rewarded above equal shares",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "wealthMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "value_ffcf66d4f13ca210",
+      "title": "resisting dependence is worth material hardship",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "assertiveness",
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "value_e562cddbbe79ba57",
+      "title": "authority without consequences becomes an empty title",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    },
+    {
+      "id": "value_451dae60c64b3867",
+      "title": "a private grievance may survive a public reconciliation",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "vengefulness",
+        "-compassion"
+      ]
+    },
+    {
+      "id": "value_32ea2b0e9acf68b8",
+      "title": "a person should guard scarce opportunities for their own kin",
+      "requireAll": [],
+      "requireAny": [],
+      "requireNotHigh": [
+        "compassion"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "authorityRespect"
+      ]
+    }
+  ]
+}

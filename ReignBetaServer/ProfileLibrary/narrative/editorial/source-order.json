@@ -1,0 +1,281 @@
+{
+  "schema": "reign-editorial-source-order-v1",
+  "families": {
+    "hobbies.txt:woodwork": {
+      "count": 25,
+      "sha256": "c238bc04d29e772ab95f283cb8b1796670a3c3a93cbd6cacf3113dbe5fd18f69"
+    },
+    "hobbies.txt:clay_stone": {
+      "count": 25,
+      "sha256": "2596a8e3c8b04468dd36772c35158ceea514584840ab1bfb7f2fe06a3830a679"
+    },
+    "hobbies.txt:textiles": {
+      "count": 25,
+      "sha256": "fe91b4c9266fe28e3c53da1db52e1204e6131f200a0a74d8e4c29c7c0b733a87"
+    },
+    "hobbies.txt:metal_leather": {
+      "count": 25,
+      "sha256": "f1eeef6a56647e9055231a8259d7cb08dcabd0d9d06aef6852600f9c315b3b61"
+    },
+    "hobbies.txt:music": {
+      "count": 25,
+      "sha256": "4b58042c65d48dcd6b7ecc6738cc8d4a458924ff0e67f362bb268da8a4f48ac5"
+    },
+    "hobbies.txt:story_performance": {
+      "count": 25,
+      "sha256": "27fd3b7ad659fb1923283f3c0c550a8c49358ffcd71afe69e558c92f1e692ce9"
+    },
+    "hobbies.txt:games": {
+      "count": 25,
+      "sha256": "a1c28b11ff4c13ea69d791acd40f3ccbd7448feac2d3e56721741f39198121fc"
+    },
+    "hobbies.txt:gardens": {
+      "count": 25,
+      "sha256": "5f01ffa6a1ae09c8d8e32980f99353d7b0f3d54e0bde57607d13e29baad0f386"
+    },
+    "hobbies.txt:food": {
+      "count": 25,
+      "sha256": "df6dd6d58be94b72f9c653af226186eabed539499d7d462b2d3f3f35a679fa2a"
+    },
+    "hobbies.txt:drink_scent": {
+      "count": 25,
+      "sha256": "c3162a903ce7bfae6c3e14fe27e0f243955a0f05e1760476b29b81e2cc69ff87"
+    },
+    "hobbies.txt:cats_dogs": {
+      "count": 25,
+      "sha256": "7c2af40697e9437055548916991caa57f02ad0e3ba34a1c47b0fb8baa117251c"
+    },
+    "hobbies.txt:birds": {
+      "count": 25,
+      "sha256": "96881bf0b2642172e9d29aaac368ee206ac294874383673515b775584ff21261"
+    },
+    "hobbies.txt:horses_livestock": {
+      "count": 25,
+      "sha256": "10666b4026e60550a238ece8023dffb21d99c994c5bc851bcf0633c5f1a2f616"
+    },
+    "hobbies.txt:wildlife": {
+      "count": 25,
+      "sha256": "4ed66e4c0cec6097b2fdd050de32b7bd2772f6f3f006ad29e1d22fcd494004d6"
+    },
+    "hobbies.txt:nature_collecting": {
+      "count": 25,
+      "sha256": "b95939f8e414dcd8af7411c2ae929b15883691c7c20e549d388878afb3f1b3a1"
+    },
+    "hobbies.txt:physical_pursuits": {
+      "count": 25,
+      "sha256": "ca51edfe14ab7c0595c0ed10217dece82822aa2c1c600feb3181a8e6d320cd3c"
+    },
+    "hobbies.txt:travel_places": {
+      "count": 25,
+      "sha256": "4f56f4a2d7a5ed6aa928dac5c3423e1b9a08992f61d8d0803affe03cb0d63394"
+    },
+    "hobbies.txt:history_collecting": {
+      "count": 25,
+      "sha256": "6fd508731a5181a5b3cc9dcb544986dc4d75cd1511d7aad1a279f20edbdedf4f"
+    },
+    "hobbies.txt:books_languages": {
+      "count": 25,
+      "sha256": "f693eb6cbf1ec6e1ccb7669c5ebdc1bc47fafc3b9b978c55878798294c73c1c1"
+    },
+    "hobbies.txt:social_observation": {
+      "count": 25,
+      "sha256": "6da1222ed570e900eda01a4a2dfb837d66435b19b6555a0f0c3a19c05aa0e8dd"
+    },
+    "hobbies.txt:philosophy_numbers": {
+      "count": 25,
+      "sha256": "bcff50cd91bc2a2f4f63ed5d4c4d0fd146af83b95c625aeff5d2cefc13e22bbb"
+    },
+    "hobbies.txt:art_design": {
+      "count": 25,
+      "sha256": "d6cb3bb30eb58c9d5b5bc0fd8267f1ffa925b56579beeb49461614fb7a9c7523"
+    },
+    "hobbies.txt:hospitality_service": {
+      "count": 25,
+      "sha256": "464bc401883e9797574853b6dd73b9e059dfbbd07da88c3bebc921c17d2db64b"
+    },
+    "hobbies.txt:contemplative_ritual": {
+      "count": 25,
+      "sha256": "3e31772c10a43d3e7f9baf6348b8344ebbdf40b53c9a131037ec4a54912e79a2"
+    },
+    "drives.txt:jealousy": {
+      "count": 160,
+      "sha256": "caebf10c6ce6b140b029ad94f93f97905885831a1f40c5f663a55d2216b6cc37"
+    },
+    "drives.txt:temptation": {
+      "count": 160,
+      "sha256": "2da4f885db561c612b718cd72141867150834d6677a9a18cec235d42e105c8e6"
+    },
+    "drives.txt:secret": {
+      "count": 160,
+      "sha256": "8b2f9dfa9ce3fc1cdf7987b8327d806048270d35d22a93bc85902ca95a39322e"
+    },
+    "drives.txt:formative": {
+      "count": 160,
+      "sha256": "25a157c3749f18341d7771f8660f79637bcda440cace8a8d80139f68c37660e4"
+    },
+    "drives.txt:attachment": {
+      "count": 160,
+      "sha256": "b0198c31438c94fadc658d3124bfa2a23776d2284c54d870aec45361486649d5"
+    },
+    "drives.txt:wound": {
+      "count": 160,
+      "sha256": "74f2d0db039e80630eb4046ddbe7571ddf7635b04dd5f16a6b1ac751848dd9ba"
+    },
+    "drives.txt:dream": {
+      "count": 160,
+      "sha256": "20757fa6c4083021ccedebdc3185904e0b438b3c2ae84eff0760a9d13f1a11cb"
+    },
+    "drives.txt:desire": {
+      "count": 160,
+      "sha256": "86e674f427c73d5b0804ec7ed209d0d4963e45ab5ef1d35e45afa85e0019679f"
+    },
+    "drives.txt:fear": {
+      "count": 160,
+      "sha256": "6ccdc8225e884664fa410950b84a396521a42793f9a5e8f6c1dad34506fe477b"
+    },
+    "drives.txt:value": {
+      "count": 160,
+      "sha256": "2d1b43592a8c40641e3dba78271593e0d33efdeb89a947ec4732310da35d5850"
+    },
+    "additional.txt:hobby/child_toys": {
+      "count": 8,
+      "sha256": "fd2e18c214452bff3f6d5b0c336e7adaf7bfab96c2e68eeba6538193d15c04ed"
+    },
+    "additional.txt:hobby/child_animals": {
+      "count": 8,
+      "sha256": "b834b59ff4b7c3c111e6bbcb67a6c00ebaea7c6c119e9c386d8932fce618bfaa"
+    },
+    "additional.txt:hobby/child_movement": {
+      "count": 8,
+      "sha256": "42663c72a3b1e58715e3208a8931394c25a886e72246dbd979376e5e5aad04da"
+    },
+    "additional.txt:hobby/child_sorting": {
+      "count": 8,
+      "sha256": "dc83da7a7326111aad079dbce5b6ea43eb4d000950e21cc801db7e73782587d5"
+    },
+    "additional.txt:hobby/child_sounds": {
+      "count": 8,
+      "sha256": "5aa6c38e2be995b065fb14d16ed53ee612bb772d97c551fee1b6402c1a785574"
+    },
+    "additional.txt:hobby/child_stories": {
+      "count": 8,
+      "sha256": "40f9c981e41cbed2a6bdf5ef6630dfdea26b2448a2817e5fc4bbccfae6767d87"
+    },
+    "additional.txt:hobby/child_outdoors": {
+      "count": 8,
+      "sha256": "aff12e2ae85f6e73d9ac9a6c6111e39fc769cfba6f9d85fab157fff64876d2e5"
+    },
+    "additional.txt:hobby/child_household": {
+      "count": 8,
+      "sha256": "167e6386f414c33a94f0fdbeb5a3f09cd946e9b53727f572d4b81f5ddff47c0b"
+    },
+    "additional.txt:dream/child_hopes": {
+      "count": 16,
+      "sha256": "7486d27570c1e17a4cab10ab6bc69edd337bec6273cc3fac5a102fd47809e9ca"
+    },
+    "additional.txt:desire/child_wants": {
+      "count": 16,
+      "sha256": "04e26bce71d69d80f0a925629058ac7a3e03d0444fee93c3d2545539e74be433"
+    },
+    "additional.txt:fear/child_cautions": {
+      "count": 16,
+      "sha256": "72ac3f040c659d01745b3dab5a28bd2d7a266dfc805b27ed422d9feeb26f4160"
+    },
+    "additional.txt:value/child_rules": {
+      "count": 16,
+      "sha256": "d938728e23fa798411cd05637eb1da8907ddb3e45e3e0e28d0a61c20eae8cb52"
+    },
+    "additional.txt:attachment/child_bonds": {
+      "count": 16,
+      "sha256": "fb283fdcab294783c5d0214691fd43090bff9d097e81659a929a75341cb29b8a"
+    },
+    "additional.txt:formative/child_experiences": {
+      "count": 16,
+      "sha256": "740e108e346ea3cee1f60cc19e54364077f6588d764bc9d71bec612f407fe4b7"
+    },
+    "additional.txt:wound/child_hurts": {
+      "count": 12,
+      "sha256": "0dc034762538cbe23d15364fdcd894c4821eb8e57de5ccefd81dfb8d3806b9b6"
+    },
+    "additional.txt:jealousy/child_comparisons": {
+      "count": 12,
+      "sha256": "55f1f1bae3b71282ed66e4af3df3041ff1f47ee4c9d0c7913de8563a724c5656"
+    },
+    "additional.txt:temptation/child_impulses": {
+      "count": 12,
+      "sha256": "ca2075583443ced7f7707b124405e0390f4d7d542f6606c39edd04880c3abe3e"
+    },
+    "additional.txt:secret/child_privacies": {
+      "count": 12,
+      "sha256": "edbec8659e5c722babd0e3b9c83497995dbc27306f96cd0c3719edb7f98be78e"
+    },
+    "additional.txt:dream/status": {
+      "count": 16,
+      "sha256": "cd3d817e997191a02fdaf8c69f6d21804a9eb1f18eb6ac29aab326e2d12847c6"
+    },
+    "additional.txt:desire/status": {
+      "count": 16,
+      "sha256": "46b5a75a10ac0a2cd5927415ef017f30ac9c44eaefa0ca3b2be3800352e30b4b"
+    },
+    "additional.txt:value/hard_edges": {
+      "count": 32,
+      "sha256": "08a6134e0fdcbb29a6a127f1d77eac718d81271ad0b38aa8182d2d8a2ee7b062"
+    },
+    "additional.txt:attachment/status": {
+      "count": 16,
+      "sha256": "e10207d29800295e4f7d24d2fcb279ff0988df9499ffff87718d6c75bc0d0ba1"
+    },
+    "additional.txt:formative/hard_edges": {
+      "count": 16,
+      "sha256": "8eb7c4dd1a507e879afddc230054bdd8dc4a6a7a388f65875f882b60e6e58473"
+    },
+    "additional.txt:fear/status": {
+      "count": 16,
+      "sha256": "1ca24ec6fd628226d07dfcd8e323d768da23e47246ef5da5e18958caf76f6795"
+    },
+    "additional.txt:jealousy/status": {
+      "count": 16,
+      "sha256": "0b60c22a04ae29ce8e189924d84388c028b1f65724ee2f2d0540858d99093302"
+    },
+    "additional.txt:temptation/hard_edges": {
+      "count": 16,
+      "sha256": "0c8fbad658e13da8fbaf468d024de98205479ac1d9d3ffd4ac05d02670f16767"
+    },
+    "additional.txt:secret/hard_edges": {
+      "count": 16,
+      "sha256": "0dbc416818663c40cebace1668da2eca95ac4d562a9c567ad913c97b8b01d5fb"
+    },
+    "additional.txt:dream/private_comfort": {
+      "count": 24,
+      "sha256": "9124f03f6a9c69abc355ebdce97febba7f12f43ec07c74c416695adb0bb5431c"
+    },
+    "additional.txt:dream/personal_recognition": {
+      "count": 24,
+      "sha256": "2441f2d73ba7007673e9d41e36879e8a38c713d5768114ad9f707fd194642c65"
+    },
+    "additional.txt:dream/chosen_independence": {
+      "count": 24,
+      "sha256": "cab2f219290960aec8356fb475443e1b9780f158a3a551607816b962f5fb8315"
+    },
+    "additional.txt:dream/collection_and_luxury": {
+      "count": 24,
+      "sha256": "803e71ede7f39e72a287d50b83e0f40c707fc4079b0ee84f8f531d33d4691114"
+    },
+    "additional.txt:dream/mastery_and_play": {
+      "count": 24,
+      "sha256": "90a903b088e93c408d11a1dd1ae7d689b010d1387e8a0904a4eece2db8c35052"
+    },
+    "additional.txt:dream/rivalry_and_vindication": {
+      "count": 24,
+      "sha256": "10df5638ec66b30da5d89b3575cdc85fd5fcfa6d013d2e32e47c980751f948f1"
+    },
+    "additional.txt:dream/influence_and_control": {
+      "count": 24,
+      "sha256": "26eea5f1d2ccdf424f6b1aee8379c2a9fb9316dcefa5521ca00cdc7325e2ce50"
+    },
+    "additional.txt:dream/sensory_and_companionship": {
+      "count": 24,
+      "sha256": "2451f125e72cbe7f5d3aaf6f64dea7dae6edd6ee1b0dcf14f1edbdb3d619a2eb"
+    }
+  }
+}

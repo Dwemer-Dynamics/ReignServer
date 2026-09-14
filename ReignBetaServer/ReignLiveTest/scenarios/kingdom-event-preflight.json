@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "label": "Kingdom catastrophe/boon launch acceptance - read-only catalog and eligibility preflight",
+  "mode": "kingdom_event",
+  "presentation": "visible",
+  "effects": "guarded",
+  "steps": [
+    { "operation": "kingdom_event_test", "phase": "preflight", "fixtureRunId": "kingdom_event_acceptance_preflight", "timeoutSeconds": 180 }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance - one natural foreign-agent cycle",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    {
+      "operation": "world_acknowledge_native_diplomacy_notices",
+      "confirmation": "acknowledge Bannerlord diplomacy notices on disposable save",
+      "timeoutSeconds": 30
+    },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    {
+      "operation": "spymaster_organic",
+      "phase": "observe",
+      "stage": "agent_cycle_single",
+      "fixtureRunId": "spymaster_organic_launch",
+      "timeoutSeconds": 120
+    }
+  ]
+}

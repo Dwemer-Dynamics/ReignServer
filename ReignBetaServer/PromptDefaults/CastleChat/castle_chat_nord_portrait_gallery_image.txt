@@ -1,0 +1,102 @@
+Create an exceptionally photorealistic cinematic scene inside a **Nord castle portrait gallery and hall of remembrance**, distinctly reflecting a settled northern maritime warrior aristocracy.
+
+This must not simply resemble Sturgia.
+
+Nord family identity is closely tied to:
+
+- Seafaring.
+- Voyages.
+- Coastal land.
+- Ship ownership.
+- Exploration.
+- Warfare.
+- Law.
+- Oaths.
+- Clan loyalty.
+- Trade.
+- Raiding traditions.
+- Settlements founded across the sea.
+- Martial and navigational achievement.
+
+The gallery occupies a long section of a heavy coastal fortress.
+
+Massive rough-cut stone walls support large oak beams and carved wooden uprights. Shuttered windows reveal gray northern daylight, sea, distant cliffs, snow, mountains, or storm clouds where appropriate.
+
+Iron lamps and candles cast warm light across the darker interior.
+
+Portraits are framed in heavy carved oak using restrained:
+
+- Interlace.
+- Knotwork.
+- Ship motifs.
+- Stylized beasts.
+- Geometric carving.
+
+Between them may hang:
+
+- Old shields.
+- Swords.
+- Seax-like ceremonial blades.
+- Ship plaques.
+- Pieces of carved prow ornament.
+- Navigation instruments.
+- Sea charts.
+- Harbor maps.
+- Family banners.
+- Treaty documents.
+- Land grants.
+- Objects brought home from distant voyages.
+- Written sagas.
+- Genealogical records.
+
+The gallery should feel like a place where a person's portrait is only one part of how they are remembered. Their ship, voyage, oath, battle, land, or deed may matter just as much.
+
+No invented humans may appear anywhere.
+
+Portrait paintings must depict supplied source identities only, or be covered, obscured, angled, cropped, or outside readable focus.
+
+Likely activities include:
+
+- Looking at a famous voyager.
+- Studying a family founder.
+- Examining an old sea chart.
+- Reading a written saga connected to a portrait.
+- Looking at a ship relic.
+- Remembering someone lost at sea.
+- Studying inheritance.
+- Considering a family oath.
+- Reflecting on land won generations earlier.
+- Looking at an ancestor remembered for battle.
+- Wondering whether family stories exaggerate old deeds.
+- Thinking about one's own legacy.
+
+### ABSOLUTE CHARACTER REQUIREMENTS
+
+Only the full-body source characters supplied directly to the prompt may appear as visible human beings.
+
+Do not generate:
+
+- Ancestors.
+- Sailors.
+- Guards.
+- Servants.
+- Warriors.
+- Attendants.
+- Children.
+- Background figures.
+- Human statues.
+- Human silhouettes.
+- Unspecified portrait subjects.
+- Reflected people.
+
+Preserve every supplied character's exact facial identity and complete physique.
+
+Maintain age, skin texture, hair, facial hair, scars, height, shoulder width, torso shape, body mass, musculature, legs, arms, and natural proportions.
+
+Do not convert the character into a stereotypical Viking.
+
+Clothing may be replaced with realistic Nord noble or civilian clothing suited to an indoor castle gallery: wool, linen, leather, tunics, trousers, dresses, cloaks, belts, boots, woven trim, silver or bronze ornament.
+
+The finished scene must appear indistinguishable from high-quality live-action historical photography.
+
+---

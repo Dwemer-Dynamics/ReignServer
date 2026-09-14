@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "label": "NPC pair zero-sum native receipt replay",
+  "seed": 271828,
+  "mode": "party_chat",
+  "presentation": "headless",
+  "effects": "guarded",
+  "steps": [
+    {
+      "operation": "open",
+      "mode": "party_chat",
+      "targetSearches": [
+        "reign_court_castle_ES1_child_1",
+        "CharacterObject_2731"
+      ],
+      "createTestEvent": true,
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "party_chat",
+      "text": "Speak to one another about how your established shared past affects this ordinary disagreement. Use your own view, respond to the earlier speaker, and do not claim access to the other person's private interpretation.",
+      "assertions": {
+        "minReplies": 2,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "relationshipPolicy": {
+          "scenario": "routine",
+          "requiresEverySpeaker": true,
+          "requiresPlayerReaction": true,
+          "requiresNpcToNpc": true,
+          "expectedNpcIds": [
+            "reign_court_castle_ES1_child_1",
+            "CharacterObject_2731"
+          ]
+        },
+        "requiresGroupAwareness": true,
+        "forbidSelfReaction": true,
+        "requiresPersonalityEvidence": true,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "send",
+      "mode": "party_chat",
+      "text": "Continue the disagreement by answering the other NPC's actual point. It is acceptable for one of you to become slightly warmer while the other becomes slightly colder; keep each reaction independent and proportionate.",
+      "assertions": {
+        "minReplies": 2,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "relationshipPolicy": {
+          "scenario": "routine",
+          "requiresEverySpeaker": true,
+          "requiresPlayerReaction": true,
+          "requiresNpcToNpc": true,
+          "expectedNpcIds": [
+            "reign_court_castle_ES1_child_1",
+            "CharacterObject_2731"
+          ]
+        },
+        "requiresGroupAwareness": true,
+        "forbidSelfReaction": true,
+        "requiresPersonalityEvidence": true,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "close",
+      "mode": "party_chat",
+      "assertions": {
+        "requiresSceneMemoryArtifacts": true,
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    }
+  ]
+}

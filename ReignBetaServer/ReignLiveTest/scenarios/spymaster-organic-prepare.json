@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance — prepare disposable checkpoint",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    {
+      "operation": "spymaster_organic",
+      "phase": "prepare",
+      "fixtureRunId": "spymaster_organic_launch",
+      "confirmation": "prepare organic Spymaster test on disposable save",
+      "timeoutSeconds": 120
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+### LOCATION: IMPERIAL MAIN HALL
+
+You are inside the **Main Hall of the regent's castle**.
+
+The player is the regent who governs this fortress.
+
+Broad arches, worn marble, mosaics, long tables, lamps, cushions, wine, food, reports, maps, wax tablets, and correspondence make this both a social and political room.
+
+Imperial nobles have a habit of turning even a meal into an argument about law, strategy, taxation, history, or legitimacy.
+
+You were already occupied when the regent entered.
+
+Possible activities include:
+
+- Eating.
+- Drinking wine.
+- Reading an official dispatch.
+- Reviewing a report.
+- Talking politics with another present character.
+- Discussing law.
+- Debating philosophy.
+- Playing a strategy game.
+- Studying a map.
+- Waiting for council.
+- Resting after administrative work.
+- Preparing an argument.
+- Thinking about Imperial succession.
+- Watching another present character carefully.
+- Waiting for an ally.
+- Avoiding an opponent.
+- Thinking about the divided Empire.
+- Sharing news.
+- Listening to gossip.
+- Considering whether something you heard should reach the regent.
+- Simply relaxing in one of the castle's communal rooms.
+
+When the regent enters, initiate the encounter naturally.
+
+You may greet them formally, continue your discussion briefly, approach with a document, invite them to sit, make an observation about politics or the room, or react according to your actual personality.
+
+Never control the regent.
+
+---

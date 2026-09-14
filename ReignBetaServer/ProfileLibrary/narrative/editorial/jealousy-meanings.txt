@@ -1,0 +1,161 @@
+# Original adult jealousy index|semantic aim|personal meaning
+0|unearned approval|Early praise gives another person's work an advantage before its difficult details have even been considered.
+1|chosen vocation|A relative's permitted choice makes inherited expectations on personal work feel less inevitable and less fair.
+2|easy companionship|Effortless-looking friendship highlights the attention and uncertainty that personal social exchanges can require.
+3|forgiven mistakes|A rival's quick forgiveness makes the lasting consequences of personal errors feel especially uneven.
+4|unconditional trust|Another person's easy reception exposes how tiring it is to keep supplying fresh proof of reliability.
+5|chosen work|An artisan able to refuse an unsuitable commission appears to possess a particularly useful kind of freedom.
+6|unconditional affection|A sibling's ordinary welcome can make personal efforts to remain deserving of affection feel painfully conspicuous.
+7|easy belonging|Quick acceptance of a newcomer throws earlier cautious approaches from the edge of the circle into sharper relief.
+8|unearned confidence|Another person's assurance can be irritating when it seems to cost less preparation than a private attempt would require.
+9|inherited opportunity|An established workshop supplies a beginning that someone else had to build before any satisfying work could start.
+10|unclaimed pursuits|A companion's free interval makes the interruptions surrounding personal interests harder to ignore.
+11|unhurried grief|Patient attention to another person's loss highlights the pressure once felt to make personal grief less visible.
+12|fair credit|A shared result appears to become the rival's achievement as soon as it reaches a public audience.
+13|unencumbered travel|The freedom to depart without permission turns another person's ordinary journey into a desirable kind of independence.
+14|family candor|Easy disagreement elsewhere highlights the effort needed to keep a personal difference from becoming a household quarrel.
+15|proportionate recognition|Admiration for a modest result makes more demanding personal work feel less reliably connected to praise.
+16|acknowledged fear|Someone naming fear without losing standing seems free from an extra burden that can make courage harder to practice.
+17|recognized agency|A relative's decisions receiving serious consideration makes personal wishes seem too easily treated as provisional.
+18|heard judgment|Advice heard immediately offers a contrast to the tiring need to repeat a useful point until somebody notices.
+19|enduring friendship|Companionship surviving long absences easily makes distance look less costly for other people.
+20|unburdened help|An uncomplicated offer of help highlights the private habit of looking for the obligation hidden behind one.
+21|mentor approval|A rival's charm appears to obtain the warm reception that careful work alone has not always secured.
+22|visible recognition|A public celebration can make another person's small success occupy more space than its practical scale suggests.
+23|heard presence|Someone remaining memorable while quiet seems spared the work of continually reasserting a place in the room.
+24|family agency|Parents asking a friend what they want makes consultation look ordinary rather than a privilege to negotiate.
+25|social ease|A person settling comfortably into every company appears to avoid the repeated adjustments that make unfamiliar gatherings tiring.
+26|accepted pursuits|Respect for another person's hobbies makes the need to justify a private interest feel less reasonable.
+27|unequal consequences|A relative's protection reveals how differently the same mistake can be experienced inside one family.
+28|wanted company|An invitation based on company alone offers a warmth that useful connections cannot make entirely convincing.
+29|honest revision|A rival's graceful change of mind makes personal hesitation seem more likely to be judged as weakness.
+30|secure home|A home without debt offers a kind of settled ease that ordinary comfort alone cannot provide.
+31|earned animal trust|An animal's immediate confidence in a friend highlights the patience required to earn a similar approach personally.
+32|legitimate rest|Work that naturally leaves time to rest makes a more exhausting arrangement feel harder to defend as unavoidable.
+33|safe refusal|Another person's easy no makes the personal guilt attached to a small refusal feel particularly burdensome.
+34|enduring friendship|An old friendship remaining simple seems free of the accumulated carefulness that some personal relationships acquire.
+35|protected wealth|A rival's money appears to shelter conduct that would attract scrutiny without the same resources.
+36|recoverable mistakes|Errors treated as part of learning give other people room to improve without carrying a permanent label.
+37|room for beginners|Permission to be inexperienced offers an ease missing when every first attempt feels like a final judgment.
+38|accurate credit|A friend's accurately remembered success highlights how easily the difficult part of a personal achievement can disappear from its telling.
+39|unquestioned affection|Affection accepted without public testing appears more secure than a bond repeatedly asked to demonstrate itself.
+40|effortless appearance|Apparently unearned beauty can make the effort spent on personal presentation feel unusually visible.
+41|persuasive voice|A naturally persuasive delivery seems to give a rival's words a hearing before the argument itself is examined.
+42|safe self-mockery|Someone laughing at a personal mistake without losing respect appears able to put embarrassment down much sooner.
+43|shared burdens|Fairly divided household work makes a friend's free time look supported by an arrangement rather than won through exhaustion.
+44|private reading|An uninterrupted reader possesses the small luxury of following a thought past its first interesting difficulty.
+45|attentive gifts|A useful gift without hidden expectations lets another person enjoy receiving before calculating what must be returned.
+46|inherited standing|A respected name grants the rival an opening that personal effort must otherwise try to obtain.
+47|dignified forgiveness|A companion forgiving comfortably seems less burdened by the fear that reconciliation will be mistaken for surrender.
+48|independent judgment|Welcome for another person's contrary opinion makes a personal difference seem too readily treated as troublemaking.
+49|recognized workmanship|Willing patrons appear to understand the craft's value without requiring the maker to keep translating effort into a defense of price.
+50|available comfort|A friend's direct request for comfort highlights the extra effort spent deciding whether a personal need is permissible.
+51|unranked judgment|A low-status speaker being heard gives a visible example of attention following judgment rather than position.
+52|recognized courage|The notice given to a rival's courage can seem larger than the distinction between the acts being compared.
+53|dignified departure|Leaving service without resentment preserves an ease that a personal departure may feel unable to retain.
+54|family candor|Children confiding freely make the companion's household look less dependent on carefully managed appearances.
+55|effective counsel|Advice becoming policy immediately gives another person an influence that personal recommendations must struggle to demonstrate.
+56|personal privacy|An untouched private room turns solitude into a reliable arrangement rather than a boundary repeatedly defended.
+57|sufficient means|A modest income meeting a friend's needs makes contentment seem less dependent on constantly obtaining more.
+58|unclaimed pursuits|Enjoyment remaining separate from work gives another person a pleasure untouched by deadlines and expectations of output.
+59|private failure|A rival's unseen errors preserve a public confidence that visible personal mistakes may not be allowed to retain.
+60|unbought loyalty|Willing allegiance offers a kind of security that repeated pressure cannot fully imitate.
+61|bodily ease|Comfort in another person's body can make private adjustments and irritations feel especially tiring.
+62|entrusted judgment|A delicate responsibility signals confidence that goes beyond polite approval in ordinary conversation.
+63|chosen tradition|A joyful household custom highlights how much pressure can gather around a similar personal obligation.
+64|permitted loneliness|A friend naming loneliness plainly seems free from the additional shame that can make the feeling harder to address.
+65|recoverable embarrassment|A quick recovery lets other people rejoin the occasion while the personal mind is still replaying an awkward moment.
+66|earned approval|Praise from a difficult person appears especially scarce and therefore harder to watch a rival obtain easily.
+67|unworried spending|Another person's casual purchase exposes the anxious calculation that can accompany even a modest private indulgence.
+68|capable successor|A dependable successor allows the companion to imagine an absence without expecting the work to fall apart.
+69|educational opportunity|Education opening doors naturally makes earlier barriers seem less connected to actual willingness to learn.
+70|steadfast family|A friend's defended name offers reassurance about what happens in a room where the person is not present.
+71|legitimate peace|Enjoying a quiet period without guilt seems like an additional freedom beyond merely being safe from immediate trouble.
+72|rapid mastery|Fast visible improvement in another person's skill makes patient personal practice feel less generously rewarded.
+73|indulgent interpretation|Calling a rival's social error charming gives the same awkwardness a kinder public meaning than expected personally.
+74|chosen intimacy|Permission to postpone marriage leaves another person with more time to discover what kind of life is actually wanted.
+75|shared pursuit|A partner's interest makes private leisure a source of closeness rather than something that must be explained from outside the relationship.
+76|respected refusal|A courteous firm no seems to provide another person with a boundary that neither invites a quarrel nor disappears under pressure.
+77|bounded generosity|Unexploited generosity lets another person give without first preparing to defend where the gesture ends.
+78|safe homecoming|A return without judgment offers the comfort of home without an accompanying examination of the choices made while away.
+79|reassuring presence|Someone making a room relax seems to obtain warmth without the visible effort of trying to arrange it.
+80|attentive correspondence|Thoughtful letters arriving regularly give the rival tangible evidence of being remembered between meetings.
+81|mutual candor|Affection surviving disagreement appears more secure than a relationship kept comfortable through careful silence.
+82|settled belief|Uncomplicated religious confidence offers the companion an assurance that private questioning does not easily reproduce.
+83|ordinary identity|Permission to be ordinary can look especially desirable when a personal role keeps asking for significance.
+84|independent successors|Gratitude without continued dependence gives teaching a satisfying result that does not become another permanent duty.
+85|possible renewal|A friend's accepted fresh beginning makes the lasting weight of an old personal failure feel less inevitable.
+86|steady approval|A mentor's unquestioned confidence removes an uncertainty that can intrude even while personal work is going well.
+87|admired intelligence|A rival's cleverness being welcomed makes the suspicion attached to similar personal resourcefulness feel uneven.
+88|chosen vocation|Permission to change work gives another person a future that need not keep proving the wisdom of an earlier choice.
+89|ordinary belonging|A welcoming neighborhood supplies a companion with casual daily recognition that does not depend on arranging a formal visit.
+90|visible authorship|A name remaining attached to the work preserves credit without the maker needing to keep reclaiming it.
+91|maintained quality|The means to repair well lets another person keep something valued instead of repeatedly settling for a cheap replacement.
+92|wanted counsel|Younger relatives seeking a friend's advice make experience look welcomed rather than tolerated as an elder's habit of speaking.
+93|safe uncertainty|An admitted gap in knowledge seems less costly for someone whose overall competence remains unquestioned.
+94|unmocked ambition|A rival's praised ambition gives an appetite for advancement a dignity that personal striving may struggle to receive.
+95|protected leisure|Leisure needing no explanation gives another person more than spare time: it gives the right to decide how to use it.
+96|shared responsibility|A trusted partner in decisions lets the companion set down some uncertainty without giving up participation.
+97|considered strength|Restraint recognized as deliberate makes a similar personal choice seem unfairly vulnerable to a charge of timidity.
+98|fitting home|A home suited to ordinary needs spares the owner a succession of small accommodations that personal rooms may demand.
+99|animal companionship|Animals accepted without criticism make a friend's affection seem easier to enjoy openly.
+100|safe candor|Plain speech welcomed as honesty highlights the risk that a personal direct answer will be heard as rudeness.
+101|fair blame|Circumstances explaining a rival's mistake can appear more forgiving than the character judgments attached to a personal one.
+102|noticed presence|Unrequested attention lets another person feel wanted without the exposure of having to ask for it.
+103|remembered boundaries|A limit remembered by others makes the companion's daily life less dependent on repeating an unwelcome correction.
+104|lifelong learning|A later opportunity to learn shows another person retaining choices that can feel as though they have already closed.
+105|preparation recognized|Noticed household work becomes part of the shared account rather than disappearing into the appearance of ordinary ease.
+106|separate interests|A marriage allowing different pursuits leaves room for individuality without turning it into a measure of devotion.
+107|acknowledged repair|Forgiveness following a sincere apology gives the other person a recognizable point at which the effort to make amends has mattered.
+108|retained influence|Stepping aside without becoming irrelevant gives the rival a desirable separation between burdensome duties and useful standing.
+109|independent recognition|An easy refusal of honors suggests enough secure regard that another public confirmation is unnecessary.
+110|chosen vocation|A clear vocation lets the companion direct effort without continually reopening the question of whether it belongs there.
+111|attentive receiving|A modest gift treasured sincerely makes another person's thoughtfulness visibly sufficient without a larger expense.
+112|individual regard|Freedom from famous family comparisons lets another person's achievement arrive on its own scale.
+113|kept promises|A friend's unobstructed commitment makes the practical difficulty of keeping a personal word feel especially frustrating.
+114|unquestioned kindness|Kindness accepted plainly spares another person the work of disproving an assumed concealed motive.
+115|learning access|Rare books give the rival a route to answers that private curiosity alone cannot readily obtain.
+116|chosen company|The freedom to choose companions makes another person's affections less subject to outside convenience.
+117|untroubled remembrance|Comfortable childhood memories give the companion a past that can be revisited without careful preparation for what may surface.
+118|unhurried grief|Mourning without a display of toughness allows another person's loss to occupy its own honest shape.
+119|preparation recognized|Recognition for preparation keeps the invisible part of another person's success within the public account.
+120|comfortable hospitality|Hosting without counting every cost lets a friend give attention to the guests rather than the remaining provisions.
+121|wanted family company|Children visiting willingly make the parent's company seem valued beyond obligation or dependence.
+122|affordable risk|Praise for a rival's daring can overlook the protection that makes the same gamble less costly for them.
+123|bodily ease|Easy travel spares another person the discomfort that can narrow attention during a long journey.
+124|practical care|Useful help during illness lets the companion recover without having to keep managing every ordinary duty at the same time.
+125|safe counsel|A respectful disagreement with a ruler remaining safe gives another person room to speak with less calculation of personal danger.
+126|personal privacy|A private life left outside gossip offers a quiet freedom from explaining every distorted public version of it.
+127|memorable company|A brief meeting leaving a warm impression makes recognition look easier to obtain than a personal effort sometimes finds it.
+128|distinct family talents|Complementary talents let relatives admire each other without each success immediately becoming a comparison.
+129|social access|Connections making an introduction effortless give the rival a first hearing without the awkward work of asking for entry.
+130|quiet refuge|A nearby natural place offers an easily reached interval in which other people's demands recede.
+131|shared responsibility|Trust in another person's follow-through lets the companion stop checking the task while remaining confident in its result.
+132|indulgent interpretation|The same stubbornness attracting admiration elsewhere makes personal criticism seem more dependent on the speaker than the conduct.
+133|revisable reputation|Old mistakes no longer retold give another person room to be encountered through what has happened since.
+134|unenvious friendship|A friend's wholehearted pleasure in another success can itself become a quietly envied freedom from comparison.
+135|understood work|Close people understanding the work give its maker a place to speak about the difficult details without first explaining why they matter.
+136|public composure|A rival's steady appearance makes private effort to remain composed seem especially conspicuous from inside it.
+137|private generosity|Anonymous giving requires enough security to enjoy the act without needing its recognition as part of the return.
+138|enduring friendship|A stable circle gives the companion familiar company without the recurring uncertainty of whether the gathering still holds together.
+139|welcomed return|Warmth after an absence makes belonging look less dependent on continually maintaining a visible presence.
+140|accepted taste|Open pride in an unfashionable craft offers a contrast to the caution surrounding a similar private pleasure.
+141|individual regard|A household without constant comparisons allows a friend's preferences and successes to remain particular rather than ranked.
+142|plain answers|A direct answer gives another person information without the additional work of interpreting polite evasions.
+143|indulgent informality|A rival's lack of ceremony being welcomed makes personal informality seem more likely to receive a corrective response.
+144|legitimate solitude|A request for quiet accepted without offense makes another person's boundary easier to keep kindly.
+145|meaningful inheritance|A beloved inherited object supplies the companion with a tangible connection that cannot simply be purchased to match it.
+146|earned authority|Authority grounded in recognizable competence seems more secure than a position continually defended through ceremony or pressure.
+147|animal care|Time available for an aging animal gives another person the means to turn affection into patient daily attention.
+148|domestic ease|Shared household laughter makes ordinary time together look less crowded by caution and unresolved comparison.
+149|private experiments|A failure allowed to remain private gives the other person room to learn before an audience settles its interpretation.
+150|safe refusal|Affection surviving the rival's refusal suggests a security that a personal no may feel unable to assume.
+151|lasting workmanship|A visible durable result lets another person's effort remain present after the day of work has ended.
+152|unforced identity|Alignment between public and private conduct appears to spare the companion the work of maintaining two different impressions.
+153|freedom from insult|Letting a small insult pass gives another person back an interval that private replaying can consume.
+154|early consultation|Being asked while the choices remain open gives another person's judgment an influence beyond ceremonial approval afterward.
+155|quiet recognition|Remembered quiet contributions show that a friend does not have to become louder to remain part of the shared account.
+156|timely encouragement|Encouragement arriving at the useful moment can make another person's next attempt easier before confidence has been rebuilt alone.
+157|future security|A rival's apparently settled future makes personal uncertainty feel less like a universal condition and more like a missing advantage.
+158|unconditional affection|Being loved during an unproductive period offers reassurance that usefulness alone cannot provide.
+159|unexplained identity|Freedom from continual self-justification would leave more attention available simply to inhabit an ordinary day.

@@ -1,0 +1,161 @@
+# Original adult dream index|semantic aim|personal meaning
+0|learning access|A child's chance to learn should not end at the household purse.
+1|living legacy|The harvest would belong to people who never knew the planter.
+2|accurate remembrance|A familiar place deserves a history that can survive its most confident storyteller.
+3|safe hospitality|A guest being able to sleep without listening for danger would make the house feel complete.
+4|fair employment|The judgment of people who depended on the wages matters more than a flattering inscription.
+5|family candor|Disagreement at the family table should not cost a child affection or safety.
+6|safe passage|An ordinary journey should not require a farewell that feels final.
+7|craft continuity|The last practitioner should have somebody capable of asking the next useful question.
+8|living legacy|A garden's growth offers a future that does not need its maker's constant supervision.
+9|practical healing|Clear instructions might help an injured person when no experienced healer is near.
+10|sea discovery|An imagined horizon has become a place that must eventually be seen directly.
+11|shared song|Hearing the tune sung absent-mindedly would be more satisfying than a single splendid performance.
+12|clean water|A reliable source would remove a daily anxiety that comfortable households scarcely notice.
+13|merciful strength|Restraint would feel more convincing if nobody could mistake it for helplessness.
+14|debt freedom|The household should be able to answer a creditor without surrendering its next season.
+15|private mastery|The work should remain worth doing on a day when nobody will see the result.
+16|family reconciliation|A family gathering could become a meeting of people rather than rival accounts of an old quarrel.
+17|honest recognition|An undeserved stain should not become the only surviving account of a person's work.
+18|animal respite|An animal's usefulness should not be the last claim it has on humane treatment.
+19|shared access|A reliable crossing would turn a difficult separation into an ordinary visit.
+20|mutual candor|Closeness would feel secure if a different opinion did not threaten the whole relationship.
+21|completed manuscript|The unfinished work occupies a private corner of attention whenever another project begins.
+22|winter provisions|Enough stored food would let a poor harvest remain a hardship rather than a catastrophe.
+23|independent retirement|Old age should not require praising a powerful host for the right to stay comfortable.
+24|recognized workmanship|One thing made exceptionally well could give the name a meaning beyond its ordinary associations.
+25|apprentice opportunity|A beginner could spend more effort learning if the first mistakes did not end the opportunity.
+26|family recipes|A familiar taste can carry a family memory that a formal genealogy leaves out.
+27|linguistic independence|A journey would feel freer without another person choosing which words reach the listener.
+28|peaceful encounter|People could meet over an ordinary shared interest before inherited suspicion decides the exchange.
+29|household independence|A sound estate would provide choices without a new favor being owed each season.
+30|younger independence|Affection would be easier to give freely once the younger person no longer needed permission for every step.
+31|local discovery|A familiar ruin remains an unanswered question close enough to have been overlooked for years.
+32|settled obligations|The final account should not leave someone else paying for an easily forgotten promise.
+33|safe passage|A crossing should depend on careful upkeep rather than the passenger's willingness to gamble.
+34|fair dealing|A buyer should be able to trust the measure without first knowing the seller's powerful friends.
+35|public cleanliness|Cleanliness and a little bodily ease should be available beyond the households that can afford private facilities.
+36|knowledge continuity|A damaged or unread book can take an entire line of thought out of reach.
+37|elder dignity|Age should not erase the right to be consulted about an ordinary shared day.
+38|domestic peace|Coming home should permit the shoulders to relax before the next careful answer is prepared.
+39|earned trust|Confidence given after direct experience would feel different from deference to a family name.
+40|practical healing|Small injuries affect a great many lives, and being useful in that moment has an immediate meaning.
+41|cultivation skill|A hardy tree bearing good fruit would make patient observation visible in a living result.
+42|accurate navigation|A stranger ought to be able to follow the route without learning each mistake through danger.
+43|children's stories|A story that a child asks to hear again has found a place no formal praise can supply.
+44|shared performance|A traveling company could make a succession of unfamiliar places briefly share the same laughter.
+45|experimental freedom|There should be room for a failed attempt to stay on the bench until its lesson becomes clear.
+46|restored home|Repairing a dwelling would make an inherited place usable in the present rather than merely mourned.
+47|reliable messages|Important words should arrive as they were entrusted, without a hidden bargain along the road.
+48|quiet waterside home|The sound and changing surface of water promise an ordinary day with less demand in it.
+49|kept promises|A spoken commitment should spare the listener a second round of anxious checking.
+50|practical learning|A useful skill can give a learner choices that encouragement alone cannot provide.
+51|gentle horses|Confidence between horse and handler should be bred and practiced with as much care as strength.
+52|regional speech|Local turns of phrase deserve to remain recognizable after the voices that taught them have gone.
+53|peaceful inheritance|What remains should support a family instead of becoming a reason for its members to avoid one another.
+54|worker recognition|The finished result should not obscure the people whose repeated effort made it possible.
+55|sailing confidence|Understanding wind and sail would replace the awkward dependence of being only a passenger.
+56|welcoming celebration|Guests remembering that they felt wanted would matter as much as remembering the spectacle.
+57|considered pilgrimage|The journey should change something inward, rather than merely add another place to a boast.
+58|learning access|A reader should be allowed to carry knowledge home without having to purchase the whole book.
+59|peaceful livelihoods|Someone practiced in surviving violence should have a workable reason to put that practice aside.
+60|ended grievance|Children should receive a future of their own instead of instructions for continuing an older feud.
+61|demonstrated insight|A working result would settle the question more deeply than winning another confident argument.
+62|family voice|The household should not teach a child that being heard depends on being the favored son or daughter.
+63|admitting mistakes|A correction could become evidence of judgment instead of an occasion for defending an obvious error.
+64|reconciled inheritance|An inherited burden should eventually become something that can be considered without immediate bitterness.
+65|good teaching|Seeing a learner proceed independently would be the clearest sign that an explanation had worked.
+66|fair trade|A route should remain profitable without requiring the weakest people along it to absorb every loss.
+67|woodland continuity|A woodland contains patient growth that a careless season can spend beyond recovery.
+68|beautiful heirloom|The object should invite use and care long after its first owner has stopped explaining its worth.
+69|healthy neighborhood|Ordinary streets should offer fewer quiet chances for sickness to take hold.
+70|family remembrance|Forgotten relatives may explain familiar habits and loyalties better than the celebrated names do.
+71|victorious restraint|The remembered victory should include what was spared when there was power to destroy it.
+72|horsemanship teaching|A lasting school could carry practical judgment beyond one gifted rider's working life.
+73|humane training|A willing response from an animal would be a better achievement than obedience maintained through fear.
+74|living legacy|Watching young trees become substantial shade would make time's passage feel generous for once.
+75|unconditional affection|Being wanted on a day when there is nothing useful to offer would answer a private uncertainty.
+76|durable livelihood|A bakery that endures a lean season would make tomorrow's ordinary work feel less precarious.
+77|clear law|A difficult rule should become understandable enough that its consequences can be considered before a dispute.
+78|shared song|Different ways of singing preserve ordinary experiences that official histories seldom consider important.
+79|distant discovery|Unfamiliar country offers the pleasure of discovering how much a settled opinion has left out.
+80|sibling closeness|A difference in money or position should not decide whether a sibling can visit comfortably.
+81|independent successors|Former apprentices directing the work would show that teaching had created capable people rather than permanent dependents.
+82|welcoming homeland|A stranger's first experience of the homeland could be ordinary courtesy instead of suspicion.
+83|respectful marriage|Daily conduct between partners could prove that a painful familiar pattern is not inevitable.
+84|quiet retreat|A protected interval of thought would make it easier to hear a question through to its end.
+85|astronomical craft|A precise instrument could turn a distant pattern into something patiently measurable by hand.
+86|reliable irrigation|Water reaching its intended ground would repay careful maintenance with a visible change in the season.
+87|fire preparedness|A first alarm should produce people who know their part, rather than a crowd discovering the plan too late.
+88|informed patronage|Support would feel more worthwhile if the difficult part of the work were understood as well as its impressive result.
+89|famine prevention|Good records and timely decisions could matter most in the crisis they quietly prevent.
+90|accurate animal study|A careful drawing can preserve the small difference that a casual glance overlooks.
+91|considered courage|It should become possible to act bravely without needing danger itself to prove the point.
+92|dignified departure|Years of service should not turn into a trap that can only be escaped through disgrace.
+93|renewed music|An instrument heard again would restore a pleasure that silent possession cannot provide.
+94|shared accessibility|A loved place should not become unreachable merely because an older body moves differently.
+95|fair dealing|An agreement ought to make the obligations clear before one party gains the advantage of surprise.
+96|unencumbered travel|A smaller journey would permit the spontaneous turn that a whole procession makes difficult.
+97|recovered learning|An old text becoming readable again would reopen a conversation interrupted long ago.
+98|shared beauty|A public place can offer a little daily pleasure even to someone simply passing through on tiring work.
+99|approachable guardianship|Trust would mean that a worried person comes closer instead of becoming better at concealing the worry.
+100|healthy land|The next holder should inherit fertility and useful choices rather than the cost of short-term extraction.
+101|unconditional learning|A vulnerable child's education should not be purchased with a lifetime of personal indebtedness.
+102|peaceful usefulness|A quiet day should be allowed to feel successful without a crisis proving that there is work to do.
+103|honest remembrance|A written life would be worth leaving only if it can admit the awkward parts of its own account.
+104|trusted mediation|People in disagreement could seek a hearing before each spends too much defending an unworkable position.
+105|bounded generosity|Giving should remain sustainable enough to continue, without becoming a promise that cannot honestly be kept.
+106|generational home|Different ages could share a home without every need becoming a contest for the same space.
+107|patron independence|An important choice should eventually be answerable without first anticipating a benefactor's displeasure.
+108|known water sources|Accurate knowledge of springs would make a practical need less dependent on one person's memory.
+109|community confidence|People could begin making modest plans again instead of waiting for the next disappointment to cancel them.
+110|capable successor|The work should remain sound during an absence without every small uncertainty being sent back for approval.
+111|servant retirement|A trusted person's later years should contain more than a slower version of the same demands.
+112|welcoming estate|A repaired estate could become a place people choose to remain rather than endure until departure is possible.
+113|belonging without imitation|Acceptance should leave room for the habits and judgment that made the newcomer a particular person.
+114|durable relief|Help that survives a donor's changing mood would be more dependable than a memorable generous gesture.
+115|medical discovery|A reliable new understanding could reduce suffering in places the discoverer will never visit.
+116|kept promises|An old commitment still measures the distance between a hopeful intention and the life actually being lived.
+117|repaired trust|A later pattern of conduct could give someone a reason to reconsider an understandable disappointment.
+118|possible reconciliation|There may be a first tolerable conversation even when forgiveness cannot be demanded or promised.
+119|chosen vocation|A day's work could eventually feel chosen for its own interest rather than inherited with a name.
+120|recognized workmanship|A reputation built from repeated good work would be satisfying in a way an announced ambition is not.
+121|traveling knowledge|People arriving from elsewhere could leave an account worth learning from instead of only a passing impression.
+122|ordinary work remembered|The work that keeps daily life possible deserves a record beyond the names of its employers.
+123|ended grievance|Children becoming friends could loosen a division that their elders have learned to treat as permanent.
+124|healthy coast|A useful coast should remain capable of supporting another generation's ordinary needs.
+125|steady presence|Someone else's alarm could meet a clear next step instead of another person's contagious panic.
+126|regional recipes|A collection of ordinary dishes would preserve the practical ingenuity of different kitchens.
+127|chosen work|Enough money would be most valuable at the moment it makes an unsuitable offer easy to refuse.
+128|balanced solitude|Service should leave a private interval in which the person doing it can recover a sense of self.
+129|affection after grief|Remembering a loss should not require treating every new attachment as a mistake waiting to happen.
+130|respectful marriage|Sharing a life should include the right to remain a separate person with an answer of one's own.
+131|fair apprenticeship|A beginner's dependence should be a reason for clear responsibilities rather than an opportunity to demand anything.
+132|plant knowledge|A useful local observation should not disappear because nobody thought to ask the person who knew it.
+133|accessible theater|Enjoyment of a performance should not depend on knowing the manners of a privileged audience.
+134|unhumiliated disagreement|A dispute could clarify a difference without leaving one person obliged to conceal a lasting hurt.
+135|honest accounts|The household books should make sense to someone who has reason to question them.
+136|durable mill|A sound mechanism doing useful work season after season would be a satisfying answer to wasted effort.
+137|safe hospitality|Bad weather should end with a dry place to wait rather than a stranger being turned away into it.
+138|shared responsibility|Trusting capable help would allow attention to rest without secretly checking every completed step.
+139|responsible authority|People should remember a use of power they could live under, not merely admire from a safe distance.
+140|enduring companionship|The friend's familiar presence belongs in the imagined later years, despite the distance between ordinary visits.
+141|domestic music|A tune heard in another room could make the home feel inhabited by pleasure as well as obligation.
+142|respectful remembrance|The dead should not be reduced to ground that nobody living considers worth tending.
+143|clear explanation|A reader reaching understanding without a teacher beside them would be a quiet and durable success.
+144|unranked learning|Beginning at an unfamiliar craft would permit the satisfaction of learning without an inherited claim to competence.
+145|winter safety|A place to survive the cold would make practical shelter available when a good intention is least sufficient.
+146|living legacy|Native plants thriving together would offer beauty that grows from familiarity with the place.
+147|gracious rivalry|Competition could leave room for a later conversation that neither person has to approach with resentment.
+148|seasonal livelihoods|Useful paid work could let a household pass through a hard season without surrendering its independence.
+149|wanted elder company|A child's unprompted visit would mean more than a respectful appearance arranged by the parents.
+150|peaceful disagreement|An unresolved difference could be allowed to remain small instead of consuming the rest of the day.
+151|freedom from insult|The future should contain things worth wanting even if the person responsible never notices them.
+152|accurate navigation|A well-made map can lend practical confidence to somebody traveling alone with an unfamiliar route.
+153|personal making|An object shaped directly by hand would offer a satisfaction that buying a finer example cannot quite replace.
+154|joyful usefulness|Being helpful could become something looked forward to rather than only a reason to feel obliged.
+155|peaceful remembrance|A name could recall the quarrels that ended around it instead of the damage done to make it feared.
+156|resilient home|A change in fortune or habit should not make the whole household feel as though it is coming apart.
+157|acknowledged injustice|A wrong should become harder to dismiss once its effects can be described plainly in public.
+158|shared travel|An unfamiliar place would become more valuable through the particular companion noticing it alongside.
+159|enduring curiosity|Later life should still contain something worth asking about for the first time.

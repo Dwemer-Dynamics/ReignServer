@@ -1,0 +1,155 @@
+Create an exceptionally photorealistic cinematic scene inside the **private chapel of a wealthy Vlandian castle**, strongly reflecting Vlandian feudal nobility, hereditary duty, martial culture, solemn religious observance, dynastic memory, and the belief that rulers remain accountable to powers and traditions greater than themselves.
+
+This is not a vast cathedral. It is the castle's own chapel: substantial enough for the ruling household and important guests, but intimate enough for private prayer, mourning, confession of conscience, family observances, oath-taking, and moments of solitude.
+
+The chapel is built from pale dressed stone with a high but relatively narrow vaulted ceiling. Heavy masonry columns or engaged stone supports divide portions of the chamber. Tall pointed or narrow arched windows admit cold shafts of daylight.
+
+Where colored glass is used, favor **abstract geometric, floral, heraldic, or sacred-symbol designs rather than invented human saints or religious figures**.
+
+A raised sacred area occupies the far end of the chamber. It may contain:
+
+- A stone or carved oak altar or devotional table.
+- Candlesticks.
+- Beeswax candles.
+- Sacred books.
+- Woven cloth.
+- Metal devotional objects.
+- Incense vessels where appropriate.
+- Small reliquary-like boxes.
+- Offering vessels.
+- Non-human sacred symbols.
+- Family memorial plaques.
+
+Rows of simple but finely made oak benches or kneeling rails provide places for worshippers.
+
+The stone floor should show generations of wear. Some sections may contain carved memorial stones, family names, or heraldic burial markers associated with the ruling household.
+
+Wall decoration may include:
+
+- Carved shields.
+- Heraldic emblems.
+- Floral stonework.
+- Geometric sacred motifs.
+- Family memorial inscriptions.
+- Battle banners donated after victories.
+- Small metal lamps.
+- Carved wooden screens.
+
+The atmosphere should be quieter and more severe than the rest of the castle.
+
+This is a place where people may come after triumph, defeat, childbirth, death, betrayal, marriage, war, illness, fear, guilt, or political crisis.
+
+Possible activities include:
+
+- Kneeling in silent prayer.
+- Standing alone before the altar.
+- Lighting a candle.
+- Reading a devotional text.
+- Mourning a relative.
+- Remembering fallen soldiers.
+- Seeking forgiveness.
+- Wrestling privately with guilt.
+- Making or renewing an oath.
+- Giving thanks after surviving danger.
+- Asking for courage before battle.
+- Praying for an absent family member.
+- Sitting silently after receiving terrible news.
+- Contemplating a marriage.
+- Considering whether a political decision is morally acceptable.
+- Leaving a small offering or memorial token.
+- Reading a family memorial inscription.
+- Waiting for a religious ceremony to begin.
+- Remaining after a ceremony has ended.
+- Seeking privacy somewhere no ordinary courtier is likely to interrupt.
+- Contemplating death, legacy, duty, or succession.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as human beings anywhere in the finished image.
+
+Every visible human face or body must correspond exactly to one of those supplied source images.
+
+Do not generate:
+
+- Priests.
+- Clergy.
+- Monks.
+- Nuns.
+- Guards.
+- Servants.
+- Worshippers.
+- Choir members.
+- Children.
+- Attendants.
+- Background figures.
+- Human silhouettes.
+- Reflected people.
+- Unspecified mourners.
+
+This restriction also applies to religious artwork.
+
+Do not create invented human saints, prophets, martyrs, angels, rulers, ancestors, or other humanlike figures in:
+
+- Paintings.
+- Stained glass.
+- Statues.
+- Carvings.
+- Tapestries.
+- Frescoes.
+- Reliefs.
+- Icons.
+
+Any religious decoration should use **abstract sacred symbols, geometric patterns, plants, heraldry, architecture, light, animals where culturally appropriate, or other non-human imagery** unless a depicted human is one of the supplied source characters.
+
+Preserve every supplied character's exact identity and physique as precisely as technically possible, including:
+
+- Facial structure.
+- Apparent age.
+- Skin tone.
+- Pores and natural texture.
+- Eye shape, spacing, and color.
+- Eyebrows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hairline.
+- Hair color.
+- Hairstyle.
+- Facial hair.
+- Scars.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest and torso proportions.
+- Waist.
+- Hips.
+- Arm length.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative size compared with other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or otherwise redesign the characters.
+
+Their clothing may be changed to culturally appropriate **Vlandian civilian, noble, mourning, or devotional clothing** suitable for the chapel and their status.
+
+Armor should appear only if the activity genuinely warrants someone having entered directly from military duty. Otherwise favor believable wool, linen, leather, gowns, tunics, hose, cloaks, belts, boots, veils or head coverings only where culturally and situationally appropriate, and restrained noble ornament.
+
+Characters should interact naturally with the sacred space.
+
+They may kneel, sit, stand before the altar, light a candle, hold a book, look down in thought, touch a memorial stone, hold a small token, or remain motionless in contemplation.
+
+Do not pose them like models.
+
+The finished image must resemble **high-end live-action historical photography of real people inside a real medieval castle chapel**.
+
+Use natural skin, realistic hands, worn stone, aged timber, candle wax, subtle smoke, metal, cloth, parchment, believable shadows, and physically accurate daylight and firelight.
+
+No fantasy illustration. No video-game rendering. No plastic skin. No artificial holiness glow.
+
+Maximum possible photorealism.
+
+---

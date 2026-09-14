@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+  <Name value="Bannerlord Native Portrait Renderer" />
+  <Id value="BannerlordNativePortraitRenderer" />
+  <Version value="v1.0.0" />
+  <DefaultModule value="false" />
+  <SingleplayerModule value="true" />
+  <MultiplayerModule value="false" />
+  <DependedModuleMetadatas>
+    <DependedModuleMetadata id="Native" order="LoadBeforeThis" optional="false" version="e1.0.0" />
+    <DependedModuleMetadata id="SandBoxCore" order="LoadBeforeThis" optional="false" version="e1.0.0" />
+    <DependedModuleMetadata id="Sandbox" order="LoadBeforeThis" optional="false" version="e1.0.0" />
+    <DependedModuleMetadata id="CustomBattle" order="LoadBeforeThis" optional="false" version="e1.0.0" />
+  </DependedModuleMetadatas>
+  <SubModules>
+    <SubModule>
+      <Name value="NativePortraitRendererSubModule" />
+      <DLLName value="BannerlordNativePortraitRenderer.dll" />
+      <SubModuleClassType value="Bannerlord.NativePortraitRenderer.SubModule" />
+      <Tags />
+    </SubModule>
+  </SubModules>
+</Module>

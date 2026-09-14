@@ -1,0 +1,149 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>ReignBetaServer</AssemblyName>
+    <RootNamespace>ReignBetaServer</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <LangVersion>latest</LangVersion>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <ReignIncludePrivateVerificationContracts Condition="'$(ReignIncludePrivateVerificationContracts)' == ''">false</ReignIncludePrivateVerificationContracts>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(ExcludeCourt)' == 'true'">
+    <DefineConstants>$(DefineConstants);REIGN_EXCLUDE_COURT</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(ExcludeCourt)' == 'true'">
+    <Compile Remove="src\Modules\Court\**\*.cs" />
+    <Compile Remove="src\Modules\Spymaster\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ReignModules\Reign.Shared.Source\**\*.cs" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Remove="ReignVerification\**\*.cs" />
+    <Compile Remove="ReignLiveTest\**\*.cs" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Management" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ReignModules\Reign.Core.Contracts\Reign.Core.Contracts.csproj" />
+    <ProjectReference Include="..\ReignModules\Reign.Relationships\Reign.Relationships.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.1" />
+    <PackageReference Include="Npgsql" Version="8.0.9" />
+    <PackageReference Include="OpenTelemetry" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="postgresql\reign_meta.sql" LogicalName="ReignBetaServer.PostgreSql.reign_meta.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="assets\ReignLogo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ProfileLibrary\profile_catalog.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ProfileLibrary\profile_catalog_v4.json;ProfileLibrary\narrative\*.txt;ProfileLibrary\narrative\native-context.json;ProfileLibrary\narrative\dream-compatibility.json;ProfileLibrary\narrative\concern-compatibility.json;ProfileLibrary\narrative\fact-compatibility.json;ProfileLibrary\narrative\profiles\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="PortraitModels\version-RFB-320.onnx">
+      <TargetPath>portrait_models\version-RFB-320.onnx</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="PortraitModels\THIRD_PARTY_NOTICES.md">
+      <TargetPath>portrait_models\THIRD_PARTY_NOTICES.md</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <EmbeddedResource Include="PromptDefaults\world_tone.txt" LogicalName="ReignBetaServer.PromptDefaults.world_tone.txt" />
+    <EmbeddedResource Include="PromptDefaults\noble_prompt.txt" LogicalName="ReignBetaServer.PromptDefaults.noble_prompt.txt" />
+    <EmbeddedResource Include="PromptDefaults\commoner_prompt.txt" LogicalName="ReignBetaServer.PromptDefaults.commoner_prompt.txt" />
+    <EmbeddedResource Include="PromptDefaults\ambassador_role.txt" LogicalName="ReignBetaServer.PromptDefaults.ambassador_role.txt" />
+    <EmbeddedResource Include="PromptDefaults\CastleChat\*.txt" />
+    <EmbeddedResource Include="PromptDefaults\TavernHouse\*.txt" />
+  </ItemGroup>
+
+  <!-- Private integration evidence is opt-in and is never a release payload. -->
+  <Target Name="CopyVerificationContracts" AfterTargets="Build"
+          Condition="'$(ReignIncludePrivateVerificationContracts)' == 'true'">
+    <Error Condition="!Exists('..\ReignBeta\ReignBeta.csproj')"
+           Text="Private integration contracts require the paired Reign workspace. A public server build must leave ReignIncludePrivateVerificationContracts disabled." />
+    <PropertyGroup>
+      <OutputPath>$([MSBuild]::EnsureTrailingSlash('$(OutputPath)'))</OutputPath>
+      <VerificationWorkspace>$(OutputPath)verification_contracts\workspace\</VerificationWorkspace>
+    </PropertyGroup>
+    <ItemGroup>
+      <VerificationServerSource Include="$(MSBuildProjectDirectory)\src\**\*.cs" />
+      <VerificationClientSource Include="..\ReignBeta\src\**\*.cs" />
+      <VerificationLiveTestSource Include="$(MSBuildProjectDirectory)\ReignLiveTest\**\*.cs" Exclude="$(MSBuildProjectDirectory)\ReignLiveTest\**\obj\**;$(MSBuildProjectDirectory)\ReignLiveTest\**\bin\**" />
+      <VerificationLiveTestScenario Include="$(MSBuildProjectDirectory)\ReignLiveTest\scenarios\**\*.json" />
+      <VerificationGovernmentMcpSource Include="..\ReignMcp\src\Reign.Mcp.Server\Modules\Government\TestingTools.Government.cs" />
+      <VerificationServerDocument Include="$(MSBuildProjectDirectory)\docs\**\*.md" />
+      <VerificationGuiContract Include="..\ReignBeta\GUI\**\*" />
+      <VerificationPreviewerContract Include="..\ReignBeta\tools\GauntletXmlPreviewer\**\*.js;..\ReignBeta\tools\GauntletXmlPreviewer\**\*.mjs;..\ReignBeta\tools\GauntletXmlPreviewer\**\*.json;..\ReignBeta\tools\GauntletXmlPreviewer\**\*.py;..\ReignBeta\tools\GauntletXmlPreviewer\**\*.ps1;..\ReignBeta\tools\GauntletXmlPreviewer\**\*.html;..\ReignBeta\tools\GauntletXmlPreviewer\**\*.css" Exclude="..\ReignBeta\tools\GauntletXmlPreviewer\node_modules\**;..\ReignBeta\tools\GauntletXmlPreviewer\.preview*\**;..\ReignBeta\tools\GauntletXmlPreviewer\artifacts\**" />
+      <VerificationGuiContract Remove="..\ReignBeta\GUI\**\*Court*.xml" Condition="'$(ExcludeCourt)' == 'true'" />
+      <VerificationContractSource Include="..\ReignModules\**\*.cs" Exclude="..\ReignModules\**\obj\**;..\ReignModules\**\bin\**" />
+      <VerificationNativePortraitGeneratorSource Include="..\NativeCharacterImageGenerator\src\NativeCharacterImageGenerator.App\App.xaml.cs;..\NativeCharacterImageGenerator\src\NativeCharacterImageGenerator\ReignCharacterCatalog.cs" />
+      <VerificationProjectFile Include="$(MSBuildProjectDirectory)\ReignBetaServer.csproj;..\ReignBeta\ReignBeta.csproj;..\ReignBeta\SubModule.xml" />
+      <VerificationTavernCast Include="..\ReignBeta\ModuleData\reign_tavern_cast.json" />
+    </ItemGroup>
+    <RemoveDir Directories="$(VerificationWorkspace)" />
+    <MakeDir Directories="$(VerificationWorkspace)ReignBetaServer;$(VerificationWorkspace)ReignBeta;$(VerificationWorkspace)ReignModules;$(VerificationWorkspace)ReignMcp;$(VerificationWorkspace)NativeCharacterImageGenerator" />
+    <Copy SourceFiles="@(VerificationServerSource)" DestinationFiles="@(VerificationServerSource->'$(VerificationWorkspace)ReignBetaServer\src\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationClientSource)" DestinationFiles="@(VerificationClientSource->'$(VerificationWorkspace)ReignBeta\src\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationLiveTestSource)" DestinationFiles="@(VerificationLiveTestSource->'$(VerificationWorkspace)ReignBetaServer\ReignLiveTest\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationLiveTestScenario)" DestinationFiles="@(VerificationLiveTestScenario->'$(VerificationWorkspace)ReignBetaServer\ReignLiveTest\scenarios\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationGovernmentMcpSource)" DestinationFiles="@(VerificationGovernmentMcpSource->'$(VerificationWorkspace)ReignMcp\src\Reign.Mcp.Server\Modules\Government\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationServerDocument)" DestinationFiles="@(VerificationServerDocument->'$(VerificationWorkspace)ReignBetaServer\docs\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationGuiContract)" DestinationFiles="@(VerificationGuiContract->'$(VerificationWorkspace)ReignBeta\GUI\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationPreviewerContract)" DestinationFiles="@(VerificationPreviewerContract->'$(VerificationWorkspace)ReignBeta\tools\GauntletXmlPreviewer\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationTavernCast)" DestinationFolder="$(VerificationWorkspace)ReignBeta\ModuleData" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\reign.testing.json" DestinationFolder="$(VerificationWorkspace)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationContractSource)" DestinationFiles="@(VerificationContractSource->'$(VerificationWorkspace)ReignModules\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(VerificationNativePortraitGeneratorSource)" DestinationFiles="@(VerificationNativePortraitGeneratorSource->'$(VerificationWorkspace)NativeCharacterImageGenerator\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\ReignBetaServer.csproj" DestinationFolder="$(VerificationWorkspace)ReignBetaServer" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\ReignBeta\ReignBeta.csproj;..\ReignBeta\SubModule.xml" DestinationFolder="$(VerificationWorkspace)ReignBeta" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishBundledNativePortraitGenerator"
+          AfterTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(ReignSkipNativePortraitGenerator)' != 'true'">
+    <PropertyGroup>
+      <NativePortraitGeneratorProject>$(MSBuildProjectDirectory)\..\NativeCharacterImageGenerator\src\NativeCharacterImageGenerator.App\NativeCharacterImageGenerator.App.csproj</NativePortraitGeneratorProject>
+      <NativePortraitGeneratorPublishDir>$([MSBuild]::EnsureTrailingSlash('$(OutputPath)'))native-portrait-generator\</NativePortraitGeneratorPublishDir>
+      <NativePortraitGeneratorBuildDir>$(MSBuildProjectDirectory)\obj\bundled-native-portrait-generator\$(Configuration)\</NativePortraitGeneratorBuildDir>
+    </PropertyGroup>
+    <Delete Files="$(NativePortraitGeneratorPublishDir)TaleWorlds.Starter.Library.dll" />
+    <MSBuild Projects="$(NativePortraitGeneratorProject)"
+             Targets="Restore"
+             Condition="'$(ReignRestoreBundledTools)' == 'true'"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true"
+             RemoveProperties="OutDir;OutputPath;BaseOutputPath;BaseIntermediateOutputPath"
+             BuildInParallel="false" />
+    <MSBuild Projects="$(NativePortraitGeneratorProject)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true;DebugType=None;OutputPath=$(NativePortraitGeneratorBuildDir);PublishDir=$(NativePortraitGeneratorPublishDir)"
+             RemoveProperties="OutDir;BaseOutputPath;BaseIntermediateOutputPath"
+             BuildInParallel="false" />
+    <Error Condition="!Exists('$(NativePortraitGeneratorPublishDir)Bannerlord.NativeCharacterImageGenerator.App.exe')"
+           Text="The bundled native portrait generator was not published into the Reign server package." />
+    <Error Condition="!Exists('$(NativePortraitGeneratorPublishDir)Bannerlord.NativePortraitRenderHost.exe')"
+           Text="The bundled native TaleWorlds portrait render host was not published into the Reign server package." />
+  </Target>
+</Project>
+

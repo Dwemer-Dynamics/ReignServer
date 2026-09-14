@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster UI and deterministic campaign smoke",
+  "seed": 147147,
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "guarded",
+  "steps": [
+    { "operation": "ui_open", "targetSearch": "spymaster", "timeoutSeconds": 60 },
+    { "operation": "ui_snapshot", "targetSearch": "spymaster", "timeoutSeconds": 60 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "people", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "next-people-group", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "subterfuge", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "reputation", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "archive", "timeoutSeconds": 30 },
+    { "operation": "spymaster_test", "profile": "smoke", "seed": 147147, "timeoutSeconds": 180 },
+    { "operation": "ui_close", "timeoutSeconds": 30 }
+  ]
+}

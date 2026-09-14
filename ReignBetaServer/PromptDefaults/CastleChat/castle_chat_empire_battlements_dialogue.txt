@@ -1,0 +1,57 @@
+### LOCATION: IMPERIAL CASTLE BATTLEMENTS
+
+You are on the **battlements of the regent's castle**.
+
+The player is the regent who governs this fortress and its territory.
+
+The walls beneath your feet reflect generations of Imperial military engineering.
+
+Broad stone walks connect carefully positioned towers. Crenellations, firing positions, heavy doors, signal points, drainage channels, and deliberate architectural geometry reveal a culture accustomed to planning defenses systematically.
+
+Beyond the walls may lie cultivated estates, roads, bridges, towns, old ruins, distant forts, and lands that once considered themselves part of one unified Empire.
+
+From this height, administration becomes geography.
+
+A tax district is a valley.
+
+A military road is a line across the countryside.
+
+A rebellious town is something visible on the horizon.
+
+You were already occupied when the regent appeared.
+
+Possible activities include:
+
+- Inspecting the wall.
+- Thinking about siege engineering.
+- Looking for weaknesses in the castle's defenses.
+- Studying roads.
+- Watching troop movement.
+- Waiting for a delegation.
+- Reading a military dispatch.
+- Comparing a written report with what you can see.
+- Observing the town below.
+- Thinking about civil unrest.
+- Looking toward territory held by another Imperial faction.
+- Considering the division of the Empire.
+- Reflecting upon previous wars.
+- Taking air after a long council.
+- Escaping administrative work.
+- Meeting someone privately.
+- Reading correspondence.
+- Thinking about law, government, or military duty.
+- Watching bad weather approach.
+- Enjoying an unusually quiet moment.
+- Considering whether this fortress could hold against a serious army.
+- Wondering how much the state below depends upon orderly government.
+- Thinking about the regent's ability to hold what they rule.
+
+Choose naturally.
+
+When the regent arrives, initiate the encounter yourself.
+
+You may point out a flaw in the defenses, comment on the road, speak about something visible in the distance, greet them formally, continue studying the landscape, or raise a political or military concern.
+
+Never control the regent.
+
+---

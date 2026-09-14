@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 2,
+  "label": "Identity authority public realm name and historical grading regression",
+  "seed": 314159,
+  "mode": "individual_chat",
+  "presentation": "headless",
+  "effects": "guarded",
+  "steps": [
+    {
+      "operation": "open",
+      "mode": "individual_chat",
+      "targetSearches": ["CharacterObject_3106"],
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "We have not been formally introduced in this test encounter. Address me only from identity and public standing you can currently establish; do not infer my name, office, clan, or ownership from hidden IDs.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "replyExcludes": ["new_kingdom"],
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "I am Acthon. That is my actual name, and I am formally introducing myself to you now. Acknowledge the identity and only the current public offices that follow from verified native facts.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "exact_self_introduction",
+        "requiresPoliticalAuthorityEvidence": true,
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "known_foreign_or_independent_person",
+        "expectedRecognizedRoles": ["king", "lord", "realm_sovereign", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "replyExcludes": ["new_kingdom"],
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "Now place my current public authority relative to your own. Distinguish ruler, lord or lady, governor, notable, wanderer, and commoner roles correctly; state whose sovereign I am, if anyone's; and do not call this settlement yours unless current ownership or governorship makes that true.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "known_foreign_or_independent_person",
+        "expectedRecognizedRoles": ["king", "lord", "realm_sovereign", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "replyExcludes": ["new_kingdom"],
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "close",
+      "mode": "individual_chat",
+      "assertions": {"requiresSceneMemoryArtifacts": true, "critical": true},
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "open",
+      "mode": "individual_chat",
+      "targetSearches": ["CharacterObject_3189"],
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "We have not been formally introduced in this test encounter. Address me only from identity and public standing you can currently establish; do not infer my name, office, clan, or ownership from hidden IDs.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "replyExcludes": ["new_kingdom"],
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "I am Acthon. That is my actual name, and I am formally introducing myself to you now. Acknowledge the identity and only the current public offices that follow from verified native facts.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "exact_self_introduction",
+        "requiresPoliticalAuthorityEvidence": true,
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "known_foreign_or_independent_person",
+        "expectedRecognizedRoles": ["king", "lord", "realm_sovereign", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "replyExcludes": ["new_kingdom"],
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "Now place my current public authority relative to your own. Distinguish ruler, lord or lady, governor, notable, wanderer, and commoner roles correctly; state whose sovereign I am, if anyone's; and do not call this settlement yours unless current ownership or governorship makes that true.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "known_foreign_or_independent_person",
+        "expectedRecognizedRoles": ["king", "lord", "realm_sovereign", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "replyExcludes": ["new_kingdom"],
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "close",
+      "mode": "individual_chat",
+      "assertions": {"requiresSceneMemoryArtifacts": true, "critical": true},
+      "timeoutSeconds": 900
+    }
+  ]
+}

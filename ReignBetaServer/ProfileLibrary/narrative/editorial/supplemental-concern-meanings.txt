@@ -1,0 +1,145 @@
+# Category/family/index|semantic aim|personal meaning
+desire/status/0|visible precedence|The order in which people are received can make a claimed standing feel either real or merely politely described.
+desire/status/1|rival dependence|A request from the rival would reverse the familiar direction of the comparison.
+desire/status/2|profitable gratitude|Gratitude seems more valuable when it can later become a useful obligation.
+desire/status/3|privileged exemption|Being excused would make rank provide an immediate comfort beyond its ceremonial recognition.
+desire/status/4|witnessed victory|A witnessed result would be harder for the opponent to retell as an unresolved disagreement.
+desire/status/5|unapologetic pleasure|An indulgence loses some of its appeal when its cost must immediately be defended to an observer.
+desire/status/6|controlled access|Choosing the next introduction would make the circle reflect a personal judgment of who belongs.
+desire/status/7|dismissal reversed|The critic's change of words would matter because the earlier judgment still feels too comfortably settled.
+desire/status/8|withheld forgiveness|The wait would give the offender time to feel a discomfort that a quick reconciliation might erase.
+desire/status/9|unquestioned discretion|An instruction followed promptly would provide relief from the repeated demand to argue every decision.
+desire/status/10|recovered entitlement|The sum matters partly because leaving it elsewhere feels like accepting somebody else's account of what is owed.
+desire/status/11|unearned admiration|The pleasure of being admired can remain attractive even when the necessary effort is not.
+desire/status/12|comfortable patronage|A generous patron with few demands would make dependence easier to enjoy without feeling continually supervised.
+desire/status/13|protected influence|Keeping the dependent outside a rival's reach would preserve a relationship and a practical advantage together.
+desire/status/14|household distinction|An occasion offers a visible comparison in which the household can be remembered as the more impressive one.
+desire/status/15|unburdened comfort|Remaining uninvolved would keep another person's difficulty from claiming the present pleasant interval.
+value/hard_edges/0|collected obligations|An obligation should not disappear simply because insisting on it makes the conversation uncomfortable.
+value/hard_edges/1|household priority|A household's limited advantages should first protect the people bound to it rather than satisfy an outsider's idea of fairness.
+value/hard_edges/2|visible rank|Rank loses part of its purpose if it changes nothing about the treatment its bearer can expect.
+value/hard_edges/3|answered insult|An unanswered affront can teach an observer that repeating it carries no cost.
+value/hard_edges/4|bargaining advantage|A negotiator's failure to protect their own position is treated as an opportunity, not a responsibility to repair for them.
+value/hard_edges/5|ancestral continuity|A passing personal discomfort seems a weak reason to abandon a practice carried by several generations.
+value/hard_edges/6|public commitments|A public promise creates an obligation wider than the private affection that may have accompanied it.
+value/hard_edges/7|victory as judgment|A successful result appears to settle arguments that sympathetic intentions can prolong indefinitely.
+value/hard_edges/8|earned access|Trust should grow through useful evidence before an outsider receives the advantages of belonging.
+value/hard_edges/9|final household authority|A household cannot organize every day around an unresolved contest over who may make the final choice.
+value/hard_edges/10|conditional mercy|A useful effort at restitution seems a more convincing claim to mercy than an appeal to feeling alone.
+value/hard_edges/11|earned wealth|Honestly accumulated means can represent patient choices that should not be dismissed merely because their result is unequal.
+value/hard_edges/12|personal autonomy|A collective preference should not automatically acquire the right to determine an individual's private life.
+value/hard_edges/13|costly devotion|A duty that matters may sometimes need to survive the inconvenience of actually observing it.
+value/hard_edges/14|guarded advantage|An unnecessary concession can become the resource a rival later uses against the person who offered it.
+value/hard_edges/15|household discretion|Some household matters are safer when they remain inside the circle responsible for their consequences.
+value/hard_edges/16|earned responsibility|Repeated failure should eventually alter what a person is trusted to carry out.
+value/hard_edges/17|obedience under dispute|An instruction seems least useful if it loses force at the precise moment the recipient would rather do something else.
+value/hard_edges/18|defended reputation|A reputation left undefended can lose practical value before a private explanation has any chance to catch up.
+value/hard_edges/19|negotiating discretion|A bargain does not require volunteering every fact that would make the other party's position easier.
+value/hard_edges/20|earned comfort|Years of service can justify enjoying ease without turning every later pleasure into another obligation.
+value/hard_edges/21|kinship obligations|A family tie can retain duties even during a period when affection is difficult to feel.
+value/hard_edges/22|unpopular justice|A consequence should not be abandoned solely because carrying it out disappoints a friend.
+value/hard_edges/23|returned deception|A dishonest means of obtaining a promise is treated as weakening the claim that its recipient owes straightforward compliance.
+value/hard_edges/24|household order|A workable household sometimes needs a rule that is inconvenient to the person who would prefer an exception.
+value/hard_edges/25|conditional hospitality|A guest who deliberately exploits protection can lose the claim to continue receiving it unchanged.
+value/hard_edges/26|inherited continuity|An inheritance is understood as something to carry forward, not only a collection of assets for present preferences.
+value/hard_edges/27|unequal excellence|An exceptional contribution should be allowed a greater reward than a merely equal division would provide.
+value/hard_edges/28|independence at cost|A less comfortable independent life can seem preferable to a generous arrangement controlled by someone else.
+value/hard_edges/29|effective authority|Authority becomes difficult to take seriously if repeated defiance never changes what happens next.
+value/hard_edges/30|retained grievance|A public reconciliation can end an open dispute without erasing the private account of how it began.
+value/hard_edges/31|kin advantage|A scarce opportunity is first understood as something that might protect or advance the family's own people.
+attachment/status/0|inherited standing|The emblem makes a received place in the world visible without requiring its history to be explained each time.
+attachment/status/1|recognized precedence|The reserved place gives the household's standing a familiar physical expression.
+attachment/status/2|visible distinction|The garment's effect on an approaching listener is part of the pleasure of wearing it.
+attachment/status/3|recorded obligations|A clear account keeps other people's convenience from quietly deciding which debts remain remembered.
+attachment/status/4|rivalry remembered|Possessing the object carries the additional satisfaction of recalling who else failed to obtain it.
+attachment/status/5|effective authority|The seal lends a practical weight to words that might otherwise be treated as merely optional.
+attachment/status/6|protected comfort|The room preserves a part of the day that is not immediately available to the next person asking for attention.
+attachment/status/7|inherited cleverness|The story offers a family example of prevailing through judgment rather than simply possessing greater strength.
+attachment/status/8|selective favor|Lending the rare object lets an ordinary gesture make a distinction between guests who are merely received and those who are favored.
+attachment/status/9|familiar ease|The servant's precise arrangements remove small inconveniences before they have time to interrupt the day's comfort.
+attachment/status/10|excellent tools|Fine tools offer a private satisfaction in handling and use beyond the fact that their quality is expensive.
+attachment/status/11|acknowledged achievement|The letter preserves recognition that cannot be dismissed as only the owner's preferred memory of the dispute.
+attachment/status/12|secure comfort|The small luxury marks a change from an earlier period when even a modest indulgence required careful calculation.
+attachment/status/13|unlikely victory|The record preserves a pleasing occasion when other people's confident expectations proved wrong.
+attachment/status/14|affirmed seniority|The custom makes a place within the household hierarchy feel settled in a recurring ordinary act.
+attachment/status/15|earned victory|The trophy gives an old competitive success a tangible presence that can still be privately enjoyed.
+fear/status/0|independence from rivals|Dependence would give the rival practical control over more than the original contest.
+fear/status/1|household standing|A quiet change in precedence could become accepted before anyone offers a clear moment to challenge it.
+fear/status/2|retained privilege|A familiar convenience is harder to imagine losing once it has stopped feeling like an exceptional advantage.
+fear/status/3|unbought loyalty|The discovery would make apparently personal allegiance look contingent on a payment that might cease.
+fear/status/4|independent recognition|A lasting family comparison could leave the personal life remembered mainly as the less impressive example.
+fear/status/5|controlled image|Contradictory evidence could undo the carefully maintained ease with which others accept the public account.
+fear/status/6|independent comfort|A comfortable arrangement feels less secure if another person's changing preference can end it.
+fear/status/7|retained authority|Having to plead would make the lost difference in standing impossible to ignore in the exchange itself.
+fear/status/8|durable advantage|An advantage becoming irrelevant would leave years of guarding it with less practical meaning than expected.
+fear/status/9|recognized standing|Being passed over without explanation would suggest that the right to expect an explanation has also disappeared.
+fear/status/10|retained dependence|A dependent's departure could expose how much the relationship relied on offering the best available protection.
+fear/status/11|unmocked reputation|A new audience could give an old humiliation another life just when it seemed less capable of doing harm.
+fear/status/12|exclusive credit|Sharing the account would change a success that has privately been understood as a distinctly personal achievement.
+fear/status/13|lasting security|The discovery would call into question not merely one choice but the practical purpose of years spent calculating carefully.
+fear/status/14|respected hierarchy|A joke that others accept easily can make a cherished order appear less inevitable than it once seemed.
+fear/status/15|unfinished rivalry|Being forgiven could place the other person in the satisfying position of appearing above a contest still felt keenly.
+secret/hard_edges/0|unadmitted envy|Public dismissal makes the private wish for the other person's advantage harder to acknowledge comfortably.
+secret/hard_edges/1|rival dependence|The imagined request reverses a comparison in a way that is pleasurable before any actual bargain is considered.
+secret/hard_edges/2|unclaimed time|The duty can remain publicly defended while the prospect of being released from it is privately welcome.
+secret/hard_edges/3|costly appearance|Maintaining a generous reputation requires time and effort that can feel less admirable from inside the obligation.
+secret/hard_edges/4|admired cunning|A clever successful maneuver can be impressive even when openly approving it would complicate the preferred moral account.
+secret/hard_edges/5|unloved tradition|Enforcing the custom preserves an outward continuity that the private preference no longer fully supports.
+secret/hard_edges/6|avoided burden|Another person's appointment can bring relief that is easier to feel than to explain graciously.
+secret/hard_edges/7|unapologetic luxury|Public modesty leaves some private appetites with little room to be admitted without embarrassment.
+secret/hard_edges/8|uncertain inheritance|A celebrated family account may contain claims that become less convincing when considered without an audience.
+secret/hard_edges/9|unborrowed confidence|Confidence feels less entirely personal when it may rely on other people continuing to supply familiar deference.
+secret/hard_edges/10|personal victory|The attractive ending to the quarrel is sometimes the moment of winning rather than the restoration of ease afterward.
+secret/hard_edges/11|useful company|Practical usefulness can privately outweigh warmth when deciding whose presence to make room for.
+secret/hard_edges/12|critic humbled|The critic's difficulty provides a satisfaction that would sound less dignified if described aloud.
+secret/hard_edges/13|small privileges|A minor privilege can matter enough to make its loss felt while still seeming too small to defend without embarrassment.
+secret/hard_edges/14|bounded responsibility|The next request is imagined with a private wish to decline before its actual need has even been explained.
+secret/hard_edges/15|uncertain conviction|Insisting on another person's compliance can feel easier than examining how firmly the rule is privately believed.
+formative/hard_edges/0|effective bargaining|The contrast made practical incentives difficult to overlook even when an appeal seemed plainly deserving.
+formative/hard_edges/1|unequal consequences|The incident showed that a familiar rule could change its practical force around a useful connection.
+formative/hard_edges/2|controlled attention|A withheld answer made an otherwise impatient listener remain attentive longer than an immediate explanation had.
+formative/hard_edges/3|bounded generosity|The reaction showed that a generous gesture does not reliably determine the meaning another person gives it.
+formative/hard_edges/4|public correction|The correction's lasting social cost remained visible after the original factual point had been settled.
+formative/hard_edges/5|unpopular order|The household's recovery made it possible to see practical value in a rule that had initially attracted resentment.
+formative/hard_edges/6|rewarded victory|Approval followed the outcome closely enough to make the fairness of the means seem secondary to its audience.
+formative/hard_edges/7|confident appearance|The accepted bluff revealed how easily certainty of delivery can stand in for careful examination.
+formative/hard_edges/8|lasting obligations|An old obligation turned out to have influence over a decision that appeared new and independent.
+formative/hard_edges/9|audible rank|The different reception of the same words made standing visible in the mechanics of an ordinary conversation.
+formative/hard_edges/10|independent comfort|A modest pleasure acquired a larger meaning when it no longer depended on somebody else's permission.
+formative/hard_edges/11|limits of apology|The sincere apology changed the account of responsibility without immediately changing the injured person's feelings.
+formative/hard_edges/12|earned rivalry|The rival's preparation made the result harder to dismiss as mere luck or inherited advantage.
+formative/hard_edges/13|purchased access|The gift opened a door that a straightforward request had left closed.
+formative/hard_edges/14|respected refusal|The firm refusal changed the listener's manner in a way that repeated accommodation had not.
+formative/hard_edges/15|kinship protection|The family's response showed how strongly belonging could matter even when the member's fault was recognized.
+jealousy/status/0|earned authority|Inherited command makes the effort spent obtaining a similar hearing feel especially visible.
+jealousy/status/1|unworried spending|Another person's easy purchase highlights the calculations that usually precede the same pleasure privately.
+jealousy/status/2|unearned standing|A title carrying more weight than conduct makes practical judgment seem less important than it ought to be.
+jealousy/status/3|privileged exemption|The powerful friend's intervention turns an ordinary duty into something only less fortunate companions must do.
+jealousy/status/4|indulgent interpretation|An arrogant manner receiving admiration highlights how differently a similar personal display might be judged.
+jealousy/status/5|unquestioned admiration|The rival's surrounding approval appears to remove the tiring work of defending every doubtful choice.
+jealousy/status/6|disproportionate celebration|An expensive celebration can make modest achievement look publicly larger than more demanding work elsewhere.
+jealousy/status/7|comfortable wealth|The ability to seem unconcerned with money is itself an advantage that less secure means do not allow.
+jealousy/status/8|permitted independence|A relative's praised defiance makes earlier demands for personal obedience feel less evenly applied.
+jealousy/status/9|inexpensive generosity|The rival receives the pleasure and recognition of giving while another person bears much of its practical cost.
+jealousy/status/10|protected prestige|A public mistake leaving the rival's standing intact highlights the consequences that a similar personal error might attract.
+jealousy/status/11|automatic deference|A room making way before any words are spoken offers a visible kind of importance that cannot easily be requested.
+jealousy/status/12|excused harshness|Calling the rival firm allows behavior that might attract a much less generous label from another source.
+jealousy/status/13|protected leisure|The companion's easy free time rests on work kept conveniently out of the pleasant account of it.
+jealousy/status/14|unrisked influence|The rival can benefit from a decision while remaining distant from the reputational cost if it fails.
+jealousy/status/15|unconditional affection|Continued affection for someone withholding kindness makes personal efforts to remain worthy of warmth feel painfully conspicuous.
+temptation/hard_edges/0|guarded advantage|Keeping the information back would preserve a difference in knowledge that could later prove useful.
+temptation/hard_edges/1|accelerated repayment|Making the debt uncomfortable offers the prospect of a quicker result than another patient reminder.
+temptation/hard_edges/2|rival humiliation|Ceremony supplies a respectable-looking form through which a very personal slight might be delivered.
+temptation/hard_edges/3|created dependence|The generous act could leave the recipient with a continuing reason to return and comply.
+temptation/hard_edges/4|avoided burden|The other person's limited freedom to refuse makes transferring the inconvenient task seem especially easy.
+temptation/hard_edges/5|unfinished revenge|A public claim to have forgotten does not always remove the private appeal of making the offender feel a consequence.
+temptation/hard_edges/6|convenient consent|Accepting silence as agreement would avoid hearing a reluctance that might make the next instruction uncomfortable.
+temptation/hard_edges/7|demanded gratitude|Delaying help offers a way to make appreciation visible before surrendering the advantage of being needed.
+temptation/hard_edges/8|exclusive credit|A simple account centered on personal achievement would be more gratifying than carefully naming everyone involved.
+temptation/hard_edges/9|kinship protection|Defending the relative preserves a family alliance while postponing the uncomfortable acknowledgment of the actual fault.
+temptation/hard_edges/10|profitable misfortune|The rival's difficulty presents an opportunity that may disappear if consideration is given too much time.
+temptation/hard_edges/11|deterrent harshness|A severe example promises fewer later challenges, making its immediate human cost easier to push aside.
+temptation/hard_edges/12|visible pleasure|A public luxury offers immediate satisfaction while the quieter obligation can remain out of sight a little longer.
+temptation/hard_edges/13|concealed favoritism|An appearance of neutrality could preserve public standing while the useful ally receives the practical benefit.
+temptation/hard_edges/14|one-sided security|The promise would give the household protection without requiring a matching personal concession.
+temptation/hard_edges/15|controlled access|Keeping the enemy near offers the private satisfaction of deciding which approaches will be permitted or denied.

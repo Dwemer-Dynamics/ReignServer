@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Bannerlord.NativeCharacterImageGenerator</AssemblyName>
+    <RootNamespace>Bannerlord.NativeCharacterImageGenerator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bannerlord.NativeCharacterImageGenerator.SourceCacheVerifier" />
+    <InternalsVisibleTo Include="Bannerlord.NativeCharacterImageGenerator.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\third_party\TpacTool\TpacTool.Lib\TpacTool.Lib.csproj" />
+    <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
+  </ItemGroup>
+</Project>

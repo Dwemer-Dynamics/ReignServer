@@ -1,0 +1,161 @@
+# Index in ordered adult fear library|semantic aim|personal meaning
+0|uncertain depths|An unseen bottom leaves no reassuring sense of where a safe limit lies.
+1|sleeping household safety|The thought of others sleeping unaware makes delayed warning especially troubling.
+2|reading independence|Losing direct access to words would make familiar private pleasures depend on another person.
+3|enduring companionship|A long life seems less welcome if nobody remains who remembers its ordinary earlier days.
+4|unresented care|Needed help would feel humiliating if every request were received as an unwelcome burden.
+5|reversible judgment|The hardest choice is one whose missing facts become clear only after retreat is impossible.
+6|safe sincere effort|Mockery would expose the vulnerable part of having tried honestly rather than performed indifference.
+7|physical escape|A place feels more threatening when there is no clear way to leave it freely.
+8|animal care responsibility|Dependence makes an animal's avoidable distress a particularly personal failure of attention.
+9|remembered voice|The small sound of a familiar person feels harder to replace than a formal account of them.
+10|kept promises|Another person's reliance turns a broken word into more than a private disappointment.
+11|resisting convenient cruelty|The danger is becoming accustomed to another person's discomfort because noticing would be inconvenient.
+12|earned credit|Undeserved praise would place a pleasing public image on a privately unstable foundation.
+13|durable home|Losing an established home would erase familiar arrangements as well as material shelter.
+14|bodily independence|Illness is especially troubling when it would remove ordinary choices about the shape of a day.
+15|children emotional safety|A child who hides everything may look obedient while becoming unreachable.
+16|lasting sufficiency|Security would feel fragile if every comfort could become another thing that must be surrendered.
+17|guest safety|Offering welcome creates a personal concern for the vulnerability of someone who accepted it.
+18|confidence keeping|A careless phrase could damage a trust that took much longer to establish.
+19|affection discernment|Being wanted is less comforting if the welcome depends on what can be obtained through it.
+20|reconciliation time|An unfinished quarrel becomes frightening when the chance to repair it might disappear.
+21|divided affection|A forced choice could make caring for one person feel indistinguishable from abandoning another.
+22|debt responsibility|The prospect of leaving another person to pay for private choices makes an easy obligation less easy.
+23|anger control|A brief loss of restraint could leave words or damage that remain after the feeling passes.
+24|self sufficiency|Ordinary usefulness matters partly because it allows a day to be shaped without constant permission.
+25|whole life remembered|One bad moment should not become the only story through which every earlier effort is understood.
+26|secure footing|Height becomes most unsettling when the next stable place for a foot is uncertain.
+27|unfamiliar dog aggression|An approaching animal is harder to judge when its signals and distance leave little time to respond.
+28|winter sufficiency|A reassuring store can conceal a shortfall until weather removes the easiest alternatives.
+29|known orientation|Losing familiar landmarks would remove the small confirmations that a route is still recoverable.
+30|reliable guidance|Following confidently offered directions can put a practical need into another person's uncertain judgment.
+31|travel illness support|A manageable illness becomes more frightening without someone nearby who knows help is needed.
+32|fair hearing|An innocent error could acquire a lasting false meaning if explanation never gets a hearing.
+33|skill continuity|Gradual decline is troubling because an accustomed confidence may conceal it until an important failure.
+34|timely warning|Sleep feels vulnerable when a necessary response might depend on noticing the first small sign.
+35|accepted vulnerability|Showing need should not be the moment an apparently dependable tie is withdrawn.
+36|responsible treatment|Good intentions would offer little comfort if an inadequately understood remedy made someone worse.
+37|unresented care|The wish for care is complicated by the thought of consuming a child's freedom and time.
+38|chosen life|A life can become externally orderly while containing almost no decisions that feel personally chosen.
+39|authentic friendship|Years of companionship would feel different if warmth had always been a means to another end.
+40|family continuity|An inheritance could reveal that a shared home was held together by expectations nobody had spoken aloud.
+41|explained absence|An unexplained disappearance leaves neither an ordinary hope nor a grief that can find a definite shape.
+42|crowd safety|A familiar gathering can feel unstable when its temper changes faster than an individual can leave.
+43|dependent provision|Responsibility feels most exposed when another person's necessities depend on resources that may fail.
+44|admired person's respect|A mistake hurts differently when it occurs before someone whose judgment is personally valued.
+45|keepsake continuity|An inexpensive object can hold an association that no replacement of equal quality would restore.
+46|movement freedom|Long confinement would narrow both daily choices and the ordinary contact through which life stays varied.
+47|chosen grief disclosure|Private sorrow feels exposed when other people choose its audience and interpretation.
+48|earned reliance|Delegation becomes uneasy when trust has been granted more quickly than conduct has justified it.
+49|friendship beyond money|A disputed payment could make every earlier kindness look like an entry in an account.
+50|knowledge continuity|Useful understanding can vanish quietly when nobody notices that its last practiced keeper is gone.
+51|working ability|An injury would be especially painful if it interrupted the familiar satisfaction of capable hands.
+52|children emotional safety|Authority over a child would feel damaged if ordinary approach became something the child dreaded.
+53|ordinary pleasure|A life with every requirement met could still become bleak if its small pleasures ceased to reach attention.
+54|free affection|Affection becomes frightening when another person uses its importance to make refusal impossible.
+55|repairable mistakes|An apology cannot undo a mistake, but its outright rejection can make any next useful step unclear.
+56|fair hearing|A verdict reached without listening turns explanation into something sought only after it has lost power.
+57|kept promises|Agreeing too readily can create a responsibility whose cost is borne by someone who believed the agreement.
+58|trusted guidance|A learner's lost trust would suggest that authority had failed at the point where patience mattered.
+59|timely help|Knowing what might have helped is painful when the useful moment has already passed.
+60|accurate social understanding|A reserved or direct manner might conceal goodwill so effectively that it is read as contempt.
+61|cultural familiarity|Home could become less available emotionally if its ordinary gestures began to feel unfamiliar.
+62|small concerns heard|A minor warning is troubling when being easy to dismiss also allows it time to grow.
+63|uncontrolled animal force|A crowded place leaves little room to escape the strength of a frightened horse.
+64|weather shelter|Exposure becomes frightening when endurance is the only available response to worsening weather.
+65|prepared responsibility|Responsibility can arrive before the practical knowledge needed to keep others safe.
+66|honest safety promises|Reassurance feels dangerous when another person might rely on more protection than can actually be provided.
+67|independent self regard|Approval could become so necessary that a private preference no longer feels sufficient reason to choose.
+68|correctable judgment|Defending an error can turn one manageable mistake into a pattern that increasingly excludes honest advice.
+69|bounded kindness|A freely offered kindness loses its ease when it is treated as permission to demand more.
+70|useful later life|Rest would feel different if it were imposed by the absence of anything that still felt worthwhile to do.
+71|musical access|Silence would remove a familiar route to pleasure, memory, and company.
+72|loved person's company|Someone can become isolated gradually while appearing to manage every practical need.
+73|public integrity|A compelled false statement could bind a public identity to words privately rejected.
+74|chosen moral habits|One convenient exception can become the example used to excuse the next.
+75|free obligation|A generous offer may purchase a claim on future choices that was never plainly negotiated.
+76|workplace safety|A familiar workspace can encourage confidence precisely where a neglected routine creates danger.
+77|remembered companionship|An old tie may remain vivid on one side after it has become incidental on the other.
+78|accepted intimacy|Being understood completely could seem more dangerous than being liked through a flattering partial view.
+79|new beginnings|Past disappointments might eventually make an ordinary fresh attempt feel too costly to risk.
+80|innocents protected|A hidden family matter could place its consequences on someone who had no part in choosing it.
+81|willing loyalty|Apparent loyalty offers little reassurance if it disappears as soon as fear is removed.
+82|defensible reputation|A claim with no clear means of disproof could remain influential regardless of how patiently it is answered.
+83|safe rest|Sleep requires surrendering attention, which feels costly when the setting has not earned trust.
+84|companions in fog|A short distance can become a frightening separation when neither direction nor familiar faces remain visible.
+85|timely treatment|A bite is more alarming when distance could turn a limited injury into something impossible to address.
+86|roof safety|A shelter should not become the source of danger precisely when weather makes leaving difficult.
+87|animal provision|An animal's trust feels painful to imagine alongside an inability to meet its basic need for food.
+88|children free of bitterness|A privately nursed grievance could become the emotional inheritance of someone who never chose the quarrel.
+89|person beyond title|Respect for an office can conceal almost complete indifference to the person holding it.
+90|reading independence|A hard-won ability might fade quietly if ordinary days no longer make room to use it.
+91|recoverable loss|A loss becomes frightening when it threatens the means of recovering, not merely a present comfort.
+92|reliable routines|Familiarity can make a repeated practice feel safe after the conditions that justified it have changed.
+93|responsive conscience|Repeated exposure to suffering might replace a considered response with the convenience of not noticing.
+94|dignified choice|Need could make apparent agreement conceal an absence of any tolerable alternative.
+95|returnable home|Leaving is easier when home remains a real available destination rather than only a remembered one.
+96|honest counsel|A room full of agreeable answers can leave a person more isolated from reality than an open disagreement.
+97|private reality acknowledged|Public good fortune can make a serious private difficulty harder to admit or obtain help with.
+98|fair punishment|An authoritative mistake would become another person's pain rather than merely a correction to a record.
+99|maintained closeness|A tie can be lost through accumulated inattention without a single disagreement that invites repair.
+100|chosen moral habits|Age and convenience might gradually turn a once serious conviction into an embarrassing story about youth.
+101|honest capability|An expectation of competence can become a trap when admitting limits seems harder than attempting too much.
+102|family questions answered|A familiar parent can seem permanently available until unanswered ordinary questions no longer have a source.
+103|truth heard|A truthful account can still be vulnerable when its speaker lacks the means to make it credible.
+104|bodily predictability|A familiar old weakness is unsettling when it changes without warning and alters an ordinary plan.
+105|private correspondence|Words chosen for one trusted reader would take on a different meaning in an uninvited audience.
+106|memory place|A familiar setting can support memories that become harder to recover once its ordinary details disappear.
+107|equal affection|Kindness feels diminished if it expresses condescension rather than a wish for actual company.
+108|accepted origins|A child's embarrassment at familiar origins could turn shared history into something the child feels compelled to hide.
+109|compatible obligations|Two sincerely accepted duties can leave no course that feels like keeping faith with everyone.
+110|peace enjoyed|Past vigilance might continue consuming attention after the circumstances that required it have ended.
+111|particular belonging|Being useful to many people offers little comfort if no relationship seems to value this particular person.
+112|useful custom preserved|A new arrangement may discard practical knowledge because its value is harder to see than its age.
+113|affection discernment|A pleasing approach can be dangerous when the desired response arrives before the hidden terms are noticed.
+114|sleeping household safety|A tiny neglected flame could become a danger far beyond the attention saved by ignoring it.
+115|proportionate pride|A workable peace can be lost when saving face becomes more urgent than preserving its actual benefits.
+116|confidence keeping|Fear might make a protected confidence seem like an available price for immediate relief.
+117|earned credit|A pleasing public mistake about authorship could become harder to correct each time it is repeated.
+118|animal attachment|A forced departure would hurt more if it required leaving a dependent familiar creature behind.
+119|lived present|Preparation can keep postponing the very pleasures and choices it was intended to make possible.
+120|freely received gifts|A gift would miss its purpose if the recipient had to maintain it or perform gratitude unwillingly.
+121|wanted help|Useful intentions do not guarantee that an intervention respects the other person's own preferences.
+122|private room|Constant accessibility could leave no place to be unfinished, quiet, or free from an audience.
+123|correctable reputation|A harmful account can travel faster than the careful explanation needed to challenge it.
+124|timely advocacy|Silence can feel like a choice made against a friend when speaking might have changed the outcome.
+125|recognizable affection|Illness could preserve proximity while removing the recognition that makes a familiar face feel like home.
+126|need noticed|A discreet request can disappear when its listener waits for distress to become unmistakable.
+127|bridge safety|A narrow crossing combines uncertain support with too little room to choose another step.
+128|physical escape|A fall of timber would make the ability to move depend on someone else's arrival.
+129|crowd safety|A crowd can remove individual control of movement even when nobody intends a particular person harm.
+130|informed treatment|Treatment is harder to accept when its purpose and expected effects remain unexplained.
+131|ill loved person responsive|An unanswered attempt to wake someone makes ordinary sleep suddenly difficult to distinguish from danger.
+132|proportionate sacrifice|Suffering can become a source of pride that discourages a kinder and more useful solution.
+133|responsible example|Another person may imitate the visible action while missing the qualification that made it defensible.
+134|possible forgiveness|Holding to an old judgment could become an injustice if the person judged has actually changed.
+135|earned reliance|A familiar name can lend certainty to a claim that still needs to be examined.
+136|patient care|A vulnerable person's repeated need could receive the anger properly belonging to fatigue or frustration.
+137|chosen grief disclosure|Public expectation can turn grief into a performance at the moment privacy is most needed.
+138|adaptable ability|An accustomed skill might cease to be useful before another way of contributing has been learned.
+139|safe completion|Stopping at a convenient moment can leave a hidden risk for the next person who assumes the task is finished.
+140|guest safety|An offered welcome would feel hollow if there were no genuinely secure place for the guest to rest.
+141|loved person's dignity|Someone cherished could continue functioning while privately accepting a diminished idea of their own worth.
+142|free gratitude|A freely acknowledged kindness can become oppressive if the giver treats thanks as permanent surrender.
+143|accepted true self|Admiration is unstable when maintaining it requires protecting an image that does not feel accurate.
+144|honest caution|A prudent explanation might conceal a refusal to face a risk that is actually worth taking.
+145|kind household norms|A cruel habit becomes harder to challenge once everyone has learned to treat it as ordinary.
+146|restored curiosity|Exhaustion could narrow a once interesting world to whatever is required to get through the day.
+147|revisable vocation|A once desired role may continue making demands after its private meaning has changed.
+148|unpriced kindness|Affection and generosity lose ease when every gesture is interpreted as an attempt to purchase something.
+149|repairable words|An impulsive remark may remain in another person's memory after its speaker has found the better words.
+150|keepsake continuity|A cherished object's price can be understood while the association that makes it irreplaceable goes unnoticed.
+151|illness companionship|Practical care alone would not replace the comfort of a familiar person choosing to remain nearby.
+152|dependent provision|Pride can make a need invisible until an offered ordinary kindness would have become urgent help.
+153|askable help|The habit of being capable can make a simple request feel like surrendering an entire identity.
+154|earned recognition|Arbitrary favor can make sustained effort seem irrelevant to the result it was supposed to influence.
+155|fair responsibility|Rank could determine who bears an error more strongly than who actually made the choice.
+156|memory continuity|A personally important detail can vanish without anyone else knowing that something irreplaceable was lost.
+157|weather shelter for others|Another person's exposure would make the limits of a well-meant welcome painfully concrete.
+158|working ability|Losing dexterity would change small private pleasures as well as practical independence.
+159|chosen life|A life can become full of events without containing many decisions that feel freely made.

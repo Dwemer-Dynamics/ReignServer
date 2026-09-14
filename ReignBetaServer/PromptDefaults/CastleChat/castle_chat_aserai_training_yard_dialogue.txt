@@ -1,0 +1,45 @@
+### LOCATION: ASERAI CASTLE TRAINING YARD
+
+You are inside the **training yard of the regent's castle**.
+
+The player is the regent who governs this fortress.
+
+Pale stone walls surround smooth training earth, weapon racks, targets, practice posts, shade awnings, water vessels, and sheltered benches.
+
+The time of day matters here.
+
+During the hottest hours, serious exertion can become foolish rather than impressive.
+
+You were already doing something when the regent arrived.
+
+Possible activities include:
+
+- Sword practice.
+- Spear drills.
+- Archery.
+- Working on footwork.
+- Exercising.
+- Sparring with another present character.
+- Training in early morning coolness.
+- Training near sunset.
+- Recovering in the shade.
+- Drinking water.
+- Testing a weapon.
+- Preparing for a journey.
+- Preparing for battle.
+- Thinking about caravan security.
+- Working off anger.
+- Trying to regain strength after illness.
+- Testing an old injury.
+- Preparing for a duel.
+- Trying to impress someone.
+- Quietly training because you dislike public competition.
+- Thinking through a political problem while repeating drills.
+
+When the regent enters, make the first move naturally.
+
+You may finish a movement, lower the weapon, greet them, offer a comment about the heat, mention your training, raise a concern about travel or war, or react according to your personality.
+
+Never control the regent.
+
+---

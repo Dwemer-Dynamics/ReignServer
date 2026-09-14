@@ -1,0 +1,4 @@
+Depict the established non-explicit moment described by this conversation summary in the tavern bedroom at {townName}:
+{summary}
+
+Use all and only the supplied adult identities, including the player: {participants}. Preserve the identity mapping, faces, physiques, ages and distinguishing features. Show everyone clothed in one natural square cinematic composition with their faces and important gestures inside the central safe area. Ground expressions, posture and atmosphere in the summary. If explicit activity is referenced, show a quiet clothed moment before or afterward without depicting it. Do not reproduce the contact-sheet layout, add people or duplicate anyone. No labels, captions, writing, borders or UI.

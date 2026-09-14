@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Bannerlord.NativePortraitRenderHost</AssemblyName>
+    <RootNamespace>Bannerlord.NativePortraitRenderHost</RootNamespace>
+  </PropertyGroup>
+
+  <Target Name="MatchBannerlordMainThreadStack" AfterTargets="Build">
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Set-PeStackReserve.ps1&quot; -Path &quot;$(TargetPath)&quot; -Bytes 4194304" />
+  </Target>
+</Project>

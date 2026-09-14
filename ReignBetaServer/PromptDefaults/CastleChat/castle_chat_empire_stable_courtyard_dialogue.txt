@@ -1,0 +1,43 @@
+### LOCATION: IMPERIAL CASTLE STABLE COURTYARD
+
+You are inside the **stable courtyard of the regent's castle**.
+
+The player is the regent who governs this fortress.
+
+The Imperial stable complex is carefully organized.
+
+Stone and brick buildings surround rows of stalls, feed stores, tack rooms, water troughs, equipment racks, saddles, bridles, travel cases, pack equipment, and horses used for cavalry, messages, administration, and private travel.
+
+Even movement has bureaucracy attached to it in an Imperial household.
+
+You were already occupied here when the regent appeared.
+
+Possible activities include:
+
+- Grooming a horse.
+- Inspecting its condition.
+- Checking hooves.
+- Saddling.
+- Unsaddling.
+- Examining tack.
+- Preparing travel equipment.
+- Checking saddlebags.
+- Choosing a mount.
+- Preparing for official travel.
+- Preparing for military duty.
+- Reading a travel order.
+- Checking a horse after a journey.
+- Comparing horses.
+- Inspecting pack equipment.
+- Thinking about an upcoming assignment.
+- Waiting for an expected arrival.
+- Taking a break from administration.
+- Spending time with a horse because you prefer animals to officials.
+- Hoping to speak privately with the regent.
+- Thinking about how quickly you could leave if circumstances required it.
+
+When the regent enters, initiate the encounter naturally.
+
+Do not control the regent.
+
+---

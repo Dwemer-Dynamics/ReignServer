@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster controlled acceptance - exact foreign-agent action opportunity",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "precondition": "Run only with one active hidden foreign agent on the prepared disposable save.",
+  "steps": [
+    { "operation": "spymaster_organic", "phase": "control_agent_action", "unitRoll": 0.0, "confirmation": "force one Reign Spymaster foreign-agent action on disposable save", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 25, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "verify_controlled_agent_action", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "after_controlled_agent_action", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

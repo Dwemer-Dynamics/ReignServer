@@ -1,0 +1,69 @@
+Create an exceptionally photorealistic cinematic scene inside the **training yard of a Khuzait-held castle**, reflecting a steppe military culture centered on mounted warfare, archery, mobility, speed, endurance, scouting, weapon handling, and constant readiness to travel.
+
+This is a permanent castle training ground adapted for people whose preferred battlefield is open country.
+
+The yard should be broad and relatively open.
+
+Use:
+
+- Plastered stone or brick walls.
+- Timber galleries.
+- Painted wooden trim.
+- Felt-covered shade areas.
+- Equipment sheds.
+- Wide open training lanes.
+- Smooth compacted dirt.
+- Archery targets.
+- Targets at several distances.
+- Practice bows.
+- Quivers.
+- Sabers or swords.
+- Spears.
+- Lances.
+- Training posts.
+- Wooden obstacles.
+- Ropes.
+- Weighted equipment.
+- Saddles placed on racks.
+- Horse tack.
+- Bridles.
+- Saddle blankets.
+- Portable chests.
+
+**Do not depict horses unless a supplied source image specifically includes the required horse and the generation workflow supports preserving it.**
+
+The yard can still strongly suggest mounted training through equipment and long practice lanes without inventing animals or riders.
+
+Likely activities include:
+
+- Archery.
+- Rapid shooting.
+- Shooting while moving on foot.
+- Practicing saber techniques.
+- Spear or lance handling.
+- Drawing a bow repeatedly for strength.
+- Testing equipment.
+- Inspecting tack.
+- Preparing gear for riding.
+- Footwork.
+- Endurance work.
+- Sparring.
+- Studying routes between exercises.
+- Practicing reaction speed.
+- Training because castle life feels too sedentary.
+
+### CHARACTER REQUIREMENTS
+
+Only supplied full-body source characters may appear.
+
+No riders, trainers, guards, soldiers, servants, stable workers, spectators, or background people.
+
+Preserve exact identity and complete physique.
+
+Clothing may change to realistic Khuzait training or riding clothing: layered garments, trousers, boots, belts, wool, felt, leather, robes secured for movement, archery equipment, partial armor where appropriate.
+
+Do not automatically make every character athletic or mounted.
+
+Maximum photorealism.
+
+---

@@ -1,0 +1,173 @@
+Create an exceptionally photorealistic cinematic scene on the **battlements of a powerful Vlandian castle**, strongly reflecting Vlandia's feudal western-medieval military culture, heavy stone fortification, landed nobility, cavalry warfare, heraldic identity, and concern with roads, farmland, villages, and defensible territory.
+
+The scene takes place high upon the castle walls.
+
+The battlements are built from massive blocks of pale or gray dressed stone weathered by rain, wind, soot, moss, and generations of use. The wall walk is broad enough for defenders and nobles to move comfortably along it.
+
+The defensive architecture should include believable features such as:
+
+- Tall crenellated parapets.
+- Merlons and embrasures.
+- Arrow loops.
+- Stone towers.
+- Wooden hoardings in selected areas if appropriate.
+- Drainage channels.
+- Steps leading to higher tower platforms.
+- Heavy wooden doors reinforced with iron.
+- Storage niches.
+- Braziers or signal baskets.
+- Racks or recesses for defensive equipment.
+- Weathered ropes.
+- Spare shields.
+- Bundles of arrows or bolts only where naturally stored.
+- Siege-defense materials where plausible.
+
+Do not make the battlements impossibly narrow or decorative. They should look like functional military architecture built to survive siege warfare.
+
+Beyond the walls should stretch a distinctly Vlandian landscape:
+
+- Patchwork farmland.
+- Villages.
+- Dirt roads.
+- Hedgerows.
+- Open fields.
+- Wooded hills.
+- Grazing land.
+- Distant manor houses.
+- Rivers or streams where appropriate.
+- Mountain ridges or neighboring fortifications in the far distance.
+
+The castle's position should visibly dominate the surrounding countryside.
+
+Banners bearing Vlandian-style heraldry may move naturally in the wind, but they should not overwhelm the scene.
+
+Weather can vary naturally:
+
+- Clear cold morning.
+- Golden evening.
+- Heavy clouds.
+- Approaching rain.
+- Strong wind.
+- Mist over the fields.
+- Winter frost.
+- Summer haze.
+
+The battlements are not only used during war.
+
+Characters might plausibly be:
+
+- Watching riders approach along a road.
+- Looking over the castle's lands.
+- Inspecting the condition of the walls.
+- Studying nearby terrain.
+- Examining distant smoke.
+- Watching a military party depart.
+- Watching a military party return.
+- Looking toward a neighboring settlement.
+- Reading a letter in privacy.
+- Speaking privately away from the court.
+- Taking fresh air after a tense meeting.
+- Thinking alone.
+- Watching the sunset.
+- Standing in the rain while brooding.
+- Checking defensive positions.
+- Examining an arrow slit.
+- Inspecting stored equipment.
+- Looking down into the courtyard.
+- Observing training below.
+- Watching travelers.
+- Practicing with a bow or crossbow at a safe target outside the occupied castle.
+- Cleaning or inspecting a weapon.
+- Looking at a campaign map while comparing it to the real landscape.
+- Waiting for an expected arrival.
+- Seeking somewhere difficult to overhear.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible person must correspond to one of the supplied source images.
+
+Do not generate:
+
+- Guards.
+- Archers.
+- Soldiers.
+- Servants.
+- Messengers.
+- Watchmen.
+- Workers.
+- Travelers.
+- Riders.
+- Villagers.
+- People in the courtyards below.
+- People on roads.
+- People visible in distant fields.
+- Background silhouettes.
+- Reflected humans.
+- Unspecified companions.
+
+If only one source character is supplied, exactly one visible human being may appear.
+
+If several source characters are supplied, only those specific people may appear.
+
+The distant countryside must not contain recognizable human figures.
+
+The supplied source images are the absolute authority for character identity.
+
+Preserve each supplied person's:
+
+- Exact facial identity.
+- Apparent age.
+- Head shape.
+- Skin tone.
+- Natural skin texture.
+- Eye shape and color.
+- Eyebrows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hairline.
+- Hair color.
+- Hairstyle where practical.
+- Facial hair.
+- Scars and distinctive features.
+- Height.
+- Shoulder width.
+- Chest and torso.
+- Waist.
+- Hips.
+- Arm proportions.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative size compared with the other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or otherwise redesign them.
+
+Their clothing may be changed to realistic **Vlandian clothing appropriate to the battlements and current activity**.
+
+A noble taking the air may wear civilian garments and a cloak. Someone inspecting defenses may wear practical clothing, a sword belt, riding clothes, partial protection, or armor if their circumstances warrant it.
+
+Do not automatically put everyone in armor merely because they are on the wall.
+
+Changing clothing must never alter the underlying physique.
+
+Characters should interact naturally with the battlements.
+
+They may rest a hand upon cold stone, lean slightly against the parapet, look across the countryside, examine masonry, hold a letter, compare a map to the horizon, brace against strong wind, or naturally handle equipment.
+
+Do not pose them as heroic fantasy characters.
+
+The finished scene must look like **live-action historical photography taken on a real medieval castle wall**.
+
+Use physically believable scale, authentic weathered stone, realistic wind affecting hair and clothing, natural atmospheric depth, believable sky, distant landscape haze, accurate human anatomy, realistic skin, and convincing contact with the environment.
+
+Avoid video-game rendering, fantasy concept art, exaggerated heroic lighting, impossible castle architecture, overly clean stone, or artificial poses.
+
+Maximum possible photorealism.
+
+---

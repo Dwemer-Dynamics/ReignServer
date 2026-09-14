@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "label": "Identity authority wilderness two-NPC qualification",
+  "seed": 161803,
+  "mode": "wilderness_event",
+  "presentation": "headless",
+  "effects": "guarded",
+  "steps": [
+    {
+      "operation": "open",
+      "mode": "wilderness_event",
+      "targetSearches": [
+        "CharacterObject_2592",
+        "CharacterObject_2591"
+      ],
+      "minimumParticipants": 2,
+      "createTestEvent": true,
+      "timeoutSeconds": 600
+    },
+    {
+      "operation": "send",
+      "mode": "wilderness_event",
+      "text": "We have not been formally introduced in this test encounter. Each of you must address me only from identity and public standing you can currently establish. Respond to the relevant earlier speaker, but do not copy another observer's private knowledge.",
+      "categories": [
+        "structural_pipeline",
+        "identity_role_authority",
+        "group_awareness",
+        "detailed_factual_accuracy",
+        "personality_consistency",
+        "performance_resilience"
+      ],
+      "assertions": {
+        "minReplies": 2,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "relationshipPolicy": {
+          "scenario": "general",
+          "requiresEverySpeaker": true,
+          "requiresPlayerReaction": true,
+          "requiresNpcToNpc": true,
+          "expectedNpcIds": [
+            "CharacterObject_2592",
+            "CharacterObject_2591"
+          ]
+        },
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresGroupAwareness": true,
+        "forbidSelfReaction": true,
+        "requiresPersonalityEvidence": true,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "send",
+      "mode": "wilderness_event",
+      "text": "I am Acthon. That is my actual name, and I am formally introducing myself to every person present now. Each of you should acknowledge that identity and only public offices supported by current native facts.",
+      "categories": [
+        "structural_pipeline",
+        "identity_role_authority",
+        "group_awareness",
+        "detailed_factual_accuracy",
+        "personality_consistency",
+        "performance_resilience"
+      ],
+      "assertions": {
+        "minReplies": 2,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "relationshipPolicy": {
+          "scenario": "general",
+          "requiresEverySpeaker": true,
+          "requiresPlayerReaction": true,
+          "requiresNpcToNpc": true,
+          "expectedNpcIds": [
+            "CharacterObject_2592",
+            "CharacterObject_2591"
+          ]
+        },
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresGroupAwareness": true,
+        "forbidSelfReaction": true,
+        "requiresPersonalityEvidence": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "exact_self_introduction",
+        "expectedRealmSovereignKnown": false,
+        "expectedRecognizedRoles": [
+          "lord"
+        ],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "send",
+      "mode": "wilderness_event",
+      "text": "Each of you now give a separate, direct authority accounting. State my current role and your own; whether I am your sovereign; which nearby settlement, realm, and diplomacy facts are actually current; and mark unavailable facts unknown. React to the earlier speaker when their public claim is relevant.",
+      "categories": [
+        "structural_pipeline",
+        "identity_role_authority",
+        "group_awareness",
+        "detailed_factual_accuracy",
+        "personality_consistency",
+        "performance_resilience"
+      ],
+      "assertions": {
+        "minReplies": 2,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "relationshipPolicy": {
+          "scenario": "general",
+          "requiresEverySpeaker": true,
+          "requiresPlayerReaction": true,
+          "requiresNpcToNpc": true,
+          "expectedNpcIds": [
+            "CharacterObject_2592",
+            "CharacterObject_2591"
+          ]
+        },
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresGroupAwareness": true,
+        "forbidSelfReaction": true,
+        "requiresPersonalityEvidence": true,
+        "expectedRealmSovereignKnown": false,
+        "expectedRecognizedRoles": [
+          "lord"
+        ],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "close",
+      "mode": "wilderness_event",
+      "assertions": {
+        "requiresSceneMemoryArtifacts": true,
+        "critical": true
+      },
+      "timeoutSeconds": 900
+    }
+  ]
+}

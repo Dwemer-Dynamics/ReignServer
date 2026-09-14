@@ -1,0 +1,4255 @@
+{
+  "schema": "reign-narrative-dream-compatibility-v1",
+  "rule": "Eligibility is evaluated before deterministic selection; each required score must exceed40. Any-requirement needs at least one score above40. Compatible motives are weighted by existing personality; neutral pleasures remain available.",
+  "sourceDreamOrderSha256": "20757fa6c4083021ccedebdc3185904e0b438b3c2ae84eff0760a9d13f1a11cb",
+  "concepts": [
+    {
+      "id": "dream_b08cf88d5771ce42",
+      "title": "establish a school open to poor children",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "dream_72d5aa0a2114c010",
+      "title": "restore an orchard for future generations",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_59e9ee62e17c5e83",
+      "title": "write a reliable account of local history",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_4b6798c304da525a",
+      "title": "build a home where guests feel safe",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_92df0a1e1ef9b926",
+      "title": "be remembered as a fair employer",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_737fd445b8dfa62d",
+      "title": "raise children who can disagree without fear",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_8af9d1f945610dab",
+      "title": "make a dangerous road safe for travelers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_0c34b98a89c9c978",
+      "title": "preserve a dying craft tradition",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_fe8173626a3551ea",
+      "title": "create a garden that outlives its maker",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_f7270121b906bae8",
+      "title": "leave a useful medical handbook",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_714093a789419d9b",
+      "title": "see the sea after a lifetime inland",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_7c4a7bdd676fe869",
+      "title": "compose a song that ordinary people keep singing",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_566841b07b713c9b",
+      "title": "bring clean water to a neglected neighborhood",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "dream_bb2db26a44598817",
+      "title": "prove that mercy can coexist with strength",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_9201eb12c312b601",
+      "title": "make a household independent of predatory debt",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "dream_acb22d9407d658c7",
+      "title": "master an art without seeking public fame",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_9c3f6b01e348485c",
+      "title": "reconcile branches of a divided family",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_df172b74fe83ed5b",
+      "title": "restore dignity to a discredited but honest mentor",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_a8c043714f67fde0",
+      "title": "create a refuge for exhausted working animals",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_4c47736d6ba4e264",
+      "title": "build a bridge that joins isolated communities",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_c6bd5ea0d8f0f94d",
+      "title": "find a life partner who welcomes honest disagreement",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_4b7b55df55497ea1",
+      "title": "finish a long-abandoned book",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_26abde1009b08638",
+      "title": "establish a dependable winter granary",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_bc820d1cb63e20e1",
+      "title": "retire without becoming dependent on flattery",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_df319dc7bedc8d53",
+      "title": "be known for one excellent piece of work",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_362c231b8f521c2c",
+      "title": "give an apprentice a better start than their own",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "dream_8d06cf7ae40edc68",
+      "title": "recover a lost family recipe tradition",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_62606d582ab86357",
+      "title": "learn enough languages to travel freely",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_1546fea980ae17cd",
+      "title": "create a place where rival cultures meet peacefully",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_25c960870f2e1bdb",
+      "title": "make a modest estate genuinely self-supporting",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_54deaf5a292cff1c",
+      "title": "see a beloved younger person become independent",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_7acb29c72263a8d0",
+      "title": "understand the ruins near their childhood home",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_6c37045a8829ae92",
+      "title": "leave no unpaid obligation at death",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "dream_14878343f7a7a6de",
+      "title": "build a fleet of safe river ferries",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_9dbf9bd6b6649f4f",
+      "title": "establish a fair system of weights at market",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "dream_df91235721f741d0",
+      "title": "fund a public bathhouse",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_f63af1aefa88fec2",
+      "title": "preserve a collection of endangered manuscripts",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_57a0319a6ccf9df0",
+      "title": "give neglected elders a respected place",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_371293a44052844f",
+      "title": "create a household free from constant quarrels",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_5fd8e9de390f0b5e",
+      "title": "earn trust without relying on inherited position",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_d42e61e2ca895cd9",
+      "title": "become a skilled healer of ordinary injuries",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_4227c212aa5d1e60",
+      "title": "cultivate a new hardy fruit variety",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_bef7aa88d44eb797",
+      "title": "map the mountain paths accurately",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_7a385a25414278ec",
+      "title": "write a collection of children's stories",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_1f65c7c3efbac84f",
+      "title": "establish a traveling theater company",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_73ac07fde53a442e",
+      "title": "build a workshop with room for experimentation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_d23977890a24f9b5",
+      "title": "restore a ruined family dwelling",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_77353bfbaa776dca",
+      "title": "create a network of honest messengers",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_139896fb31bd1209",
+      "title": "retire to a small house beside water",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "dream_d7289644c86e14de",
+      "title": "make their name associated with reliable promises",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_5fd8ff03bd982386",
+      "title": "found a school for practical crafts",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_b413acc5f71ce43a",
+      "title": "create a stable breeding line of gentle horses",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_cbb984c7245df01e",
+      "title": "record the speech of their home region",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_a31581495ec2add8",
+      "title": "leave a fair inheritance without bitter rivalry",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_3102379aac45ab14",
+      "title": "secure recognition for overlooked workers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_290d92cf78f084a6",
+      "title": "learn to sail confidently",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_5dd3d36a88b065b4",
+      "title": "establish a festival remembered for hospitality",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_887491c0a9fab1ee",
+      "title": "complete a pilgrimage thoughtfully",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_8c4475adfd6b5648",
+      "title": "create a library that lends books freely",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_3a0978fbc7cb2f96",
+      "title": "help veterans find peaceful occupations",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_2f476e60f88830b7",
+      "title": "settle a grievance without passing it to children",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_4e48d8e82a4fc353",
+      "title": "prove a disputed technical idea through working evidence",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_52ffba8048be0b62",
+      "title": "build a household where daughters and sons are heard",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_daac79658277c60e",
+      "title": "become capable of admitting mistakes publicly",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "fameMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_af994e5479f0458b",
+      "title": "make peace with a difficult inheritance",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_1dd82850417ce881",
+      "title": "become an excellent teacher",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_5443352f3e6ebd39",
+      "title": "establish a reliable trade route without exploitation",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "dream_449aae2b576abed0",
+      "title": "save an old woodland from careless destruction",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_42cee429ef8990f8",
+      "title": "create a beautiful object worthy of an heirloom",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_c60e373e6f75400b",
+      "title": "make one city district healthier",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "dream_10756779676a4277",
+      "title": "recover the history of forgotten ancestors",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_185572cf7d441134",
+      "title": "be remembered for restraint after victory",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "fameMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_17630f91c043ca12",
+      "title": "build a school of horsemanship",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_7cfd86fa659f7699",
+      "title": "develop a humane approach to animal training",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_ba58ab52bd74a29a",
+      "title": "live long enough to see a planted grove mature",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_352ce375be2bac75",
+      "title": "earn affection that does not depend on usefulness",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_18104f84826536e0",
+      "title": "establish a bakery that survives lean winters",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_72a7a95131b28701",
+      "title": "write a clear practical law commentary",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_e7357b97806097f1",
+      "title": "collect the songs of several cultures",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_03317979534949bd",
+      "title": "discover what lies beyond familiar borders",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_0c27f93e56b8e21c",
+      "title": "keep siblings close despite different fortunes",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_bf3e1f2e2d0e9d95",
+      "title": "establish a workshop run by former apprentices",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_debbfcc811af3cb4",
+      "title": "make their homeland welcoming to strangers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_6504459cf16b46ea",
+      "title": "leave a marriage better than the one they witnessed growing up",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_01e693111e6f670c",
+      "title": "build a quiet place for contemplation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_37769044b709c73b",
+      "title": "make a remarkable astronomical instrument",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_b24f2793523c0862",
+      "title": "restore a neglected irrigation channel",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_6ac1811d6e0304bd",
+      "title": "give a town a dependable fire response",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_581d3ccdc2ae746e",
+      "title": "become a patron who understands the work supported",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_c388de46805ca825",
+      "title": "prove that careful administration can prevent famine",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_c10004b314e3516b",
+      "title": "create a collection of accurate animal drawings",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_ef9046f0ee68bfb2",
+      "title": "learn to distinguish courage from recklessness",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_07e51c85244b10fe",
+      "title": "ensure servants can leave with dignity",
+      "requireAll": [
+        "compassion",
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "honor"
+      ]
+    },
+    {
+      "id": "dream_bcdd2da0ea7c6dc7",
+      "title": "bring an old musical instrument back into use",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_685eba181de40c98",
+      "title": "make a cherished place accessible to older people",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_63eef46171284b92",
+      "title": "establish a fair contract custom",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_0b51c0b5021805fa",
+      "title": "be able to travel without an entourage",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "dream_7ae614d17ee53635",
+      "title": "recover an abandoned language of learning",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_907f633a10d5943f",
+      "title": "create a beautiful public square",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_9e4dffdd3bdefbbe",
+      "title": "become a guardian others approach willingly",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_56f112df865b3269",
+      "title": "leave land healthier than they received it",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_3dfb44deb75a5239",
+      "title": "create a school for orphaned children without claiming their loyalty",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion"
+      ]
+    },
+    {
+      "id": "dream_218eae35e257b4c7",
+      "title": "learn to enjoy peace without feeling useless",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_c110e3cfa2823965",
+      "title": "write an honest memoir",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_da947a3f344e1338",
+      "title": "develop a respected tradition of mediation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_276dd24d025107d8",
+      "title": "make their family known for generosity with boundaries",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_366a84ceabfb662b",
+      "title": "create a home suited to several generations",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_d1e2777c8363a32f",
+      "title": "become free of a patron's influence",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "dream_a2cb5116804cb457",
+      "title": "complete a map of local springs",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_ee866aa1a243d1b4",
+      "title": "restore a village's damaged confidence",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_6e7e1aca9cdb4b99",
+      "title": "train a successor who needs little supervision",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_8a3b93f0449ea1ee",
+      "title": "create a peaceful retirement for a trusted servant",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_b319bc64fc891ebb",
+      "title": "turn a neglected estate into a welcoming community",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_a69bf47e4e4d3b8e",
+      "title": "prove that an outsider can belong without imitation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_e7fac19fdaae6841",
+      "title": "establish a durable charitable fund",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_111034464774d4be",
+      "title": "make a useful discovery in medicine",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_2ff98cd740695957",
+      "title": "become worthy of a promise made in youth",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_7345d003fb6637b4",
+      "title": "restore trust after a personal failure",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_5c1aa9e60f11cd8f",
+      "title": "make a difficult reconciliation possible",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_ebde1c5fbd5bfa6a",
+      "title": "find a vocation beyond inherited duty",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "dream_716202d1e14a563e",
+      "title": "build a reputation for excellent craftsmanship",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_dc1d99c3f8344f1f",
+      "title": "open a house of learning for travelers",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_5ad11db314d1f3b5",
+      "title": "leave a record of ordinary women's work",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_548ab03a34b3748d",
+      "title": "see children from rival households become friends",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_709433473b8569ba",
+      "title": "protect a stretch of coast from reckless exploitation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_e5cbeba441514fef",
+      "title": "become a dependable source of calm in crises",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_014752becac39af7",
+      "title": "create an enduring collection of regional recipes",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_b95b53e9fbfb0455",
+      "title": "earn enough to choose work freely",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect"
+      ]
+    },
+    {
+      "id": "dream_ab438373cdbcd792",
+      "title": "build a life that includes both service and solitude",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_d39744fb75177ebb",
+      "title": "learn to mourn without closing off affection",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_4d7e8ba3d307b0cd",
+      "title": "make a marriage based on mutual respect",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_bebab30efa1b459b",
+      "title": "establish a fair apprenticeship tradition",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "dream_60e44fff7ebbab21",
+      "title": "preserve knowledge of local plants",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_e50a4ff8ac5e5a1d",
+      "title": "create a theater that welcomes common audiences",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_d29e4957719a3abd",
+      "title": "understand how people can argue without humiliation",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_a71d9025b6a4875e",
+      "title": "make their household known for honest accounts",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor"
+      ]
+    },
+    {
+      "id": "dream_559e2c42fe553bf7",
+      "title": "build a durable watermill",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_717bccce988b87aa",
+      "title": "establish a refuge for travelers caught by weather",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_866a965fba150b39",
+      "title": "become able to trust another person's competence",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_5f216b9a633aa1ef",
+      "title": "leave an example of responsible power",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_74c20a23afe958d2",
+      "title": "bring a distant friend safely into old age",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_b366e1091992b1cd",
+      "title": "create a home with music in it",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_1dcf3e8fe94bc6d4",
+      "title": "restore a neglected cemetery respectfully",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_7d74f44aa0ae6435",
+      "title": "write a book that makes a difficult subject understandable",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_544b2bc7dbfa5274",
+      "title": "learn a craft entirely outside their station",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_fdaa3f3f6120cb30",
+      "title": "establish a safe winter shelter",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_4583e08ca5852c39",
+      "title": "create a long-lived garden of native plants",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_602aa20d40eaaadd",
+      "title": "be remembered as a gracious rival",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_ffd5832c58cf05d0",
+      "title": "make useful work available during hard seasons",
+      "requireAll": [
+        "compassion"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "compassion",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_d1ff52d6d363cacd",
+      "title": "become a grandparent children seek voluntarily",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "sociability"
+      ]
+    },
+    {
+      "id": "dream_3d057893f80503b6",
+      "title": "live without needing to win every argument",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_ad2332d393df013e",
+      "title": "make their life more than a response to an old insult",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_ad9713a222fba304",
+      "title": "leave a collection of accurate practical maps",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_3c37a96f3c3bd485",
+      "title": "create something beautiful with their own hands",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_f70349e0df91ef48",
+      "title": "discover a form of service that brings joy",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_905b005e1daa3e84",
+      "title": "earn a peaceful reputation in a violent age",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "fameMotivation",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_ee32d1b4c59f674d",
+      "title": "build a household resilient enough to welcome change",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "familyMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_4a31c2d543b7d6e1",
+      "title": "make an old injustice publicly understood",
+      "requireAll": [
+        "honor"
+      ],
+      "requireAny": [],
+      "prefer": [
+        "honor",
+        "emotionalStability"
+      ]
+    },
+    {
+      "id": "dream_34b6e683c8326e5e",
+      "title": "travel with someone whose company they cherish",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_8a94886a088a11ad",
+      "title": "reach old age with curiosity intact",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "knowledgeMotivation",
+        "discipline"
+      ]
+    },
+    {
+      "id": "dream_3e879fbfbede5af4",
+      "title": "make their family name impossible to ignore",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_82b0a02db51dbd37",
+      "title": "be remembered above a celebrated rival",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_9e3b10f31e7fe7f0",
+      "title": "restore an inherited claim to precedence",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_2df8e75ce0b44e77",
+      "title": "accumulate enough wealth to refuse every patron",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_78dc4f57713b800c",
+      "title": "command a household whose obedience is unquestioned",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_7340035c70f1cd23",
+      "title": "win an honor denied to an earlier generation",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_65678e20a805e317",
+      "title": "make a former critic publicly acknowledge their worth",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_9b7bf2a48d783c07",
+      "title": "establish a lineage that outlasts political defeat",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_c226618c61a7fd78",
+      "title": "become indispensable to the person who holds power",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_c1b1d21f422b384e",
+      "title": "leave a monument bearing their own name",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_63c5713db01eb234",
+      "title": "turn a modest holding into a center of influence",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_1619725999f2321d",
+      "title": "be received as an equal by those who once dismissed them",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_f73e77178ac3c267",
+      "title": "secure a comfortable retirement others must finance",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_1a4b1b1c320cca69",
+      "title": "possess a collection envied by discerning visitors",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_3a959fa3f7af377a",
+      "title": "control the account by which their generation is remembered",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_856fe071fa01d942",
+      "title": "obtain a place near power without accepting its burdens",
+      "requireAll": [],
+      "requireAny": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation",
+        "wealthMotivation"
+      ],
+      "prefer": [
+        "ambition",
+        "fameMotivation",
+        "powerMotivation"
+      ]
+    },
+    {
+      "id": "dream_fe6f74a15f32e110",
+      "title": "have a room arranged entirely to their own taste",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_621fc7d90d17573b",
+      "title": "spend a whole season without an unwanted formal invitation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_25049a1fbd792bd9",
+      "title": "wake beside a garden with no business waiting before breakfast",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_1e80683351c7fd2e",
+      "title": "have a chair so comfortable that guests ask where it was made",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_c67d9b78435b5430",
+      "title": "keep a warm bathing room available during winter",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_483b144705e116e9",
+      "title": "own clothing chosen for comfort rather than rank",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_5916f6100bdb1979",
+      "title": "enjoy a long meal without anyone seeking a favor",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_5d39942edfc1da84",
+      "title": "have a private workroom where unfinished objects can remain untouched",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_5323a2ed2cb7d729",
+      "title": "take a journey with no audience expecting a remarkable account",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_c15b1e56026544de",
+      "title": "spend a summer near cool water",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_c3174110fb7b5cb4",
+      "title": "keep a small household with few ceremonial obligations",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_67d11c497325332a",
+      "title": "have enough leisure to follow an absorbing subject for months",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_444c743d404ec8ee",
+      "title": "fill a room with colors other people consider unfashionable",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_51d4c5bf3ac8397c",
+      "title": "keep an excellent cook without turning every supper into an occasion",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_7411a80016d64e0c",
+      "title": "own a bed suited to their own sleeping habits",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_52616b670a2a8731",
+      "title": "have a quiet courtyard beyond the reach of routine interruptions",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_79589572b2651c49",
+      "title": "choose guests entirely for the pleasure of their company",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_c3823eb1b9a9e451",
+      "title": "spend a winter absorbed in books and familiar comforts",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_99ad419698c06b9d",
+      "title": "arrange a personal library by the way they actually use it",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_9e17310f72aacb94",
+      "title": "keep one pleasant place unknown to casual acquaintances",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_34e0112e4bd9571a",
+      "title": "have a dependable supply of a favorite ordinary delicacy",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_3687730ad013a80e",
+      "title": "grow old with a daily routine nobody insists on improving",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_15ee86159e663dd8",
+      "title": "enjoy an expensive pleasure without rehearsing a justification",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_a1d9e4f08e71a093",
+      "title": "have enough privacy to be cheerful or irritable without causing comment",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-dutyMotivation",
+        "-fameMotivation"
+      ]
+    },
+    {
+      "id": "dream_8035598bb480b918",
+      "title": "have a difficult achievement recognized by the person who once dismissed them",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_25212140a12bd33d",
+      "title": "be invited for their wit rather than their connections",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_99a9a6295c9f8240",
+      "title": "see their name attached accurately to a lasting piece of work",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_77bc617a236d7014",
+      "title": "receive an unsolicited letter of admiration from a respected expert",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_29e5e5206fe016e8",
+      "title": "be remembered as an exceptionally entertaining companion",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_0451d575a4ec31be",
+      "title": "have a rival quote their judgment approvingly",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_4de75cf43685a387",
+      "title": "make a performance people discuss long afterwards",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_d7dc5bfe16c952bc",
+      "title": "be recognized for excellent taste",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_2b27f619185e0293",
+      "title": "become the person newcomers most want to meet",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_0a0904ba337898c1",
+      "title": "have an unfashionable interest become admired through their example",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_c9fb69096e631695",
+      "title": "receive praise that describes the actual work rather than the family name",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_e2525460f105f650",
+      "title": "be remembered for an original idea",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_01db5f9616ca92a3",
+      "title": "have an old critic acknowledge a mistaken judgment",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_b47fd8103425a586",
+      "title": "be the most sought-after guest at an intimate gathering",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_b84e35202f72aabf",
+      "title": "have their private talent taken seriously by their household",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_3b23dc1807e1e99a",
+      "title": "be known for a distinctive personal style",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_4f4bfbdea900992e",
+      "title": "win a difficult contest with witnesses who understand its demands",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_915681a844b7df2a",
+      "title": "hear an admired performer use something they composed",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_5e2aa89899ebf9fc",
+      "title": "see a younger rival seek their instruction",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_79a77fe3446e6927",
+      "title": "be treated as the natural authority on a chosen narrow subject",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_67e0c051ec9af6d8",
+      "title": "have an ordinary-looking object they made become treasured",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_fa96d2769e52bb50",
+      "title": "receive an honor they can accept without feeling patronized",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_9fc4257491a7070a",
+      "title": "be remembered as more interesting than their official position suggests",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_cb58dea29a25e58c",
+      "title": "have their accomplishments discussed without comparison to a famous relative",
+      "requireAll": [],
+      "requireAny": [
+        "fameMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "fameMotivation",
+        "pride"
+      ]
+    },
+    {
+      "id": "dream_9b2fb7a93751a0c7",
+      "title": "choose a companion without seeking household approval",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_d5c54f8582b1966a",
+      "title": "refuse a powerful person's request without fearing the consequences",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_b7de05ae858bf584",
+      "title": "leave an unwanted role while still respected",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_5abbf81982282398",
+      "title": "spend earned money without presenting an account to a relative",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_9215a8a37626048d",
+      "title": "change an old ambition without being accused of failure",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_a5f6eb5891a1fc85",
+      "title": "move to a place selected for personal preference",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_a86ec6764f50ce49",
+      "title": "choose a craft that has no use to the clan",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_fb7b0a40738eac2d",
+      "title": "keep affection without accepting constant supervision",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_d4387d00facd951a",
+      "title": "travel under an ordinary introduction rather than a formal title",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_c0c7f11a6b545236",
+      "title": "have a livelihood that allows unpopular opinions",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_ce576bc79bca3ecb",
+      "title": "stop being the expected mediator in every family quarrel",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_41208e2a41d040ca",
+      "title": "be allowed a private decision that remains unexplained",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_0ce776f023df1625",
+      "title": "make an unconventional household arrangement work in practice",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_8ca878782dbb1e12",
+      "title": "take an extended break without somebody declaring a crisis",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_d6aade2cda10af66",
+      "title": "choose how much of their history strangers learn",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_8db525ea292bc067",
+      "title": "maintain a friendship others find inconvenient",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_074067ac77886440",
+      "title": "decline an inheritance that comes with intolerable conditions",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_bfc4c186fe35ed23",
+      "title": "retain a valued skill while giving up the profession attached to it",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_ae1231053922802d",
+      "title": "be free to admit that a former ambition no longer appeals",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_3b39d7e10363b48e",
+      "title": "have a private income sufficient for modest personal choices",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_5126c54a9452afb2",
+      "title": "keep a home that does not depend on pleasing a patron",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_4604c90b735dfee9",
+      "title": "choose a future without asking whether it looks impressive",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_c0174d5846a1757b",
+      "title": "be able to leave a gathering as soon as enjoyment ends",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_9f8e0abd5e4e02ea",
+      "title": "have affection that leaves room for a separate life",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "-authorityRespect",
+        "assertiveness"
+      ]
+    },
+    {
+      "id": "dream_f8a94141ade81a9d",
+      "title": "assemble a small collection of remarkably fine carved objects",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_e7151c8d06a583fd",
+      "title": "own a horse admired for its beauty as well as its usefulness",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_257743061a636d76",
+      "title": "commission a portrait that captures their preferred image of themselves",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_065f2fd0336ab80f",
+      "title": "obtain a rare volume for the pleasure of possessing it",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_3e7e4996cca5b6e9",
+      "title": "keep a wardrobe with a fabric for every preferred season",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_ee59a75cf17afbf3",
+      "title": "own a musical instrument whose tone delights them",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_6b83f2d70a817178",
+      "title": "collect the finest examples of an unfashionable craft",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_f6455541a158952a",
+      "title": "have a garden cultivated mainly for scent",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_6eebfe4cde3fe373",
+      "title": "acquire a beautiful object that a rival has long wanted",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_c6b4af220450f6d1",
+      "title": "commission a room whose design reflects no taste but their own",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_4a92f34d9dfe3141",
+      "title": "keep a private collection that visitors would envy if shown",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_1a8263762e9a323f",
+      "title": "own a small boat suited to leisurely outings",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_0a82be85cf74f7ad",
+      "title": "have an exceptional piece of jewelry made to a personal design",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_a81ea2fbabc3d4e3",
+      "title": "collect delicate cups that make an ordinary drink feel special",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_d270491e041c95f6",
+      "title": "own a hunting hound chosen for a particular admired quality",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_a07947715eeb860d",
+      "title": "commission a lavish gift that will be impossible to forget",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_a6a05ee2a435aa82",
+      "title": "obtain a set of finely balanced gaming pieces",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_480d9c73b15a31f4",
+      "title": "have a place where prized possessions can be displayed exactly as intended",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_389e7218e0ddcaf6",
+      "title": "collect ornaments associated with memorable journeys",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_9ee234332ffdf0ee",
+      "title": "own a cloak whose quality can be recognized without an emblem",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_672bf5711d8877c2",
+      "title": "acquire a handsome writing desk with ingenious small compartments",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_eb8c95164ece403b",
+      "title": "keep a selection of rare scents for private enjoyment",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_618266572cd3e307",
+      "title": "possess a map beautiful enough to enjoy apart from its usefulness",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_8cf8320d91a6c327",
+      "title": "leave a collection intact rather than have it divided among indifferent heirs",
+      "requireAll": [],
+      "requireAny": [
+        "wealthMotivation",
+        "greed",
+        "curiosity"
+      ],
+      "prefer": [
+        "wealthMotivation",
+        "greed"
+      ]
+    },
+    {
+      "id": "dream_94157e6cf143fde7",
+      "title": "finish a model with no detail they feel compelled to conceal",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_f2a74de4ab6f1e60",
+      "title": "play a difficult musical passage with apparent ease",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_6adb9adbcd79850d",
+      "title": "win a long-running friendly contest decisively",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_4d7289463d2c70ea",
+      "title": "learn a physical pursuit solely for its pleasure",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_1028ca5def92b43f",
+      "title": "become an unusually convincing storyteller",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_fa8e0e9ffc098390",
+      "title": "create a recipe that friends request by name",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_cd385c00cb7f3a3c",
+      "title": "learn to draw a familiar person's expression accurately",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_956e6ec1361c9721",
+      "title": "complete a collection of puzzles that once seemed impossible",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_73b5eab9b682a189",
+      "title": "make a practical object elegant enough to inspire imitation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_6759733e845b6438",
+      "title": "dance confidently in an unfamiliar regional style",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_fc9aa9759e4e03e9",
+      "title": "learn enough of a difficult craft to judge it for themselves",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_a5fa87cffecb9f60",
+      "title": "produce a beautiful result using deliberately humble materials",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_62c30626c9e6adf1",
+      "title": "design a game that holds friends' attention for an entire evening",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_04bb7dcaab61491f",
+      "title": "perform a comic scene without losing its timing",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_9c7c4145639c7e30",
+      "title": "write something they would enjoy even if it remained anonymous",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_6e8586b8cd1af6ef",
+      "title": "learn to recognize familiar birds by sound alone",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_4766a0ac9adf7b02",
+      "title": "build a small working model of an intriguing mechanism",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_31a1ee40a8e98ac0",
+      "title": "win a contest against somebody whose skill they sincerely respect",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_b15ac0c7e1448295",
+      "title": "make an object that conceals how difficult it was to construct",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_a3528ad1a916c15f",
+      "title": "be able to improvise gracefully when a familiar performance goes wrong",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_d70f849117e254d4",
+      "title": "understand a difficult subject well enough to challenge an admired explanation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_f288a16a34e2447c",
+      "title": "create an absorbing pursuit that remains free from public expectations",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_9c9c295de8313582",
+      "title": "complete an intricate private project at their own pace",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_dcd172e9d79cc82e",
+      "title": "become exceptionally good at something that carries no political advantage",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "discipline",
+        "curiosity",
+        "knowledgeMotivation"
+      ]
+    },
+    {
+      "id": "dream_35444a622d8e4eb0",
+      "title": "see a habitual rival lose an advantage they have taken for granted",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_039a3f0b2c166904",
+      "title": "surpass a relative who is always held up as the example",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_4ea7134b9cac5f39",
+      "title": "make a dismissive acquaintance ask for a favor",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_fa94ec1d9e59dae6",
+      "title": "win a dispute without offering the conciliatory gesture everyone expects",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_0de2ec1cb19d0a3a",
+      "title": "have an insulting assessment publicly corrected",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_fd1ecef888999fe0",
+      "title": "be offered the opportunity that once went to a better-connected rival",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_19efde386fa195ec",
+      "title": "see their restraint recognized as deliberate rather than timid",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_3af316c7153f585a",
+      "title": "make an opponent admit that a clever plan failed",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_f83a9db8b156f192",
+      "title": "gain the last word in a quarrel that still occupies private thought",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_622809ec2a4912e0",
+      "title": "be visibly preferred by someone a rival hopes to impress",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_d7fc90157feba0f4",
+      "title": "outlast a critic's confidence without having to answer every taunt",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_febb9f2b6bab949c",
+      "title": "see an arrogant expert confronted by a better result",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_3848098551fd02ae",
+      "title": "succeed conspicuously at something others called a waste of time",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_4f395cdffbee3a7e",
+      "title": "become too useful to be casually dismissed",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_5837751b6723bcd2",
+      "title": "have a former patron request their support on equal terms",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_c7953eca36a9a166",
+      "title": "watch a rival discover that inherited advantages are insufficient",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_1029bb1b970751b0",
+      "title": "receive an invitation from a circle that once excluded them",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_d096f0659fdbf596",
+      "title": "have an old refusal regretted by the person who made it",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_6b62639cf573242b",
+      "title": "surpass an admired competitor without pretending not to care",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_1d85a469f9742500",
+      "title": "be able to refuse somebody who once enjoyed making them wait",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_f4af9578f99ace26",
+      "title": "have a family comparison finally turn in their favor",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_7f41d77a9e172819",
+      "title": "win a public contest without owing the victory to anyone's mercy",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_f08c3b4d571ed017",
+      "title": "make a persistent skeptic acknowledge a demonstrated result",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_8a7d5a94053d226a",
+      "title": "leave an old rival uncertain about how much influence they still possess",
+      "requireAll": [],
+      "requireAny": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation",
+        "pride"
+      ],
+      "prefer": [
+        "envy",
+        "vengefulness",
+        "revengeMotivation"
+      ]
+    },
+    {
+      "id": "dream_f8ad9432e4c15aae",
+      "title": "be consulted before a decision has already been settled",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_4fdedf6e27f6c1b4",
+      "title": "have the final choice in matters affecting their private household",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_efcac445f2a4e604",
+      "title": "build a circle whose members depend on their introductions",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_bc39a6db1a2aeeff",
+      "title": "be the person a powerful acquaintance trusts with a delicate question",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_6a31d8529944407f",
+      "title": "gain enough influence to protect a favored arrangement",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_6fbcab3de40bc39d",
+      "title": "place a personally trusted adviser where their views will be heard",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_cb64edb96a9602de",
+      "title": "make others compete for their endorsement",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_49507491c074ba3a",
+      "title": "have a public proposal succeed because their support made the difference",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_faa767b9e47b2de7",
+      "title": "be able to decide which obligations deserve attention first",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_8e83b0ab41ec011c",
+      "title": "shape an institution around their preferred way of working",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_1c2023dfc55f4746",
+      "title": "keep control of a project through its final decisions",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_b2b594dd10a2cd7f",
+      "title": "build a reputation that makes people hesitate before opposing them casually",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_bdc35ff7b749e28d",
+      "title": "be able to reward loyalty in a way others notice",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_073de2fca656343d",
+      "title": "have a rival's plans depend on a concession only they can give",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_473aad09b2464e87",
+      "title": "become the person who decides when a disagreement is finished",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_6d1c330b627fc4d5",
+      "title": "secure a position with more discretion and fewer supervising voices",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_9f870aaac4771ff1",
+      "title": "gain direct access to someone who currently hears them through intermediaries",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_6489fdff4261630d",
+      "title": "make a chosen successor personally indebted to their guidance",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_87384db0c7354e6f",
+      "title": "have their advice requested rather than offered unsolicited",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_b1e6887e6fb8bf9e",
+      "title": "maintain influence after relinquishing the most tiring public duties",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_fc3584dca7e03513",
+      "title": "be able to keep unwelcome people out of a private circle",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_713ad22db9a442c1",
+      "title": "make a long-standing personal preference become the accepted practice",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_d74cba6f08a51ddb",
+      "title": "become difficult to replace in an important network of acquaintances",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_c94cf58922ed0012",
+      "title": "have enough authority to stop explaining every minor decision",
+      "requireAll": [],
+      "requireAny": [
+        "powerMotivation",
+        "ambition"
+      ],
+      "prefer": [
+        "powerMotivation",
+        "ambition"
+      ]
+    },
+    {
+      "id": "dream_65feeabf1804f299",
+      "title": "spend a season following music from one welcoming gathering to another",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_0d2e94cdb7155b16",
+      "title": "share a long journey with somebody who enjoys comfortable silence",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_e871e6a96c336a82",
+      "title": "host an evening remembered mainly for how much everyone laughed",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_899158596b17b552",
+      "title": "learn every variation of a favorite local dish",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_889b281349224434",
+      "title": "keep the company of a particularly engaging animal",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_e626862e6c63a1ff",
+      "title": "have a friend who welcomes rambling conversations without an agenda",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_f31fb99de25e3e8e",
+      "title": "see a spectacular natural place with no official purpose attached",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_fa1f3c220a002e6a",
+      "title": "spend several days practicing a beloved hobby with a patient companion",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_ce084dfccfb9430a",
+      "title": "have a household where spontaneous music is ordinary",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_4e3ef6c2be280d77",
+      "title": "find a place whose weather suits their body and temper",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_b2b55594d207a51c",
+      "title": "enjoy a leisurely friendship that never becomes a contest for favors",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_feeb37f0b1162570",
+      "title": "be surprised by a thoughtful gift chosen from close observation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_ffdffff22ca22700",
+      "title": "spend a year noticing the seasons in one cherished landscape",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_34b053404dc88e44",
+      "title": "share an absorbing interest with a person they love",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_ca2d2d905c278b17",
+      "title": "have a familiar animal seek their company freely",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_a77d2694ab29cc02",
+      "title": "be invited into a conversation that continues late because nobody wants to leave",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_76be0b011030916e",
+      "title": "enjoy a feast entirely free of speeches about duty",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_f9c8b3247e4e0f67",
+      "title": "find a companion who enjoys the same unfashionable pleasures",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_40592bc510c50a4b",
+      "title": "spend an afternoon teaching something without turning it into an obligation",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_69e7d8b43d6ecd44",
+      "title": "hear a favorite story told by someone who knows why it matters",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_4d4e946dfb77da34",
+      "title": "travel slowly enough to remain in a place merely because it is pleasant",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_8820a5e9aed8284b",
+      "title": "have a private celebration of an achievement too small for public ceremony",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_30f4a5d79a60dc0b",
+      "title": "grow comfortable enough with a friend to stop polishing every remark",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    },
+    {
+      "id": "dream_97ba798b44109e7d",
+      "title": "reach a time when an ordinary pleasant day feels sufficient",
+      "requireAll": [],
+      "requireAny": [],
+      "prefer": [
+        "sociability",
+        "familyMotivation"
+      ]
+    }
+  ]
+}

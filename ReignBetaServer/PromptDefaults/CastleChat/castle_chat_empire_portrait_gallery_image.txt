@@ -1,0 +1,79 @@
+Create an exceptionally photorealistic cinematic scene inside an **Imperial dynastic portrait gallery**, reflecting the Empire's traditions of political legitimacy, ancestry, office, military accomplishment, civic status, classical artistic influence, and competing claims to Imperial continuity.
+
+The chamber should feel older and more institutional than its Vlandian equivalent.
+
+Broad rounded arches divide a long gallery built from fitted stone and brick. Sections of worn marble facing, painted plaster, geometric mosaic flooring, pilasters, bronze lamps, and architectural ornament reflect generations of Imperial wealth.
+
+Tall windows provide strong but controlled natural light.
+
+Portraits are displayed in painted wooden, bronze-edged, or gilded frames. Some are very old and darkened with age. Others were commissioned much more recently.
+
+The gallery may also display:
+
+- Imperial insignia.
+- Military standards.
+- Civic honors.
+- Laurel motifs.
+- Family seals.
+- Inscribed plaques.
+- Legal records concerning titles.
+- Old maps.
+- Copies of decrees.
+- Marriage records.
+- Administrative appointments.
+- Commemorative objects from past offices or campaigns.
+
+The gallery should communicate that an Imperial family might derive legitimacy not only from blood but also from **office, service, law, military command, and association with the old Empire**.
+
+Because only supplied source characters may be depicted, never generate an invented human in a portrait, mosaic, bust, relief, statue, fresco, or background artwork.
+
+Visible portrait paintings must either depict supplied source characters or be obscured, covered, angled away, cropped, or outside readable focus so no new human identity is created.
+
+Likely activities include:
+
+- Studying past rulers.
+- Examining political ancestry.
+- Comparing competing family lines.
+- Looking at a former senator, general, governor, or magistrate from one's lineage.
+- Reading an inscription.
+- Considering Imperial succession.
+- Researching a legal claim.
+- Discussing whether ancestry truly grants legitimacy.
+- Examining the honors associated with an ancestor.
+- Reflecting upon the division of the Empire.
+- Looking at portraits from before the civil conflicts.
+- Comparing older and newer Imperial styles.
+- Meeting privately beneath the images of previous rulers.
+- Contemplating how history will judge the living.
+
+### ABSOLUTE CHARACTER REQUIREMENTS
+
+Only supplied full-body source characters may appear as human beings anywhere in the image.
+
+Do not invent:
+
+- Ancestors.
+- Emperors.
+- Senators.
+- Soldiers.
+- Servants.
+- Guards.
+- Artists.
+- Courtiers.
+- Background figures.
+
+This includes all artistic representations.
+
+Preserve each source character's exact face, age, skin, hair, eyes, scars, facial proportions, height, build, body mass, musculature, torso proportions, and natural physique.
+
+Clothing may be changed to realistic Imperial noble or civilian clothing appropriate to rank.
+
+Avoid theatrical ancient-Roman costumes.
+
+The characters should naturally examine portraits, inscriptions, standards, plaques, or documents.
+
+Render the environment and people as high-end live-action historical photography.
+
+Maximum realism.
+
+---

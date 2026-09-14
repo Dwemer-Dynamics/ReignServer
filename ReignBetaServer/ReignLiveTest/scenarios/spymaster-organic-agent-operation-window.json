@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance - natural foreign-agent operation window",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "world_advance", "mode": "passive_world", "days": 20, "timeoutSeconds": 7200 },
+    {
+      "operation": "spymaster_organic",
+      "phase": "observe",
+      "stage": "agent_operation_window",
+      "fixtureRunId": "spymaster_organic_launch",
+      "timeoutSeconds": 120
+    }
+  ]
+}
