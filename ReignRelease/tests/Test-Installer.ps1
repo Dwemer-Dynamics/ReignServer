@@ -41,6 +41,19 @@ try {
     try { Assert-Rejected { Write-ReignJson $record @{state='should-not-be-written'} } 'reject-locked-install-record-replacement' }
     finally { $locked.Dispose() }
     Assert-Contract ((Get-ReignHash $record) -eq $before -and @(Get-ChildItem -LiteralPath $root -Filter '*.new-*').Count -eq 0) 'failed-record-replacement-preserves-original-and-cleans-temp'
+    # Execute only the launcher's actual record-reading expression. This proves
+    # decoding under Windows PowerShell 5.1 without starting a server/listener.
+    $InstallationFile = Join-Path $root 'utf8-installation.json'
+    $expectedServerRoot = 'D:\' + [string][char]0x6F22 + [char]0x5B57 + '\ReignServer'
+    Write-ReignJson $InstallationFile @{schema='reign-installation-v1';serverRoot=$expectedServerRoot}
+    $tokens = $null
+    $parseErrors = $null
+    $launcher = Join-Path (Split-Path $PSScriptRoot -Parent) 'Start-ReignServer.ps1'
+    $launcherAst = [Management.Automation.Language.Parser]::ParseFile($launcher,[ref]$tokens,[ref]$parseErrors)
+    $readAssignments = @($launcherAst.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$record'},$false))
+    Assert-Contract (@($parseErrors).Count -eq 0 -and $readAssignments.Count -eq 1) 'launcher-record-reader-is-bounded'
+    $loadedRecord = & ([scriptblock]::Create($readAssignments[0].Right.Extent.Text))
+    Assert-Contract ($loadedRecord.serverRoot -eq $expectedServerRoot) 'launcher-reads-utf8-installation-paths'
     $inputRoot = Join-Path $root 'input'
     $relative = "PortraitCache/_shared/Lord O'Brien 漢字/portrait.png"
     $entry = New-Fixture $inputRoot $relative 'original'
