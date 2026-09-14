@@ -42,9 +42,11 @@ Name: "{group}\Uninstall Reign"; Filename: "{uninstallexe}"
 var
   Folders: TInputDirWizardPage;
   Sources: TInputFileWizardPage;
+  SetupSucceeded: Boolean;
 
 procedure InitializeWizard;
 begin
+  SetupSucceeded := False;
   Folders := CreateInputDirPage(wpWelcome, 'Choose installation folders',
     'Select Bannerlord and the drive with enough space for Reign.',
     'Keep the program and player data in separate folders. Setup verifies the game version and available space before installing.', False, '');
@@ -106,9 +108,25 @@ begin
       ' -BannerlordRoot ' + Quoted(Folders.Values[0]) + ' -ProgramRoot ' + Quoted(Folders.Values[1]) +
       ' -DataRoot ' + Quoted(Folders.Values[2]) + ' -PayloadDirectory ' + Quoted(Folders.Values[3]);
     if Sources.Values[0] <> '' then Arguments := Arguments + ' -SourcesFile ' + Quoted(Sources.Values[0]);
-    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments, '', SW_SHOW, ewWaitUntilTerminated, Code) or (Code <> 0) then
-      RaiseException('Reign setup did not complete. Review the setup journal in your chosen data folder, correct the reported problem, and run setup again.');
+    SetupSucceeded := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments, '', SW_SHOW, ewWaitUntilTerminated, Code);
+    if SetupSucceeded then SetupSucceeded := Code = 0;
+    if not SetupSucceeded then
+      Log('Reign payload installation failed. The completion page and process exit code must report failure.');
   end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and not SetupSucceeded then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Reign installation did not complete';
+    WizardForm.FinishedLabel.Caption := 'Reign is not ready to run. Check the setup journal in your chosen player data folder, correct the reported problem, and run setup again.';
+    WizardForm.NextButton.Caption := 'Close';
+  end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if SetupSucceeded then Result := 0 else Result := 1;
 end;
 
 function InitializeUninstall(): Boolean;

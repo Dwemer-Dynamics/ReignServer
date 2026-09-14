@@ -46,6 +46,10 @@ if (-not (Test-Path -LiteralPath $keyPath)) {
     $password = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($keyPath), $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser))
 }
 function Protect-PrivateFile([string]$Path) {
+    # GUI setup can inherit PowerShell 7 module paths before starting Windows
+    # PowerShell 5.1. Load this host's security module, never an incompatible
+    # module discovered through that inherited search path.
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     # icacls changes only the DACL; Set-Acl can request SACL privileges on repair
     # under a standard Windows account even when no audit changes are intended.
     $acl = Get-Acl -LiteralPath $Path
