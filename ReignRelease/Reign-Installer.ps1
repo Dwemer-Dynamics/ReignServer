@@ -26,6 +26,13 @@ function Get-ReignHash([string]$Path) {
     try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-','').ToLowerInvariant() }
     finally { $stream.Dispose(); $algorithm.Dispose() }
 }
+function Assert-ReignDatabasePath([string]$Path, [string]$Label) {
+    # Pinned PostgreSQL uses narrow Windows paths even with a UTF-8 database.
+    # Reject unsupported roots before copying payloads or creating state.
+    if ($Path -match '[^\x20-\x7e]') {
+        throw "$Label must use ASCII characters (English letters, numbers, spaces and punctuation) throughout its full path. The bundled database cannot use accented or other non-English folder names. Choose another local folder."
+    }
+}
 function Assert-ReignLocalPath([string]$Path) {
     if ($Path -notmatch '^[A-Za-z]:[\\/]' -or $Path.Length -lt 5) { throw 'Choose an absolute folder on a local drive.' }
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\','/')

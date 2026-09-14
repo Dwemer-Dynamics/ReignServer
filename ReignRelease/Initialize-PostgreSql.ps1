@@ -11,6 +11,9 @@ $ErrorActionPreference = 'Stop'
 if ($KeepValidationRunning -and -not $ValidationOnly) { throw 'Only an isolated validation database can remain running after this provisioning command.' }
 $bin = [IO.Path]::GetFullPath($BinDirectory)
 $state = [IO.Path]::GetFullPath($StateDirectory).TrimEnd('\')
+if ($bin -match '[^\x20-\x7e]' -or $state -match '[^\x20-\x7e]') {
+    throw 'PostgreSQL binary and state folders require ASCII paths (English letters, numbers, spaces and punctuation). Choose folders without accented or other non-English names before provisioning.'
+}
 if (-not [IO.Path]::IsPathRooted($StateDirectory) -or $state.Length -lt 8) { throw 'Choose an explicit local PostgreSQL state directory.' }
 $cluster = Join-Path $state 'cluster'
 $keyPath = Join-Path $state 'owner.password'

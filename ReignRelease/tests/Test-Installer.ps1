@@ -31,6 +31,9 @@ function Write-FixtureZip([string]$Path, $Index, $Entries) {
     [pscustomobject]@{id=$Index.id;version=$Index.version;file=[IO.Path]::GetFileName($Path);bytes=(Get-Item -LiteralPath $Path).Length;sha256=(Get-ReignHash $Path);expandedBytes=($Index.files|Measure-Object bytes -Sum).Sum}
 }
 try {
+    Assert-ReignDatabasePath "D:\Reign O'Brien\Player data-1" 'Fixture'
+    Assert-Contract $true 'database-path-allows-ascii-spaces-and-apostrophes'
+    Assert-Rejected { Assert-ReignDatabasePath ('D:\Reign-' + [char]0x00E9) 'Fixture' } 'database-path-rejects-accented-roots'
     $record = Join-Path $root "record O'Brien.json"
     Write-ReignJson $record @{state='installing';version='first'}
     Write-ReignJson $record @{state='complete';version='second'}

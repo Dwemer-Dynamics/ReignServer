@@ -20,6 +20,8 @@ try {
     $game = Assert-ReignLocalPath $BannerlordRoot
     $program = Assert-ReignLocalPath $ProgramRoot
     $data = Assert-ReignLocalPath $DataRoot
+    Assert-ReignDatabasePath $program 'ReignServer program folder'
+    Assert-ReignDatabasePath $data 'Reign player data folder'
     $payloads = [IO.Path]::GetFullPath($PayloadDirectory)
     $recordPath = Assert-ReignLocalPath $InstallationFile
     foreach ($pair in @(@($game,$program),@($game,$data),@($program,$data))) {

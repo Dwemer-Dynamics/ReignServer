@@ -62,6 +62,26 @@ begin
   Sources.Add('Private download file (optional):', 'JSON files|*.json', '.json');
 end;
 
+function IsDatabasePathSupported(Value: String): Boolean;
+var I: Integer;
+begin
+  Result := False;
+  for I := 1 to Length(Value) do
+    if (Ord(Value[I]) < 32) or (Ord(Value[I]) > 126) then Exit;
+  Result := True;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = Folders.ID then begin
+    if not IsDatabasePathSupported(Folders.Values[1]) or not IsDatabasePathSupported(Folders.Values[2]) then begin
+      MsgBox('Choose ReignServer program and player data folders without accented or other non-English characters anywhere in their paths. The bundled database requires English letters, numbers, spaces and punctuation. Your Bannerlord and payload folders can keep their existing names.', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;
+
 function Quoted(Value: String): String;
 var Tail: Integer;
 begin
