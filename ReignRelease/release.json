@@ -12,7 +12,7 @@
   },
   "development": "local",
   "sourceOwnership": {
-    "Reign": ["ReignBeta", "BannerlordEditorMcp", "ReignMcp", "docs", "tests", ".codex"],
+    "Reign": ["ReignBeta", "ReignContent", "BannerlordEditorMcp", "ReignMcp", "docs", "tests", ".codex"],
     "ReignServer": ["ReignBetaServer", "ReignModules", "NativeCharacterImageGenerator", "ReignTools", "ReignRelease"]
   },
   "supportedPlatform": { "os": "Windows 11", "architecture": "x64", "gameStore": "Steam", "bannerlordVersion": "v1.4.8" },

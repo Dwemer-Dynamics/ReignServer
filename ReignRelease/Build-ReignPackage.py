@@ -114,6 +114,29 @@ def audit_payload(root):
         # Paths only: never include matching secret text.
         raise ValueError("Prohibited release files or possible credentials: " + ", ".join(sorted(set(failures))[:25]))
 
+def tracked_private_portrait_source(workspace, inventory_path, portrait_inventory):
+    expected_inventory = (workspace / "ReignContent" / "shared-portrait-inventory.json").resolve()
+    if inventory_path.resolve() != expected_inventory:
+        raise ValueError("Shared portraits must use the tracked private ReignContent inventory")
+    if portrait_inventory.get("schema") != "reign-shared-content-inventory-v1":
+        raise ValueError("Unsupported shared portrait inventory")
+    configured_root = Path(portrait_inventory["root"])
+    if configured_root.is_absolute():
+        raise ValueError("Shared portrait inventory root must be repository-relative")
+    portrait_source = (inventory_path.parent / configured_root).resolve()
+    expected_source = (workspace / "ReignContent" / "PortraitCache" / "_shared").resolve()
+    if portrait_source != expected_source:
+        raise ValueError("Shared portrait source must be ReignContent/PortraitCache/_shared")
+    tracked = set(subprocess.run(
+        ["git", "-C", str(workspace), "ls-files", "-z", "--", "ReignContent"],
+        check=True, capture_output=True).stdout.decode("utf-8").rstrip("\0").split("\0"))
+    required = {"ReignContent/shared-portrait-inventory.json"}
+    required.update("ReignContent/PortraitCache/_shared/" + entry["path"] for entry in portrait_inventory["files"])
+    missing = sorted(required - tracked)
+    if missing:
+        raise ValueError("Shared portrait source contains untracked package inputs: " + ", ".join(missing[:10]))
+    return portrait_source
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)
@@ -248,9 +271,16 @@ def main():
             if path.is_file() and path.name.lower().startswith(("license", "notice", "copying")) and path.stat().st_size < 2 * 1024 * 1024:
                 copy(path, notices / "nuget" / name / path.relative_to(directory))
     write(notices / "nuget-packages.json", packages)
-    portrait_inventory = read(spec["portraitInventory"])
-    portrait_source = Path(portrait_inventory["root"])
+    portrait_inventory_path = Path(spec["portraitInventory"])
+    portrait_inventory = read(portrait_inventory_path)
+    portrait_source = tracked_private_portrait_source(workspace, portrait_inventory_path, portrait_inventory)
     allowed = {"portrait.png", "portrait_chest.png", "thumbnail_wide.png", "thumbnail.png", "zoom.png", "portrait_input.json", ".portrait_derivatives.json", ".ai_generation.json", "formal_outfit.json", "prompt.txt"}
+    listed_paths = [safe_relative(entry["path"]) for entry in portrait_inventory["files"]]
+    if len(set(listed_paths)) != len(listed_paths):
+        raise ValueError("Shared portrait inventory contains duplicate paths")
+    actual_paths = {path.relative_to(portrait_source).as_posix() for path in portrait_source.rglob("*") if path.is_file()}
+    if actual_paths != {path.as_posix() for path in listed_paths}:
+        raise ValueError("Tracked shared portrait source and inventory differ")
     for entry in portrait_inventory["files"]:
         relative = safe_relative(entry["path"])
         if len(relative.parts) != 2 or relative.name not in allowed:

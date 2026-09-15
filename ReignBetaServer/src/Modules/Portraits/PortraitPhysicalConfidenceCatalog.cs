@@ -128,7 +128,8 @@ namespace ReignBetaServer
         private static bool IsFemalePortraitSubject(Dictionary<string, object> payload)
         {
             string gender = ReadString(payload, "gender", "").Trim().ToLowerInvariant();
-            return gender == "woman" || gender == "female" || gender == "girl";
+            if (gender == "woman" || gender == "female" || gender == "girl") return true;
+            return payload != null && payload.ContainsKey("isFemale") && ReadBool(payload, "isFemale", false);
         }
 
         private static int ClampPortraitPercentage(int value)
