@@ -1080,6 +1080,11 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 if (selectedLanes.Contains("exact_history", StringComparer.OrdinalIgnoreCase)
                     && !selectedLanes.Contains("interpersonal_history", StringComparer.OrdinalIgnoreCase)) selectedLanes.Add("interpersonal_history");
                 selectedLanes = selectedLanes.Where(lane => !string.Equals(lane, "exact_history", StringComparison.OrdinalIgnoreCase)).ToList();
+                // Native history documents live in world_affairs even when the
+                // conversation asks about the immediate local situation.
+                if (types.Contains("world_history_event", StringComparer.OrdinalIgnoreCase)
+                    && !selectedLanes.Contains("world_affairs", StringComparer.OrdinalIgnoreCase))
+                    selectedLanes.Add("world_affairs");
                 if (selectedLanes.Count > 0) filters["memoryLane"] = selectedLanes;
                 if (!string.IsNullOrWhiteSpace(timelineId)) filters["timelineId"] = timelineId;
                 request["filters"] = filters;
@@ -1119,6 +1124,8 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
             HashSet<string> types = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "memory", "summary" };
             if (RouteHasLane(route, "personal_state")) types.Add("comprehension");
             if (RouteHasLane(route, "beliefs_and_rumors")) types.Add("belief");
+            if (RouteHasLane(route, "world_affairs") || RouteHasLane(route, "local_awareness"))
+                types.Add("world_history_event");
             return types.ToList();
         }
 

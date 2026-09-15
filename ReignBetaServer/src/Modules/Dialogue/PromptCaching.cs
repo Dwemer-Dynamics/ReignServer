@@ -479,6 +479,9 @@ namespace ReignBetaServer
             };
             string conversationScenePrompt = ReadString(turnPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(turnPayload, heroId, heroName, playerName);
+            string guestPromptBlock = BuildTemporaryGuestDialoguePromptBlock(turnPayload, heroId);
+            if (!string.IsNullOrWhiteSpace(guestPromptBlock))
+                roleAttribution += "\n\n" + guestPromptBlock;
             string arrestPromptBlock = BuildArrestDialoguePromptBlock(turnPayload);
             if (!string.IsNullOrWhiteSpace(arrestPromptBlock))
                 roleAttribution = roleAttribution + "\n\n" + arrestPromptBlock;
@@ -662,6 +665,9 @@ namespace ReignBetaServer
             };
             string conversationScenePrompt = ReadString(eventPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(eventPayload, heroId, heroName, playerName);
+            string guestPromptBlock = BuildTemporaryGuestDialoguePromptBlock(eventPayload, heroId);
+            if (!string.IsNullOrWhiteSpace(guestPromptBlock))
+                roleAttribution += "\n\n" + guestPromptBlock;
             promptPhaseTiming["templateAssemblyMs"] = promptPhaseTimer.ElapsedMilliseconds;
             promptPhaseTimer.Restart();
             Dictionary<string, object> npcRelationshipPrompt =
@@ -2031,6 +2037,7 @@ namespace ReignBetaServer
             results.AddRange(RunPromptCompositionSelfTests());
             results.AddRange(RunConversationNaturalnessSelfTests());
             results.AddRange(RunRoleplayContinuitySelfTests());
+            results.AddRange(RunTemporaryGuestDialogueSelfTests());
             PromptEnvelope first = CreatePromptEnvelope("dialogue", "commoner", "STATIC", "CHARACTER", "turn one");
             PromptEnvelope second = CreatePromptEnvelope("dialogue", "commoner", "STATIC", "CHARACTER", "turn two");
             add("prompt_prefix_dynamic_stability", ReadString(first.Diagnostics, "globalPrefixHash", "") == ReadString(second.Diagnostics, "globalPrefixHash", "") && ReadString(first.Diagnostics, "characterPrefixHash", "") == ReadString(second.Diagnostics, "characterPrefixHash", ""), "Changing the live suffix preserves both reusable prefix hashes.", null);

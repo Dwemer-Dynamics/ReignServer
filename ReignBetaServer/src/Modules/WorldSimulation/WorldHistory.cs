@@ -12,7 +12,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const int PostgreSqlWorldHistorySchemaRevision = 2;
+        private const int PostgreSqlWorldHistorySchemaRevision = 3;
         private static readonly object WorldHistoryCacheLock = new object();
         private static readonly Dictionary<string, Dictionary<string, object>> WorldHistoryClaimCache =
             new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
@@ -150,6 +150,7 @@ AND NOT EXISTS (
                 }
             }
             else ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
+            EnsureImmediateTournamentKnowledge(connection);
             string storedCampaignId = ReadString(QuerySql(connection,
                 "SELECT campaign_id FROM world_history_events WHERE campaign_id<>'' LIMIT 1;").FirstOrDefault(), "campaign_id", "");
             if (!string.IsNullOrWhiteSpace(storedCampaignId))
@@ -1218,6 +1219,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             };
             assertions.AddRange(RunLieDetectionAssertions(campaignId, timelineId));
             assertions.AddRange(RunWorldHistoryRetentionAssertions());
+            assertions.AddRange(RunWorldHistoryDialogueAssertions(campaignId, timelineId));
             try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
             try { Directory.Delete(CampaignDirectory(campaignId), true); } catch { }
             return new Dictionary<string, object> { ["ok"] = assertions.All(x => ReadBool(x, "passed", false)), ["passed"] = assertions.All(x => ReadBool(x, "passed", false)), ["assertions"] = assertions };

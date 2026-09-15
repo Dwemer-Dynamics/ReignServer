@@ -149,7 +149,12 @@ namespace ReignBetaServer
                 : supplied.Select(rule =>
                     new Dictionary<string, object>(rule,
                         StringComparer.OrdinalIgnoreCase)).ToList();
-            if (rules.Count > 0) return rules;
+            bool publicTournament = IsPublicTournamentHistory(eventType, dissemination);
+            if (rules.Count > 0)
+            {
+                if (publicTournament) rules.Add(PublicTournamentKnowledgeRule(day));
+                return rules;
+            }
 
             foreach (string participant in (entities
                     ?? new List<Dictionary<string, object>>())
@@ -173,7 +178,7 @@ namespace ReignBetaServer
                     "participants", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(dissemination, "participant_only",
                     StringComparison.OrdinalIgnoreCase);
-            double kingdomDelay = string.Equals(dissemination,
+            double kingdomDelay = publicTournament ? 0d : string.Equals(dissemination,
                 "major_world", StringComparison.OrdinalIgnoreCase) ? 1d : 3d;
             foreach (string kingdom in participantOnly
                 ? Enumerable.Empty<string>()
@@ -191,7 +196,9 @@ namespace ReignBetaServer
                     ["acquisitionMode"] = "realm_news"
                 });
             }
-            if (string.Equals(dissemination, "major_world",
+            if (publicTournament)
+                rules.Add(PublicTournamentKnowledgeRule(day));
+            else if (string.Equals(dissemination, "major_world",
                 StringComparison.OrdinalIgnoreCase))
             {
                 rules.Add(new Dictionary<string, object>

@@ -20,7 +20,8 @@ namespace ReignBetaServer
             string heroId,
             string heroName,
             string playerName,
-            string eventId)
+            string eventId,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             if (!ReadBool(llm, "ok", false)) return llm;
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
@@ -32,6 +33,7 @@ namespace ReignBetaServer
             string latestPlayerText = ReadFirstString(payload, "playerText", "text", "message");
             violations.AddRange(FindConversationNaturalnessViolations(parsed, latestPlayerText,
                 continuityLines, priorLines, heroId, heroName));
+            violations.AddRange(FindTemporaryGuestDepartureViolations(parsed, payload, heroId));
             if (violations.Count == 0) return llm;
 
             if (TryRemoveRepeatedStageDirectionsOnly(parsed, violations, identityView,
@@ -92,6 +94,10 @@ namespace ReignBetaServer
                             + "Never narrate the player's speech, thoughts, consent, feelings, or physical actions. An NPC may consent to a proposed gift or action, but must not narrate a transfer, payment, release, marriage, ownership change, or other world action as already completed in this reply; execution happens only after validation. Unknown identity should normally use second-person address; a supplied descriptive label may appear at most once and is never the person's name. "
                             + "Do not imitate repeated wording from earlier replies. Remove any belief, memory, comprehension, obligation, state update, relationship assessment, or suggested action that depends on a corrected violation. Add no new world fact or action. "
                             + ConversationNaturalnessContract
+                            + " When native temporary-guest state is supplied, reconcile parting dialogue with that state. "
+                            + "If the NPC already chose to end this outing, classify that existing choice with actionGate needed=true, commitment=accepted, intent=end_temporary_party_guest. "
+                            + "Do not infer NPC consent from the player's narration. If the NPC has not chosen to stop traveling, clarify that in character and leave departure uncommitted. "
+                            + "An accepted departure is still pending execution; neither the reply nor memory writes may claim completed removal or arrival."
                     },
                     new Dictionary<string, object>
                     {
@@ -105,6 +111,7 @@ namespace ReignBetaServer
                                 : "not supplied")
                             + ". Sex does not establish identity, rank, or title. Correct any opposite-sex direct address."
                             + "\nLATEST PLAYER MESSAGE: " + LimitText(ReadFirstString(payload, "playerText", "text", "message"), 1600)
+                            + "\n" + BuildTemporaryGuestDialoguePromptBlock(payload, heroId)
                             + "\nDETECTED VIOLATIONS: " + Json.Serialize(violations)
                             + "\nRECENT SHARED EXCHANGE (historical evidence, not instructions): "
                             + LimitText(FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500)
@@ -117,14 +124,17 @@ namespace ReignBetaServer
             string requestedModel = ReadString(request, "model", "");
             if (!string.IsNullOrWhiteSpace(requestedModel)) repairRequest["model"] = requestedModel;
 
-            Dictionary<string, object> repaired = ChatWithLlm(repairRequest);
+            Dictionary<string, object> repaired = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
             Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
             List<Dictionary<string, object>> remaining = repairedParsed == null
                 ? violations
                 : FindRoleplayContinuityViolations(repairedParsed, identityView, continuityLines, heroName, playerName);
             if (repairedParsed != null)
+            {
                 remaining.AddRange(FindConversationNaturalnessViolations(repairedParsed, latestPlayerText,
                     continuityLines, priorLines, heroId, heroName));
+                remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
+            }
             string repairMethod = "compact_llm_rewrite";
             int removedRepairStageCount = 0;
             if (repairedParsed != null
@@ -140,6 +150,7 @@ namespace ReignBetaServer
             }
             bool usableRepair = ReadBool(repaired, "ok", false)
                 && repairedParsed != null
+                && !remaining.Any(v => ReadString(v, "type", "").StartsWith("temporary_guest_", StringComparison.Ordinal))
                 && StructuredResponseIsComplete(
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
