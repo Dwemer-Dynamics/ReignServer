@@ -52,7 +52,7 @@ namespace ReignBetaServer
             return Path.GetFullPath(candidate);
         }
         private const string CharacterSchemaVersion = "reign_character_v2";
-        private const int CharacterConstructionEngineVersion = 3;
+        private const int CharacterConstructionEngineVersion = 4;
         private const int CharacterConstructionTokenCeiling = 50000;
         private const int AuditMaxStringChars = 16000;
         private const int AuditMaxListItems = 120;
