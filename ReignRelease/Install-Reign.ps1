@@ -32,7 +32,7 @@ try {
     $edge = @((Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'), (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'))
     if (@($edge | Where-Object { [IO.File]::Exists($_) }).Count -eq 0) { throw 'Microsoft Edge is required for the dedicated Reign Control Center.' }
     $release = Read-ReignJson $Manifest
-    if ($release.schema -ne 'reign-package-v1' -or $release.protocolVersion -ne 1 -or $release.payloads.Count -ne 5) { throw 'Unsupported or incomplete setup manifest.' }
+    if ($release.schema -ne 'reign-package-v1' -or $release.protocolVersion -ne 1 -or $release.payloads.Count -ne 4) { throw 'Unsupported or incomplete setup manifest.' }
     if ($release.version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$' -or $release.sourceFingerprint -notmatch '^[a-f0-9]{64}$') { throw 'Invalid release identity.' }
     $previousRecord = $null
     $previousReceipt = $null
@@ -70,7 +70,7 @@ try {
     [IO.Directory]::CreateDirectory($stage) | Out-Null
     Write-ReignJson (Join-Path $stage '.reign-staging.json') @{schema='reign-setup-staging-v1';runId=$runId}
     $indices = @{}
-    foreach ($id in @('client','server','runtime','dependencies','portraits')) {
+    foreach ($id in @('client','server','runtime','dependencies')) {
         $matches = @($release.payloads | Where-Object id -eq $id)
         if ($matches.Count -ne 1) { throw "Setup requires exactly one $id payload." }
         Write-Host "Verifying and extracting $id..."
@@ -130,19 +130,30 @@ try {
     Install-Directory (Join-Path $stage 'client\Modules\ReignBeta') $module
     foreach ($name in $replaceDependencies) { Install-Directory (Join-Path $stage ('dependencies\Modules\' + $name)) (Join-Path $game ('Modules\' + $name)) }
     & (Join-Path $PSScriptRoot 'Initialize-PostgreSql.ps1') -BinDirectory (Join-Path $serverDestination 'runtime\postgresql\bin') -StateDirectory (Join-Path $data 'postgresql')
-    $content = Join-Path $data 'Content'
-    [IO.Directory]::CreateDirectory($content) | Out-Null
-    $previousContent = @()
-    if ($null -ne $previousReceipt) { $previousContent = @($previousReceipt.contentFiles) }
-    $merged = Merge-ReignContent (Join-Path $stage 'portraits') $content $indices.portraits $previousContent
-    $receipt.contentFiles = $merged.files
-    $receipt.preservedPortraits = $merged.preservedPortraits
-    $record = [ordered]@{schema='reign-installation-v1';version=$release.version;protocolVersion=$release.protocolVersion;contentVersion=$release.contentVersion;serverRoot=$serverDestination;contentRoot=$content;dataRoot=$data;bannerlordRoot=$game;moduleRoot=$module;postgresBin=(Join-Path $serverDestination 'runtime\postgresql\bin');postgresPort=55432}
+    # Retire only exact files installed by the old separate portrait payload.
+    # Any locally changed file is preserved and reported rather than deleted.
+    $retiredContent = Join-Path $data 'Content'
+    $preservedContent = [Collections.Generic.List[string]]::new()
+    if ($null -ne $previousReceipt -and [IO.Directory]::Exists($retiredContent)) {
+        foreach ($entry in @($previousReceipt.contentFiles)) {
+            $target = Get-ReignSafeTarget $retiredContent $entry.path
+            if (-not [IO.File]::Exists($target)) { continue }
+            if (Test-ReignShippedFile $target $entry) { Remove-Item -LiteralPath $target -Force }
+            else { $preservedContent.Add($entry.path) }
+        }
+        $directories = @(Get-ChildItem -LiteralPath $retiredContent -Directory -Recurse | Sort-Object FullName -Descending)
+        foreach ($directory in $directories) {
+            if (@(Get-ChildItem -LiteralPath $directory.FullName -Force).Count -eq 0) { Remove-Item -LiteralPath $directory.FullName -Force }
+        }
+        if (@(Get-ChildItem -LiteralPath $retiredContent -Force).Count -eq 0) { Remove-Item -LiteralPath $retiredContent -Force }
+    }
+    $receipt.preservedPortraits = @($preservedContent)
+    $record = [ordered]@{schema='reign-installation-v1';version=$release.version;protocolVersion=$release.protocolVersion;contentVersion=$release.contentVersion;serverRoot=$serverDestination;contentRoot=$module;dataRoot=$data;bannerlordRoot=$game;moduleRoot=$module;postgresBin=(Join-Path $serverDestination 'runtime\postgresql\bin');postgresPort=55432}
     Write-ReignJson (Join-Path $data 'installed-package.json') $receipt
     Write-ReignJson $recordPath $record
     Assert-ReignPhysicalFile $recordPath
     $committed = $true
-    Write-ReignJson $journal @{schema='reign-setup-journal-v1';state='complete';version=$release.version;stage=$stage;preservedPortraits=$merged.preservedPortraits;recoveryDirectories=@($moves | Where-Object hadPrevious | ForEach-Object old)}
+    Write-ReignJson $journal @{schema='reign-setup-journal-v1';state='complete';version=$release.version;stage=$stage;preservedPortraits=@($preservedContent);recoveryDirectories=@($moves | Where-Object hadPrevious | ForEach-Object old)}
     Write-Host 'Reign installed. Start ReignServer from its shortcut, configure your own provider account, then enable the required modules in Bannerlord.'
     # Delete only this exact verified staging tree; retained previous program and
     # module directories are recorded above for recovery.

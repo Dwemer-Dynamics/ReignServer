@@ -92,7 +92,7 @@ try {
     $inputRoot = Join-Path $root 'input'
     $relative = "PortraitCache/_shared/Lord O'Brien 漢字/portrait.png"
     $entry = New-Fixture $inputRoot $relative 'original'
-    $index = [pscustomobject]@{schema='reign-payload-v1';id='portraits';version='fixture';files=@($entry)}
+    $index = [pscustomobject]@{schema='reign-payload-v1';id='client';version='fixture';files=@($entry)}
     $zip = Join-Path $root 'valid.zip'
     $payload = Write-FixtureZip $zip $index @{$relative='original'}
     Assert-Contract ((Get-ReignDownloadBytes $root @($payload)) -eq 0) 'fully-offline-setup-needs-zero-download-bytes'
@@ -112,7 +112,7 @@ try {
     }
     $badEntry = $entry | Select-Object *
     $badEntry.path = '../escape.txt'
-    $badIndex = [pscustomobject]@{schema='reign-payload-v1';id='portraits';version='fixture';files=@($badEntry)}
+    $badIndex = [pscustomobject]@{schema='reign-payload-v1';id='client';version='fixture';files=@($badEntry)}
     $badZip = Join-Path $root 'traversal.zip'
     $badPayload = Write-FixtureZip $badZip $badIndex @{'../escape.txt'='original'}
     Assert-Rejected { Expand-ReignPayload $badZip (Join-Path $root 'traversal') $badPayload } 'reject-verified-zip-traversal'
@@ -123,14 +123,6 @@ try {
     $duplicateZip = Join-Path $root 'duplicate.zip'
     $duplicatePayload = Write-FixtureZip $duplicateZip $badIndex @{$relative='original'}
     Assert-Rejected { Expand-ReignPayload $duplicateZip (Join-Path $root 'duplicate') $duplicatePayload } 'reject-case-insensitive-duplicates'
-    $userContent = Join-Path $root 'player-content'
-    $old = New-Fixture $userContent $relative 'old-shipped'
-    $merged = Merge-ReignContent $destination $userContent $expanded @($old)
-    Assert-Contract ([IO.File]::ReadAllText((Join-Path $userContent $relative)) -eq 'original') 'update-previously-shipped-content'
-    [IO.File]::WriteAllText((Join-Path $userContent $relative), 'user-edited')
-    $merged = Merge-ReignContent $destination $userContent $expanded @($entry)
-    Assert-Contract ([IO.File]::ReadAllText((Join-Path $userContent $relative)) -eq 'user-edited') 'preserve-user-edited-portrait'
-    Assert-Contract ($merged.preservedPortraits.Count -eq 1) 'report-preserved-portrait'
     $versionRoot = Join-Path $root 'uninstall-version'
     $programEntry = New-Fixture $versionRoot 'bin/server.exe' 'shipped-program'
     Remove-ReignShippedFiles $versionRoot @($programEntry) $true

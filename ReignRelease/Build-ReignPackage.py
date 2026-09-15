@@ -66,6 +66,8 @@ def archive(root, output, identity, version):
     files = inventory(root)
     if identity != "portraits":
         for item in files:
+            if identity == "client" and item["path"].startswith("Modules/ReignBeta/PortraitCache/_shared/"):
+                continue
             item["lastWriteUtcTicks"] = 637134336000000000  # 2020-01-01 UTC; no runtime timestamp semantics.
     index = {"schema": "reign-payload-v1", "id": identity, "version": version, "files": files}
     name = f"Reign-{identity}-{version}.zip"
@@ -115,23 +117,23 @@ def audit_payload(root):
         raise ValueError("Prohibited release files or possible credentials: " + ", ".join(sorted(set(failures))[:25]))
 
 def tracked_private_portrait_source(workspace, inventory_path, portrait_inventory):
-    expected_inventory = (workspace / "ReignContent" / "shared-portrait-inventory.json").resolve()
+    expected_inventory = (workspace / "ReignBeta" / "PortraitCache" / "shared-portrait-inventory.json").resolve()
     if inventory_path.resolve() != expected_inventory:
-        raise ValueError("Shared portraits must use the tracked private ReignContent inventory")
+        raise ValueError("Shared portraits must use the inventory inside the tracked ReignBeta module")
     if portrait_inventory.get("schema") != "reign-shared-content-inventory-v1":
         raise ValueError("Unsupported shared portrait inventory")
     configured_root = Path(portrait_inventory["root"])
     if configured_root.is_absolute():
         raise ValueError("Shared portrait inventory root must be repository-relative")
     portrait_source = (inventory_path.parent / configured_root).resolve()
-    expected_source = (workspace / "ReignContent" / "PortraitCache" / "_shared").resolve()
+    expected_source = (workspace / "ReignBeta" / "PortraitCache" / "_shared").resolve()
     if portrait_source != expected_source:
-        raise ValueError("Shared portrait source must be ReignContent/PortraitCache/_shared")
+        raise ValueError("Shared portrait source must be ReignBeta/PortraitCache/_shared")
     tracked = set(subprocess.run(
-        ["git", "-C", str(workspace), "ls-files", "-z", "--", "ReignContent"],
+        ["git", "-C", str(workspace), "ls-files", "-z", "--", "ReignBeta/PortraitCache"],
         check=True, capture_output=True).stdout.decode("utf-8").rstrip("\0").split("\0"))
-    required = {"ReignContent/shared-portrait-inventory.json"}
-    required.update("ReignContent/PortraitCache/_shared/" + entry["path"] for entry in portrait_inventory["files"])
+    required = {"ReignBeta/PortraitCache/shared-portrait-inventory.json"}
+    required.update("ReignBeta/PortraitCache/_shared/" + entry["path"] for entry in portrait_inventory["files"])
     missing = sorted(required - tracked)
     if missing:
         raise ValueError("Shared portrait source contains untracked package inputs: " + ", ".join(missing[:10]))
@@ -157,7 +159,7 @@ def main():
     staging.mkdir(parents=True, exist_ok=False)
     product = output / "package"
     product.mkdir()
-    components = {name: staging / name for name in ("client", "server", "runtime", "dependencies", "portraits")}
+    components = {name: staging / name for name in ("client", "server", "runtime", "dependencies")}
     for root in components.values():
         root.mkdir()
     downloads = Path(spec["downloadDirectory"])
@@ -287,16 +289,17 @@ def main():
             raise ValueError("Shared portrait inventory is outside the runtime allowlist")
         source = portrait_source / relative
         verify(source, entry)
-        target = components["portraits"] / "PortraitCache" / "_shared" / relative
+        target = module / "PortraitCache" / "_shared" / relative
         copy(source, target)
         if target.suffix.lower() == ".json":
             write(target, portable_metadata(read(target)))
         ticks = int(entry["lastWriteUtcTicks"])
         os.utime(target, ns=((ticks - TICKS_EPOCH) * 100, (ticks - TICKS_EPOCH) * 100))
+    copy(portrait_inventory_path, module / "PortraitCache" / "shared-portrait-inventory.json")
     for name, root in components.items():
         print(f"Auditing and packaging {name}...", flush=True)
         audit_payload(root)
-    versions = {"portraits": release["contentVersion"], "runtime": release["runtimeVersion"], "dependencies": release["dependenciesVersion"]}
+    versions = {"runtime": release["runtimeVersion"], "dependencies": release["dependenciesVersion"]}
     payloads = [archive(root, product, name, versions.get(name, release["version"])) for name, root in components.items()]
     package = {"schema": "reign-package-v1", "version": release["version"], "releaseSequence": release["releaseSequence"], "protocolVersion": release["protocolVersion"], "contentVersion": release["contentVersion"], "sourceFingerprint": report["SourceFingerprintSha256"], "payloads": payloads}
     write(product / "package.json", package)

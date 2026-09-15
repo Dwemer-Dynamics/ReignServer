@@ -225,30 +225,3 @@ function Remove-ReignShippedFiles([string]$Root, $Files, [bool]$RemoveEmptyRoot)
     }
     if ($RemoveEmptyRoot -and [IO.Directory]::Exists($root) -and @(Get-ChildItem -LiteralPath $root -Force).Count -eq 0) { [IO.Directory]::Delete($root) }
 }
-function Merge-ReignContent([string]$Incoming, [string]$Destination, $Index, $PreviousFiles) {
-    $previous = @{}
-    foreach ($item in $PreviousFiles) { $previous[$item.path] = $item }
-    $preserved = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in $Index.files) {
-        $target = Get-ReignSafeTarget $Destination $entry.path
-        if ([IO.File]::Exists($target) -and -not (Test-ReignShippedFile $target $entry)) {
-            if (-not $previous.ContainsKey($entry.path) -or -not (Test-ReignShippedFile $target $previous[$entry.path])) {
-                $preserved.Add(($entry.path -split '/')[2]) | Out-Null
-            }
-        }
-    }
-    $installed = @()
-    foreach ($entry in $Index.files) {
-        if ($preserved.Contains(($entry.path -split '/')[2])) {
-            if ($previous.ContainsKey($entry.path)) { $installed += $previous[$entry.path] }
-            continue
-        }
-        $source = Get-ReignSafeTarget $Incoming $entry.path
-        $target = Get-ReignSafeTarget $Destination $entry.path
-        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)) | Out-Null
-        [IO.File]::Copy($source, $target, $true)
-        [IO.File]::SetLastWriteTimeUtc($target, [IO.File]::GetLastWriteTimeUtc($source))
-        $installed += $entry
-    }
-    [pscustomobject]@{ files = $installed; preservedPortraits = @($preserved) }
-}

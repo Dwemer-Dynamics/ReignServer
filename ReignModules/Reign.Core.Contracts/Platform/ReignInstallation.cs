@@ -87,8 +87,8 @@ namespace Reign.Core.Contracts.Platform
                 throw new InvalidDataException("The ReignBeta module must belong to the selected Bannerlord installation.");
             if (IsWithin(ServerRoot, DataRoot) || IsWithin(ModuleRoot, DataRoot))
                 throw new InvalidDataException("Writable Reign data must be outside the installed program and module directories.");
-            if (IsWithin(ServerRoot, ContentRoot) || IsWithin(ModuleRoot, ContentRoot))
-                throw new InvalidDataException("Shared portrait content must be outside the installed program and module directories so user changes survive updates.");
+            if (!string.Equals(ContentRoot, ModuleRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Shared portrait content must be inside the directly distributable ReignBeta module.");
         }
 
         private static string AbsoluteDirectory(string value, string name)

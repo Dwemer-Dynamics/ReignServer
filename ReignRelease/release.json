@@ -7,12 +7,12 @@
   "runtimeVersion": "2026.09.14",
   "dependenciesVersion": "2026.09.14",
   "repositories": {
-    "Reign": { "origin": "https://github.com/Dwemer-Dynamics/Reign.git", "branch": "main", "visibility": "private" },
-    "ReignServer": { "origin": "https://github.com/Dwemer-Dynamics/ReignServer.git", "branch": "main", "visibility": "public" }
+    "Reign": { "origin": "https://github.com/Dwemer-Dynamics/Reign.git", "branch": "reign", "visibility": "private" },
+    "ReignServer": { "origin": "https://github.com/Dwemer-Dynamics/ReignServer.git", "branch": "reign", "visibility": "public" }
   },
   "development": "local",
   "sourceOwnership": {
-    "Reign": ["ReignBeta", "ReignContent", "BannerlordEditorMcp", "ReignMcp", "docs", "tests", ".codex"],
+    "Reign": ["ReignBeta", "BannerlordEditorMcp", "ReignMcp", "docs", "tests", ".codex"],
     "ReignServer": ["ReignBetaServer", "ReignModules", "NativeCharacterImageGenerator", "ReignTools", "ReignRelease"]
   },
   "supportedPlatform": { "os": "Windows 11", "architecture": "x64", "gameStore": "Steam", "bannerlordVersion": "v1.4.8" },
