@@ -972,6 +972,10 @@ namespace ReignBetaServer
                     {
                         response = SettingsForUi(LoadSettings());
                     }
+                    else if (request.Method == "GET" && request.Path == "/api/gameplay-options")
+                    {
+                        response = ReignXpOptionsForClient();
+                    }
                     else if (request.Method == "POST" && request.Path == "/api/settings")
                     {
                         response = SaveSettings(request.JsonBody);
@@ -21679,6 +21683,8 @@ Return exactly this JSON shape:
                 ["settingsRevision"] = "",
                 ["textureTraceEnabled"] = false,
                 ["saveSyncEnabled"] = true,
+                ["reignXpEnabled"] = true,
+                ["reignXpMultiplier"] = 1.0,
                 ["autoOpenBrowser"] = true
             };
         }
@@ -21735,6 +21741,9 @@ Return exactly this JSON shape:
 
         private static Dictionary<string, object> SaveSettings(Dictionary<string, object> incoming)
         {
+            string xpError = ValidateReignXpOptions(incoming);
+            if (!string.IsNullOrEmpty(xpError))
+                return new Dictionary<string, object> { ["ok"] = false, ["error"] = xpError };
             string imageProviderError = ValidateCodexImageSettings(incoming);
             if (!string.IsNullOrEmpty(imageProviderError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = imageProviderError };
@@ -26478,6 +26487,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
   <main>
     <nav id='mainNavigation' class='tabs' aria-label='Main pages'>
       <button class='tab active' data-tab='general'>General</button>
+      <button class='tab' data-tab='options'>Options</button>
       <button class='tab' data-tab='campaigns'>Campaign Backups</button>
       <button class='tab' data-tab='llm'>LLM Backend</button>
       <button class='tab' data-tab='models'>Models</button>
@@ -26524,6 +26534,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
       </div>
     </section>
 
+    @REIGN_XP_OPTIONS@
     <section id='campaigns' class='page'>
       <div class='card'>
         <h2>Campaign Backups</h2>
@@ -27397,7 +27408,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
     ids.push('llmProvider','codexExecutable','codexHome');
     intIds.add('recentRawConversationTurns');
     intIds.add('recentRawConversationCharBudget');
-    const floatIds = new Set(['temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
+    const floatIds = new Set(['reignXpMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
     const promptState = { files:{}, catalog:[], loaded:false };
     const nanoPresetHints = {
       'gpt-image-1.5': 'Preset request shape: 1024x1536 via NanoGPT image reference route.',
@@ -27513,6 +27524,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
     async function loadSettings() {
       const r = await fetch('/api/settings');
       const s = await r.json();
+      loadReignXpOptions(s);
       ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -29800,7 +29812,8 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 .Replace("@CHAT_PROVIDER_KEYS@", ChatProviderKeysHtml()).Replace("@CHAT_PROVIDER_SCRIPT@", ChatProviderScript())
                 .Replace("@CODEX_PERFORMANCE_CONTROLS@", CodexPerformanceControlCenterHtml())
                 .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
-                .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript());
+                .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript() + ReignXpOptionsScript())
+                .Replace("@REIGN_XP_OPTIONS@", ReignXpOptionsHtml());
         }
         private static string BuildEventJsonForPrompt(Dictionary<string, object> payload)
         {
