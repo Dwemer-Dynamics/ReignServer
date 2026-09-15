@@ -47,7 +47,12 @@ if (-not $SkipClient) {
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo($dll).FileVersion -ne "$($release.version).0") { throw 'Client version does not match the release manifest.' }
     if (-not (Test-Path -LiteralPath (Join-Path $native 'Bannerlord.NativeCharacterImageGenerator.App.exe'))) { throw 'Validated Windows portrait helper is missing.' }
     $deploymentId = "$runId-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
-    $stage = Join-Path $game "Modules\.reign-stage-$deploymentId"
+    # Bannerlord discovers SubModule.xml even in hidden folders under Modules.
+    # Keep staging and recoverable backups outside that search root, on the same volume.
+    $deploymentRoot = Join-Path $game '.reign-deployment'
+    if ((Test-Path -LiteralPath $deploymentRoot) -and ((Get-Item -LiteralPath $deploymentRoot).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Redirected deployment storage is not supported.' }
+    New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
+    $stage = Join-Path $deploymentRoot "stage-$deploymentId"
     if (Test-Path -LiteralPath $stage) { throw 'The deployment staging path already exists.' }
     New-Item -ItemType Directory -Path $stage | Out-Null
     foreach ($directory in @('GUI','ModuleData','EventArt','TavernArt','Videos')) {
@@ -65,11 +70,11 @@ if (-not $SkipClient) {
     if (Test-Path -LiteralPath $helper) { throw 'The helper deployment path already exists.' }
     New-Item -ItemType Directory -Path (Split-Path $helper) -Force | Out-Null
     Copy-Item -LiteralPath $native -Destination $helper -Recurse
-    $backup = Join-Path $game ('Modules\.reign-before-' + [DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))
-    # These are fixed children of the verified game Modules directory; old files remain recoverable.
-    $modulesRoot = [IO.Path]::GetFullPath((Join-Path $game 'Modules')) + '\'
+    $backup = Join-Path $deploymentRoot "before-$deploymentId"
+    # Fixed children of the verified game directory; backups remain outside Modules.
+    $gameRoot = [IO.Path]::GetFullPath($game) + '\'
     foreach ($path in @($module,$stage,$backup)) {
-        if (-not [IO.Path]::GetFullPath($path).StartsWith($modulesRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Deployment path escaped the game Modules directory.' }
+        if (-not [IO.Path]::GetFullPath($path).StartsWith($gameRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Deployment path escaped the game directory.' }
         if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Redirected module paths are not supported.' }
     }
     if (Test-Path -LiteralPath $module) { Move-Item -LiteralPath $module -Destination $backup }
