@@ -73,6 +73,9 @@ namespace Reign.Core.Contracts.Platform
         public static string QuoteWindowsArgument(string value)
         {
             value = value ?? string.Empty;
+            // WSL parses simple switches literally; quoting "-d" turns it into a Linux command.
+            if (value.Length > 0 && !value.Any(character => char.IsWhiteSpace(character) || character == '"'))
+                return value;
             var result = new StringBuilder("\"");
             int slashes = 0;
             foreach (char character in value)

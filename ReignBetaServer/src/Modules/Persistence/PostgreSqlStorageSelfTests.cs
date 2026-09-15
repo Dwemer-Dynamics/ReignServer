@@ -42,6 +42,20 @@ namespace ReignBetaServer
                     && ReadString(diagnostics, "databaseOwner", "") == ReignPostgreSqlStorage.Options.Username,
                     "Reign connects to the exact environment-authorized UTF-8 PostgreSQL database as its configured owner.");
 
+                using (var connection = ReignPostgreSqlStorage.OpenMetadataConnection())
+                {
+                    int first = ReignPostgreSqlStorage.ApplyInfrastructureMigrations(connection);
+                    int repeated = ReignPostgreSqlStorage.ApplyInfrastructureMigrations(connection);
+                    add("database_version_update_idempotent",
+                        first == ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion && repeated == first,
+                        "Repeated database update checks retain the required schema version.");
+                }
+                bool newerSchemaRejected = false;
+                try { ReignPostgreSqlStorage.ValidateDatabaseSchemaVersion(ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion + 1); }
+                catch (InvalidOperationException) { newerSchemaRejected = true; }
+                add("database_version_downgrade_guard", newerSchemaRejected,
+                    "Older server code rejects a newer database schema before changing it.");
+
                 using (ReignDbConnection connection =
                     OpenCampaignConnection(campaignId))
                 {

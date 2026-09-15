@@ -663,6 +663,8 @@ namespace ReignBetaServer
             Dictionary<string, object> settings = LoadSettings();
             int port = ReadPort(args, settings);
             ReignPostgreSqlStorage.EnsureInfrastructure();
+            Console.WriteLine("ReignServer database versioning check completed. Schema version "
+                + ReignPostgreSqlStorage.DatabaseSchemaVersion + ".");
             InitializeCharacterProfileLibrary();
             Directory.CreateDirectory(DataDir);
             ActiveServerPort = port;
@@ -960,6 +962,9 @@ namespace ReignBetaServer
                         {
                             ["ok"] = true,
                             ["service"] = "BannerlordReignServer",
+                            ["databaseSchemaVersion"] = ReignPostgreSqlStorage.DatabaseSchemaVersion,
+                            ["requiredDatabaseSchemaVersion"] = ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
+                            ["databaseSchemaUpToDate"] = ReignPostgreSqlStorage.DatabaseSchemaVersion == ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
                             ["protocolVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol,
                             ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? typeof(Program).Assembly.GetName().Version.ToString(3),
                             ["contentVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.ContentVersion ?? "development",

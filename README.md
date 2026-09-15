@@ -10,6 +10,10 @@ For local development, see `ReignRelease/skills/reign-full-deploy/SKILL.md` and 
 
 ## Release version and date
 
+Database schema versions are separate from release versions. `reign_meta.storage_version` records the applied PostgreSQL schema version (currently 2). Startup runs the embedded `ReignBetaServer/postgresql/reign_meta.sql` migrations under a transaction and advisory lock before accepting requests. For a future schema change, append a version-gated migration and advance `RequiredDatabaseSchemaVersion` in `PostgreSqlStorage.cs` together; advance the stored version only after the migration succeeds. Existing campaign and Save Sync upgrade behavior stays server-owned.
+
+The health endpoint reports applied/required schema versions. DwemerDistro verifies those fields during install/update activation and relays the result to the launcher console; the dashboard displays the same status. An older binary refuses a newer database schema before changing it. Code rollback does not downgrade databases. Builds predating schema reporting remain launchable for retained-runtime compatibility, with an explicit unverified-version message.
+
 Both repositories keep `.version_number.txt` (semantic version, currently `0.1.0`) and `.version.txt` (numeric local release stamp, `yyyyMMddHH`), matching HerikaServer. Set the same release values in both repositories when promoting a paired release. Advance the date stamp for a new build even when the semantic version stays the same. Keep `ReignRelease/release.json`, client `SubModule.xml`, and runtime version constants aligned when changing the semantic version.
 
 Builds derive their assembly version from `.version_number.txt` and include both files in their output. Local deployment preserves these files with each installed version. The launcher reads the active server artifact and displays `branch | MM-DD-YYYY | version`; a newer date at the same semantic version also signals an update. Rollback restores the metadata with the executable.
