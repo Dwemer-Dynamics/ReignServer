@@ -17196,9 +17196,10 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
+        // Windows and Linux JSON adapters expose different IList implementations.
         private static string ExtractAssistantContent(Dictionary<string, object> raw)
         {
-            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is ArrayList choices) || choices.Count == 0)
+            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is IList choices) || choices.Count == 0)
             {
                 return "";
             }
@@ -17216,7 +17217,7 @@ The previous attempt did not complete a JSON object within its output budget.
 
         private static string ExtractFinishReason(Dictionary<string, object> raw)
         {
-            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is ArrayList choices) || choices.Count == 0)
+            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is IList choices) || choices.Count == 0)
             {
                 return "";
             }
