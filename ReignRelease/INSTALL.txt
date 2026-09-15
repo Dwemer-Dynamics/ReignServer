@@ -21,6 +21,12 @@ INSTALL
    spaces and punctuation (ASCII). The bundled Windows database cannot use
    accented or other non-English folder names. Setup rejects those paths before
    copying payloads. Bannerlord and payload locations may use non-English names.
+   Reign remembers these folders in your Windows profile at
+   .reign\installation.json. Both the game and server read that record; their
+   working directory and the drive used for installation do not affect discovery.
+   Setup checks that Windows has not redirected its writes into private app
+   storage. If that check fails, choose a folder outside AppData or run setup
+   from File Explorer. Default program, data and setup locations avoid AppData.
 3. Close Bannerlord and ReignServer before installing or repairing. Setup may
    request Windows approval for Microsoft's Visual C++ runtime. If Windows needs
    to restart, restart and run setup again. Database setup runs as your user.
@@ -39,6 +45,11 @@ you edited. It retains the previous program/module directories for recovery.
 Existing dependency mods with different contents must be resolved before setup
 continues. Setup will not adopt an unmanaged existing ReignBeta installation.
 Logs and transaction journals live in the selected data folder under setup.
+Setup can adopt an earlier setup record from LocalAppData\Bannerlord Reign when
+repairing the same installation. It preserves the old record for recovery;
+updated Reign components use only .reign\installation.json (or an explicitly
+configured REIGN_INSTALLATION_FILE) so an old record cannot override an update
+or reactivate the installation after uninstall.
 A failed install retains staging evidence; correct its reported error and retry.
 Close Reign before manually recovering a previous program version. Database
 downgrades are not supported; preserve the current database for migration.

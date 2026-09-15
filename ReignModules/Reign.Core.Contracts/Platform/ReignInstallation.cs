@@ -29,11 +29,23 @@ namespace Reign.Core.Contracts.Platform
         // A caller testing the record itself uses ReadFrom with an isolated path.
         public static ReignInstallation? TryLoadCurrent()
         {
-            if (Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1") return null;
-            string? explicitPath = Environment.GetEnvironmentVariable("REIGN_INSTALLATION_FILE");
+            return TryLoad(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                Environment.GetEnvironmentVariable("REIGN_INSTALLATION_FILE"),
+                Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1");
+        }
+
+        // Outside AppData: an MSIX-hosted installer can otherwise create a record
+        // visible only inside its own package, invisible to a normally launched game.
+        public static string GetDefaultRecordPath(string userProfile) =>
+            Path.Combine(AbsoluteDirectory(userProfile, "userProfile"), ".reign", "installation.json");
+
+        // Explicit inputs also allow isolated discovery contracts without changing
+        // process-wide environment variables or reading the real player's state.
+        public static ReignInstallation? TryLoad(string userProfile, string? explicitPath = null, bool validationMode = false)
+        {
+            if (validationMode) return null;
             string path = string.IsNullOrWhiteSpace(explicitPath)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "Bannerlord Reign", "installation.json")
+                ? GetDefaultRecordPath(userProfile)
                 : Path.GetFullPath(explicitPath!);
             if (!File.Exists(path))
             {

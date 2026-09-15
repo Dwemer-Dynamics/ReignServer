@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory=$true)][string]$ProgramRoot,
     [Parameter(Mandatory=$true)][string]$DataRoot,
     [string]$SourcesFile,
-    [string]$InstallationFile = (Join-Path $env:LOCALAPPDATA 'Bannerlord Reign\installation.json')
+    [string]$InstallationFile = (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.reign\installation.json')
 )
 . (Join-Path $PSScriptRoot 'Reign-Installer.ps1')
 $journal = $null
@@ -16,12 +16,12 @@ $committed = $false
 $moves = New-Object 'System.Collections.Generic.List[object]'
 try {
     if (-not [Environment]::Is64BitOperatingSystem -or [Environment]::OSVersion.Version.Build -lt 22000) { throw 'This release requires Windows 11 x64.' }
-    Assert-ReignStopped
     $game = Assert-ReignLocalPath $BannerlordRoot
     $program = Assert-ReignLocalPath $ProgramRoot
     $data = Assert-ReignLocalPath $DataRoot
     Assert-ReignDatabasePath $program 'ReignServer program folder'
     Assert-ReignDatabasePath $data 'Reign player data folder'
+    Assert-ReignStopped
     $payloads = [IO.Path]::GetFullPath($PayloadDirectory)
     $recordPath = Assert-ReignLocalPath $InstallationFile
     foreach ($pair in @(@($game,$program),@($game,$data),@($program,$data))) {
@@ -38,9 +38,16 @@ try {
     $previousReceipt = $null
     $recordBytes = $null
     $receiptBytes = $null
-    if ([IO.File]::Exists($recordPath)) {
-        $recordBytes = [IO.File]::ReadAllBytes($recordPath)
-        $previousRecord = Read-ReignJson $recordPath
+    if ([IO.File]::Exists($recordPath)) { $recordBytes = [IO.File]::ReadAllBytes($recordPath) }
+    # Adopt an earlier setup's record only during an ordinary upgrade. Explicit
+    # fixture/custom records must never discover another installation implicitly.
+    $legacyRecord = $null
+    if (-not $PSBoundParameters.ContainsKey('InstallationFile')) {
+        $legacyRecord = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Bannerlord Reign\installation.json'
+    }
+    $previousPath = Get-ReignPreviousInstallationPath $recordPath $legacyRecord
+    if ($null -ne $previousPath) {
+        $previousRecord = Read-ReignJson $previousPath
         $previousReceipt = Read-ReignJson (Join-Path $previousRecord.dataRoot 'installed-package.json')
         $receiptBytes = [IO.File]::ReadAllBytes((Join-Path $previousRecord.dataRoot 'installed-package.json'))
         if ($previousReceipt.schema -ne 'reign-installed-package-v1') { throw 'Previous installation ownership cannot be verified.' }
@@ -50,6 +57,11 @@ try {
     [long]$expanded = ($release.payloads | Measure-Object expandedBytes -Sum).Sum
     [long]$downloads = Get-ReignDownloadBytes $payloads $release.payloads
     Assert-ReignSpace @(@{path=$program;bytes=$expanded},@{path=$data;bytes=$expanded + 512MB},@{path=$game;bytes=$expanded},@{path=$payloads;bytes=$downloads})
+    # Probe actual new files, not just directory names: MSIX can redirect new
+    # AppData writes even when an existing directory appears to be shared.
+    foreach ($directory in @($program,$data,(Join-Path $game 'Modules'),([IO.Path]::GetDirectoryName($recordPath)))) {
+        Assert-ReignVisibleDirectory $directory
+    }
     [IO.Directory]::CreateDirectory($program) | Out-Null
     [IO.Directory]::CreateDirectory($data) | Out-Null
     $runId = [guid]::NewGuid().ToString('N')
@@ -128,6 +140,7 @@ try {
     $record = [ordered]@{schema='reign-installation-v1';version=$release.version;protocolVersion=$release.protocolVersion;contentVersion=$release.contentVersion;serverRoot=$serverDestination;contentRoot=$content;dataRoot=$data;bannerlordRoot=$game;moduleRoot=$module;postgresBin=(Join-Path $serverDestination 'runtime\postgresql\bin');postgresPort=55432}
     Write-ReignJson (Join-Path $data 'installed-package.json') $receipt
     Write-ReignJson $recordPath $record
+    Assert-ReignPhysicalFile $recordPath
     $committed = $true
     Write-ReignJson $journal @{schema='reign-setup-journal-v1';state='complete';version=$release.version;stage=$stage;preservedPortraits=$merged.preservedPortraits;recoveryDirectories=@($moves | Where-Object hadPrevious | ForEach-Object old)}
     Write-Host 'Reign installed. Start ReignServer from its shortcut, configure your own provider account, then enable the required modules in Bannerlord.'

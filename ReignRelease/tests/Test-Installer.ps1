@@ -31,6 +31,34 @@ function Write-FixtureZip([string]$Path, $Index, $Entries) {
     [pscustomobject]@{id=$Index.id;version=$Index.version;file=[IO.Path]::GetFileName($Path);bytes=(Get-Item -LiteralPath $Path).Length;sha256=(Get-ReignHash $Path);expandedBytes=($Index.files|Measure-Object bytes -Sum).Sum}
 }
 try {
+    # Resolve real handles, including a redirecting junction as a deterministic
+    # negative control. No actual installed record or player directory is used.
+    $physicalRoot = Join-Path $root 'visible files'
+    Assert-ReignVisibleDirectory $physicalRoot
+    Assert-Contract (@(Get-ChildItem -LiteralPath $physicalRoot -Force).Count -eq 0) 'physical-location-probe-cleans-up'
+    $redirect = Join-Path $root 'redirected files'
+    New-Item -ItemType Junction -Path $redirect -Target $physicalRoot | Out-Null
+    try {
+        Assert-Rejected { Assert-ReignVisibleDirectory $redirect } 'reject-redirected-installation-writes'
+        Assert-Contract (@(Get-ChildItem -LiteralPath $physicalRoot -Force).Count -eq 0) 'rejected-location-probe-cleans-up'
+    } finally { [IO.Directory]::Delete($redirect) }
+    $legacy = Join-Path $root 'legacy-record.json'
+    $preferred = Join-Path $root 'preferred-record.json'
+    Write-ReignJson $legacy @{source='earlier setup'}
+    Assert-Contract ((Get-ReignPreviousInstallationPath $preferred $legacy) -eq $legacy) 'upgrade-discovers-legacy-ownership'
+    Assert-Contract ($null -eq (Get-ReignPreviousInstallationPath $preferred $null)) 'explicit-install-does-not-adopt-legacy'
+    Write-ReignJson $preferred @{source='current setup'}
+    Assert-Contract ((Get-ReignPreviousInstallationPath $preferred $legacy) -eq $preferred) 'current-record-owns-upgrade'
+    # Evaluate the shipped default expressions; obtain a location only, without
+    # reading or modifying the actual user's installation record.
+    $expectedDefault = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.reign\installation.json'
+    foreach ($script in @('Install-Reign.ps1','Uninstall-Reign.ps1')) {
+        $tokens=$null; $errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path (Split-Path $PSScriptRoot -Parent) $script),[ref]$tokens,[ref]$errors)
+        $parameter=@($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'InstallationFile' })
+        $defaultPath=& ([scriptblock]::Create($parameter[0].DefaultValue.Extent.Text))
+        Assert-Contract ($errors.Count -eq 0 -and $defaultPath -eq $expectedDefault) ($script + '-discovers-profile-record')
+    }
     Assert-ReignDatabasePath "D:\Reign O'Brien\Player data-1" 'Fixture'
     Assert-Contract $true 'database-path-allows-ascii-spaces-and-apostrophes'
     Assert-Rejected { Assert-ReignDatabasePath ('D:\Reign-' + [char]0x00E9) 'Fixture' } 'database-path-rejects-accented-roots'
@@ -57,6 +85,10 @@ try {
     Assert-Contract (@($parseErrors).Count -eq 0 -and $readAssignments.Count -eq 1) 'launcher-record-reader-is-bounded'
     $loadedRecord = & ([scriptblock]::Create($readAssignments[0].Right.Extent.Text))
     Assert-Contract ($loadedRecord.serverRoot -eq $expectedServerRoot) 'launcher-reads-utf8-installation-paths'
+    $defaultAssignments = @($launcherAst.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$InstallationFile'},$true))
+    Assert-Contract ($defaultAssignments.Count -eq 1) 'launcher-has-one-default-record-location'
+    $defaultPath = & ([scriptblock]::Create($defaultAssignments[0].Right.Extent.Text))
+    Assert-Contract ($defaultPath -eq $expectedDefault) 'launcher-discovers-profile-record'
     $inputRoot = Join-Path $root 'input'
     $relative = "PortraitCache/_shared/Lord O'Brien 漢字/portrait.png"
     $entry = New-Fixture $inputRoot $relative 'original'

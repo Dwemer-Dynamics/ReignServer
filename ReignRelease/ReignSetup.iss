@@ -14,7 +14,8 @@ AppVersion={#ReleaseVersion}
 VersionInfoVersion={#ReleaseNumericVersion}
 AppPublisher=Dwemer Dynamics
 AppPublisherURL=https://github.com/Dwemer-Dynamics/ReignServer
-DefaultDirName={localappdata}\Programs\ReignSetup
+DefaultDirName={%USERPROFILE}\.reign\setup
+UsePreviousAppDir=no
 DefaultGroupName=Reign
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
@@ -55,8 +56,8 @@ begin
   Folders.Add('Reign player data and portraits:');
   Folders.Add('Folder containing the five Reign payload ZIP files:');
   Folders.Values[0] := ExpandConstant('{commonpf32}\Steam\steamapps\common\Mount & Blade II Bannerlord');
-  Folders.Values[1] := ExpandConstant('{localappdata}\Programs\ReignServer');
-  Folders.Values[2] := ExpandConstant('{localappdata}\Bannerlord Reign');
+  Folders.Values[1] := ExpandConstant('{%USERPROFILE}\Reign\ReignServer');
+  Folders.Values[2] := ExpandConstant('{%USERPROFILE}\Reign\Data');
   Folders.Values[3] := ExpandConstant('{src}');
   Sources := CreateInputFilePage(Folders.ID, 'Private downloads (optional)',
     'Offline payload files work without a download link.',

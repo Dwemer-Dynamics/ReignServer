@@ -18,9 +18,9 @@
   "supportedPlatform": { "os": "Windows 11", "architecture": "x64", "gameStore": "Steam", "bannerlordVersion": "v1.4.8" },
   "installation": {
     "moduleIdentity": "ReignBeta",
-    "serverDirectory": "%LOCALAPPDATA%/Programs/ReignServer",
-    "dataDirectory": "%LOCALAPPDATA%/Bannerlord Reign",
-    "record": "%LOCALAPPDATA%/Bannerlord Reign/installation.json",
+    "serverDirectory": "%USERPROFILE%/Reign/ReignServer",
+    "dataDirectory": "%USERPROFILE%/Reign/Data",
+    "record": "%USERPROFILE%/.reign/installation.json",
     "serverPort": 5101,
     "postgresPort": 55432,
     "database": "Reign",

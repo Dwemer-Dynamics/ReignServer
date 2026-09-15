@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$InstallationFile = (Join-Path $env:LOCALAPPDATA 'Bannerlord Reign\installation.json'))
+param([string]$InstallationFile = (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.reign\installation.json'))
 . (Join-Path $PSScriptRoot 'Reign-Installer.ps1')
 try {
     Assert-ReignStopped

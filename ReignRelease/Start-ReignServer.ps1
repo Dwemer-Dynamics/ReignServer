@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param([string]$InstallationFile = $env:REIGN_INSTALLATION_FILE)
 $ErrorActionPreference = 'Stop'
-if ([string]::IsNullOrWhiteSpace($InstallationFile)) { $InstallationFile = Join-Path $env:LOCALAPPDATA 'Bannerlord Reign\installation.json' }
+if ([string]::IsNullOrWhiteSpace($InstallationFile)) { $InstallationFile = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.reign\installation.json' }
 if (-not (Test-Path -LiteralPath $InstallationFile)) { throw 'Install ReignServer using the supplied setup package before starting Reign.' }
 $record = Get-Content -LiteralPath $InstallationFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($record.schema -ne 'reign-installation-v1' -or $record.protocolVersion -ne 1) { throw 'Run the matching ReignServer setup to repair the installation record.' }

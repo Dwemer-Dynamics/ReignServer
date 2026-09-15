@@ -26,6 +26,57 @@ function Get-ReignHash([string]$Path) {
     try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-','').ToLowerInvariant() }
     finally { $stream.Dispose(); $algorithm.Dispose() }
 }
+function Get-ReignPreviousInstallationPath([string]$RecordPath, [string]$LegacyPath) {
+    if ([IO.File]::Exists($RecordPath)) { return $RecordPath }
+    if (-not [string]::IsNullOrWhiteSpace($LegacyPath) -and [IO.File]::Exists($LegacyPath)) { return $LegacyPath }
+    return $null
+}
+function Assert-ReignPhysicalFile([string]$Path) {
+    if (-not ('Reign.Setup.PhysicalFiles' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+namespace Reign.Setup {
+    public static class PhysicalFiles {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+        public static string Resolve(string path) {
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+                var buffer = new StringBuilder(32768);
+                uint count = GetFinalPathNameByHandleW(file.SafeFileHandle, buffer, (uint)buffer.Capacity, 0);
+                if (count == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (count >= buffer.Capacity) throw new IOException("Resolved installation path is too long.");
+                string result = buffer.ToString();
+                return result.StartsWith(@"\\?\", StringComparison.Ordinal) ? result.Substring(4) : result;
+            }
+        }
+    }
+}
+'@
+    }
+    $expected = [IO.Path]::GetFullPath($Path)
+    $physical = [Reign.Setup.PhysicalFiles]::Resolve($expected)
+    if (-not $physical.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Windows redirected the installation location '$expected' to '$physical'. Choose a local folder outside AppData, or close setup and run it from File Explorer. Reign cannot use a location hidden from the game."
+    }
+}
+function Assert-ReignVisibleDirectory([string]$Directory) {
+    [IO.Directory]::CreateDirectory($Directory) | Out-Null
+    $probe = Join-Path $Directory ('.reign-location-probe-' + [guid]::NewGuid().ToString('N'))
+    $created = $false
+    try {
+        $file = [IO.File]::Open($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $created = $true
+        $file.Dispose()
+        Assert-ReignPhysicalFile $probe
+    } finally {
+        if ($created -and [IO.File]::Exists($probe)) { [IO.File]::Delete($probe) }
+    }
+}
 function Assert-ReignDatabasePath([string]$Path, [string]$Label) {
     # Pinned PostgreSQL uses narrow Windows paths even with a UTF-8 database.
     # Reject unsupported roots before copying payloads or creating state.
@@ -150,7 +201,7 @@ function Assert-ReignSpace($Requirements) {
     }
 }
 function Assert-ReignStopped {
-    $running = @(Get-Process -Name ReignBetaServer,Bannerlord,Bannerlord.Native -ErrorAction SilentlyContinue)
+    $running = @(Get-Process -Name ReignBetaServer,Bannerlord,Bannerlord.Native,Bannerlord.BLSE.Launcher,Bannerlord.BLSE.LauncherEx -ErrorAction SilentlyContinue)
     if ($running.Count -gt 0) { throw 'Close Bannerlord and the visible ReignServer / Control Center before installing or repairing.' }
 }
 function Test-ReignShippedFile([string]$Path, $Entry) {
