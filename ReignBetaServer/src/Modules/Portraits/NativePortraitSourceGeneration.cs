@@ -131,16 +131,16 @@ namespace ReignBetaServer
                         throw new InvalidDataException("Native portrait snapshot identity or facial appearance is invalid.");
                     string snapshotPath = Path.Combine(jobRoot, "character.json");
                     WriteJsonObject(snapshotPath, snapshot);
-                    AppendProcessArgument(arguments, "--character-snapshot", snapshotPath);
+                    AppendProcessArgument(arguments, "--character-snapshot", NativeGeneratorPath(snapshotPath));
                 }
                 AppendProcessArgument(arguments, "--reign-render-portrait-source");
                 AppendProcessArgument(arguments, "--campaign-id", ReadString(payload, "campaignId", ""));
-                AppendProcessArgument(arguments, "--reign-data-root", DataDir);
+                AppendProcessArgument(arguments, "--reign-data-root", NativeGeneratorPath(DataDir));
                 AppendProcessArgument(arguments, "--hero-id", ReadFirstString(payload, "heroStringId", "heroId", "characterId"));
                 AppendProcessArgument(arguments, "--character-object-id", ReadString(payload, "characterObjectId", ""));
                 AppendProcessArgument(arguments, "--cache-key", ReadString(payload, "cacheKey", ""));
-                AppendProcessArgument(arguments, "--output", outputPath);
-                AppendProcessArgument(arguments, "--result", resultPath);
+                AppendProcessArgument(arguments, "--output", NativeGeneratorPath(outputPath));
+                AppendProcessArgument(arguments, "--result", NativeGeneratorPath(resultPath));
                 var start = new ProcessStartInfo
                 {
                     FileName = executable,
@@ -204,6 +204,18 @@ namespace ReignBetaServer
 
         private static string ResolveNativePortraitGeneratorPath(Dictionary<string, object> settings)
         {
+#if REIGN_LINUX
+            // The game renderer remains Windows-native; only a locally installed helper is callable.
+            string bridge = Environment.GetEnvironmentVariable("REIGN_NATIVE_GENERATOR")
+                ?? ReadString(settings, "portraitNativeSourceGeneratorPath", "");
+            string bridgeRecord = Path.Combine(DataDir, "windows-bridge.json");
+            if (string.IsNullOrWhiteSpace(bridge) && File.Exists(bridgeRecord))
+                bridge = ReadString(ReadJsonObject(bridgeRecord), "nativeGenerator", "");
+            if (!bridge.StartsWith("/mnt/", StringComparison.Ordinal)
+                || !string.Equals(Path.GetFileName(bridge), NativePortraitGeneratorExecutable, StringComparison.Ordinal)
+                || !File.Exists(bridge)) return "";
+            return Path.GetFullPath(bridge);
+#else
             string configured = ReadString(settings, "portraitNativeSourceGeneratorPath", "");
             string[] candidates =
             {
@@ -217,6 +229,35 @@ namespace ReignBetaServer
                 if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate)) return Path.GetFullPath(candidate);
             }
             return "";
+#endif
+        }
+
+        // WSL exposes the same job files to the bounded Windows renderer through its local UNC path.
+        private static string NativeGeneratorPath(string path)
+        {
+#if REIGN_LINUX
+            var start = new ProcessStartInfo("/usr/bin/wslpath")
+            {
+                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            start.ArgumentList.Add("-w");
+            start.ArgumentList.Add(Path.GetFullPath(path));
+            using (Process process = Process.Start(start))
+            {
+                if (process == null) throw new IOException("Could not resolve the Windows portrait bridge path.");
+                if (!process.WaitForExit(5000))
+                {
+                    process.Kill();
+                    throw new IOException("Windows portrait bridge path lookup timed out.");
+                }
+                string mapped = process.StandardOutput.ReadToEnd().Trim();
+                if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(mapped))
+                    throw new IOException("Windows portrait bridge path lookup failed.");
+                return mapped;
+            }
+#else
+            return path;
+#endif
         }
 
         private static string ReadNativePortraitGeneratorError(string resultPath, int exitCode)

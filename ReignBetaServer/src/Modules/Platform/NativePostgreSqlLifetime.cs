@@ -14,6 +14,10 @@ namespace ReignBetaServer
     {
         private static NativePostgreSqlLifetime BeginInstalledDatabase(string[] args)
         {
+#if REIGN_LINUX
+            // DwemerDistro owns PostgreSQL; the server must never start or stop its shared cluster.
+            return null;
+#else
             // Tool/verification commands have their own isolated database owner.
             string[] runtimeOptions = { "--port", "--terminal-window-name", "--terminal-tab-index", "--no-browser" };
             if (args.Any(value => value.StartsWith("--", StringComparison.Ordinal)
@@ -26,6 +30,7 @@ namespace ReignBetaServer
             if (UnifiedLifetimeJobHandle == IntPtr.Zero)
                 throw new InvalidOperationException("ReignServer could not establish its required Windows process lifetime group.");
             return NativePostgreSqlLifetime.Start(installation);
+#endif
         }
     }
 

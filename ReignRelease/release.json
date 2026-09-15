@@ -1,14 +1,14 @@
 {
   "schema": "reign-release-v1",
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0",
   "releaseSequence": 1,
   "protocolVersion": 1,
   "contentVersion": "2026.09.14",
   "runtimeVersion": "2026.09.14",
   "dependenciesVersion": "2026.09.14",
   "repositories": {
-    "Reign": { "origin": "https://github.com/Dwemer-Dynamics/Reign.git", "branch": "main", "visibility": "private" },
-    "ReignServer": { "origin": "https://github.com/Dwemer-Dynamics/ReignServer.git", "branch": "main", "visibility": "public" }
+    "Reign": { "origin": "https://github.com/Dwemer-Dynamics/Reign.git", "branch": "reign", "visibility": "private" },
+    "ReignServer": { "origin": "https://github.com/Dwemer-Dynamics/ReignServer.git", "branch": "reign", "visibility": "public" }
   },
   "development": "local",
   "sourceOwnership": {
@@ -16,6 +16,22 @@
     "ReignServer": ["ReignBetaServer", "ReignModules", "NativeCharacterImageGenerator", "ReignTools", "ReignRelease"]
   },
   "supportedPlatform": { "os": "Windows 11", "architecture": "x64", "gameStore": "Steam", "bannerlordVersion": "v1.4.8" },
+  "dwemerdistro": {
+    "serverOs": "Debian 12 WSL",
+    "architecture": "x64",
+    "serverRuntime": ".NET 10 self-contained",
+    "productionBranch": "reign",
+    "betaBranch": "dev",
+    "developmentBranch": "unstable",
+    "serverPort": 8089,
+    "internalServerPort": 5101,
+    "vectorWorkerPort": 5102,
+    "postgresPort": 5432,
+    "database": "Reign",
+    "encoding": "UTF8",
+    "runtimeRoot": "/opt/dwemerdistro/reign",
+    "dataRoot": "/var/lib/dwemerdistro/reign"
+  },
   "installation": {
     "moduleIdentity": "ReignBeta",
     "serverDirectory": "%USERPROFILE%/Reign/ReignServer",

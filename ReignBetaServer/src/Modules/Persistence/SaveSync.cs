@@ -39,11 +39,20 @@ namespace ReignBetaServer
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool CreateHardLink(string newFileName, string existingFileName, IntPtr securityAttributes);
 
+#if REIGN_LINUX
+        // The same-directory Unix rename atomically replaces JSON and Save Sync files.
+        private static bool MoveFileEx(string existingFileName, string newFileName, uint flags)
+        {
+            File.Move(existingFileName, newFileName, (flags & 0x1) != 0);
+            return true;
+        }
+#else
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool MoveFileEx(
             string existingFileName,
             string newFileName,
             uint flags);
+#endif
 
         private sealed class SaveSyncActiveState
         {
@@ -2279,7 +2288,11 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     && ResolveSaveSyncRoot("", fallbackRoot) == Path.GetFullPath(fallbackRoot),
                     "Supported launchers can pin Save Sync manifests and ledgers to one stable per-user directory while isolated verification retains its artifact-local fallback.");
                 string simulatedInstalledCampaign = Path.Combine(
+#if REIGN_LINUX
+                    "/var/lib/reign-test-runtime", "campaigns", campaignId);
+#else
                     @"D:\ReignRuntime", "campaigns", campaignId);
+#endif
                 string simulatedWorkRoot = SaveSyncCampaignWorkRoot(
                     simulatedInstalledCampaign, "restore", "test");
                 add("restore_work_stays_on_campaign_volume",
@@ -2929,6 +2942,15 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                         && !ReadBool(lockedResult, "cleanupComplete", true)
                         && ReadStringList(lockedResult,
                             "residualCleanup").Count > 0);
+#if REIGN_LINUX
+                // Unix permits unlinking an open file; verify the successful cleanup as well as failure reporting.
+                lockedFailureVisible |= ReadBool(lockedResult, "campaignDeleted", false)
+                    && ReadBool(lockedResult, "cleanupComplete", false)
+                    && !File.Exists(lockedPath)
+                    && !Directory.Exists(StrictCampaignDirectory(lockedCleanupId))
+                    && !ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
+                        ReadString(row, "campaignId", "") == lockedCleanupId);
+#endif
                 add("locked_files_never_fail_silently",
                     lockedFailureVisible,
                     "A locked campaign file either leaves the active campaign recovered or produces explicit post-commit residual cleanup; it is never silently ignored.");

@@ -184,10 +184,14 @@ namespace ReignBetaServer
                 }
 
                 byte[] clearText = Encoding.UTF8.GetBytes(Json.Serialize(protectedState));
+#if REIGN_LINUX
+                byte[] protectedBytes = LinuxVaultTransform(vaultPath, clearText, true);
+#else
                 byte[] protectedBytes = ProtectedData.Protect(
                     clearText,
                     SettingsSecretVaultEntropy,
                     DataProtectionScope.CurrentUser);
+#endif
                 string temporaryPath = vaultPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 try
                 {
@@ -227,10 +231,14 @@ namespace ReignBetaServer
             lock (SettingsSecretVaultLock)
             {
                 byte[] protectedBytes = File.ReadAllBytes(vaultPath);
+#if REIGN_LINUX
+                byte[] clearText = LinuxVaultTransform(vaultPath, protectedBytes, false);
+#else
                 byte[] clearText = ProtectedData.Unprotect(
                     protectedBytes,
                     SettingsSecretVaultEntropy,
                     DataProtectionScope.CurrentUser);
+#endif
                 Dictionary<string, object> protectedState =
                     Json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(clearText))
                     ?? new Dictionary<string, object>();

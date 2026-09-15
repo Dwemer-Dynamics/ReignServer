@@ -2545,7 +2545,7 @@ namespace ReignBetaServer
                 && nativeGeneratorAppText.Contains("--reign-data-root", StringComparison.Ordinal)
                 && nativeGeneratorAppText.Contains("NativeEngineRenderService", StringComparison.Ordinal)
                 && nativeGeneratorCatalogText.Contains("FindCampaign(moduleRoot, requestedCampaignId, reignDataRoot)", StringComparison.Ordinal)
-                && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", DataDir)", StringComparison.Ordinal)
+                && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", NativeGeneratorPath(DataDir))", StringComparison.Ordinal)
                 && serverClientText.Contains("[\"civilianEquipment\"] = BuildPortraitCivilianEquipment(hero)", StringComparison.Ordinal)
                 && serverClientText.Contains("character[\"civilianEquipment\"] as JArray", StringComparison.Ordinal)
                 && serverProjectContractText.Contains("PublishBundledNativePortraitGenerator", StringComparison.Ordinal)

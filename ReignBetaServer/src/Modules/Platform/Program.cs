@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -708,7 +708,15 @@ namespace ReignBetaServer
             ShutdownRequested = false;
             StartCampaignRetirementMonitor();
             ActiveListener = listener;
-            if (!HasArg(args, "--no-browser"))
+#if REIGN_LINUX
+            using var terminate = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                System.Runtime.InteropServices.PosixSignal.SIGTERM,
+                context => { context.Cancel = true; RequestServerShutdown("dwemerdistro"); });
+            using var interrupt = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                System.Runtime.InteropServices.PosixSignal.SIGINT,
+                context => { context.Cancel = true; RequestServerShutdown("dwemerdistro"); });
+#endif
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT && !HasArg(args, "--no-browser"))
             {
                 ScheduleUnifiedControlCenterOpen(port);
             }
@@ -953,7 +961,7 @@ namespace ReignBetaServer
                             ["ok"] = true,
                             ["service"] = "BannerlordReignServer",
                             ["protocolVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol,
-                            ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? "development",
+                            ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? typeof(Program).Assembly.GetName().Version.ToString(3),
                             ["contentVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.ContentVersion ?? "development",
                             ["dataDir"] = DataDir,
                             ["processId"] = Process.GetCurrentProcess().Id,
@@ -21712,6 +21720,10 @@ Return exactly this JSON shape:
                     ["settingsFileExisted"] = settingsFileExisted
                 });
             }
+#if REIGN_LINUX
+            // DwemerDistro reserves 8082 for MiniMe; Reign owns a separate loopback worker.
+            settings["vectorWorkerUrl"] = "http://127.0.0.1:5102";
+#endif
             PersistInstalledSettingsSecrets(settings);
             return settings;
         }
@@ -26186,7 +26198,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 
         private static string ControlCenterHtml()
         {
-            return @"<!doctype html>
+            string html = @"<!doctype html>
 <html>
 <head>
   <meta charset='utf-8'>
@@ -29784,6 +29796,12 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 .Replace("@CODEX_PERFORMANCE_CONTROLS@", CodexPerformanceControlCenterHtml())
                 .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
                 .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript());
+#if REIGN_LINUX
+            html = html.Replace("Unified Control Center is always attached", "Managed by DwemerDistro")
+                .Replace("Normal launches always open one dedicated Reign window. Closing it shuts down the server and helper worker; shutting down the server closes it.",
+                    "Open this page from the DwemerDistro launcher. Closing the browser leaves Reign running; use the launcher to stop the distro.");
+#endif
+            return html;
         }
         private static string BuildEventJsonForPrompt(Dictionary<string, object> payload)
         {

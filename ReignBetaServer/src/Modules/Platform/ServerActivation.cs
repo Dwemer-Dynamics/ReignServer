@@ -88,6 +88,7 @@ namespace ReignBetaServer
 
         private static bool TryActivateExistingServer(int port, string[] args, bool healthy)
         {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT) return healthy;
             bool openBrowser = !HasArg(args ?? new string[0], "--no-browser");
             if (healthy && TryRequestExistingServerActivation(port, openBrowser))
             {
@@ -105,6 +106,9 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ActivateRunningServer(Dictionary<string, object> payload)
         {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                return new Dictionary<string, object> { ["ok"] = true, ["port"] = ActiveServerPort,
+                    ["managedBy"] = "DwemerDistro", ["url"] = "http://127.0.0.1:" + ActiveServerPort + "/" };
             payload = payload ?? new Dictionary<string, object>();
             bool openBrowser = ReadBool(payload, "openBrowser", true);
             bool focused = TryFocusNamedTerminal(ActiveTerminalWindowName, ActiveTerminalTabIndex);

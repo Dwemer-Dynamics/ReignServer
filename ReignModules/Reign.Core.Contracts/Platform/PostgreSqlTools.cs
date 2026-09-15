@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Reign.Core.Contracts.Platform
@@ -17,8 +18,14 @@ namespace Reign.Core.Contracts.Platform
                 throw new ArgumentException("Only pg_dump and pg_restore are supported.", nameof(arguments));
             var values = arguments.ToList();
             string executable;
-            bool native = !string.IsNullOrWhiteSpace(nativeBin);
-            if (native)
+            bool linux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+            bool native = linux || !string.IsNullOrWhiteSpace(nativeBin);
+            if (linux)
+            {
+                executable = Path.Combine("/usr/bin", values[0]);
+                values.RemoveAt(0);
+            }
+            else if (native)
             {
                 if (!Path.IsPathRooted(nativeBin)) throw new ArgumentException("PostgreSQL bin must be absolute.", nameof(nativeBin));
                 executable = Path.Combine(nativeBin, values[0] + ".exe");
@@ -56,7 +63,7 @@ namespace Reign.Core.Contracts.Platform
         public static string ArchivePath(string path, bool native)
         {
             string full = Path.GetFullPath(path ?? string.Empty);
-            if (native) return full;
+            if (native || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return full;
             if (full.Length < 3 || full[1] != ':' || full[2] != '\\' && full[2] != '/')
                 throw new InvalidDataException("Legacy WSL archives require an absolute Windows drive path.");
             return "/mnt/" + char.ToLowerInvariant(full[0]) + "/" + full.Substring(3).Replace('\\', '/');
