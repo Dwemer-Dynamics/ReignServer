@@ -27,7 +27,7 @@
     "internalServerPort": 5101,
     "vectorWorkerPort": 5102,
     "postgresPort": 5432,
-    "database": "Reign",
+    "database": "reign",
     "encoding": "UTF8",
     "runtimeRoot": "/opt/dwemerdistro/reign",
     "dataRoot": "/var/lib/dwemerdistro/reign"
@@ -39,7 +39,7 @@
     "record": "%USERPROFILE%/.reign/installation.json",
     "serverPort": 5101,
     "postgresPort": 55432,
-    "database": "Reign",
+    "database": "reign",
     "postgresMode": "native-windows",
     "privatePayloadBaseUrl": null
   },

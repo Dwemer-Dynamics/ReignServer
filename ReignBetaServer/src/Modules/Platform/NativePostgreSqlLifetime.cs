@@ -61,7 +61,7 @@ namespace ReignBetaServer
             var metadata = new System.Web.Script.Serialization.JavaScriptSerializer()
                 .Deserialize<System.Collections.Generic.Dictionary<string, object>>(File.ReadAllText(ownership));
             if (Convert.ToString(metadata["schema"]) != "reign-native-postgres-v1"
-                || Convert.ToString(metadata["database"]) != "Reign"
+                || Convert.ToString(metadata["database"]) != ReignPostgreSqlOptions.RequiredDatabaseName
                 || Convert.ToString(metadata["username"]) != "reign"
                 || Convert.ToInt32(metadata["port"], CultureInfo.InvariantCulture) != installation.PostgresPort)
                 throw new InvalidDataException("PostgreSQL ownership does not match this installation.");
@@ -75,7 +75,7 @@ namespace ReignBetaServer
             Environment.SetEnvironmentVariable("REIGN_DB_HOST", "127.0.0.1");
             Environment.SetEnvironmentVariable("REIGN_DB_PORT", installation.PostgresPort.ToString(CultureInfo.InvariantCulture));
             Environment.SetEnvironmentVariable("REIGN_DB_USER", "reign");
-            Environment.SetEnvironmentVariable("REIGN_DB_NAME", "Reign");
+            Environment.SetEnvironmentVariable("REIGN_DB_NAME", ReignPostgreSqlOptions.RequiredDatabaseName);
             Environment.SetEnvironmentVariable("REIGN_POSTGRES_BIN", installation.PostgresBin);
             if (lifetime.Control("status", "-D", lifetime.cluster) == 0)
                 throw new InvalidOperationException("This Reign database is already owned by another launch. Close the current ReignServer before starting another.");

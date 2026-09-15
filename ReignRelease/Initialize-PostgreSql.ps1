@@ -17,7 +17,7 @@ if ($bin -match '[^\x20-\x7e]' -or $state -match '[^\x20-\x7e]') {
 if (-not [IO.Path]::IsPathRooted($StateDirectory) -or $state.Length -lt 8) { throw 'Choose an explicit local PostgreSQL state directory.' }
 $cluster = Join-Path $state 'cluster'
 $keyPath = Join-Path $state 'owner.password'
-$database = if ($ValidationOnly) { 'ReignValidation' } else { 'Reign' }
+$database = if ($ValidationOnly) { 'ReignValidation' } else { 'reign' }
 foreach ($tool in @('initdb.exe','pg_ctl.exe','psql.exe','createdb.exe','pg_dump.exe','pg_restore.exe')) {
     if (-not (Test-Path -LiteralPath (Join-Path $bin $tool) -PathType Leaf)) { throw "PostgreSQL package is incomplete: $tool" }
 }

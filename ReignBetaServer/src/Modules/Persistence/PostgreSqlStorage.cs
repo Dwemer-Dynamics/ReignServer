@@ -18,7 +18,7 @@ namespace ReignBetaServer
 {
     internal sealed class ReignPostgreSqlOptions
     {
-        public const string RequiredDatabaseName = "Reign";
+        public const string RequiredDatabaseName = "reign";
         public const string ValidationDatabaseName = "ReignValidation";
         public const string RequiredEncoding = "UTF8";
 

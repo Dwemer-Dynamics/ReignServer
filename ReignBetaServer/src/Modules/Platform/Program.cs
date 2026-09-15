@@ -962,6 +962,7 @@ namespace ReignBetaServer
                         {
                             ["ok"] = true,
                             ["service"] = "BannerlordReignServer",
+                            ["databaseName"] = ReignPostgreSqlOptions.FromEnvironment().Database,
                             ["databaseSchemaVersion"] = ReignPostgreSqlStorage.DatabaseSchemaVersion,
                             ["requiredDatabaseSchemaVersion"] = ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
                             ["databaseSchemaUpToDate"] = ReignPostgreSqlStorage.DatabaseSchemaVersion == ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
