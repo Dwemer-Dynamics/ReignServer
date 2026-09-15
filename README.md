@@ -8,6 +8,12 @@ DwemerDistro owns startup, shutdown, PostgreSQL (`Reign`, UTF-8, port 5432), and
 
 For local development, see `ReignRelease/skills/reign-full-deploy/SKILL.md` and `reign-server-wsl-deploy/SKILL.md`. The private paired validator builds the client and Linux component; `ReignRelease/Deploy-LocalWsl.ps1` deploys successful reports. Public distro updates use `ReignRelease/Build-Linux.py` from a clean checkout. Neither route launches the game or calls paid providers.
 
+## Release version and date
+
+Both repositories keep `.version_number.txt` (semantic version, currently `0.1.0`) and `.version.txt` (numeric local release stamp, `yyyyMMddHH`), matching HerikaServer. Set the same release values in both repositories when promoting a paired release. Advance the date stamp for a new build even when the semantic version stays the same. Keep `ReignRelease/release.json`, client `SubModule.xml`, and runtime version constants aligned when changing the semantic version.
+
+Builds derive their assembly version from `.version_number.txt` and include both files in their output. Local deployment preserves these files with each installed version. The launcher reads the active server artifact and displays `branch | MM-DD-YYYY | version`; a newer date at the same semantic version also signals an update. Rollback restores the metadata with the executable.
+
 The Bannerlord module and native portrait renderer remain on Windows. A validated local installation record maps their shared cache paths into the selected WSL distro; only that distro's managed paths are accepted. The renderer is invoked through WSL interoperability with bounded execution. Its game-dependent rendering still requires separate acceptance. Existing standalone Windows installations require deliberate data and credential migration; DPAPI-encrypted credentials are not portable to Linux.
 
 ReignServer runs locally beside Bannerlord Reign. This public repository contains the server, shared contracts, native portrait generator, vector worker and release packaging sources. The game module is maintained in [Reign](https://github.com/Dwemer-Dynamics/Reign). Internal ReignBeta names remain for save compatibility.

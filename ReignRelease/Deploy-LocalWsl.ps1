@@ -59,6 +59,9 @@ if (-not $SkipClient) {
         Copy-Item -LiteralPath (Join-Path $workspaceRoot "ReignBeta\$directory") -Destination (Join-Path $stage $directory) -Recurse
     }
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'ReignBeta\SubModule.xml') -Destination $stage
+    foreach ($versionFile in @('.version.txt', '.version_number.txt')) {
+        Copy-Item -LiteralPath (Join-Path $client $versionFile) -Destination $stage
+    }
     $bin = Join-Path $stage 'bin\Win64_Shipping_Client'
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
     foreach ($file in Get-ChildItem -LiteralPath $client -File -Filter '*.dll') {

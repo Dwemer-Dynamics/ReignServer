@@ -153,6 +153,9 @@ def main():
         if path.suffix.lower() == ".dll" and not path.name.startswith("TaleWorlds."):
             copy(path, module / "bin" / "Win64_Shipping_Client" / path.name)
     app = components["server"] / "app"
+    for name in (".version.txt", ".version_number.txt"):
+        copy(client_bin / name, module / name)
+        copy(server_bin / name, app / name)
     tree(server_bin, app, lambda p: (len(p.parts) == 1 and (p.suffix.lower() in (".dll", ".exe", ".config") or p.name.endswith(".deps.json")))
          or p.parts[0] in ("assets", "ProfileLibrary", "portrait_models", "native-portrait-generator") and p.suffix.lower() not in (".pdb", ".lib"))
     identity = {"schema": "reign-release-identity-v1", "version": release["version"], "protocolVersion": release["protocolVersion"], "sourceFingerprint": report["SourceFingerprintSha256"]}
