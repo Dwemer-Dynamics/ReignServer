@@ -14,3 +14,5 @@ Deploy with `ReignRelease/Deploy-LocalWsl.ps1 -Workspace <Reign checkout> -Linux
 Verify public port 8089, internal server 5101, worker 5102, and fresh `/var/www/html/ReignServer/data/logs/server.log`. The worker must report a loaded 384-dimension embedding model. Stop/start only through `ddistro_reign`, and verify the owned worker stops too. Never stop MiniMe on 8082 or alter unrelated mod databases.
 
 Data and secrets remain in `/var/www/html/ReignServer/data`; executables and dependencies live in `/var/www/html/ReignServer/runtime`. Both folders stay inside the checkout and survive source updates and uninstall. Never run campaign/destructive/provider tests on active data. A process/health check is not in-game or native portrait-renderer proof. Report exact source, artifact, version, deployment, validation, and remaining limits.
+
+ReignServer is Linux-only. The client owns Windows portrait-helper builds; no Windows server installer or packaged Windows vector worker is supported. Canonical server verification runs inside WSL with ReignValidation and run-owned data.

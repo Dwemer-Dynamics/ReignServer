@@ -1,10 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-#if !REIGN_LINUX
-using System.Drawing;
-using System.Drawing.Imaging;
-#endif
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -235,17 +231,7 @@ namespace ReignBetaServer
             long height = ((long)bytes[20] << 24) | ((long)bytes[21] << 16) | ((long)bytes[22] << 8) | bytes[23];
             if (width < 1 || height < 1 || width > 8192 || height > 8192 || width * height > 33554432)
                 throw new InvalidDataException("PNG dimensions exceed the bounded image contract.");
-#if REIGN_LINUX
             LinuxImageCodec.Normalize(bytes, requirePng: true);
-#else
-            using (var stream = new MemoryStream(bytes, false))
-            using (var image = Image.FromStream(stream, false, true))
-            {
-                if (image.RawFormat.Guid != ImageFormat.Png.Guid || image.Width != width || image.Height != height)
-                    throw new InvalidDataException("Invalid PNG data or dimensions.");
-                using (var decoded = new Bitmap(image)) { decoded.GetPixel(0, 0); }
-            }
-#endif
         }
 
         private static void AssertCodexImageLocalPath(string path)
@@ -292,7 +278,6 @@ namespace ReignBetaServer
                 try
                 {
                     if (!process.Start()) throw new InvalidOperationException("Codex image helper could not start.");
-                    if (UnifiedLifetimeJobHandle != IntPtr.Zero) AssignProcessToJobObject(UnifiedLifetimeJobHandle, process.Handle);
                     process.StandardInput.AutoFlush = true;
                     new Thread(ReadOutput) { IsBackground = true, Name = "ReignCodexImageOutput" }.Start();
                     new Thread(() => { try { while (process.StandardError.ReadLine() != null) { } } catch { } })

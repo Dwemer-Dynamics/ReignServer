@@ -33,7 +33,7 @@ namespace ReignBetaServer
             string validationRoot = Path.Combine(Path.GetFullPath(workspace), ".codex-build", "reign-mcp", "validation", validationId);
             string reportPath = Path.Combine(validationRoot, "validation-report.json");
             var validation = ReadJsonObject(reportPath);
-            string validatedServer = Path.Combine(validationRoot, "server", "out", "ReignBetaServer.exe");
+            string validatedServer = Path.Combine(validationRoot, "server", "out", "ReignBetaServer.dll");
             string runningServer = typeof(Program).Assembly.Location;
             if (!ReadBool(validation, "Ok", false) || ReadString(ReadDictionary(validation, "Plan"), "Configuration", "") != "Release"
                 || !File.Exists(validatedServer) || FileSha256(validatedServer) != FileSha256(runningServer))

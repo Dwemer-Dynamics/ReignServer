@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework Condition="'$(ReignLinux)' != 'true'">net472</TargetFramework>
-    <TargetFramework Condition="'$(ReignLinux)' == 'true'">net10.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>ReignBetaServer</AssemblyName>
     <RootNamespace>ReignBetaServer</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -18,26 +17,18 @@
     <OutputPath>bin\$(Configuration)\</OutputPath>
     <ReignIncludePrivateVerificationContracts Condition="'$(ReignIncludePrivateVerificationContracts)' == ''">false</ReignIncludePrivateVerificationContracts>
     <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
     <Prefer32Bit>false</Prefer32Bit>
-    <RuntimeIdentifier Condition="'$(ReignLinux)' != 'true'">win-x64</RuntimeIdentifier>
-    <RuntimeIdentifier Condition="'$(ReignLinux)' == 'true'">linux-x64</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>
     <Content Include="$(ReignVersionRoot)\.version.txt;$(ReignVersionRoot)\.version_number.txt" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(ReignLinux)' == 'true'">
-    <DefineConstants>$(DefineConstants);REIGN_LINUX</DefineConstants>
-    <ReignSkipNativePortraitGenerator>true</ReignSkipNativePortraitGenerator>
-    <ReignIncludePrivateVerificationContracts>false</ReignIncludePrivateVerificationContracts>
-  </PropertyGroup>
 
-  <ItemGroup Condition="'$(ReignLinux)' == 'true'">
+  <ItemGroup>
     <Content Include="VectorWorker\*.py;VectorWorker\requirements*.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\ReignRelease\embedding-model.lock.json" Link="embedding-model.lock.json" CopyToOutputDirectory="PreserveNewest" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
-    <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="SkiaSharp" Version="4.152.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.152.0" />
   </ItemGroup>
@@ -55,12 +46,6 @@
     <Compile Include="..\ReignModules\Reign.Shared.Source\**\*.cs" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Remove="ReignVerification\**\*.cs" />
     <Compile Remove="ReignLiveTest\**\*.cs" />
-    <Reference Include="System.Web.Extensions" Condition="'$(ReignLinux)' != 'true'" />
-    <Reference Include="System.Drawing" Condition="'$(ReignLinux)' != 'true'" />
-    <Reference Include="System.IO.Compression" Condition="'$(ReignLinux)' != 'true'" />
-    <Reference Include="System.IO.Compression.FileSystem" Condition="'$(ReignLinux)' != 'true'" />
-    <Reference Include="System.Management" Condition="'$(ReignLinux)' != 'true'" />
-    <Reference Include="System.Security" Condition="'$(ReignLinux)' != 'true'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -147,29 +132,7 @@
     <Copy SourceFiles="..\ReignBeta\ReignBeta.csproj;..\ReignBeta\SubModule.xml" DestinationFolder="$(VerificationWorkspace)ReignBeta" SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="PublishBundledNativePortraitGenerator"
-          AfterTargets="Build"
-          Condition="'$(DesignTimeBuild)' != 'true' and '$(ReignSkipNativePortraitGenerator)' != 'true'">
-    <PropertyGroup>
-      <NativePortraitGeneratorProject>$(MSBuildProjectDirectory)\..\NativeCharacterImageGenerator\src\NativeCharacterImageGenerator.App\NativeCharacterImageGenerator.App.csproj</NativePortraitGeneratorProject>
-      <NativePortraitGeneratorPublishDir>$([MSBuild]::EnsureTrailingSlash('$(OutputPath)'))native-portrait-generator\</NativePortraitGeneratorPublishDir>
-      <NativePortraitGeneratorBuildDir>$(MSBuildProjectDirectory)\obj\bundled-native-portrait-generator\$(Configuration)\</NativePortraitGeneratorBuildDir>
-    </PropertyGroup>
-    <Delete Files="$(NativePortraitGeneratorPublishDir)TaleWorlds.Starter.Library.dll" />
-    <MSBuild Projects="$(NativePortraitGeneratorProject)"
-             Targets="Restore"
-             Condition="'$(ReignRestoreBundledTools)' == 'true'"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true"
-             RemoveProperties="OutDir;OutputPath;BaseOutputPath;BaseIntermediateOutputPath"
-             BuildInParallel="false" />
-    <MSBuild Projects="$(NativePortraitGeneratorProject)"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true;DebugType=None;OutputPath=$(NativePortraitGeneratorBuildDir);PublishDir=$(NativePortraitGeneratorPublishDir)"
-             RemoveProperties="OutDir;BaseOutputPath;BaseIntermediateOutputPath"
-             BuildInParallel="false" />
-    <Error Condition="!Exists('$(NativePortraitGeneratorPublishDir)Bannerlord.NativeCharacterImageGenerator.App.exe')"
-           Text="The bundled native portrait generator was not published into the Reign server package." />
-    <Error Condition="!Exists('$(NativePortraitGeneratorPublishDir)Bannerlord.NativePortraitRenderHost.exe')"
-           Text="The bundled native TaleWorlds portrait render host was not published into the Reign server package." />
+  <Target Name="RequireLinuxServer" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(RuntimeIdentifier)' != 'linux-x64'" Text="ReignServer supports linux-x64 only. Deploy through DwemerDistro." />
   </Target>
 </Project>

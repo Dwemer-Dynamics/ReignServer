@@ -34,14 +34,11 @@
   },
   "installation": {
     "moduleIdentity": "ReignBeta",
-    "serverDirectory": "%USERPROFILE%/Reign/ReignServer",
-    "dataDirectory": "%USERPROFILE%/Reign/Data",
     "record": "%USERPROFILE%/.reign/installation.json",
-    "serverPort": 5101,
-    "postgresPort": 55432,
-    "database": "reign",
-    "postgresMode": "native-windows",
-    "privatePayloadBaseUrl": null
+    "serverMode": "dwemerdistro-wsl",
+    "serverPort": 8089,
+    "postgresPort": 5432,
+    "database": "reign"
   },
   "publication": {
     "serverSourceMayContainClientSource": false,

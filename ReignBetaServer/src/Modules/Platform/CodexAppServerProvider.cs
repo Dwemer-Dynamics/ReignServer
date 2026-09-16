@@ -636,10 +636,6 @@ namespace ReignBetaServer
                 try
                 {
                     if (!process.Start()) throw new InvalidOperationException("The Codex app-server process did not start.");
-                    if (Environment.OSVersion.Platform == PlatformID.Win32NT && UnifiedLifetimeJobHandle != IntPtr.Zero)
-                    {
-                        AssignProcessToJobObject(UnifiedLifetimeJobHandle, process.Handle);
-                    }
                     lock (CodexStateLock)
                     {
                         CodexProcess = process;

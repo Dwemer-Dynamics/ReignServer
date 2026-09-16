@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1140,25 +1140,8 @@ namespace ReignBetaServer
         {
             try
             {
-#if REIGN_LINUX
                 byte[] normalized = NormalizeAtlasOutputToPng(LinuxImageCodec.Fixture(2, 2, jpeg: true));
                 return normalized != null && normalized.Length >= 8 && normalized[0] == 137 && normalized[1] == 80;
-#else
-                using (System.Drawing.Bitmap bitmap = new System.Drawing.Bitmap(2, 2))
-                using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap))
-                using (System.IO.MemoryStream jpeg = new System.IO.MemoryStream())
-                {
-                    graphics.Clear(System.Drawing.Color.Black);
-                    bitmap.Save(jpeg, System.Drawing.Imaging.ImageFormat.Jpeg);
-                    byte[] normalized = NormalizeAtlasOutputToPng(jpeg.ToArray());
-                    return normalized != null
-                        && normalized.Length >= 8
-                        && normalized[0] == 137
-                        && normalized[1] == 80
-                        && normalized[2] == 78
-                        && normalized[3] == 71;
-                }
-#endif
             }
             catch
             {

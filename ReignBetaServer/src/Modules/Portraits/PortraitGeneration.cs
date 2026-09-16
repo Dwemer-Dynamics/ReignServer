@@ -1,12 +1,8 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-#if !REIGN_LINUX
-using System.Drawing;
-using System.Drawing.Imaging;
-#endif
 using System.IO;
 using System.Net;
 using System.Text;
@@ -928,20 +924,7 @@ namespace ReignBetaServer
 
             try
             {
-#if REIGN_LINUX
                 return LinuxImageCodec.Normalize(imageBytes);
-#else
-                using (MemoryStream input = new MemoryStream(imageBytes, false))
-                using (Image source = Image.FromStream(input, true, true))
-                using (Bitmap bitmap = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb))
-                using (Graphics graphics = Graphics.FromImage(bitmap))
-                using (MemoryStream output = new MemoryStream())
-                {
-                    graphics.DrawImage(source, 0, 0, source.Width, source.Height);
-                    bitmap.Save(output, ImageFormat.Png);
-                    return output.ToArray();
-                }
-#endif
             }
             catch
             {

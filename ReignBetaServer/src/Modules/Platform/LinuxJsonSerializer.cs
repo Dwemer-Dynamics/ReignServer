@@ -1,4 +1,3 @@
-#if REIGN_LINUX
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -74,4 +73,3 @@ namespace System.Web.Script.Serialization
         }
     }
 }
-#endif

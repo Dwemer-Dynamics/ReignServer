@@ -353,7 +353,6 @@ namespace ReignBetaServer
                 CampaignNativeSaveRootOverrideForTests))
                 return Path.GetFullPath(
                     CampaignNativeSaveRootOverrideForTests);
-#if REIGN_LINUX
             // Local deployment records the selected Windows user's save folder in WSL notation.
             string saveRoot = ReadString(ReadJsonObject(Path.Combine(DataDir, "windows-bridge.json")), "nativeSaveRoot", "");
             if (!saveRoot.StartsWith("/mnt/", StringComparison.Ordinal)
@@ -361,11 +360,6 @@ namespace ReignBetaServer
                 || Path.GetFullPath(saveRoot) != saveRoot)
                 throw new InvalidOperationException("Set up the local Reign client bridge before managing native Bannerlord saves.");
             return saveRoot;
-#else
-            return Path.Combine(Environment.GetFolderPath(
-                Environment.SpecialFolder.MyDocuments),
-                "Mount and Blade II Bannerlord", "Game Saves");
-#endif
         }
 
         private static string NormalizeNativeSaveSlot(string value)
@@ -1808,15 +1802,7 @@ namespace ReignBetaServer
 
         private static string CampaignPortraitCacheRoot()
         {
-#if REIGN_LINUX
             return Path.Combine(DataDir, "PortraitCache");
-#else
-            var installation = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent();
-            if (installation != null) return installation.PortraitCacheRoot;
-            DirectoryInfo appDir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            string moduleDir = appDir.Parent?.Parent?.FullName ?? "";
-            return string.IsNullOrWhiteSpace(moduleDir) ? "" : Path.Combine(moduleDir, "PortraitCache");
-#endif
         }
 
         private static string CampaignRetirementLedgerPath()

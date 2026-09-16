@@ -2548,9 +2548,9 @@ namespace ReignBetaServer
                 && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", NativeGeneratorPath(DataDir))", StringComparison.Ordinal)
                 && serverClientText.Contains("[\"civilianEquipment\"] = BuildPortraitCivilianEquipment(hero)", StringComparison.Ordinal)
                 && serverClientText.Contains("character[\"civilianEquipment\"] as JArray", StringComparison.Ordinal)
-                && serverProjectContractText.Contains("PublishBundledNativePortraitGenerator", StringComparison.Ordinal)
-                && serverProjectContractText.Contains("native-portrait-generator", StringComparison.Ordinal)
-                && serverProjectContractText.Contains("Bannerlord.NativePortraitRenderHost.exe", StringComparison.Ordinal);
+                && clientProjectContractText.Contains("PublishBundledNativePortraitGenerator", StringComparison.Ordinal)
+                && clientProjectContractText.Contains("native-portrait-generator", StringComparison.Ordinal)
+                && clientProjectContractText.Contains("Bannerlord.NativePortraitRenderHost.exe", StringComparison.Ordinal);
             var backgroundPortraitAudit = AuditBackgroundPortraitEntrypoints(clientRoot);
             AddVerificationCheck(checks, "contracts.background_portrait_entrypoints", "portraits_images",
                 ReadBool(backgroundPortraitAudit, "ok", false),
@@ -2750,7 +2750,7 @@ namespace ReignBetaServer
                 if (File.Exists(installedClientAssembly))
                     clientAssembly = installedClientAssembly;
             }
-            string serverAssembly = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ReignBetaServer.exe");
+            string serverAssembly = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ReignBetaServer.dll");
             AddVerificationCheck(checks, "contracts.build_artifacts", "build", File.Exists(clientAssembly) && File.Exists(serverAssembly), "Client and server build artifacts are present.", new Dictionary<string, object> { ["clientAssembly"] = clientAssembly, ["serverAssembly"] = serverAssembly });
 
             RunPromptSizeContract(checks);

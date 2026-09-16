@@ -42,7 +42,7 @@ if (-not $SkipClient) {
     $runId = $report.RunId
     if ($runId -notmatch '^[A-Za-z0-9-]+$') { throw 'Invalid validation run ID.' }
     $client = Join-Path $report.ArtifactRoot 'client\out'
-    $native = Join-Path $report.ArtifactRoot 'server\out\native-portrait-generator'
+    $native = Join-Path $report.ArtifactRoot 'client\out\native-portrait-generator'
     $dll = Join-Path $client 'ReignBeta.dll'
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo($dll).FileVersion -ne "$($release.version).0") { throw 'Client version does not match the release manifest.' }
     if (-not (Test-Path -LiteralPath (Join-Path $native 'Bannerlord.NativeCharacterImageGenerator.App.exe'))) { throw 'Validated Windows portrait helper is missing.' }

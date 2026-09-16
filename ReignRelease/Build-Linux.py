@@ -28,7 +28,7 @@ def main():
         if subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard"]):
             raise RuntimeError("Public source updates require a clean checkout; use the paired validator for local development")
         subprocess.run(["dotnet", "publish", str(source / "ReignBetaServer/ReignBetaServer.csproj"),
-                        "-c", "Release", "-p:ReignLinux=true", "--runtime", "linux-x64",
+                        "-c", "Release", "--runtime", "linux-x64",
                         "--self-contained", "true", "--output", str(output)], check=True)
         after = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
         if before != after:

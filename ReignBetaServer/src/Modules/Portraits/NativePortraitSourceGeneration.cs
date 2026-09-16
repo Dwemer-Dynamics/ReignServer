@@ -204,7 +204,6 @@ namespace ReignBetaServer
 
         private static string ResolveNativePortraitGeneratorPath(Dictionary<string, object> settings)
         {
-#if REIGN_LINUX
             // The game renderer remains Windows-native; only a locally installed helper is callable.
             string bridge = Environment.GetEnvironmentVariable("REIGN_NATIVE_GENERATOR")
                 ?? ReadString(settings, "portraitNativeSourceGeneratorPath", "");
@@ -215,27 +214,11 @@ namespace ReignBetaServer
                 || !string.Equals(Path.GetFileName(bridge), NativePortraitGeneratorExecutable, StringComparison.Ordinal)
                 || !File.Exists(bridge)) return "";
             return Path.GetFullPath(bridge);
-#else
-            string configured = ReadString(settings, "portraitNativeSourceGeneratorPath", "");
-            string[] candidates =
-            {
-                configured,
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "native-portrait-generator", NativePortraitGeneratorExecutable),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "Bannerlord Events", "NativeCharacterImageGenerator", "publish", "app", NativePortraitGeneratorExecutable)
-            };
-            foreach (string candidate in candidates)
-            {
-                if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate)) return Path.GetFullPath(candidate);
-            }
-            return "";
-#endif
         }
 
         // WSL exposes the same job files to the bounded Windows renderer through its local UNC path.
         private static string NativeGeneratorPath(string path)
         {
-#if REIGN_LINUX
             var start = new ProcessStartInfo("/usr/bin/wslpath")
             {
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
@@ -255,9 +238,6 @@ namespace ReignBetaServer
                     throw new IOException("Windows portrait bridge path lookup failed.");
                 return mapped;
             }
-#else
-            return path;
-#endif
         }
 
         private static string ReadNativePortraitGeneratorError(string resultPath, int exitCode)
