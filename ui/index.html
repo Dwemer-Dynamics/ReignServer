@@ -277,6 +277,7 @@
   <main>
     <nav id='mainNavigation' class='tabs' aria-label='Main pages'>
       <button class='tab active' data-tab='general'>General</button>
+      <button class='tab' data-tab='options'>Options</button>
       <button class='tab' data-tab='campaigns'>Campaign Backups</button>
       <button class='tab' data-tab='llm'>LLM Backend</button>
       <button class='tab' data-tab='models'>Models</button>
@@ -323,6 +324,7 @@
       </div>
     </section>
 
+    @REIGN_XP_OPTIONS@
     <section id='campaigns' class='page'>
       <div class='card'>
         <h2>Campaign Backups</h2>
@@ -1203,7 +1205,7 @@
     ids.push('llmProvider','codexExecutable','codexHome');
     intIds.add('recentRawConversationTurns');
     intIds.add('recentRawConversationCharBudget');
-    const floatIds = new Set(['temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
+    const floatIds = new Set(['reignXpMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
     const promptState = { files:{}, catalog:[], loaded:false };
     const nanoPresetHints = {
       'gpt-image-1.5': 'Preset request shape: 1024x1536 via NanoGPT image reference route.',
@@ -1319,6 +1321,7 @@
     async function loadSettings() {
       const r = await fetch('/api/settings');
       const s = await r.json();
+      loadReignXpOptions(s);
       ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
