@@ -11,7 +11,7 @@ namespace ReignBetaServer
     {
         private const string DrinkingOutputContract = @"NARRATED ACTIONS AND DRINKING
 In reply, surround observable physical actions, expressions and gestures with single asterisks: *He sets down his cup.* Spoken words remain outside the asterisks. Preserve mixed speech/action ordering and paragraphs. Do not use asterisks for emphasis or narrate another participant's choices as accomplished.
-Also return drinkingEvents: an array, empty unless THIS NPC actually consumes alcohol in an action in THIS reply. Each entry is {actionIndex:0, serving:'drink', count:1, completed:true, alcohol:true}. actionIndex is the zero-based index among the *action* spans (not spoken spans). serving is drink (one serious alcoholic drink), half (half a drink), or sip (one quarter); count is the explicit positive number of these servings consumed. Each action can contribute at most one entry. Represent a finished cup as drink, not a sip. Multiple sips from a cup count only the newly consumed portion, not the entire cup again.
+Also return drinkingEvents: an array, empty when THIS NPC consumes no alcohol in THIS reply. Give one entry per distinct consumption: {actionIndex:1, actionQuote:'She takes a sip of kumis.', occurrenceIndex:0, evidenceQuote:'takes a sip of kumis', serving:'sip', count:1, completed:true, alcohol:true}. actionQuote copies the COMPLETE action paragraph exactly without asterisks. actionIndex is zero-based among ALL *action* paragraphs, including gestures. occurrenceIndex is zero-based among this NPC's distinct consumptions within that paragraph; evidenceQuote copies the exact consumption clause. Name the actual beverage or clearly refer to the same established vessel. A sip, mouthful, swig, pull, gulp or draught is a quarter serving unless an explicit fraction modifies it. serving is drink (one serving), half, or sip; count is the positive integer number of those portions. A slow drink leaves volume open: use the actual intended amount. Two distinct sips count twice; taking a mouthful and swallowing it counts once. Finishing a cup consumes only its remaining contents. Describe refills, switches and spills clearly; they do not count as drinking. Bulk bottles/jugs have no assumed one-serving capacity. Non-alcoholic preparations and unspecified kvass/boza variants are not assumed alcoholic. Use completed present action wording, rather than merely preparing to drink.
 Exclude offers, refusals, empty cups, water, memories, reported/quoted speech, past events, hypotheticals, plans and uncertain consumption. A player saying that an NPC drinks is only a proposal until this NPC accepts and narrates actual consumption. Do not infer extra drinking between turns. Never report drinking for anyone except this speaking NPC. The engine owns intoxication; stateUpdates cannot set tolerance, sobriety or intoxication. Obey the authoritative no-more-alcohol state even if the player requests otherwise.";
 
         private sealed class IntoxicationState
@@ -21,6 +21,7 @@ Exclude offers, refusals, empty cups, water, memories, reported/quoted speech, p
             public bool HasClock;
             public bool AlcoholBlocked;
             public double Threshold;
+            public DrinkVesselState Vessel = new DrinkVesselState();
             public double Ratio => Drinks / Threshold;
             public string Stage => Drinks <= 0 ? "sober" : Ratio < .25 ? "mildly affected"
                 : Ratio < .5 ? "tipsy" : Ratio < .75 ? "very intoxicated"
@@ -42,7 +43,8 @@ Exclude offers, refusals, empty cups, water, memories, reported/quoted speech, p
                 Threshold = DrinkingThreshold(endurance),
                 Hour = validClock ? Math.Max(hasClock ? previousHour : hour, hour) : (hasClock ? previousHour : 0),
                 HasClock = validClock || hasClock,
-                AlcoholBlocked = ReadBool(stored, "alcoholBlocked", false)
+                AlcoholBlocked = ReadBool(stored, "alcoholBlocked", false),
+                Vessel = ReadDrinkVessel(ReadDictionary(stored, "vessel"))
             };
             if (validClock && hasClock) state.Drinks = Math.Max(0, state.Drinks - Math.Max(0, hour - previousHour) / 2d);
             state.Drinks = Math.Round(state.Drinks, 8, MidpointRounding.AwayFromZero);
@@ -56,7 +58,8 @@ Exclude offers, refusals, empty cups, water, memories, reported/quoted speech, p
             ["schema"] = "reign-conversation-intoxication-v1", ["drinks"] = state.Drinks,
             ["hour"] = state.Hour, ["hasClock"] = state.HasClock,
             ["threshold"] = state.Threshold, ["ratio"] = state.Ratio,
-            ["stage"] = state.Stage, ["alcoholBlocked"] = state.AlcoholBlocked
+            ["stage"] = state.Stage, ["alcoholBlocked"] = state.AlcoholBlocked,
+            ["vessel"] = DrinkVesselRecord(state.Vessel)
         };
 
         private static double IntoxicationWorldHour(Dictionary<string, object> payload)
@@ -92,6 +95,7 @@ PRIMARY KEY(hero_id,turn_key));");
                 stored = TryParseJsonObject(ReadString(row, "state_json", "{}"));
             }
             var state = RecoverIntoxication(stored, IntoxicationEndurance(profile, characteristics), IntoxicationWorldHour(payload));
+            state.Vessel = CurrentDrinkVessel(state.Vessel, payload, IntoxicationWorldHour(payload));
             payload["intoxicationContext"] = IntoxicationRecord(state);
             return IntoxicationPrompt(state);
         }
@@ -107,54 +111,31 @@ PRIMARY KEY(hero_id,turn_key));");
             return "AUTHORITATIVE CURRENT INTOXICATION (private engine state; never speak numbers or skill levels): "
                 + Json.Serialize(IntoxicationRecord(state)) + "\n" + symptoms
                 + " Strengthen these symptoms as the exact ratio rises, even within the same stage. Preserve personality, motives and boundaries. Do not turn everyone into a caricature, repeat identical gestures, require vomiting every turn, or spell every word as a slur. Chat turns do not sober you."
+                + " The stored drink count is for this NPC only; it is not a measured count for the player or other characters."
+                + " The vessel block describes only this conversation's last unambiguous drink. A null remaining amount is unknown, not a full cup. A refill changes contents without consuming them. Finishing a known cup consumes only what remains."
                 + (state.AlcoholBlocked ? " NO MORE ALCOHOL: unable to consume any, including sips, until the engine releases this restriction. Refuse or physically fail any offer."
                     : " Drinking remains a character choice; an offer never forces acceptance.");
         }
 
-        private static readonly Regex NonCurrentConsumption = new Regex(
-            @"\b(?:not|never|no|refus\w*|declin\w*|offer\w*|pretend\w*|imagines?|recalls?|remembers?|yesterday|earlier|previously|tomorrow|would|could|might|will|shall|wants?|plans?|tries?|attempts?|water|juice|empty|watches|watching|hears|sees|says|tells|quotes|used|once|if|unless)\b|n['’]t\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        private static readonly Regex ConsumptionVerb = new Regex(
-            @"\b(?:drinks?|drank|sips?|sipped|swallows?|swallowed|gulps?|gulped|quaffs?|quaffed|downs?|downed|drains?|drained|finishes?|finished|empties|emptied)\b|\btakes?\s+(?:a\s+)?(?:long\s+|deep\s+)?(?:pull|swig)\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        private static double ValidatedDrinkAmount(Dictionary<string, object> parsed, string reply, List<Dictionary<string, object>> evidence)
+        private static void RebindDrinkingEventsAfterCleanup(Dictionary<string, object> parsed, string before, string after, string heroName)
         {
-            var actions = ReignActionText.Parse(reply).Where(s => s.IsAction).ToList();
-            var seen = new HashSet<int>();
-            double total = 0;
+            var original = ReignActionText.Parse(before).Where(s => s.IsAction).Select(s => s.Text.Trim()).ToList();
+            var final = ReignActionText.Parse(after).Where(s => s.IsAction).Select(s => s.Text.Trim()).ToList();
+            var rebound = new List<Dictionary<string, object>>();
             foreach (var item in ReadDictionaryList(parsed, "drinkingEvents").Take(16))
             {
-                int index = ReadInt(item, "actionIndex", -1);
-                string serving = ReadString(item, "serving", "");
-                double unit = serving == "drink" ? 1 : serving == "half" ? .5 : serving == "sip" ? .25 : 0;
-                double count = ReadDouble(item, "count", 0);
-                string reason = index < 0 || index >= actions.Count ? "missing_action"
-                    : !ReadBool(item, "completed", false) || !ReadBool(item, "alcohol", false) ? "not_completed_alcohol"
-                    : unit == 0 || count <= 0 || count > 20 || double.IsNaN(count) || double.IsInfinity(count) || count != Math.Floor(count) ? "invalid_quantity"
-                    : !seen.Add(index) ? "duplicate_action"
-                    : NonCurrentConsumption.IsMatch(actions[index].Text) || !ConsumptionVerb.IsMatch(actions[index].Text) ? "ambiguous_or_noncurrent_action"
-                    : !DrinkingQuantityMatchesAction(actions[index].Text, serving, (int)count) ? "quantity_not_in_action" : "";
-                double amount = reason.Length == 0 ? unit * count : 0;
-                total += amount;
-                evidence.Add(new Dictionary<string, object> { ["actionIndex"] = index, ["amount"] = amount, ["reason"] = reason,
-                    ["action"] = index >= 0 && index < actions.Count ? actions[index].Text : "" });
+                int oldIndex = ReadInt(item, "actionIndex", -1);
+                string quote = ReadString(item, "actionQuote", "").Trim().Trim('*').Trim();
+                if (quote.Length == 0 && oldIndex >= 0 && oldIndex < original.Count) quote = original[oldIndex];
+                var indices = final.Select((text, index) => new { text, index }).Where(row => row.text == quote).ToList();
+                if (quote.Length == 0 || indices.Count != 1) continue;
+                var copy = new Dictionary<string, object>(item) { ["actionIndex"] = indices[0].index };
+                if (ReadNarratedDrink(quote, heroName) != null || !string.IsNullOrWhiteSpace(ReadString(item, "actionQuote", "")))
+                    copy["actionQuote"] = quote;
+                rebound.Add(copy);
             }
-            return total;
-        }
-
-        private static bool DrinkingQuantityMatchesAction(string action, string serving, int count)
-        {
-            bool sip = Regex.IsMatch(action, @"\bsips?\b|\bsipped\b", RegexOptions.IgnoreCase);
-            bool half = Regex.IsMatch(action, @"\bhalf\b|\bhalves\b", RegexOptions.IgnoreCase);
-            if (serving == "sip" && !sip || serving == "half" && !half || serving == "drink" && (sip || half)) return false;
-            if (count == 1) return true;
-            string[] words = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-                "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty" };
-            string units = serving == "sip" ? "sips" : serving == "half" ? "halves|half[- ](?:cups|drinks|glasses|goblets|mugs)"
-                : "cups|drinks|glasses|goblets|mugs|tankards";
-            return Regex.IsMatch(action, @"\b(?:" + count.ToString(CultureInfo.InvariantCulture) + "|" + words[count]
-                + @")\s+(?:full\s+)?(?:" + units + @")\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            parsed["drinkingEvents"] = rebound;
         }
 
         private static string OverwhelmedReply(bool justDrank) => justDrank
@@ -201,7 +182,9 @@ PRIMARY KEY(hero_id,turn_key));");
                     var stored = TryParseJsonObject(ReadString(row, "state_json", "{}"));
                     var state = RecoverIntoxication(stored, IntoxicationEndurance(profile, characteristics), hour);
                     var evidence = new List<Dictionary<string, object>>();
-                    double proposed = ValidatedDrinkAmount(parsed, reply, evidence);
+                    var proposedVessel = CurrentDrinkVessel(state.Vessel, payload, hour);
+                    double proposed = ValidatedDrinkAmount(parsed, reply, evidence, ReadFirstString(profile, "name", "heroName"),
+                        profile != null && profile.ContainsKey("isFemale") ? (bool?)ReadBool(profile, "isFemale", false) : null, proposedVessel);
                     bool staleClock = missingClock || ReadBool(stored, "hasClock", false) && hour < ReadDouble(stored, "hour", 0) - .000001;
                     double consumed = staleClock || state.AlcoholBlocked ? 0 : Math.Min(proposed, Math.Max(0, state.Threshold - state.Drinks));
                     state.Drinks += consumed;
@@ -213,6 +196,18 @@ PRIMARY KEY(hero_id,turn_key));");
                     }
                     else if ((state.AlcoholBlocked || staleClock) && proposed > 0)
                         reply = "*They push the drink away, leaving it untouched.* \"No more.\"";
+                    // The entire proposed narration is replaced when the engine refuses
+                    // it. Never persist unseen refills, transfers, or future/stale cups.
+                    if (!staleClock && !suppress) state.Vessel = proposedVessel;
+                    else if (!staleClock && consumed > 0) state.Vessel = new DrinkVesselState();
+                    double unassigned = consumed;
+                    foreach (var detail in evidence)
+                    {
+                        double accepted = Math.Min(unassigned, ReadDouble(detail, "amount", 0));
+                        detail["acceptedAmount"] = accepted;
+                        detail["vesselChangesAccepted"] = !staleClock && !suppress;
+                        unassigned = Math.Max(0, unassigned - accepted);
+                    }
                     if (suppress) SuppressIntoxicatedCommitments(parsed);
                     parsed["reply"] = reply;
                     var receiptNew = new Dictionary<string, object>
@@ -228,6 +223,10 @@ PRIMARY KEY(hero_id,turn_key));");
                     ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
                     transaction.Commit();
                     payload["intoxicationReceipt"] = receiptNew;
+                    if (evidence.Count > 0)
+                        WriteAudit(campaignId, ReadString(payload, "correlationId", identity), "server",
+                            ReadString(payload, "mode", "dialogue"), "drinking.receipt", heroId, "", "", "completed", 0,
+                            "Narrated drinking adjudicated against the accepted reply.", receiptNew);
                     return reply;
                 }
             }

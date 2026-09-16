@@ -94,6 +94,7 @@ namespace ReignBetaServer
                             + "Never narrate the player's speech, thoughts, consent, feelings, or physical actions. An NPC may consent to a proposed gift or action, but must not narrate a transfer, payment, release, marriage, ownership change, or other world action as already completed in this reply; execution happens only after validation. Unknown identity should normally use second-person address; a supplied descriptive label may appear at most once and is never the person's name. "
                             + "Do not imitate repeated wording from earlier replies. Remove any belief, memory, comprehension, obligation, state update, relationship assessment, or suggested action that depends on a corrected violation. Add no new world fact or action. "
                             + ConversationNaturalnessContract
+                            + "\n" + DrinkingOutputContract + "\n"
                             + " When native temporary-guest state is supplied, reconcile parting dialogue with that state. "
                             + "If the NPC already chose to end this outing, classify that existing choice with actionGate needed=true, commitment=accepted, intent=end_temporary_party_guest. "
                             + "Do not infer NPC consent from the player's narration. If the NPC has not chosen to stop traveling, clarify that in character and leave departure uncommitted. "
@@ -382,7 +383,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     "The visible reply substantially repeats a recent NPC reply instead of advancing the current beat.");
             }
             Dictionary<string, object> repeatedStageDirection = FindRepeatedDistinctiveStageDirection(
-                reply, priorLines);
+                reply, priorLines, heroName);
             if (repeatedStageDirection != null)
             {
                 add("repeated_distinctive_phrase", ReadString(repeatedStageDirection, "current", ""),
@@ -514,6 +515,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     {
                         string normalized = NormalizeStageDirectionForComparison(match.Groups[1].Value);
                         if (!repeatedSegments.Contains(normalized)) return match.Value;
+                        if (ReadNarratedDrink(match.Groups[1].Value, heroName) != null) return match.Value;
                         removedThisPass++;
                         return string.Empty;
                     }, RegexOptions.CultureInvariant | RegexOptions.Singleline);
@@ -525,6 +527,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     RegexOptions.CultureInvariant).Trim();
                 if (Regex.Matches(cleaned, @"[\p{L}\p{N}']+").Count < 6) return false;
 
+                RebindDrinkingEventsAfterCleanup(candidate, reply, cleaned, heroName);
                 candidate["reply"] = cleaned;
                 remaining = FindRoleplayContinuityViolations(
                     candidate, identityView, priorLines, heroName, playerName);
@@ -543,10 +546,11 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
 
         private static Dictionary<string, object> FindRepeatedDistinctiveStageDirection(
             string reply,
-            List<Dictionary<string, object>> priorLines)
+            List<Dictionary<string, object>> priorLines,
+            string heroName)
         {
             Match currentOwnershipPause = FindPauseOwnershipStageDirection(reply);
-            if (currentOwnershipPause.Success)
+            if (currentOwnershipPause.Success && ReadNarratedDrink(currentOwnershipPause.Groups[1].Value, heroName) == null)
             {
                 Dictionary<string, object> priorOwnershipLine =
                     (priorLines ?? new List<Dictionary<string, object>>())
@@ -567,7 +571,10 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     };
                 }
             }
-            List<string> currentSegments = RoleplayStageDirections(reply);
+            // Repeated consumption is a new physical event. Style deduplication
+            // must not erase it or turn the following action into its evidence.
+            List<string> currentSegments = RoleplayStageDirections(reply)
+                .Where(segment => ReadNarratedDrink(segment, heroName) == null).ToList();
             if (currentSegments.Count == 0) return null;
             foreach (Dictionary<string, object> line in (priorLines ?? new List<Dictionary<string, object>>())
                 .Where(row => ReadString(row, "role", "").Equals("npc", StringComparison.OrdinalIgnoreCase))
