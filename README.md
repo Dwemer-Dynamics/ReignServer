@@ -26,3 +26,5 @@ For local development, use sibling checkouts named Reign and ReignServer. Run `R
 
 
 ReignServer supports Linux x64 only. Windows server installers, DPAPI and desktop lifetime management are retired. The Windows client and native portrait renderer remain separate client components.
+
+Approved first-party shared portraits belong in the private Reign module at ReignBeta/PortraitCache/_shared, with the tracked ReignBeta/PortraitCache/shared-portrait-inventory.json. Deploy and package the verified module inventory; do not rely on a separate or machine-local first-party portrait payload.

@@ -86,7 +86,8 @@ namespace Reign.Core.Contracts.Platform
                 string prefix = @"\\wsl.localhost\" + WslDistro;
                 ServerRoot = WslDirectory(ServerRoot, prefix + @"\var\www\html\ReignServer\runtime\current");
                 DataRoot = WslDirectory(DataRoot, prefix + @"\var\www\html\ReignServer\data");
-                ContentRoot = WslDirectory(ContentRoot, DataRoot);
+                ContentRoot = string.Equals(ContentRoot, DataRoot, StringComparison.OrdinalIgnoreCase)
+                    ? WslDirectory(ContentRoot, DataRoot) : AbsoluteDirectory(ContentRoot, "contentRoot");
                 if (PostgresPort != 5432) throw new InvalidDataException("DwemerDistro owns PostgreSQL on port 5432.");
             }
             else
@@ -106,8 +107,9 @@ namespace Reign.Core.Contracts.Platform
                 throw new InvalidDataException("The ReignBeta module must belong to the selected Bannerlord installation.");
             if (IsWithin(ServerRoot, DataRoot) || IsWithin(ModuleRoot, DataRoot))
                 throw new InvalidDataException("Writable Reign data must be outside the installed program and module directories.");
-            if (IsWithin(ServerRoot, ContentRoot) || IsWithin(ModuleRoot, ContentRoot))
-                throw new InvalidDataException("Shared portrait content must be outside the installed program and module directories so user changes survive updates.");
+            if (!string.Equals(ContentRoot, ModuleRoot, StringComparison.OrdinalIgnoreCase)
+                && !(ServerMode == "dwemerdistro-wsl" && string.Equals(ContentRoot, DataRoot, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("Shared portrait content must be inside the directly distributable ReignBeta module.");
         }
 
         private static string AbsoluteDirectory(string value, string name)

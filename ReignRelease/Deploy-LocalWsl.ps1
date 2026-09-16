@@ -46,6 +46,18 @@ if (-not $SkipClient) {
     $dll = Join-Path $client 'ReignBeta.dll'
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo($dll).FileVersion -ne "$($release.version).0") { throw 'Client version does not match the release manifest.' }
     if (-not (Test-Path -LiteralPath (Join-Path $native 'Bannerlord.NativeCharacterImageGenerator.App.exe'))) { throw 'Validated Windows portrait helper is missing.' }
+    # Refuse missing or unhydrated shipped assets before touching the installed module.
+    $portraitRoot = Join-Path $workspaceRoot 'ReignBeta\PortraitCache\_shared'
+    $inventory = Get-Content (Join-Path $workspaceRoot 'ReignBeta\PortraitCache\shared-portrait-inventory.json') -Raw | ConvertFrom-Json
+    foreach ($entry in $inventory.files) {
+        $path = [IO.Path]::GetFullPath((Join-Path $portraitRoot $entry.path))
+        if (-not $path.StartsWith($portraitRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-Item -LiteralPath $path).Length -ne $entry.bytes -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) {
+            throw 'Shipped portrait inventory is incomplete. Hydrate the tracked Git LFS assets before deployment.'
+        }
+    }
     $deploymentId = "$runId-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
     # Bannerlord discovers SubModule.xml even in hidden folders under Modules.
     # Keep staging and recoverable backups outside that search root, on the same volume.
@@ -55,7 +67,7 @@ if (-not $SkipClient) {
     $stage = Join-Path $deploymentRoot "stage-$deploymentId"
     if (Test-Path -LiteralPath $stage) { throw 'The deployment staging path already exists.' }
     New-Item -ItemType Directory -Path $stage | Out-Null
-    foreach ($directory in @('GUI','ModuleData','EventArt','TavernArt','Videos')) {
+    foreach ($directory in @('GUI','ModuleData','EventArt','TavernArt','Videos','PortraitCache')) {
         Copy-Item -LiteralPath (Join-Path $workspaceRoot "ReignBeta\$directory") -Destination (Join-Path $stage $directory) -Recurse
     }
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'ReignBeta\SubModule.xml') -Destination $stage
@@ -89,7 +101,7 @@ if (-not $SkipClient) {
     $record = [ordered]@{
         schema='reign-installation-v1';version=$release.version;protocolVersion=$release.protocolVersion;contentVersion=$release.contentVersion
         serverMode='dwemerdistro-wsl';wslDistro=$Distro;serverRoot="$prefix\var\www\html\ReignServer\runtime\current"
-        contentRoot="$prefix\var\www\html\ReignServer\data";dataRoot="$prefix\var\www\html\ReignServer\data"
+        contentRoot=$module;dataRoot="$prefix\var\www\html\ReignServer\data"
         bannerlordRoot=$game;moduleRoot=$module;postgresBin='';postgresPort=5432;nativeGeneratorRoot=$helper
     }
     [IO.File]::WriteAllText("$recordPath.next",($record | ConvertTo-Json),[Text.UTF8Encoding]::new($false))

@@ -15,7 +15,7 @@ namespace ReignBetaServer
 Native weight: [NATIVE WEIGHT] on a 0–1 scale: [WEIGHT DESCRIPTION].
 Native build: [NATIVE BUILD] on a 0–1 scale: [BUILD DESCRIPTION].
 These are independent native appearance sliders, not kilograms, BMI, clinical classifications or body-fat percentages. Respect the exact position within each range, without abrupt changes at descriptive boundaries.
-Weight controls body-fat fullness; build controls muscle mass. High weight does not imply muscle. High build does not imply extra fat or automatically visible abdominal definition; body fat and clothing can obscure muscle definition.
+Weight controls body-fat fullness. For women, build controls natural muscle tone, firmness, and athletic definition, not added muscle mass, bulky shoulders, thick arms, or masculine bodybuilder proportions. For men, build controls muscle mass. High weight does not imply muscle. High build does not imply extra fat or automatically visible abdominal definition; body fat and clothing can obscure definition.
 Match these native proportions even if another prompt or the supplied AI portrait conflicts. Preserve native age, sex, skeletal proportions, face and identity. Do not infer breast size, enlarge curves, beautify, slim or bulk up the person beyond these values.
 Garments must fit this physique. Revealingness and physical confidence change clothing coverage only, never body size. Covered muscles need not be exposed. During a clothing edit, correct conflicting AI physique to these native values while preserving the person's face and identity. Never print these instructions or values in the image.";
 
@@ -41,14 +41,16 @@ Garments must fit this physique. Revealingness and physical confidence change cl
             return new Dictionary<string, object>(data);
         }
 
-        private static string PhysiqueDescription(double value, bool muscle)
+        private static string PhysiqueDescription(double value, bool muscle, bool female)
         {
             int band = value < .2 ? 0 : value < .4 ? 1 : value < .6 ? 2 : value < .8 ? 3 : 4;
-            return (muscle ? new[] { "Low muscle mass", "Light musculature", "Moderate musculature", "Muscular", "Very muscular" }
+            return (muscle && female
+                ? new[] { "Minimal muscle tone", "Lightly toned", "Moderately toned", "Athletically toned", "Highly toned and athletic" }
+                : muscle ? new[] { "Low muscle mass", "Light musculature", "Moderate musculature", "Muscular", "Very muscular" }
                 : new[] { "Very slim, minimal body fat", "Lean", "Medium body-fat level", "Heavyset, increased body fat", "Very heavyset, substantial body fat" })[band];
         }
 
-        private static Dictionary<string, object> BuildPortraitPhysiqueEvidence(Dictionary<string, object> native, string template)
+        private static Dictionary<string, object> BuildPortraitPhysiqueEvidence(Dictionary<string, object> native, string template, bool female)
         {
             double weight = NativePhysiqueUnit(native, "weight"), build = NativePhysiqueUnit(native, "build");
             if (string.IsNullOrWhiteSpace(template)) throw new InvalidDataException("The body appearance prompt is empty.");
@@ -56,11 +58,12 @@ Garments must fit this physique. Revealingness and physical confidence change cl
             foreach (string token in tokens) if (!template.Contains(token)) throw new InvalidDataException("Body appearance prompt is missing " + token);
             string layer = template.Trim().Replace(tokens[0], weight.ToString("0.########", CultureInfo.InvariantCulture))
                 .Replace(tokens[1], build.ToString("0.########", CultureInfo.InvariantCulture))
-                .Replace(tokens[2], PhysiqueDescription(weight, false)).Replace(tokens[3], PhysiqueDescription(build, true));
+                .Replace(tokens[2], PhysiqueDescription(weight, false, female)).Replace(tokens[3], PhysiqueDescription(build, true, female));
             return new Dictionary<string, object> {
                 ["schema"] = "reign-portrait-physique-v1", ["weight"] = weight, ["build"] = build,
                 ["weightSource"] = ReadString(native, "weightSource", ""), ["buildSource"] = ReadString(native, "buildSource", ""),
-                ["weightDescription"] = PhysiqueDescription(weight, false), ["buildDescription"] = PhysiqueDescription(build, true),
+                ["weightDescription"] = PhysiqueDescription(weight, false, female), ["buildDescription"] = PhysiqueDescription(build, true, female),
+                ["buildInterpretation"] = female ? "female_tone_and_firmness" : "male_muscle_mass",
                 ["sourceSha256"] = ReadString(native, "sourceSha256", ""), ["bodyLayer"] = layer,
                 ["bodyLayerSha256"] = Sha256Hex(Encoding.UTF8.GetBytes(layer))
             };

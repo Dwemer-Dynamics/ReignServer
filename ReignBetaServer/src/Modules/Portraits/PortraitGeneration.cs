@@ -189,7 +189,10 @@ namespace ReignBetaServer
                     phase.Stop();
                     timing["nativeSourceMs"] = phase.ElapsedMilliseconds;
                     var nativePhysique = ValidateNativePhysique(ReadDictionary(sourceProvenance, "physique"), sourceImage);
-                    payload["resolvedPortraitPhysique"] = BuildPortraitPhysiqueEvidence(nativePhysique, LoadPromptTemplate(PortraitBodyPromptFile));
+                    payload["resolvedPortraitPhysique"] = BuildPortraitPhysiqueEvidence(
+                        nativePhysique,
+                        LoadPromptTemplate(PortraitBodyPromptFile),
+                        IsFemalePortraitSubject(payload));
                     bool sharedRebuild = ReadString(sourceProvenance, "kind", "") == "shared_ai_portrait_reference";
                     if (PreserveResidentClothing(payload))
                     {

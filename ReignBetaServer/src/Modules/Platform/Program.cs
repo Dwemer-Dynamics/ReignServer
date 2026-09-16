@@ -4466,7 +4466,7 @@ $participants_json,$about_entities_json,$known_by_json,'[]','private',$importanc
                 });
         }
 
-        private static Dictionary<string, object> BuildNpcMemoryPacket(string campaignId, string npcId, string playerId, string locationId, string topic, int tokenBudget, Dictionary<string, object> npcContext = null)
+        private static Dictionary<string, object> BuildNpcMemoryPacket(string campaignId, string npcId, string playerId, string locationId, string topic, int tokenBudget, Dictionary<string, object> npcContext = null, Dictionary<string, object> settingsOverride = null)
         {
             ReignTraceScope retrievalTrace = BeginReignSpan("memory.retrieve", new Dictionary<string, object>
             { ["campaignId"] = campaignId, ["npcId"] = npcId, ["playerId"] = playerId, ["tokenBudget"] = tokenBudget });
@@ -4481,9 +4481,10 @@ $participants_json,$about_entities_json,$known_by_json,'[]','private',$importanc
             List<Dictionary<string, object>> comprehension = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> summaries = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> temporalKnowledge = new List<Dictionary<string, object>>();
+            List<Dictionary<string, object>> nativeWorldHistory = new List<Dictionary<string, object>>();
             List<string> warnings = new List<string>();
             List<string> sourceEventIds = new List<string>();
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = settingsOverride ?? LoadSettings();
             Dictionary<string, object> routeContext = npcContext == null
                 ? new Dictionary<string, object>()
                 : new Dictionary<string, object>(npcContext, StringComparer.OrdinalIgnoreCase);
@@ -4663,6 +4664,12 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                     }
                 }
                 timingPhases["exactHistoryMs"] = phaseTimer.ElapsedMilliseconds;
+                phaseTimer.Restart();
+                nativeWorldHistory = LoadKnownWorldHistoryForDialogue(connection,
+                    ReadString(routeContext, "timelineId", ""), ReadDouble(routeContext, "worldDay", 0d),
+                    knowledge, topic, retrievalRoute, semanticRetrieval,
+                    ReadBool(ReadDictionary(routeContext, "identityView"), "knowsIdentity", false));
+                timingPhases["nativeWorldHistoryMs"] = phaseTimer.ElapsedMilliseconds;
             }
             phaseTimer.Restart();
 
@@ -4793,8 +4800,13 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             int exactReserve = string.IsNullOrWhiteSpace(ReadString(exactHistory, "text", "")) ? 0
                 : ReadInt(exactHistory, "rawTurnCount", 0) > 0
                     ? Math.Max(1200, Math.Min(Math.Max(1200, tokenBudget - 400), (int)Math.Ceiling(ReadString(exactHistory, "text", "").Length / 4d))) : 600;
+            string nativeHistoryText = FormatKnownWorldHistoryForDialogue(nativeWorldHistory,
+                Math.Min(2400, Math.Max(800, tokenBudget * 4 / 3)));
+            int nativeReserve = (int)Math.Ceiling(nativeHistoryText.Length / 4d);
             string packet = BuildMemoryPacketText(npcId, playerId, summaries, memories, relationships, obligations, beliefs, comprehension,
-                warnings, retrievalRoute, Math.Max(400, tokenBudget - exactReserve));
+                warnings, retrievalRoute, Math.Max(400, tokenBudget - exactReserve - nativeReserve));
+            if (!string.IsNullOrWhiteSpace(nativeHistoryText)) packet = nativeHistoryText + "\n\n" + packet;
+            sourceEventIds.AddRange(nativeWorldHistory.Select(row => ReadString(row, "event_id", "")));
             string temporalText = FormatTemporalKnowledgeForPrompt(temporalKnowledge);
             if (!string.IsNullOrWhiteSpace(temporalText))
                 packet = packet.TrimEnd() + "\n\n" + temporalText;
@@ -4838,6 +4850,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                     ["beliefs"] = beliefs.Count,
                     ["comprehension"] = comprehension.Count,
                     ["temporalKnowledge"] = temporalKnowledge.Count,
+                    ["nativeWorldHistory"] = nativeWorldHistory.Count,
                     ["exactTranscriptTurns"] = ReadStringList(exactHistory, "expandedTurnIds").Count
                 },
                 ["timingMs"] = timer.ElapsedMilliseconds
@@ -13030,8 +13043,12 @@ The previous attempt did not complete a JSON object within its output budget.
                 return "";
             }
 
+            // Only a leading canonical decision identifies a present departure. Mentioning
+            // a future departure safeguard inside an initial invitation must still join.
+            bool explicitDeparture = ReadString(actionGate, "intent", "").Trim()
+                .StartsWith("end_temporary_party_guest", StringComparison.OrdinalIgnoreCase);
             string acceptedExchange = (ReadString(actionGate, "intent", "") + "\n" + playerText).Trim();
-            if (ContainsAnyNormalized(acceptedExchange,
+            if (!explicitDeparture && ContainsAnyNormalized(acceptedExchange,
                     "accept banishment",
                     "accept that risk",
                     "fighting your own realm",
@@ -13040,7 +13057,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 return "acknowledge_own_faction_combat_risk";
             }
 
-            if (ContainsAnyNormalized(acceptedExchange,
+            if (!explicitDeparture && ContainsAnyNormalized(acceptedExchange,
                 "join my party",
                 "join the player party",
                 "travel with my party",
@@ -13053,7 +13070,7 @@ The previous attempt did not complete a JSON object within its output budget.
             // "end the arrangement" at a future five-day review.  That safeguard is
             // not a present departure request.  Prefer the explicit current join verb;
             // genuine departure exchanges do not contain one of these join phrases.
-            if (ContainsAnyNormalized(acceptedExchange,
+            if (explicitDeparture || ContainsAnyNormalized(acceptedExchange,
                     "accepts release from the party",
                     "return to your people",
                     "return to your own party",

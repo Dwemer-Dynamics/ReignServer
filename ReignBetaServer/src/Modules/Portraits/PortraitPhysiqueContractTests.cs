@@ -21,8 +21,10 @@ namespace ReignBetaServer
             double[] boundaries = { 0, .199999, .2, .399999, .4, .599999, .6, .799999, .8, 1 };
             string[] weights = { "Very slim, minimal body fat", "Lean", "Medium body-fat level", "Heavyset, increased body fat", "Very heavyset, substantial body fat" };
             string[] builds = { "Low muscle mass", "Light musculature", "Moderate musculature", "Muscular", "Very muscular" };
-            check("boundaries", boundaries.Select((value, i) => PhysiqueDescription(value, false) == weights[i / 2]
-                && PhysiqueDescription(value, true) == builds[i / 2]).All(x => x));
+            string[] femaleBuilds = { "Minimal muscle tone", "Lightly toned", "Moderately toned", "Athletically toned", "Highly toned and athletic" };
+            check("boundaries", boundaries.Select((value, i) => PhysiqueDescription(value, false, false) == weights[i / 2]
+                && PhysiqueDescription(value, true, false) == builds[i / 2]
+                && PhysiqueDescription(value, true, true) == femaleBuilds[i / 2]).All(x => x));
             foreach (object invalid in new object[] { -1d, 1.01d, 74, double.NaN, double.PositiveInfinity, "0.5", null })
             {
                 var data = native(.5, .5); data["weight"] = invalid;
@@ -35,7 +37,7 @@ namespace ReignBetaServer
             check("cache_hash_binding", hashRejected && ValidateNativePhysique(native(.3, .9), source) != null);
             foreach (var values in new[] { new[] { .3, .9 }, new[] { .9, .1 } })
             {
-                var evidence = BuildPortraitPhysiqueEvidence(native(values[0], values[1]), PortraitBodyPromptDefault);
+                var evidence = BuildPortraitPhysiqueEvidence(native(values[0], values[1]), PortraitBodyPromptDefault, true);
                 var payload = new Dictionary<string, object> { ["resolvedPortraitPhysique"] = evidence,
                     ["ageYears"] = 30, ["gender"] = "female", ["promptPurpose"] = "portrait",
                     ["physicalConfidence"] = new Dictionary<string, object> { ["score"] = 74 } };
@@ -57,6 +59,15 @@ namespace ReignBetaServer
                         && BuildAdultPortraitClothingPrompt(payload) == edit);
                 }
             }
+            var femaleHighBuild = BuildPortraitPhysiqueEvidence(native(.5, .9), PortraitBodyPromptDefault, true);
+            var maleHighBuild = BuildPortraitPhysiqueEvidence(native(.5, .9), PortraitBodyPromptDefault, false);
+            check("sex_aware_high_build", ReadString(femaleHighBuild, "buildDescription", "") == "Highly toned and athletic"
+                && ReadString(femaleHighBuild, "buildInterpretation", "") == "female_tone_and_firmness"
+                && ReadString(femaleHighBuild, "bodyLayer", "").Contains("not added muscle mass, bulky shoulders, thick arms, or masculine bodybuilder proportions")
+                && ReadString(maleHighBuild, "buildDescription", "") == "Very muscular"
+                && ReadString(maleHighBuild, "buildInterpretation", "") == "male_muscle_mass");
+            check("female_subject_alias", IsFemalePortraitSubject(new Dictionary<string, object> { ["isFemale"] = true })
+                && !IsFemalePortraitSubject(new Dictionary<string, object> { ["isFemale"] = false }));
             foreach (string profile in new[] { "portrait", "adultPortrait", "scenery", "adultScenery" })
             {
                 bool called = false;
@@ -64,15 +75,15 @@ namespace ReignBetaServer
                 check("routing_" + profile, called == IsCharacterPortraitProfile(profile));
             }
             string customized = PortraitBodyPromptDefault + "\nKeep a custom garment instruction.";
-            check("editable_template", ReadString(BuildPortraitPhysiqueEvidence(native(.5, .5), customized), "bodyLayer", "").EndsWith("Keep a custom garment instruction."));
+            check("editable_template", ReadString(BuildPortraitPhysiqueEvidence(native(.5, .5), customized, false), "bodyLayer", "").EndsWith("Keep a custom garment instruction."));
             bool missingTokenRejected = false;
-            try { BuildPortraitPhysiqueEvidence(native(.5, .5), "No body tokens"); } catch (InvalidDataException) { missingTokenRejected = true; }
+            try { BuildPortraitPhysiqueEvidence(native(.5, .5), "No body tokens", false); } catch (InvalidDataException) { missingTokenRejected = true; }
             check("missing_template_tokens_rejected", missingTokenRejected);
             check("catalog", PromptFileNames.Contains(PortraitBodyPromptFile) && DefaultPromptTemplates()[PortraitBodyPromptFile] == PortraitBodyPromptDefault);
             string fixture = Path.Combine(Path.GetTempPath(), "reign-shared-rebuild-" + Guid.NewGuid().ToString("N"));
             try {
                 Directory.CreateDirectory(fixture);
-                var metadata = new Dictionary<string, object> { ["heroStringId"] = "fixture", ["bodyWeight"] = .3, ["bodyBuild"] = .9,
+                var metadata = new Dictionary<string, object> { ["heroStringId"] = "fixture", ["gender"] = "female", ["bodyWeight"] = .3, ["bodyBuild"] = .9,
                     ["nativePhysique"] = native(.3, .9) };
                 File.WriteAllText(Path.Combine(fixture, "portrait_input.json"), Json.Serialize(metadata));
                 byte[] master = PngEncoder.EncodeRgba(new byte[768 * 1024 * 4], 768, 1024);
@@ -85,10 +96,11 @@ namespace ReignBetaServer
                     && ReadString(bound, "savedSourceSha256", "") == Sha256Hex(source)
                     && ReadString(bound, "referenceKind", "") == "existing_ai_portrait");
                 var request = BuildSharedPortraitGenerationPayload(entry, "NanoGPT");
-                request["resolvedPortraitPhysique"] = BuildPortraitPhysiqueEvidence(bound, PortraitBodyPromptDefault);
+                request["resolvedPortraitPhysique"] = BuildPortraitPhysiqueEvidence(bound, PortraitBodyPromptDefault, IsFemalePortraitSubject(request));
                 string rebuildPrompt = BuildSharedPortraitRebuildPrompt(request);
                 check("shared_preserve_outfit", rebuildPrompt.Contains("Preserve the existing clothing design")
-                    && rebuildPrompt.Contains("Native weight: 0.3") && !rebuildPrompt.Contains("[NATIVE"));
+                    && rebuildPrompt.Contains("Native weight: 0.3") && rebuildPrompt.Contains("Highly toned and athletic")
+                    && !rebuildPrompt.Contains("[NATIVE"));
                 foreach (string model in AtlasImageModels.Concat(NanoImageModels)) {
                     request["model"] = model;
                     check("shared_provider_" + model, BuildSharedPortraitRebuildPrompt(request) == rebuildPrompt);
