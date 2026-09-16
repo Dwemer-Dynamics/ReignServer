@@ -76,3 +76,7 @@
 /ReignRelease/output/
 /ReignBeta/
 /ReignMcp/
+
+# DwemerDistro local application and persistent state
+/runtime/
+/data/

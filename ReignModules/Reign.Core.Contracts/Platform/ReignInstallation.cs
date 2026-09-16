@@ -84,8 +84,8 @@ namespace Reign.Core.Contracts.Platform
                     throw new InvalidDataException("A WSL client installation needs a valid local distribution name.");
                 // Only the named local WSL distro is permitted; arbitrary SMB shares stay rejected.
                 string prefix = @"\\wsl.localhost\" + WslDistro;
-                ServerRoot = WslDirectory(ServerRoot, prefix + @"\opt\dwemerdistro\reign\current");
-                DataRoot = WslDirectory(DataRoot, prefix + @"\var\lib\dwemerdistro\reign");
+                ServerRoot = WslDirectory(ServerRoot, prefix + @"\var\www\html\ReignServer\runtime\current");
+                DataRoot = WslDirectory(DataRoot, prefix + @"\var\www\html\ReignServer\data");
                 ContentRoot = WslDirectory(ContentRoot, DataRoot);
                 if (PostgresPort != 5432) throw new InvalidDataException("DwemerDistro owns PostgreSQL on port 5432.");
             }

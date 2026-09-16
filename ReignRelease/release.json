@@ -29,8 +29,8 @@
     "postgresPort": 5432,
     "database": "reign",
     "encoding": "UTF8",
-    "runtimeRoot": "/opt/dwemerdistro/reign",
-    "dataRoot": "/var/lib/dwemerdistro/reign"
+    "runtimeRoot": "/var/www/html/ReignServer/runtime",
+    "dataRoot": "/var/www/html/ReignServer/data"
   },
   "installation": {
     "moduleIdentity": "ReignBeta",

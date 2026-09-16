@@ -88,15 +88,15 @@ if (-not $SkipClient) {
     $prefix = "\\wsl.localhost\$Distro"
     $record = [ordered]@{
         schema='reign-installation-v1';version=$release.version;protocolVersion=$release.protocolVersion;contentVersion=$release.contentVersion
-        serverMode='dwemerdistro-wsl';wslDistro=$Distro;serverRoot="$prefix\opt\dwemerdistro\reign\current"
-        contentRoot="$prefix\var\lib\dwemerdistro\reign";dataRoot="$prefix\var\lib\dwemerdistro\reign"
+        serverMode='dwemerdistro-wsl';wslDistro=$Distro;serverRoot="$prefix\var\www\html\ReignServer\runtime\current"
+        contentRoot="$prefix\var\www\html\ReignServer\data";dataRoot="$prefix\var\www\html\ReignServer\data"
         bannerlordRoot=$game;moduleRoot=$module;postgresBin='';postgresPort=5432;nativeGeneratorRoot=$helper
     }
     [IO.File]::WriteAllText("$recordPath.next",($record | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath "$recordPath.next" -Destination $recordPath -Force
     $generator = ConvertTo-WslPath (Join-Path $helper 'Bannerlord.NativeCharacterImageGenerator.App.exe')
     $nativeSaveRoot = ConvertTo-WslPath (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Mount and Blade II Bannerlord\Game Saves')
-    $writeBridge = 'import json,pathlib,sys; p=pathlib.Path("/var/lib/dwemerdistro/reign/windows-bridge.json"); t=p.with_suffix(".next"); t.write_text(json.dumps({"schema":"reign-windows-bridge-v1","nativeGenerator":sys.argv[1],"nativeSaveRoot":sys.argv[2]})); t.replace(p)'
+    $writeBridge = 'import json,pathlib,sys; p=pathlib.Path("/var/www/html/ReignServer/data/windows-bridge.json"); t=p.with_suffix(".next"); t.write_text(json.dumps({"schema":"reign-windows-bridge-v1","nativeGenerator":sys.argv[1],"nativeSaveRoot":sys.argv[2]})); t.replace(p)'
     & wsl.exe -d $Distro -u dwemer -- python3 -c $writeBridge $generator $nativeSaveRoot
     if ($LASTEXITCODE -ne 0) { throw 'The client deployed, but its WSL portrait bridge record could not be written.' }
     Write-Output "Reign $($release.version) client deployed to $module; previous files retained."
