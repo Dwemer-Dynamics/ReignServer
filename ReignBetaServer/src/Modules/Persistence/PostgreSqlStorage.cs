@@ -18,7 +18,7 @@ namespace ReignBetaServer
 {
     internal sealed class ReignPostgreSqlOptions
     {
-        public const string RequiredDatabaseName = "Reign";
+        public const string RequiredDatabaseName = "reign";
         public const string ValidationDatabaseName = "ReignValidation";
         public const string RequiredEncoding = "UTF8";
 
@@ -123,6 +123,8 @@ namespace ReignBetaServer
             CampaignConnectionIdentities =
                 new ConditionalWeakTable<NpgsqlConnection, CampaignConnectionIdentity>();
         private static bool InfrastructureReady;
+        public const int RequiredDatabaseSchemaVersion = 2;
+        public static int DatabaseSchemaVersion { get; private set; }
 
         private sealed class CampaignConnectionIdentity
         {
@@ -248,17 +250,49 @@ SET schema_name=excluded.schema_name;",
                     EnsureValidationDatabaseExists();
                 using (NpgsqlConnection connection = OpenDatabaseConnection())
                 {
-                    ValidateDatabaseIdentity(connection);
-                    string sql = ReadEmbeddedSql("ReignBetaServer.PostgreSql.reign_meta.sql");
-                    using (NpgsqlCommand command = new NpgsqlCommand(sql, connection))
-                    {
-                        command.CommandTimeout = 180;
-                        command.ExecuteNonQuery();
-                    }
+                    DatabaseSchemaVersion = ApplyInfrastructureMigrations(connection);
                 }
 
                 InfrastructureReady = true;
             }
+        }
+
+        // Keep schema changes and their version stamp atomic across concurrent startup/update attempts.
+        internal static int ApplyInfrastructureMigrations(NpgsqlConnection connection)
+        {
+            ValidateDatabaseIdentity(connection);
+            using (NpgsqlTransaction transaction = connection.BeginTransaction())
+            using (NpgsqlCommand command = new NpgsqlCommand(
+                "SELECT pg_advisory_xact_lock(1380271950);", connection, transaction))
+            {
+                command.CommandTimeout = 180;
+                command.ExecuteNonQuery();
+                command.CommandText = "SELECT to_regclass('reign_meta.storage_version') IS NOT NULL;";
+                if (Convert.ToBoolean(command.ExecuteScalar(), CultureInfo.InvariantCulture))
+                {
+                    command.CommandText = "SELECT version FROM reign_meta.storage_version WHERE component='reign_postgresql';";
+                    object installed = command.ExecuteScalar();
+                    if (installed != null && installed != DBNull.Value)
+                        ValidateDatabaseSchemaVersion(Convert.ToInt32(installed, CultureInfo.InvariantCulture));
+                }
+                command.CommandText = ReadEmbeddedSql("ReignBetaServer.PostgreSql.reign_meta.sql");
+                command.ExecuteNonQuery();
+                command.CommandText = "SELECT version FROM reign_meta.storage_version WHERE component='reign_postgresql';";
+                int version = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+                if (version != RequiredDatabaseSchemaVersion)
+                    throw new InvalidOperationException("Reign database migration did not reach the required schema version.");
+                transaction.Commit();
+                return version;
+            }
+        }
+
+        // A code rollback must never rewrite schema helpers belonging to a newer database release.
+        internal static void ValidateDatabaseSchemaVersion(int version)
+        {
+            if (version > RequiredDatabaseSchemaVersion)
+                throw new InvalidOperationException("Reign database schema version " + version
+                    + " is newer than this server supports (" + RequiredDatabaseSchemaVersion
+                    + "). Install a compatible server; database downgrades are not automatic.");
         }
 
         private static void EnsureValidationDatabaseExists()

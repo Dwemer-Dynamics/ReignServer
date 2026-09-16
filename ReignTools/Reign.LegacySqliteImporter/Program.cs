@@ -120,7 +120,7 @@ internal static class Program
             Host = ReadEnvironment("REIGN_DB_HOST", "127.0.0.1"),
             Port = int.TryParse(Environment.GetEnvironmentVariable(
                 "REIGN_DB_PORT"), out var port) ? port : 5432,
-            Database = "Reign",
+            Database = "reign",
             Username = ReadEnvironment("REIGN_DB_USER", "dwemer"),
             Password = ReadEnvironment("REIGN_DB_PASSWORD", "dwemer"),
             Pooling = false,

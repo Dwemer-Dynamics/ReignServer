@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Text.RegularExpressions;
 
 namespace Reign.Core.Contracts.Platform
 {
@@ -21,6 +22,8 @@ namespace Reign.Core.Contracts.Platform
         [DataMember(Name = "moduleRoot")] public string ModuleRoot { get; set; } = string.Empty;
         [DataMember(Name = "postgresBin")] public string PostgresBin { get; set; } = string.Empty;
         [DataMember(Name = "postgresPort")] public int PostgresPort { get; set; }
+        [DataMember(Name = "serverMode")] public string ServerMode { get; set; } = string.Empty;
+        [DataMember(Name = "wslDistro")] public string WslDistro { get; set; } = string.Empty;
 
         public string PortraitCacheRoot => Path.Combine(DataRoot, "PortraitCache");
         public string SharedPortraitRoot => Path.Combine(ContentRoot, "PortraitCache", "_shared");
@@ -75,19 +78,37 @@ namespace Reign.Core.Contracts.Platform
             if (ProtocolVersion != SupportedProtocol) throw new InvalidDataException("Reign and ReignServer need matching protocol versions. Run the matching setup package.");
             if (string.IsNullOrWhiteSpace(Version) || string.IsNullOrWhiteSpace(ContentVersion))
                 throw new InvalidDataException("Installation version or content version is missing.");
-            ServerRoot = AbsoluteDirectory(ServerRoot, "serverRoot");
-            ContentRoot = AbsoluteDirectory(ContentRoot, "contentRoot");
-            DataRoot = AbsoluteDirectory(DataRoot, "dataRoot");
+            if (ServerMode == "dwemerdistro-wsl")
+            {
+                if (Path.DirectorySeparatorChar != '\\' || !Regex.IsMatch(WslDistro, @"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\z"))
+                    throw new InvalidDataException("A WSL client installation needs a valid local distribution name.");
+                // Only the named local WSL distro is permitted; arbitrary SMB shares stay rejected.
+                string prefix = @"\\wsl.localhost\" + WslDistro;
+                ServerRoot = WslDirectory(ServerRoot, prefix + @"\var\www\html\ReignServer\runtime\current");
+                DataRoot = WslDirectory(DataRoot, prefix + @"\var\www\html\ReignServer\data");
+                ContentRoot = string.Equals(ContentRoot, DataRoot, StringComparison.OrdinalIgnoreCase)
+                    ? WslDirectory(ContentRoot, DataRoot) : AbsoluteDirectory(ContentRoot, "contentRoot");
+                if (PostgresPort != 5432) throw new InvalidDataException("DwemerDistro owns PostgreSQL on port 5432.");
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(ServerMode) && ServerMode != "native-windows")
+                    throw new InvalidDataException("Unsupported Reign server mode.");
+                ServerRoot = AbsoluteDirectory(ServerRoot, "serverRoot");
+                ContentRoot = AbsoluteDirectory(ContentRoot, "contentRoot");
+                DataRoot = AbsoluteDirectory(DataRoot, "dataRoot");
+                PostgresBin = AbsoluteDirectory(PostgresBin, "postgresBin");
+            }
             BannerlordRoot = AbsoluteDirectory(BannerlordRoot, "bannerlordRoot");
             ModuleRoot = AbsoluteDirectory(ModuleRoot, "moduleRoot");
-            PostgresBin = AbsoluteDirectory(PostgresBin, "postgresBin");
             if (PostgresPort < 1024 || PostgresPort > 65535)
                 throw new InvalidDataException("PostgreSQL port must be between 1024 and 65535.");
             if (!string.Equals(ModuleRoot, Path.Combine(BannerlordRoot, "Modules", "ReignBeta"), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("The ReignBeta module must belong to the selected Bannerlord installation.");
             if (IsWithin(ServerRoot, DataRoot) || IsWithin(ModuleRoot, DataRoot))
                 throw new InvalidDataException("Writable Reign data must be outside the installed program and module directories.");
-            if (!string.Equals(ContentRoot, ModuleRoot, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(ContentRoot, ModuleRoot, StringComparison.OrdinalIgnoreCase)
+                && !(ServerMode == "dwemerdistro-wsl" && string.Equals(ContentRoot, DataRoot, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("Shared portrait content must be inside the directly distributable ReignBeta module.");
         }
 
@@ -98,6 +119,15 @@ namespace Reign.Core.Contracts.Platform
                 || (Path.DirectorySeparatorChar == '\\' && (value.Length < 3 || value[1] != ':' || value[2] != '\\' && value[2] != '/')))
                 throw new InvalidDataException("Installation " + name + " must be an absolute local directory.");
             return Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        // Keep the existing shared portrait and campaign paths inside the selected local distro.
+        private static string WslDirectory(string value, string expected)
+        {
+            string path = Path.GetFullPath(value ?? string.Empty).TrimEnd('\\');
+            if (!string.Equals(path, expected, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("WSL installation path does not match its managed runtime root.");
+            return path;
         }
 
         private static bool IsWithin(string parent, string candidate) =>

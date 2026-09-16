@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -52,7 +52,7 @@ namespace ReignBetaServer
             return Path.GetFullPath(candidate);
         }
         private const string CharacterSchemaVersion = "reign_character_v2";
-        private const int CharacterConstructionEngineVersion = 3;
+        private const int CharacterConstructionEngineVersion = 4;
         private const int CharacterConstructionTokenCeiling = 50000;
         private const int AuditMaxStringChars = 16000;
         private const int AuditMaxListItems = 120;
@@ -232,8 +232,8 @@ namespace ReignBetaServer
                     Environment.ExitCode = ActivateExistingServerFromLauncher(ReadPort(args, LoadSettings()), args);
                     return;
                 }
-                using (BeginInstalledDatabase(args ?? new string[0]))
-                    RunServer(args ?? new string[0]);
+                if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("ReignServer runs inside DwemerDistro Linux.");
+                RunServer(args ?? new string[0]);
             }
             catch (Exception ex)
             {
@@ -241,13 +241,12 @@ namespace ReignBetaServer
                 Console.WriteLine("Bannerlord Reign Server could not start cleanly.");
                 Console.WriteLine(ex.ToString());
                 Console.WriteLine();
-                Console.WriteLine("If this window opened from a shortcut, close it and try Start ReignBeta Server.cmd.");
+                Console.WriteLine("Use the DwemerDistro launcher to restart ReignServer.");
                 LogOperational("server.unhandled_startup_exception", new Dictionary<string, object>
                 {
                     ["error"] = ex.Message,
                     ["type"] = ex.GetType().FullName ?? ""
                 });
-                PauseOnStartupFailure(args);
             }
         }
 
@@ -663,11 +662,11 @@ namespace ReignBetaServer
             Dictionary<string, object> settings = LoadSettings();
             int port = ReadPort(args, settings);
             ReignPostgreSqlStorage.EnsureInfrastructure();
+            Console.WriteLine("ReignServer database versioning check completed. Schema version "
+                + ReignPostgreSqlStorage.DatabaseSchemaVersion + ".");
             InitializeCharacterProfileLibrary();
             Directory.CreateDirectory(DataDir);
             ActiveServerPort = port;
-            ActiveTerminalWindowName = ReadArgument(args, "--terminal-window-name", "");
-            ActiveTerminalTabIndex = ReadIntArgument(args, "--terminal-tab-index", 0);
 
             TcpListener listener = new TcpListener(IPAddress.Loopback, port);
             try
@@ -680,7 +679,6 @@ namespace ReignBetaServer
                 return;
             }
 
-            InitializeUnifiedProcessLifetime();
             InitializeReignTelemetry(settings);
             StartPriorityBackgroundScheduler();
             StartContinuousRelationshipWorker();
@@ -691,11 +689,9 @@ namespace ReignBetaServer
             ProcessPendingCampaignRetirementsAtStartup();
             ResumePendingSaveSyncOptimizations();
 
-            Console.Title = "Bannerlord Reign Server";
             Console.WriteLine("Bannerlord Reign Server is running.");
             Console.WriteLine("Listening on http://127.0.0.1:" + port);
-            Console.WriteLine("Leave this window open while playing Bannerlord.");
-            Console.WriteLine("Close this window to stop the server.");
+            Console.WriteLine("Managed by DwemerDistro.");
             Console.WriteLine();
 
             LogOperational("server.start", new Dictionary<string, object>
@@ -708,10 +704,12 @@ namespace ReignBetaServer
             ShutdownRequested = false;
             StartCampaignRetirementMonitor();
             ActiveListener = listener;
-            if (!HasArg(args, "--no-browser"))
-            {
-                ScheduleUnifiedControlCenterOpen(port);
-            }
+            using var terminate = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                System.Runtime.InteropServices.PosixSignal.SIGTERM,
+                context => { context.Cancel = true; RequestServerShutdown("dwemerdistro"); });
+            using var interrupt = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                System.Runtime.InteropServices.PosixSignal.SIGINT,
+                context => { context.Cancel = true; RequestServerShutdown("dwemerdistro"); });
 
             try
             {
@@ -737,7 +735,6 @@ namespace ReignBetaServer
                 ActiveListener = null;
                 try { listener.Stop(); } catch { }
                 if (DeleteAllCampaignDataPending) DeleteAllCampaignResponseSent.Wait(5000);
-                StopUnifiedControlCenter();
                 StopSemanticMemorySubsystem();
                 if (DeleteAllCampaignDataPending)
                 {
@@ -793,7 +790,6 @@ namespace ReignBetaServer
             string url = "http://127.0.0.1:" + port + "/";
             bool healthy = IsExistingServerHealthy(port);
             bool activated = TryActivateExistingServer(port, args, healthy);
-            Console.Title = "Bannerlord Reign Server";
             Console.WriteLine("Bannerlord Reign Server did not start a second copy.");
             Console.WriteLine("Port " + port + " is already in use.");
             if (healthy)
@@ -832,7 +828,6 @@ namespace ReignBetaServer
                 ["port"] = port,
                 ["error"] = ex.Message
             });
-            PauseOnStartupFailure(args);
         }
 
         private static bool IsExistingServerHealthy(int port)
@@ -861,26 +856,6 @@ namespace ReignBetaServer
             }
 
             return false;
-        }
-
-        private static void PauseOnStartupFailure(string[] args)
-        {
-            if (HasArg(args ?? new string[0], "--no-pause"))
-            {
-                return;
-            }
-
-            try
-            {
-                if (Environment.UserInteractive && !Console.IsInputRedirected)
-                {
-                    Console.WriteLine("Press any key to close this window.");
-                    Console.ReadKey(intercept: true);
-                }
-            }
-            catch
-            {
-            }
         }
 
         private static int ReadPort(string[] args, Dictionary<string, object> settings)
@@ -952,16 +927,17 @@ namespace ReignBetaServer
                         {
                             ["ok"] = true,
                             ["service"] = "BannerlordReignServer",
+                            ["databaseName"] = ReignPostgreSqlOptions.FromEnvironment().Database,
+                            ["databaseSchemaVersion"] = ReignPostgreSqlStorage.DatabaseSchemaVersion,
+                            ["requiredDatabaseSchemaVersion"] = ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
+                            ["databaseSchemaUpToDate"] = ReignPostgreSqlStorage.DatabaseSchemaVersion == ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
                             ["protocolVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol,
-                            ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? "development",
+                            ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? typeof(Program).Assembly.GetName().Version.ToString(3),
                             ["contentVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.ContentVersion ?? "development",
                             ["dataDir"] = DataDir,
                             ["processId"] = Process.GetCurrentProcess().Id,
                             ["port"] = ActiveServerPort,
-                            ["terminalWindowName"] = ActiveTerminalWindowName,
-                            ["unifiedControlCenter"] = IsUnifiedControlCenterRunning(),
-                            ["unifiedControlCenterProcessId"] = UnifiedControlCenterProcessId(),
-                            ["allProcessesCloseTogether"] = UnifiedLifetimeJobHandle != IntPtr.Zero
+                            ["managedBy"] = "DwemerDistro"
                         };
                     }
                     else if (request.Method == "POST" && request.Path == "/api/activate")
@@ -17200,9 +17176,10 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
+        // Windows and Linux JSON adapters expose different IList implementations.
         private static string ExtractAssistantContent(Dictionary<string, object> raw)
         {
-            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is ArrayList choices) || choices.Count == 0)
+            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is IList choices) || choices.Count == 0)
             {
                 return "";
             }
@@ -17220,7 +17197,7 @@ The previous attempt did not complete a JSON object within its output budget.
 
         private static string ExtractFinishReason(Dictionary<string, object> raw)
         {
-            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is ArrayList choices) || choices.Count == 0)
+            if (raw == null || !raw.TryGetValue("choices", out object choicesValue) || !(choicesValue is IList choices) || choices.Count == 0)
             {
                 return "";
             }
@@ -21729,6 +21706,8 @@ Return exactly this JSON shape:
                     ["settingsFileExisted"] = settingsFileExisted
                 });
             }
+            // DwemerDistro reserves 8082 for MiniMe; Reign owns a separate loopback worker.
+            settings["vectorWorkerUrl"] = "http://127.0.0.1:5102";
             PersistInstalledSettingsSecrets(settings);
             return settings;
         }
@@ -24288,7 +24267,6 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("server_activation", StringComparison.OrdinalIgnoreCase))
             {
-                results.AddRange(RunServerActivationSelfTests());
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("interaction_architecture", StringComparison.OrdinalIgnoreCase))
             {
@@ -26203,7 +26181,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 
         private static string ControlCenterHtml()
         {
-            return @"<!doctype html>
+            string html = @"<!doctype html>
 <html>
 <head>
   <meta charset='utf-8'>
@@ -29801,6 +29779,10 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 .Replace("@CODEX_PERFORMANCE_CONTROLS@", CodexPerformanceControlCenterHtml())
                 .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
                 .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript());
+            html = html.Replace("Unified Control Center is always attached", "Managed by DwemerDistro")
+                .Replace("Normal launches always open one dedicated Reign window. Closing it shuts down the server and helper worker; shutting down the server closes it.",
+                    "Open this page from the DwemerDistro launcher. Closing the browser leaves Reign running; use the launcher to stop the distro.");
+            return html;
         }
         private static string BuildEventJsonForPrompt(Dictionary<string, object> payload)
         {

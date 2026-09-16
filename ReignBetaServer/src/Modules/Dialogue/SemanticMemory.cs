@@ -599,13 +599,16 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
                 }
             }
             Dictionary<string, object> settings = LoadSettings();
-            try { PostJsonToUrl(ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082") + "/shutdown", "{}", 750); } catch { }
             lock (SemanticWorkerLock)
             {
                 try
                 {
-                    if (SemanticWorkerProcess != null && !SemanticWorkerProcess.HasExited && !SemanticWorkerProcess.WaitForExit(1500))
-                        SemanticWorkerProcess.Kill();
+                    if (SemanticWorkerProcess != null && !SemanticWorkerProcess.HasExited)
+                    {
+                        // A healthy external endpoint is not proof that this process owns it.
+                        try { PostJsonToUrl(ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082") + "/shutdown", "{}", 750); } catch { }
+                        if (!SemanticWorkerProcess.WaitForExit(1500)) SemanticWorkerProcess.Kill();
+                    }
                 }
                 catch { }
                 SemanticWorkerProcess = null;
@@ -633,19 +636,15 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
                 if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out workerUri)
                     || !(workerUri.IsLoopback || string.Equals(workerUri.Host, "localhost", StringComparison.OrdinalIgnoreCase))) return;
                 int workerPort = workerUri.Port > 0 ? workerUri.Port : 8082;
-                string executable = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vector-worker", "ReignVectorWorker.exe");
-                var installation = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent();
-                if (installation != null) executable = Path.Combine(installation.ServerRoot, "runtime", "vector-worker", "ReignVectorWorker.exe");
-                string dataArgument = QuoteArgument(DataDir);
                 ProcessStartInfo start = null;
-                if (File.Exists(executable))
+                string python = Environment.GetEnvironmentVariable("REIGN_VECTOR_PYTHON");
+                string sourcePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VectorWorker", "worker.py");
+                if (!string.IsNullOrWhiteSpace(python) && Path.IsPathRooted(python) && File.Exists(python) && File.Exists(sourcePath))
                 {
-                    start = new ProcessStartInfo(executable, "--host 127.0.0.1 --port " + workerPort.ToString(CultureInfo.InvariantCulture) + " --data-dir " + dataArgument);
-                }
-                else if (installation == null)
-                {
-                    string source = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "ReignBetaServer", "VectorWorker", "worker.py"));
-                    if (File.Exists(source)) start = new ProcessStartInfo("python", QuoteArgument(source) + " --host 127.0.0.1 --port " + workerPort.ToString(CultureInfo.InvariantCulture) + " --data-dir " + dataArgument);
+                    start = new ProcessStartInfo(python);
+                    foreach (string argument in new[] { sourcePath, "--host", "127.0.0.1", "--port",
+                        workerPort.ToString(CultureInfo.InvariantCulture), "--data-dir", DataDir })
+                        start.ArgumentList.Add(argument);
                 }
                 if (start == null)
                 {

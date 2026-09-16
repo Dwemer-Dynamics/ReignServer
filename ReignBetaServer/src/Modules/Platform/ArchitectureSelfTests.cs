@@ -14,6 +14,24 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
+            var providerChoice = new Dictionary<string, object> {
+                ["message"] = new Dictionary<string, object> { ["content"] = "{\"reply\":\"Hello.\"}" },
+                ["finish_reason"] = "stop"
+            };
+            foreach (object choices in new object[] { new object[] { providerChoice }, new System.Collections.ArrayList { providerChoice } })
+            {
+                var providerResponse = new Dictionary<string, object> { ["choices"] = choices };
+                add("provider_choices_" + choices.GetType().Name,
+                    ReadString(TryParseJsonObject(ExtractAssistantContent(providerResponse)), "reply", "") == "Hello."
+                    && ExtractFinishReason(providerResponse) == "stop",
+                    "Both JSON array representations preserve provider text and completion status.", null);
+            }
+            var roundTripResponse = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(
+                new Dictionary<string, object> { ["choices"] = new object[] { providerChoice } }));
+            add("provider_choices_serializer_roundtrip",
+                ExtractAssistantContent(roundTripResponse) == "{\"reply\":\"Hello.\"}"
+                && ExtractFinishReason(roundTripResponse) == "stop",
+                "The active platform serializer preserves a complete provider response.", null);
             string controlCenter = ControlCenterHtml();
             string mainNavigation = System.Text.RegularExpressions.Regex.Match(controlCenter,
                 @"<nav id='mainNavigation'[\s\S]*?</nav>").Value;
