@@ -24,4 +24,4 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Build public Linux server
-        run: python3 ReignRelease/Build-Linux.py --output "$RUNNER_TEMP/reign-linux"
+        run: python3 scripts/Build-Linux.py --output "$RUNNER_TEMP/reign-linux"
