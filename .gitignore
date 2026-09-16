@@ -72,8 +72,8 @@
 # Generated root packaging artifact containing a machine-local absolute path
 /ReignVectorWorker.spec
 
-/ReignRelease/payloads/
-/ReignRelease/output/
+/release/payloads/
+/release/output/
 /ReignBeta/
 /ReignMcp/
 
