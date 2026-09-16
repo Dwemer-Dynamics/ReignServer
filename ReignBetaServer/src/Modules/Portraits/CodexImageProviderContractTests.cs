@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 
@@ -40,8 +38,7 @@ namespace ReignBetaServer
             try
             {
                 byte[] png;
-                using (var bitmap = new Bitmap(32, 24))
-                using (var stream = new MemoryStream()) { bitmap.SetPixel(0, 0, Color.Goldenrod); bitmap.Save(stream, ImageFormat.Png); png = stream.ToArray(); }
+                png = LinuxImageCodec.Fixture(32, 24);
                 File.WriteAllBytes(Path.Combine(root, "reference.png"), png);
                 var item = new Dictionary<string, object> { ["type"] = "imageGeneration", ["status"] = "completed", ["result"] = Convert.ToBase64String(png) };
                 check("base64_png", ReadCodexImageResult(item, root).SequenceEqual(png), "Native base64 result preserves exact PNG bytes.");
@@ -124,15 +121,7 @@ namespace ReignBetaServer
             string output = Path.Combine(sandbox, "codex-images");
             Directory.CreateDirectory(output);
             byte[] reference;
-            using (var bitmap = new Bitmap(256, 256))
-            using (var graphics = Graphics.FromImage(bitmap))
-            using (var stream = new MemoryStream())
-            {
-                graphics.Clear(Color.FromArgb(30, 35, 40));
-                graphics.FillRectangle(Brushes.Tan, 50, 60, 150, 130);
-                graphics.FillEllipse(Brushes.DarkOliveGreen, 80, 90, 90, 80);
-                bitmap.Save(stream, ImageFormat.Png); reference = stream.ToArray();
-            }
+            reference = LinuxImageCodec.Fixture(256, 256);
             File.WriteAllBytes(Path.Combine(output, "reference.png"), reference);
             string[] purposes = { "portrait", "scenery", "social_event" };
             string[] briefs = {

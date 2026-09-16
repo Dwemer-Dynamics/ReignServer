@@ -3,28 +3,6 @@
   "platform": "windows-x64",
   "artifacts": [
     {
-      "id": "postgresql",
-      "version": "15.19-3",
-      "file": "postgresql-15.19-3-windows-x64-binaries.zip",
-      "url": "https://get.enterprisedb.com/postgresql/postgresql-15.19-3-windows-x64-binaries.zip",
-      "provenance": "https://www.enterprisedb.com/download-postgresql-binaries",
-      "bytes": 330913942,
-      "sha256": "70560c1792bed36ee83d738fa17960b89c5ebe5d4b234040111e23b799a5556c",
-      "role": "runtime",
-      "verification": "Official HTTPS download; locally measured SHA-256 locked for repeatable acquisition."
-    },
-    {
-      "id": "inno-setup-compiler",
-      "version": "7.1.0-x64",
-      "file": "innosetup-7.1.0-x64.exe",
-      "url": "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe",
-      "provenance": "https://jrsoftware.org/isdl.php",
-      "sha256": "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f",
-      "role": "build-tool",
-      "verification": "Valid Windows Authenticode signature, publisher Pyrsys B.V., observed 2026-09-14. Compiler is not an end-user dependency.",
-      "bytes": 14304168
-    },
-    {
       "id": "Bannerlord.Harmony",
       "version": "v2.4.2.225",
       "file": "Bannerlord.Harmony.7z",

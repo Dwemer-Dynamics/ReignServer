@@ -1,22 +1,17 @@
 # Reign character profile library
 
-`profile_catalog.json` is generated from the currently installed Sandbox noble data and Reign's fixed court roster. Do not edit the catalog by hand.
+`profile_catalog.json` is generated from the installed Sandbox noble data and Reign's fixed court roster. Do not edit the catalog by hand.
 
-From `ReignBetaServer`, rebuild it with:
+Build through the paired workspace's canonical `ReignMcp/scripts/reign-validate.ps1 -LinuxServer` command. Inside WSL, use the resulting Linux artifact for these offline operations:
 
-```powershell
-dotnet build -c Release
-..\ReignBeta\server\app\ReignBetaServer.exe --generate-profile-library `
-  --sandbox-data "D:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord\Modules\SandBox\ModuleData" `
-  --reign-data "..\ReignBeta\ModuleData" `
-  --court-manifest "..\ReignBeta\staging\court_nobles\court_nobles_manifest.json" `
-  --output ".\ProfileLibrary\profile_catalog.json"
+```sh
+dotnet /path/to/validated/ReignBetaServer.dll --generate-profile-library \
+  --sandbox-data /path/to/Bannerlord/Modules/SandBox/ModuleData \
+  --reign-data /path/to/Reign/ReignBeta/ModuleData \
+  --court-manifest /path/to/Reign/ReignBeta/staging/court_nobles/court_nobles_manifest.json \
+  --output /path/to/ReignServer/ReignBetaServer/ProfileLibrary/profile_catalog.json
+
+dotnet /path/to/validated/ReignBetaServer.dll --validate-profile-library
 ```
 
-Validate without starting the HTTP server:
-
-```powershell
-..\ReignBeta\server\app\ReignBetaServer.exe --validate-profile-library
-```
-
-The manifest derives expected counts and source hashes from the inputs. Rebuild the catalog whenever the native game version or fixed Reign roster changes.
+Use Linux paths for Windows-mounted inputs. The manifest derives expected counts and source hashes from the inputs. Rebuild the catalog whenever the native game version or fixed Reign roster changes.

@@ -1,10 +1,8 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -929,16 +927,7 @@ namespace ReignBetaServer
 
             try
             {
-                using (MemoryStream input = new MemoryStream(imageBytes, false))
-                using (Image source = Image.FromStream(input, true, true))
-                using (Bitmap bitmap = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb))
-                using (Graphics graphics = Graphics.FromImage(bitmap))
-                using (MemoryStream output = new MemoryStream())
-                {
-                    graphics.DrawImage(source, 0, 0, source.Width, source.Height);
-                    bitmap.Save(output, ImageFormat.Png);
-                    return output.ToArray();
-                }
+                return LinuxImageCodec.Normalize(imageBytes);
             }
             catch
             {

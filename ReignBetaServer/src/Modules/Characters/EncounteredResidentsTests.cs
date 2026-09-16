@@ -153,7 +153,7 @@ namespace ReignBetaServer
                 var traits = new Dictionary<string, object> { ["basePersonalitySummary"] = "Patient with children, fiercely proud of her work, wary of promises." };
                 var characteristics = new Dictionary<string, object> { ["traits"] = traits,
                     ["voice"] = new Dictionary<string, object> { ["speechStyle"] = "Dry wit and short, precise answers." } };
-                string template = LoadPromptTemplate("commoner_prompt.txt").Trim();
+                string template = NormalizePromptSegment(LoadPromptTemplate("commoner_prompt.txt"));
                 Require(PromptFileNames.Contains("commoner_prompt.txt") && PromptMetadataByName().ContainsKey("commoner_prompt.txt")
                     && DefaultPromptTemplates()["commoner_prompt.txt"].Length > 1000, "Commoner prompt is missing from editable inventory or embedded defaults.");
                 string first = BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                     && first.Contains("Dry wit"), "Role prompting replaced personality or missed native tavern occupation.");
                 string legacy = BuildCharacterFoundationText("verify_commoner", "commoner-fixture", "Sabina Doria", profile, characteristics, new Dictionary<string, object>());
                 string construction = BuildCharacterConstructionPrompt("verify_commoner", "commoner-fixture", profile, traits);
-                Require(legacy.Contains(template) && construction.Contains(template) && construction.Contains(LoadPromptTemplate("world_tone.txt")), "Legacy or first-contact construction omitted commoner/world layers.");
+                Require(legacy.Contains(template) && construction.Contains(template) && NormalizePromptSegment(construction).Contains(NormalizePromptSegment(LoadPromptTemplate("world_tone.txt"))), "Legacy or first-contact construction omitted commoner/world layers.");
                 resident["recruited"] = true;
                 string recruited = BuildStableCharacterPrompt("commoner-fixture", "Sabina Doria", profile, characteristics);
                 Require(recruited.Contains("not a current shift") && recruited.Contains("Patient with children")
@@ -281,7 +281,7 @@ namespace ReignBetaServer
                 var characteristics = new Dictionary<string, object> { ["traits"] = new Dictionary<string, object> {
                     ["basePersonalitySummary"] = "Distinctive practical outlook and dry humor." } };
                 var empty = new Dictionary<string, object>(); var rows = new List<Dictionary<string, object>>();
-                string template = LoadPromptTemplate("commoner_prompt.txt").Trim();
+                string template = NormalizePromptSegment(LoadPromptTemplate("commoner_prompt.txt"));
                 var envelopes = new List<PromptEnvelope>();
                 envelopes.Add(BuildDialoguePromptEnvelope("verify_commoner", "commoner-fixture", "Sabina Doria", "Visitor", "Visitor",
                     "How is your work?", "An ordinary conversation.", profile, characteristics, empty, empty, empty, rows, rows, rows, rows, empty, empty));
