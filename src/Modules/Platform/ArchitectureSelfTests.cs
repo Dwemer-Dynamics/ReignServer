@@ -38,12 +38,13 @@ namespace ReignBetaServer
             string diagnosticNavigation = System.Text.RegularExpressions.Regex.Match(controlCenter,
                 @"<div id='diagnosticNavigation'[\s\S]*?</div>").Value;
             add("control_center_navigation_contract",
-                System.Text.RegularExpressions.Regex.Matches(mainNavigation, "data-tab=").Count == 11
+                System.Text.RegularExpressions.Regex.Matches(mainNavigation, "data-tab=").Count == 12
                 && System.Text.RegularExpressions.Regex.Matches(diagnosticNavigation, "data-tab=").Count == 12
                 && mainNavigation.Contains("data-tab='diagnostic-tools'")
+                && mainNavigation.Contains("data-tab='options'")
                 && diagnosticNavigation.Contains(" hidden>")
                 && controlCenter.Contains("function selectControlCenterTab(tab)"),
-                "Ten everyday pages and one Diagnostics entry expose twelve subordinate diagnostic pages.", null);
+                "Eleven everyday pages including Options and one Diagnostics entry expose twelve subordinate diagnostic pages.", null);
             add("control_center_retired_tools_absent",
                 !controlCenter.Contains("relationshipSimulation") && !controlCenter.Contains("runDirectorSample")
                 && !controlCenter.Contains("/relationships/simulation/") && !controlCenter.Contains(".simulationChart"),

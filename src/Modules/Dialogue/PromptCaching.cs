@@ -2124,15 +2124,19 @@ namespace ReignBetaServer
                 && modestPrompt.NpcRelationshipBlock == "SMALL_RELATIONSHIP",
                 "In-budget prompts retain their full dynamic evidence byte-for-byte.",
                 modestPrompt.Diagnostics);
-            string worldTone = LoadPromptTemplate("world_tone.txt").Trim();
-            string noblePrompt = LoadPromptTemplate("noble_prompt.txt").Trim();
+            // Compare the runtime tone segments, including scoped language and LF normalization.
+            // Raw templates may use CRLF in a Windows checkout of the Linux server source.
+            string worldTone = NormalizePromptSegment(ScopeConversationTone(LoadPromptTemplate("world_tone.txt")));
+            string noblePrompt = NormalizePromptSegment(ScopeConversationTone(LoadPromptTemplate("noble_prompt.txt")));
             string nobleEventPrefix = BuildDialogueGlobalPrefix(true, true, new List<Dictionary<string, object>>());
             string commonerEventPrefix = BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
             bool layeredPromptEnvelope = !string.IsNullOrWhiteSpace(worldTone)
                 && !string.IsNullOrWhiteSpace(noblePrompt)
                 && nobleEventPrefix.Contains(worldTone)
+                && commonerEventPrefix.Contains(worldTone)
                 && nobleEventPrefix.Contains(noblePrompt)
                 && nobleEventPrefix.Contains("NOBLE PROMPT")
+                && !commonerEventPrefix.Contains("NOBLE PROMPT")
                 && !commonerEventPrefix.Contains(noblePrompt);
             add("prompt_world_tone_noble_layering", layeredPromptEnvelope, "Social-event prompts always carry World Tone and add Noble Prompt only for noble characters.", null);
             List<Dictionary<string, object>> fullCatalog = CompactActionCatalog(ActionCatalog());

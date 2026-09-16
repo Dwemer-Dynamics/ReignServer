@@ -954,6 +954,10 @@ namespace ReignBetaServer
                     {
                         response = SettingsForUi(LoadSettings());
                     }
+                    else if (request.Method == "GET" && request.Path == "/api/gameplay-options")
+                    {
+                        response = ReignXpOptionsForClient();
+                    }
                     else if (request.Method == "POST" && request.Path == "/api/settings")
                     {
                         response = SaveSettings(request.JsonBody);
@@ -21662,6 +21666,8 @@ Return exactly this JSON shape:
                 ["settingsRevision"] = "",
                 ["textureTraceEnabled"] = false,
                 ["saveSyncEnabled"] = true,
+                ["reignXpEnabled"] = true,
+                ["reignXpMultiplier"] = 1.0,
                 ["autoOpenBrowser"] = true
             };
         }
@@ -21720,6 +21726,9 @@ Return exactly this JSON shape:
 
         private static Dictionary<string, object> SaveSettings(Dictionary<string, object> incoming)
         {
+            string xpError = ValidateReignXpOptions(incoming);
+            if (!string.IsNullOrEmpty(xpError))
+                return new Dictionary<string, object> { ["ok"] = false, ["error"] = xpError };
             string imageProviderError = ValidateCodexImageSettings(incoming);
             if (!string.IsNullOrEmpty(imageProviderError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = imageProviderError };
@@ -26191,7 +26200,8 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 .Replace("@CHAT_PROVIDER_KEYS@", ChatProviderKeysHtml()).Replace("@CHAT_PROVIDER_SCRIPT@", ChatProviderScript())
                 .Replace("@CODEX_PERFORMANCE_CONTROLS@", CodexPerformanceControlCenterHtml())
                 .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
-                .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript());
+                .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript() + ReignXpOptionsScript())
+                .Replace("@REIGN_XP_OPTIONS@", ReignXpOptionsHtml());
             html = html.Replace("Unified Control Center is always attached", "Managed by DwemerDistro")
                 .Replace("Normal launches always open one dedicated Reign window. Closing it shuts down the server and helper worker; shutting down the server closes it.",
                     "Open this page from the DwemerDistro launcher. Closing the browser leaves Reign running; use the launcher to stop the distro.");
