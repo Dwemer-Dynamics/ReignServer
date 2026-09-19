@@ -1,0 +1,1 @@
+ReignServer runs inside DwemerDistro on Linux. Install and update through the DwemerDistro launcher. The Bannerlord client and native portrait helper remain on Windows. Standalone Windows server installation is not supported.

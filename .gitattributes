@@ -21,5 +21,8 @@
 *.woff2 binary
 
 # Preserve exact upstream notice bytes bound by ThirdParty/provenance.json.
-ReignRelease/ThirdParty/* -text
-ReignRelease/ThirdParty/provenance.json text eol=lf
+release/ThirdParty/* -text
+release/ThirdParty/provenance.json text eol=lf
+
+# Linux dependency locks must hash identically in Windows and WSL builds.
+services/vector-worker/requirements*.txt text eol=lf

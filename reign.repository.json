@@ -8,15 +8,23 @@
     "AGENTS.md",
     "README.md",
     "reign.repository.json",
-    "ReignRelease/release.json",
-    "ReignBetaServer/ReignBetaServer.csproj"
+    "release/release.json",
+    "ReignServer.csproj"
   ],
   "managedSourceRoots": [
-    "NativeCharacterImageGenerator",
-    "ReignBetaServer",
-    "ReignModules",
-    "ReignRelease",
-    "ReignTools"
+    "src",
+    "ui",
+    "prompts",
+    "profiles",
+    "database",
+    "services",
+    "shared",
+    "tests",
+    "tools",
+    "scripts",
+    "release",
+    "resources",
+    "docs"
   ],
   "prohibitedTrackedPatterns": [
     ".codex-build/**",
@@ -78,7 +86,9 @@
     ".toml",
     ".xml",
     ".yaml",
-    ".yml"
+    ".yml",
+    ".html",
+    ".css"
   ],
   "secretNamePatterns": [
     "**/.env",
