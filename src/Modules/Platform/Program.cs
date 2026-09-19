@@ -11339,8 +11339,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 CatalogCommand("dismiss_player_mercenary", "regular", "RegularDismissPlayerMercenary", "targetKingdomId or TargetKingdom,reason", "End the player's mercenary service."),
                 CatalogCommand("offer_player_vassalage", "regular", "RegularOfferPlayerVassalage", "targetKingdomId or TargetKingdom,reason", "Put the player's clan into vassalage under a kingdom."),
                 CatalogCommand("dismiss_player_vassal", "regular", "RegularDismissPlayerVassal", "targetKingdomId or TargetKingdom,reason", "Release the player's clan from regular vassalage."),
-                CatalogCommand("join_clan", "regular", "RegularJoinClan", "actorHeroId,targetClanId or TargetClan,reason", "Record a clan-joining intent for a resolved hero."),
-                CatalogCommand("leave_clan", "regular", "RegularLeaveClan", "actorHeroId,reason", "Record a clan-leaving intent for a resolved hero."),
+                CatalogCommand("join_clan", "regular", "RegularJoinClan", "actorHeroId,targetClanId or TargetClan,reason", "Move an eligible living hero into a resolved target clan."),
+                CatalogCommand("leave_clan", "regular", "RegularLeaveClan", "actorHeroId,reason", "Remove an eligible living hero from their current clan."),
                 CatalogCommand("join_kingdom", "regular", "RegularJoinKingdom", "actorClanId or TargetClan,targetKingdomId or TargetKingdom,reason", "Move a resolved clan into a kingdom."),
                 CatalogCommand("leave_kingdom", "regular", "RegularLeaveKingdom", "actorClanId or TargetClan,reason", "Move a resolved clan out of its current kingdom."),
                 CatalogCommand("hire_mercenary_clan", "regular", "RegularHireMercenaryClan", "actorClanId or TargetClan,targetKingdomId or TargetKingdom,reason", "Put a resolved clan into mercenary service for a kingdom."),
@@ -11409,9 +11409,6 @@ The previous attempt did not complete a JSON object within its output budget.
                     return "ledger_only";
                 case "follow_in_scene":
                 case "show_the_way":
-                case "transfer_workshop":
-                case "join_clan":
-                case "leave_clan":
                     return "pending_hook";
                 case "supply_agreement":
                     return "mechanical_or_ledger_by_asset";
@@ -12913,6 +12910,9 @@ The previous attempt did not complete a JSON object within its output budget.
             // whether and how to execute it. This never queues an action by itself.
             string lexicalCommand = CanonicalCommand(CommandFromDirectiveText(
                 (ReadString(actionGate, "intent", "") + "\n" + playerText).Trim()));
+            string acceptedClanMembership = AcceptedClanMembershipCandidateToPreserve(actionGate);
+            if (!string.IsNullOrWhiteSpace(acceptedClanMembership))
+                lexicalCommand = acceptedClanMembership;
             if (ShouldPreserveAcceptedItemGift(actionGate, playerText, lexicalCommand))
                 lexicalCommand = "transfer_item";
             string temporaryGuestCommand = TemporaryPartyGuestCandidateToPreserve(actionGate, playerText);
@@ -13104,6 +13104,23 @@ The previous attempt did not complete a JSON object within its output budget.
             return "";
         }
 
+        private static string AcceptedClanMembershipCandidateToPreserve(
+            Dictionary<string, object> actionGate)
+        {
+            if (!ReadBool(actionGate, "needed", false)
+                || !string.Equals(ReadString(actionGate, "commitment", ""), "accepted",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return "";
+            }
+
+            string intent = ReadString(actionGate, "intent", "");
+            return Regex.IsMatch(intent,
+                @"(?is)\b(?:accepts?|accepted|agrees?|agreed|joins?|joining|is in)\b.{0,120}\b(?:clan membership|(?:the |my |our )?clan)\b")
+                ? "join_clan"
+                : "";
+        }
+
         private static Dictionary<string, object> BuildAcceptedTemporaryPartyGuestFallbackAction(
             Dictionary<string, object> actionGate,
             Dictionary<string, object> payload,
@@ -13191,17 +13208,12 @@ The previous attempt did not complete a JSON object within its output budget.
         private static bool PlannerCanExposeAction(string command, bool testMode)
         {
             string capability = ActionCapabilityForCommand(command);
-            if (capability.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (capability.Equals("pending_hook", StringComparison.OrdinalIgnoreCase) && !testMode)
-            {
-                return false;
-            }
-
-            return true;
+            // Catalog membership is the production availability boundary. Commands that
+            // remain registered must reach the planner; native validation and execution
+            // still decide whether a selected action can run. Only explicitly retired
+            // schemas are hidden. Keep testMode in the signature for existing test seams.
+            _ = testMode;
+            return !capability.Equals("unsupported", StringComparison.OrdinalIgnoreCase);
         }
 
         private static Dictionary<string, object> BuildPlannerResolverHints(Dictionary<string, object> payload, string text)
@@ -22878,8 +22890,8 @@ terms: duelMode must be ""training"" or ""lethal"". For a nonlethal duel, duelPu
                 case "dismiss_player_mercenary": return "End the player's mercenary service.";
                 case "offer_player_vassalage": return "Put the player's clan into vassalage under a target kingdom.";
                 case "dismiss_player_vassal": return "Release the player's clan from regular vassalage.";
-                case "join_clan": return "Record a clan-joining intent; direct clan membership requires a later dedicated design.";
-                case "leave_clan": return "Record a clan-leaving intent; direct clan separation requires a later dedicated design.";
+                case "join_clan": return "Move an eligible living hero into the resolved target clan after native validation.";
+                case "leave_clan": return "Remove an eligible living hero from their current clan after native validation.";
                 case "join_kingdom": return "Move a resolved clan into a target kingdom.";
                 case "leave_kingdom": return "Move a resolved clan out of its current kingdom.";
                 case "hire_mercenary_clan": return "Put a resolved clan into mercenary service for a target kingdom.";

@@ -138,7 +138,64 @@ namespace ReignBetaServer
                 && effective.EndsWith("CUSTOM END.") && !effective.Contains(ConversationToneReplacements[0, 0]) && custom.Contains(ConversationToneReplacements[0, 0]), effective);
 
             results.AddRange(RunAcceptedItemGiftRoutingSelfTests());
+            results.AddRange(RunActionAvailabilityRoutingSelfTests());
             results.AddRange(RunDynamicCharacteristicsSelfTests());
+            return results;
+        }
+
+        private static List<Dictionary<string, object>> RunActionAvailabilityRoutingSelfTests()
+        {
+            var results = new List<Dictionary<string, object>>();
+            Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
+                "caseId", "action_availability_" + id, "passed", pass, "summary", id, "data", data));
+            var catalog = ReadDictionaryList(ActionCatalog(), "commands");
+            var unavailableCurrent = catalog
+                .Where(row => !ActionCapabilityForCommand(ReadString(row, "command", "")).Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                .Where(row => !PlannerCanExposeAction(ReadString(row, "command", ""), false))
+                .Select(row => ReadString(row, "command", ""))
+                .ToList();
+            add("every_registered_non_retired_action_reaches_production_planner",
+                unavailableCurrent.Count == 0, unavailableCurrent);
+            var retired = new[] { "temporary_truce", "sign_temporary_truce", "trade_embargo" };
+            add("retired_actions_remain_hidden",
+                retired.All(command => !PlannerCanExposeAction(command, false)), retired);
+            add("native_actions_report_mechanical_capability",
+                new[] { "transfer_workshop", "join_clan", "leave_clan" }
+                    .All(command => ActionCapabilityForCommand(command) == "mechanical"), null);
+            add("registered_scene_hooks_are_available",
+                new[] { "follow_in_scene", "show_the_way" }
+                    .All(command => ActionCapabilityForCommand(command) == "pending_hook"
+                        && PlannerCanExposeAction(command, false)), null);
+
+            const string playerText = "You have full authority and your caravan will be your own, the siege part was a joke, I know you wont do that. You will still be Chagun the Ironmonger, you will just have a banner also so people like bandits know that they are attacking someone that has something backing them and there will be consequences.";
+            const string reply = "All right. I'm in. Clan Howarton. Your banner, my caravan, my route, my margins, your cut when the books come back. Let's go look at my caravan.";
+            var gate = TestDict("needed", true, "commitment", "accepted", "intent",
+                "Chagun accepts clan membership in clan Howarton, receiving a financed caravan, armed men under Howarton banner, and full trade authority, with her profit-share number to be determined after inspecting the caravan and stock.");
+            var snapshot = DefaultActionTestSnapshot();
+            var payload = ReadDictionary(snapshot, "payload");
+            var hero = ReadDictionary(payload, "hero");
+            var settings = new Dictionary<string, object>(LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
+            foreach (int cap in new[] { 3, 10 })
+            {
+                var choices = BuildAllowedActionPlannerChoices(settings, payload, hero, gate,
+                    playerText, reply, cap);
+                add("captured_chagun_join_clan_survives_top_" + cap,
+                    choices.Count <= cap && choices.Any(row => ReadString(row, "command", "") == "join_clan"),
+                    choices.Select(row => ReadString(row, "command", "")).ToList());
+            }
+            foreach (string commitment in new[] { "conditional", "refused", "roleplay_only" })
+            {
+                add("clan_membership_requires_accepted_" + commitment,
+                    AcceptedClanMembershipCandidateToPreserve(new Dictionary<string, object>(gate)
+                    {
+                        ["commitment"] = commitment
+                    }) == "", null);
+            }
+            add("clan_membership_requires_actionable_gate",
+                AcceptedClanMembershipCandidateToPreserve(new Dictionary<string, object>(gate)
+                {
+                    ["needed"] = false
+                }) == "", null);
             return results;
         }
 
