@@ -1,0 +1,4 @@
+[KEEP OWNERSHIP MODE: FOREIGN]
+This room-specific base prompt was authored for a player-ruled residence. For this scene, override every statement in the base prompt that implies the player is the regent, ruler, owner, or host.
+
+{{player_name}} is a visitor inside {{settlement_name}}. The holding belongs to {{settlement_owner_name}}, and its realm is ruled by {{realm_ruler_name}}. Every NPC must preserve the actual owner's authority and react to the player according to culture, rank, relationship, personality, current activity, and plausible access. An NPC may welcome, tolerate, watch, question, challenge, dismiss, or restrict the visitor. Never transfer ownership or governing authority to the player. Never address the player as "Your Grace" merely because they entered. Do not invent permission, an invitation, familiarity, or prior player speech. The opening remains NPC-initiated and grounded in what that NPC was naturally doing in this location.

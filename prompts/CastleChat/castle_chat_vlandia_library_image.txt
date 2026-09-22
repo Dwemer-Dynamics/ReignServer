@@ -1,0 +1,90 @@
+Create an exceptionally photorealistic cinematic scene inside the **library of a wealthy Vlandian castle**, designed according to Vlandia's strongly feudal western-medieval culture.
+
+The library occupies a substantial stone chamber within the inner castle. Its walls are built from carefully dressed pale limestone darkened slightly by centuries of smoke, weather, and handling. Heavy oak roof beams cross overhead. Tall, narrow arched windows set deeply into the stone admit shafts of natural daylight, while iron candle stands and clusters of beeswax candles provide warm light in the darker recesses.
+
+Large hand-built oak bookcases line much of the walls. They are heavy, practical pieces constructed with pegged joints, iron braces, carved edging, and occasional restrained heraldic decoration. Books are valuable here rather than abundant. Shelves contain thick leather-bound codices, parchment volumes, rolled maps, bound family records, religious works, military histories, legal texts, chronicles, estate records, and genealogies. Some valuable volumes are secured within wooden cabinets or chests.
+
+A large central oak reading table dominates the chamber. Its surface may contain open books, parchment sheets, wax tablets, quills, inkpots, rulers, sealing wax, rolled maps, correspondence, weighted corners, and small leather document cases. Other smaller desks stand beneath the windows where the daylight is strongest.
+
+The library should clearly serve as more than a collection of books. It is where educated nobles and trusted household members might:
+
+- Read histories and chronicles.
+- Study military campaigns.
+- Examine maps of estates and kingdoms.
+- Review genealogies and noble lineages.
+- Write personal correspondence.
+- Read diplomatic letters.
+- Maintain household or estate records.
+- Study feudal law and inheritance.
+- Copy passages from valuable manuscripts.
+- Research claims to land or titles.
+- Read poetry or heroic literature privately.
+- Consider political matters away from the court.
+- Play a quiet intellectual board game while studying.
+- Annotate maps or written reports.
+- Search old records for information concerning another noble family.
+
+The room should feel **wealthy but severe**, representing a warrior aristocracy gradually accumulating generations of written knowledge. Decorations should include heraldic shields, carved wooden panels, ironwork, tapestries containing geometric or heraldic designs, and perhaps displayed weapons mounted high upon the walls, but the chamber must remain unmistakably a working library rather than a throne room.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as characters in the finished image.
+
+Every visible human being must correspond to one of those supplied source images.
+
+**Do not generate servants, guards, scribes, attendants, scholars, children, background crowds, silhouettes, reflected people, or any other additional humans.**
+
+If only one source character is provided, there must be exactly one visible person.
+
+If multiple source characters are provided, only those characters may appear.
+
+Do not add figurative statues, portraits, paintings, or artwork depicting additional human beings.
+
+The supplied source images are the absolute visual authority for character identity.
+
+Each character must preserve as precisely as technically possible:
+
+- Exact facial identity.
+- Head shape.
+- Apparent age.
+- Skin tone.
+- Natural skin texture.
+- Eye shape, spacing, and color.
+- Eyebrows.
+- Nose structure.
+- Mouth and lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hair color.
+- Hairline.
+- Hairstyle where practical.
+- Facial hair where present.
+- Scars or other distinguishing features.
+- Shoulder width.
+- Torso proportions.
+- Waist.
+- Hip structure.
+- Arm and leg proportions.
+- Height relationships between characters.
+- Body mass.
+- Muscularity.
+- Overall physique.
+
+Do not beautify, idealize, exaggerate, slim, enlarge, masculinize, feminize, age, or de-age the characters.
+
+Their **clothing may be changed** to clothing appropriate to their status, Vlandian culture, and activity within the library. Clothing should consist of believable medieval garments using wool, linen, leather, fine woven fabrics, belts, cloaks, gowns, tunics, hose, boots, or restrained noble ornament according to status.
+
+Changing clothing must never change the underlying physique.
+
+Characters should be naturally engaged with the library rather than arranged like posed models. A character may be reading beside a window, leaning over a map, writing at a desk, carrying a closed book, examining correspondence, searching a shelf, sitting thoughtfully with a manuscript, or performing another believable activity appropriate to this environment.
+
+The finished image must appear to be **a photograph of real human beings physically present inside a real medieval castle**.
+
+Use realistic anatomy, natural posture, convincing hands, genuine skin pores, individual strands of hair, believable fabric weight, physically correct contact with chairs and furniture, realistic stone, aged wood, parchment, leather, metal, dust, candle wax, and natural cinematic lighting.
+
+Avoid video-game rendering, plastic skin, painterly textures, fantasy illustration, artificial posing, excessive bloom, excessive cleanliness, or theatrical costume design.
+
+Maximum possible photorealism.
+
+---

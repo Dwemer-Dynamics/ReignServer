@@ -1,0 +1,105 @@
+Create an exceptionally photorealistic cinematic scene inside the **Noble Solar of a Nord castle**, distinctly reflecting a northern maritime aristocracy shaped by ships, coastal strongholds, trade, voyages, law, clan obligations, inherited land, harsh weather, and private household life.
+
+This must be clearly different from the Sturgian version.
+
+The chamber should feel like the private room of a wealthy settled Nord noble who may spend much of their life in a castle but whose world remains connected to the sea.
+
+Use:
+
+- Massive rough-cut stone walls.
+- Heavy dark oak beams.
+- Thick wooden shutters.
+- A broad hearth.
+- Carved oak furniture.
+- Woven wool rugs.
+- Heavy chairs.
+- Benches.
+- Chests.
+- Sea charts.
+- Harbor maps.
+- Ship logs.
+- Correspondence.
+- Legal records.
+- Family genealogy.
+- Drinking cups.
+- Jugs.
+- Small personal books.
+- Imported objects from distant voyages.
+- Carved ship motifs.
+- Knotwork.
+- Wave motifs.
+- Restrained animal carving.
+- Personal weapons displayed practically.
+- Thick cloaks.
+- Gloves.
+- Boots.
+- Coiled cord or small maritime items used as personal memorabilia.
+
+A window may reveal:
+
+- Gray sea.
+- Coastal cliffs.
+- Harbor.
+- Snow.
+- Rain.
+- Distant mountains.
+
+The room should feel warm against the weather outside.
+
+Likely activities include:
+
+- Reading a ship's letter.
+- Studying a sea chart.
+- Reviewing a harbor report.
+- Reading family correspondence.
+- Thinking about an oath.
+- Thinking about inheritance.
+- Drinking.
+- Resting beside the hearth.
+- Looking through objects brought home from voyages.
+- Waiting for news from the coast.
+- Preparing for a journey.
+- Thinking about someone at sea.
+- Playing a board game.
+- Reviewing land records.
+- Receiving someone privately.
+- Seeking solitude.
+
+### ABSOLUTE CHARACTER REQUIREMENTS
+
+Only supplied full-body source characters may appear as human beings.
+
+Do not generate:
+
+- Servants.
+- Sailors.
+- Guards.
+- Warriors.
+- Family members.
+- Visitors who were not supplied.
+- Attendants.
+- Background humans.
+- People visible through windows or doorways.
+
+Preserve exact source facial identity and full physique.
+
+Do not transform anyone into a stereotypical Viking.
+
+Clothing may change to realistic Nord private noble or civilian dress:
+
+- Wool.
+- Linen.
+- Tunics.
+- Trousers.
+- Dresses.
+- Belts.
+- Boots.
+- Indoor cloaks.
+- Restrained silver or bronze ornament.
+- Limited practical fur where warranted.
+
+Do not automatically use armor.
+
+Maximum high-end live-action photorealism.
+
+---

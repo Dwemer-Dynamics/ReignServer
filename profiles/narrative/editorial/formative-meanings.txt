@@ -1,0 +1,161 @@
+# Original adult formative experience index|semantic aim|personal meaning
+0|entrusted effort|The early trust made a difficult repair feel like something worth approaching carefully rather than avoiding until certainty arrived.
+1|patient learning|The reader's patience left room for an unfamiliar word to become understandable without embarrassment deciding the pace.
+2|shared differences|Close quarters made different habits impossible to ignore and small accommodations unusually important to ordinary peace.
+3|practical preparation|The completed journey made preparation visible through difficulties that had been anticipated instead of merely endured.
+4|fallible authority|An adult admitting error showed that respect could survive a correction rather than depend on pretending none was needed.
+5|attentive giving|The gift's particular care gave it a value that the price of its materials could not explain.
+6|earned animal trust|The change in the animal's behavior made patient familiarity visible as something different from forced obedience.
+7|traveling culture|Learning the song gave a passing encounter a place in memory that could be recalled through the voice.
+8|unwitnessed integrity|Keeping the promise made its meaning depend on personal conduct rather than the likelihood of being found out.
+9|ordinary hospitality|A welcome in an unfamiliar place made distance from home feel briefly less lonely and demanding.
+10|gracious rivalry|Losing without a quarrel left the contest available to enjoy again rather than turning it into a permanent grievance.
+11|practical footing|Useful work gave uncertain days a recognizable shape while larger questions remained unresolved.
+12|remembered voices|Helping preserve the memories revealed how easily ordinary details vanish when nobody thinks to ask about them.
+13|finite provisions|The shrinking stores made future need concrete in a way a general instruction to be careful had not.
+14|practical apology|The apology changed the direction of the quarrel before pride had made its continuation feel necessary.
+15|unexpected aptitude|The discovery opened a source of satisfaction outside the skills that others had already expected to matter.
+16|safe questions|A patient answer made the embarrassing question less isolating and another uncertain subject easier to approach.
+17|lasting workmanship|The object remaining with its recipient showed that a modest act of making could become part of another person's ordinary life.
+18|interpreted silence|A quiet interval proved to contain attention and thought rather than the dismissive meaning first imagined.
+19|seasonal work|The orchard connected patient repeated effort to changes that could not be hurried through a single energetic day.
+20|continuing care|The small animal's needs returned regularly, making responsibility something lived through ordinary attention rather than an initial promise.
+21|familiar navigation|Recognizable landmarks turned a route from a sequence of instructions into something that could be understood directly.
+22|different perspectives|Two sincere accounts made it harder to assume that confidence alone identifies the whole truth of a disagreement.
+23|dignified correction|A useful correction arrived without the humiliation that can make an awkward mistake harder to learn from.
+24|protected standards|The worker's refusal showed that a clean result depended on choices made before anyone inspected the finished work.
+25|quiet movement|The repeated walk offered a manageable change of pace that did not require a larger problem to be solved first.
+26|shared preparation|Helping with the celebration made its eventual ease feel connected to small tasks usually invisible to the guests.
+27|unconditional welcome|The outsider's reception showed that ordinary generosity could come before familiarity or a useful connection.
+28|chosen spending|A small budget made one purchase a decision about what other possibility would have to wait.
+29|completed effort|Finishing provided a result different from the discouraging middle of the task and changed how that difficult interval was remembered.
+30|timely company|The letter restored a familiar voice at a moment when the surrounding day had felt particularly solitary.
+31|gradual confidence|Patient help let physical confidence grow through small attempts rather than a single demand to stop being afraid.
+32|grounded judgment|The distinction made a repeated confident story less persuasive when its actual source remained uncertain.
+33|household resilience|Recovery was visible through practical repairs and resumed routines rather than one dramatic moment when hardship ended.
+34|specific recognition|Precise praise named something that could be understood and practiced again instead of merely providing a pleasant judgment.
+35|meaningful inclusion|Being heard within the discussion made participation feel possible before all the experience of the older speakers had been acquired.
+36|practical friendship|Shared work supplied an ordinary rhythm in which familiarity could grow without a formal effort to become close.
+37|maintained things|Mending revealed that usefulness could often be restored through attention instead of another purchase.
+38|shared ease|The meal altered the pace of the exchange enough for a less defensive conversation to become possible.
+39|quiet attention|The quiet person's observation revealed a depth of attention that the louder parts of the conversation had obscured.
+40|working rhythms|The workshop showed how many separate small actions make a finished object appear straightforward.
+41|noticed landscape|Learning names made familiar ground contain more distinct things worth noticing.
+42|patient recovery|A long recovery made small recurring acts of care more significant than a single encouraging visit.
+43|learned bargaining|Understanding the poor bargain turned an unpleasant result into a clearer sense of what to examine next time.
+44|entrusted words|Delivering the message made discretion part of an ordinary practical responsibility rather than an abstract virtue.
+45|uncoerced receiving|The graceful refusal showed that an expensive offer could be declined without turning the exchange into an insult.
+46|reading across time|The annotations revealed earlier readers thinking through the page rather than merely owning the book.
+47|unranked knowledge|The skilled teacher's lower station made ability and social position visibly different measures.
+48|shared journeys|The travelers' accounts made distant places feel particular through inconveniences and ordinary pleasures as well as remarkable events.
+49|willing learning|Another person's understanding brought a satisfaction distinct from simply being able to perform the task personally.
+50|defeated dignity|The rival's protected dignity showed that winning did not require making every remaining advantage felt.
+51|understood animal behavior|Pain explained conduct that had first appeared merely difficult, changing what a useful response would need to address.
+52|revisable accounts|The familiar account's error showed that repetition and confidence do not remove the need to check a detail.
+53|acknowledged repair|Confession followed by forgiveness gave the small mistake an ending that concealment could not have supplied.
+54|attentive cultivation|Dry weather made the garden's survival depend on repeated practical judgment rather than a pleasant intention to tend it.
+55|observed skill|Watching the recipe come together revealed small judgments that a list of ingredients did not fully explain.
+56|nearby refuge|The peaceful place offered a private interval without the cost or planning of going far away.
+57|possible renewal|Encouragement separated the failed attempt from the question of whether another beginning was still worth making.
+58|shared work across language|Practical cooperation required ways to make an intention understood beyond relying on familiar words.
+59|useful explanation|A clear account changed the frightened person's response by making the situation more understandable, not simply less loudly discussed.
+60|quiet usefulness|The work's value remained visible even when its completion attracted little attention.
+61|repair before judgment|Addressing the damage first made cooperation possible while responsibility could still be considered afterward.
+62|practical recognition|The useful tool treated future work as worth supporting instead of only marking past effort ceremonially.
+63|revisable authority|The mentor's changed judgment showed that evidence could improve an answer without erasing the value of experience.
+64|dignified help|Receiving assistance made the task easier without requiring a smaller view of personal worth or general competence.
+65|bodily distance|Traveling on foot made the route's ordinary distances and demands more concrete than a comfortable passage had.
+66|unfamiliar custom|Living with different habits revealed practical meanings that a brief impression could easily have missed.
+67|invisible preparation|The feast's work showed how much repeated attention lies beneath an apparently effortless welcome.
+68|attentive counsel|Listening first made advice more closely match the actual difficulty instead of the first familiar explanation of it.
+69|shared humor|The joke gave the awkward pause a new direction without requiring either person to explain the whole discomfort.
+70|observed weather|Small signs in the weather became useful when considered together instead of dismissed as separate passing details.
+71|kept promises|The delayed fulfillment showed that a commitment could remain meaningful even after its most convenient moment had passed.
+72|first learning|Helping with first letters made visible the patient steps hidden inside a reader's apparently effortless understanding.
+73|thoughtful disagreement|The difference became a reason to know the other person's judgment more closely rather than an automatic barrier to friendship.
+74|enduring curiosity|The elder's questions showed that experience need not turn every unfamiliar subject into something beneath attention.
+75|bounded quarrels|Stopping before cruelty left both people more room to return to the actual disagreement later.
+76|unperformed belonging|The invitation made a contribution welcome without first requiring an impressive display to earn a place.
+77|absorbing practice|Repetition became satisfying through small improvements and a settled rhythm rather than constant novelty.
+78|meaningful objects|The object's history explained why its owner valued something that appeared ordinary from outside the relationship.
+79|practical trust|Caring for the belongings made trust concrete in small choices about handling, storage, and return.
+80|costly anger|Anger quickly changed a useful shared task into an effort to manage each other's reactions.
+81|modest hospitality|The welcome showed that generosity could be experienced through attention and room made for a guest without abundant wealth.
+82|legitimate solitude|Quiet was allowed to remain a personal need rather than being turned into a judgment about the surrounding company.
+83|animal care|The birth made close attention and timely practical help matter more than a distant general interest in the animals.
+84|restored music|The instrument's returning sound gave careful repair an immediately recognizable result.
+85|fair compensation|A clear account of the work made asking a fair price feel more grounded than apologizing for the expense.
+86|inventive play|The children's game showed how much pleasure could come from shared imagination and a few ordinary objects.
+87|returned belonging|Returning the animal connected a practical search to another person's visible relief.
+88|room for beginners|A capable person struggling elsewhere showed that competence does not remove the ordinary awkwardness of starting something new.
+89|hidden household costs|The household's public ease concealed labor and tiredness that became visible only at closer range.
+90|honest friendship|The friend's criticism showed that an unwelcome observation could be part of continued care for the relationship.
+91|incomplete records|The conflicting records made a neat account harder to accept without asking which details each version had omitted.
+92|unranked enjoyment|Enjoyment survived the awkward steps, showing that an activity could be worth doing before it was done well.
+93|unranked inclusion|Being youngest did not prevent the group from treating a useful contribution as worth hearing.
+94|unforced approval|The polite refusal showed that flattery could be met without either accepting its judgment or starting a quarrel over it.
+95|quiet perspective|The landscape's particular space and rhythm made unsettled thoughts easier to hold without immediately acting on them.
+96|aging animal care|The old horse's changing needs made familiar care something that had to adapt rather than simply repeat.
+97|unexpected kindness|Help from an unexpected source complicated an earlier easy assumption about who would prove considerate.
+98|patient mastery|Repeated practice made the exercise improve by degrees that a single frustrated attempt had hidden.
+99|entrusted access|The key made trust tangible through the ordinary responsibility of entering, leaving, and keeping something secure.
+100|spoken expectations|The worsening dispute revealed how much each person had assumed without first making the expectation clear.
+101|seasonal foresight|Preserving food connected present effort to a future need before scarcity made the connection urgent.
+102|recognized wishes|The direct question made a personal preference part of the discussion instead of something inferred by others.
+103|independent judgment|An unsupervised decision made its outcome feel connected to personal attention rather than another person's instructions.
+104|examined competence|The difference became clear when an assured manner met a practical task that required more than confidence to finish.
+105|possible repair|The accepted apology showed that naming a wrong could open a next step without immediately making every feeling simple.
+106|family remembrance|The note supplied a small particular that the usual family story had not preserved.
+107|chosen making|Choosing the project made the effort personally inviting before any finished result could attract praise.
+108|renewed cultivation|Restoration revealed a usable living place within what had appeared merely abandoned and overgrown.
+109|understood alarm|Recognizing fear beneath anger changed what the exchange seemed to require beyond answering the raised voice.
+110|unforced competence|Trying too hard to impress drew attention away from the ordinary care needed to perform the task well.
+111|safe refusal|The friendship's continuation showed that a clear no need not withdraw affection along with agreement.
+112|practical mechanisms|The mill made an everyday result more interesting by revealing the movement and forces that produced it.
+113|observed craft|Examining workmanship supplied useful distinctions without requiring experience wielding the blade.
+114|patient observation|Drawing from life made small familiar features harder to understand accurately than a quick glance suggested.
+115|welcomed newcomers|Explaining etiquette showed how much local ease depends on knowledge that a newcomer has not yet had reason to acquire.
+116|fallible family|An older sibling's uncertainty made the difference in age seem less like a complete difference in certainty.
+117|restored judgment|Rest changed the quality of an answer that continued tired effort had only made more difficult.
+118|unconditional welcome|The return remained welcome even though the attempt had not produced the hoped-for success.
+119|absorbing craft|The craft gave attention a quiet practical place to settle without needing an audience or an impressive goal.
+120|inherited reflection|The elder's words gave a private pause a familiar form that could be returned to outside the original lesson.
+121|uncertain stories|Discovering the embellishment left the story's appeal intact while changing how literally its claims could be trusted.
+122|shared burdens|The difficult path made each carried load part of a practical effort whose cost was easier to understand while helping.
+123|dignified bargaining|Leaving the other person room to save face made a workable agreement easier to reach without adding humiliation to the price.
+124|attentive handling|Recognizing discomfort made small changes in the animal's movement useful information rather than an inconvenience to ignore.
+125|attentive repair|The modest gift helped because it addressed the particular misunderstanding rather than simply displaying expense.
+126|manageable planning|Planning the outing gave advance thought a practical test in other people's ordinary comfort and timing.
+127|recorded details|Writing preserved small particulars that seemed obvious at the time but proved difficult to recall accurately later.
+128|growing skill|The apprentice's better result showed that teaching could create an ability that no longer merely repeated its source.
+129|familiar discovery|Dawn revealed a different pattern of light, sound, and movement within a place already considered thoroughly known.
+130|practical hospitality|Preparing the room made welcome depend on the guest's actual needs rather than the usual appearance of readiness.
+131|unbought honesty|The stranger's return of the valuable object gave trust an example that did not rely on familiarity or an obvious reward.
+132|careful completion|A clean finish made the last patient steps feel as important as the more visible work at the beginning.
+133|unpolished remembrance|The different ending made the family story more human without requiring every admired part of it to disappear.
+134|chosen friendship|The friendship grew through the particular person's company rather than the social connection expected to make it suitable.
+135|courteous firmness|The refusal showed that clear limits and ordinary courtesy could remain present in the same exchange.
+136|seasonal knowledge|Recognizing the winter tree required attention to features that summer leaves had previously made unnecessary to notice.
+137|shared pursuit|The hobby gave a strained relationship a practical subject that did not begin with the familiar disagreement.
+138|private grief|Time left unclaimed by observers allowed mourning to have a pace that did not require constant explanation.
+139|informed planning|The failed plan showed that the people doing the work held practical information missing from the confident instructions.
+140|remembered meaning|The distinction made it possible to care for the memory without treating the object's preservation as the only way to keep it.
+141|patient instruction|The nervous beginner's progress depended partly on making another attempt feel safe enough to try.
+142|plain questions|The child's simple question brought an avoided issue into the room without the elaborate precautions the adults had built around it.
+143|gradual confidence|Approaching the fear in small steps produced information that continued avoidance had kept unavailable.
+144|noticed attention|Thanks for the small observation showed that useful care can happen before a problem becomes dramatic.
+145|responsive hospitality|The unfamiliar needs made a good welcome something to adapt thoughtfully rather than perform in exactly the usual way.
+146|heard pride|The person's softened manner suggested that part of the defensiveness had come from feeling misunderstood.
+147|restored keepsake|Repair preserved both the garment's practical use and the familiar personal associations that a replacement would lack.
+148|understood cooperation|The patient explanation obtained a more useful response than the command because the listener could understand what was needed.
+149|considerate storytelling|The story remained enjoyable without making its subject bear an avoidable public embarrassment.
+150|comfortable cooperation|Quiet work together provided companionship that did not depend on filling every pause with conversation.
+151|revisable choices|Permission to change course made the earlier choice part of learning rather than a permanent obligation to defend it.
+152|private individuality|The interest supplied a part of life that could not be explained entirely by the public role.
+153|practical apology|The effort after the apology gave its words a continuing meaning in ordinary conduct.
+154|unconditional affection|The distinction made a useful place in someone's life feel different from being wanted regardless of what could be provided.
+155|adopted improvement|Others using the small change made its value visible beyond the original personal satisfaction of making it.
+156|restrained advantage|The refusal to exploit the mistake showed that an available advantage need not determine the next choice automatically.
+157|ordinary contentment|The uneventful day contained pleasures worth noticing even though it supplied no dramatic achievement to recount.
+158|unranked enjoyment|The task's actual satisfaction proved more persuasive than the earlier judgment about who ought to be doing it.
+159|fallible admiration|An admired person's limitation made room for a more particular respect that did not require treating every choice as exemplary.

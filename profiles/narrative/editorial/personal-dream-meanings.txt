@@ -1,0 +1,225 @@
+# Family/index|semantic aim|personal meaning
+private_comfort/0|personal space|The room could feel right without every choice requiring somebody else's approval.
+private_comfort/1|unclaimed leisure|A free season would offer the unfamiliar pleasure of deciding which company is actually wanted.
+private_comfort/2|unhurried mornings|The first part of the day could belong to appetite, weather, and a view rather than an arriving demand.
+private_comfort/3|admired comfort|An ordinary seat could become both a daily pleasure and a small source of pride.
+private_comfort/4|winter warmth|Warmth available at will would make the cold season feel less like something simply to endure.
+private_comfort/5|bodily comfort|Clothing could answer to the body wearing it rather than the impression expected from a distance.
+private_comfort/6|unburdened company|A meal would taste different without waiting for the conversation to reveal its request.
+private_comfort/7|undisturbed work|Returning to an unfinished object exactly as it was left would make a private project easier to inhabit.
+private_comfort/8|unobserved travel|The journey could remain interesting without becoming material for an impressive public account.
+private_comfort/9|summer coolness|Cool water nearby promises a season whose ordinary afternoons are pleasant to imagine.
+private_comfort/10|simple household|Fewer ceremonies would leave more of home life available for ordinary preference.
+private_comfort/11|absorbing leisure|An interest could be followed past its first difficult question instead of continually being put aside.
+private_comfort/12|independent taste|The pleasure would include keeping the disliked colors after a visitor offers an unsolicited correction.
+private_comfort/13|ordinary good food|A well-cooked supper should be enjoyable without requiring a guest list or a performance of hospitality.
+private_comfort/14|restful sleep|A familiar bed could suit the actual sleeper rather than the conventional idea of an impressive chamber.
+private_comfort/15|protected quiet|A closed courtyard would give a pause a physical boundary that other people recognize.
+private_comfort/16|chosen company|An invitation could mean that the person's presence is wanted, without an obligation hidden inside it.
+private_comfort/17|winter reading|Cold weather could become an excuse for sustained reading and the comfort of staying put.
+private_comfort/18|usable collection|Finding the wanted book should follow a familiar private logic rather than a visitor's preferred order.
+private_comfort/19|private refuge|One place could remain free from the expectation that every pleasure must be shared or explained.
+private_comfort/20|reliable small pleasure|A favorite taste available regularly would make comfort part of an ordinary day.
+private_comfort/21|settled routine|Later years could include the right to keep a harmless habit simply because it feels familiar.
+private_comfort/22|unapologetic pleasure|An indulgence could be enjoyed without immediately turning it into an argument about its usefulness.
+private_comfort/23|unwatched moods|A passing mood could stay small if nobody treated it as news requiring interpretation.
+personal_recognition/0|dismissal reversed|Recognition from that particular skeptic would settle something praise from strangers leaves untouched.
+personal_recognition/1|wanted company|Being amusing company would be a more personal reason for an invitation than access to a useful acquaintance.
+personal_recognition/2|accurate credit|The work and the name should stay connected after the people present at its making have moved on.
+personal_recognition/3|expert approval|Specific admiration from a discerning reader would be worth keeping and rereading privately.
+personal_recognition/4|social distinction|A gathering remembering the company with pleasure would leave a gratifying trace of personal presence.
+personal_recognition/5|rival acknowledgment|An approving quotation would be especially satisfying from someone reluctant to offer an ordinary compliment.
+personal_recognition/6|memorable performance|The performance could remain alive in other people's conversation after its immediate applause has ended.
+personal_recognition/7|admired taste|A choice noticed for being exactly right would make private judgment feel publicly legible.
+personal_recognition/8|social importance|Newcomers seeking an introduction would make an entrance feel like an event rather than an obligation.
+personal_recognition/9|vindicated taste|An unfashionable pleasure becoming admired would turn an old teasing remark into a satisfying memory.
+personal_recognition/10|earned credit|Praise that names the difficult part of the work proves somebody actually looked at it.
+personal_recognition/11|original contribution|An idea remembered as distinctive would establish a place that cannot simply be inherited.
+personal_recognition/12|dismissal reversed|A critic's changed judgment would matter more than another chance to rehearse the original disagreement.
+personal_recognition/13|wanted company|A small gathering choosing eagerly would feel more personal than a formal hall obliged to include the name.
+personal_recognition/14|household recognition|Familiar people taking the talent seriously would remove the temptation to hide its importance.
+personal_recognition/15|distinctive identity|A recognizable style could let a preference announce the person before a title does.
+personal_recognition/16|understood achievement|The right witnesses would know which difficult decisions made the victory worth remembering.
+personal_recognition/17|creative recognition|An admired performer choosing the piece would make a private creation part of a larger shared pleasure.
+personal_recognition/18|respected seniority|A younger competitor asking to learn would turn a threatening comparison into a gratifying acknowledgment.
+personal_recognition/19|recognized expertise|Being asked naturally would be more satisfying than having to announce knowledge at the edge of the discussion.
+personal_recognition/20|treasured workmanship|A modest object kept close would give the work a place more intimate than a display of expensive possessions.
+personal_recognition/21|unqualified respect|The honor should feel like recognition among adults rather than encouragement given to a promising child.
+personal_recognition/22|personal distinction|An official role should not be the most interesting thing an acquaintance can remember.
+personal_recognition/23|independent recognition|An accomplishment could finally be considered on its own scale instead of beside a more celebrated relative.
+chosen_independence/0|chosen intimacy|Affection would feel more fully chosen without first surviving a household judgment of its suitability.
+chosen_independence/1|safe refusal|A refusal would become an ordinary answer instead of the beginning of calculations about retaliation.
+chosen_independence/2|dignified departure|Leaving should be allowed to mean a considered choice rather than a disgrace that must be explained away.
+chosen_independence/3|private spending|A small purchase could remain a pleasure instead of becoming evidence in a family discussion.
+chosen_independence/4|revised ambition|Changing course could acknowledge an altered desire without requiring a defense against the word failure.
+chosen_independence/5|chosen home|A place could be selected because living there appeals, rather than because it sends the appropriate message.
+chosen_independence/6|unclaimed pursuit|An absorbing craft would remain personal if nobody insisted on finding a clan purpose for it.
+chosen_independence/7|unmonitored affection|Closeness should not give another person the right to inspect every ordinary choice.
+chosen_independence/8|ordinary introduction|A new acquaintance could form an impression before the formal expectations of a title enter the exchange.
+chosen_independence/9|independent opinion|A livelihood should withstand an honestly unpopular answer instead of depending on agreeable silence.
+chosen_independence/10|released family duty|A family dispute could happen without automatically becoming another private afternoon lost to mediation.
+chosen_independence/11|unexplained choice|Keeping a reason private would make a small decision feel unmistakably one's own.
+chosen_independence/12|chosen household|An unconventional arrangement could earn room to continue through its daily success rather than permission from every observer.
+chosen_independence/13|credible rest|An absence could be accepted as rest without someone manufacturing a reason to summon its end.
+chosen_independence/14|personal privacy|An introduction should not entitle a stranger to the most explanatory parts of a person's past.
+chosen_independence/15|independent friendship|A friendship could keep its particular value even when it does not simplify anybody else's plans.
+chosen_independence/16|freedom from conditions|The right to refuse an inheritance would make its accompanying conditions less capable of deciding a life.
+chosen_independence/17|retained skill|Leaving a profession need not require abandoning the part of the work that still brings satisfaction.
+chosen_independence/18|revised ambition|A former aspiration could be remembered without pretending that it is still the desired future.
+chosen_independence/19|private means|A modest independent purse would make small decisions possible without a favor being requested first.
+chosen_independence/20|secure independence|Home should remain home even after an answer displeases the person who once offered help.
+chosen_independence/21|chosen future|An appealing life could be judged by living it rather than by the first impression its description makes.
+chosen_independence/22|freedom to leave|An enjoyable gathering could end before lingering obligation turns its memory sour.
+chosen_independence/23|separate lives|Affection would feel less precarious if time spent separately did not require proof of continued devotion.
+collection_and_luxury/0|fine carving collection|Small variations in skilled carving could offer the pleasure of comparison whenever the objects are taken out.
+collection_and_luxury/1|beautiful horse|An admired horse would provide a pleasure of appearance that practical usefulness alone does not satisfy.
+collection_and_luxury/2|chosen likeness|The portrait could preserve the version of the face and bearing that feels most worth presenting.
+collection_and_luxury/3|rare possession|Knowing that the volume is within reach would be a pleasure even on days when it stays closed.
+collection_and_luxury/4|seasonal comfort|Choosing among suitable fabrics would make the year's changing weather an opportunity for preference.
+collection_and_luxury/5|pleasing instrument|One resonant note could justify returning to an instrument without a performance being planned.
+collection_and_luxury/6|vindicated taste|An overlooked craft offers the satisfaction of recognizing excellence before fashionable visitors do.
+collection_and_luxury/7|scented garden|A garden could be encountered through scent before any arrangement needs to be admired with the eyes.
+collection_and_luxury/8|rival deprivation|Possession would be sweeter for knowing precisely who else had wanted the same object.
+collection_and_luxury/9|personal space|Every surface could reflect a deliberate preference instead of a compromise left over from somebody else's room.
+collection_and_luxury/10|enviable collection|Even keeping the objects private could carry the satisfaction of imagining a discerning visitor's reaction.
+collection_and_luxury/11|leisure afloat|A small boat would make a free interval feel capable of becoming a quiet outing.
+collection_and_luxury/12|personal ornament|An ornament shaped to a private design could feel more particular than a grander conventional jewel.
+collection_and_luxury/13|beautiful ordinary use|The cup could make the familiar drink worth noticing again.
+collection_and_luxury/14|admired hound|Choosing for that particular quality would make the animal interesting beyond its general usefulness.
+collection_and_luxury/15|unforgettable gift|The gift would leave a memory strong enough to survive the end of the occasion.
+collection_and_luxury/16|tactile play|A well-balanced piece in the hand could add a small pleasure to every ordinary turn.
+collection_and_luxury/17|ordered display|The arrangement would let the collection be seen through the distinctions its owner actually cares about.
+collection_and_luxury/18|journey keepsakes|An ornament could call back the particular atmosphere of a journey before its story is told aloud.
+collection_and_luxury/19|quiet distinction|Recognizable quality would announce taste without needing the authority of a displayed emblem.
+collection_and_luxury/20|ingenious furniture|A useful hidden compartment would make an everyday desk a repeated private amusement.
+collection_and_luxury/21|private scent|A rare scent could be enjoyed close to the skin without needing an audience to approve it.
+collection_and_luxury/22|beautiful map|The map could invite imagined journeys even when no practical departure is possible.
+collection_and_luxury/23|collection continuity|The meaning made by the objects together should survive beyond an heir's interest in their separate prices.
+mastery_and_play/0|satisfied workmanship|The finished model could be turned in the hand without instinctively hiding the awkward side.
+mastery_and_play/1|musical fluency|The difficult passage could finally sound like music instead of a record of the effort needed to play it.
+mastery_and_play/2|friendly victory|A clear win would become a satisfying joke to revisit with the familiar opponent.
+mastery_and_play/3|bodily enjoyment|Movement could be worth learning for the feeling of doing it rather than a useful public result.
+mastery_and_play/4|absorbed audience|A listener forgetting to interrupt would be evidence that the story has taken hold.
+mastery_and_play/5|requested recipe|Friends asking specifically would give a private experiment a welcome place at the table.
+mastery_and_play/6|recognizable expression|A small change of line could capture the look that makes the familiar face itself.
+mastery_and_play/7|solved puzzles|Earlier bafflement would become something tangible to look back on from a more capable present.
+mastery_and_play/8|elegant function|An object copied by others would show that usefulness and grace had been made to fit together.
+mastery_and_play/9|confident dance|Joining an unfamiliar rhythm could become a pleasure instead of an anxious exercise in watching the next foot.
+mastery_and_play/10|independent judgment|Enough direct practice would make it possible to assess the work without borrowing an expert's confidence.
+mastery_and_play/11|resourceful beauty|A fine result from modest material would leave less room for the cost to take the credit.
+mastery_and_play/12|absorbing shared play|Friends choosing another round would be the most convincing answer to whether the game works.
+mastery_and_play/13|comic timing|The laugh should arrive because the scene was held correctly, not because the performer rushed to explain it.
+mastery_and_play/14|private creative pleasure|The writing could remain satisfying when its reception and its author's name are taken out of the question.
+mastery_and_play/15|birdsong recognition|A familiar landscape would gain another layer of company through sounds that can be recognized unseen.
+mastery_and_play/16|working model|A moving model would turn fascination with a mechanism into an understanding that can be handled.
+mastery_and_play/17|respected victory|Winning would feel substantial because the opponent's genuine skill has already been appreciated.
+mastery_and_play/18|effortless appearance|A clean result could conceal the difficult choices without making them any less privately satisfying.
+mastery_and_play/19|graceful recovery|A mistake need not break the whole performance if there is enough command to find another route through it.
+mastery_and_play/20|independent understanding|Respect for an explanation could become more thoughtful once there is enough knowledge to question it.
+mastery_and_play/21|unclaimed pursuit|A pursuit could deepen without acquiring an audience waiting to judge what it produces.
+mastery_and_play/22|self-paced completion|Finishing could follow the needs of the work rather than somebody else's impatience with its pace.
+mastery_and_play/23|private mastery|Excellence could belong to a part of life that nobody can readily turn into political usefulness.
+rivalry_and_vindication/0|rival advantage lost|The satisfying part would be watching an easy confidence discover that its old support is gone.
+rivalry_and_vindication/1|family comparison reversed|The familiar example could become the person being asked to explain a less impressive result.
+rivalry_and_vindication/2|dismissal reversed|A request for help would put a different weight on the old dismissive tone.
+rivalry_and_vindication/3|unsoftened victory|The result could stand without the additional work of making everyone comfortable about who prevailed.
+rivalry_and_vindication/4|public vindication|A public insult seems insufficiently answered by a private reassurance from someone already sympathetic.
+rivalry_and_vindication/5|denied opportunity gained|Receiving the opportunity would reopen a possibility that another person's connections once closed.
+rivalry_and_vindication/6|restraint recognized|An observer should be able to distinguish a deliberate limit from a failure of nerve.
+rivalry_and_vindication/7|opponent concession|The plan's failure would feel more complete if its author had to name it plainly.
+rivalry_and_vindication/8|last word|A lingering exchange keeps offering the imaginary chance to finish it more decisively.
+rivalry_and_vindication/9|preferred over rival|The preference would be particularly satisfying because the rival could not plausibly misunderstand it.
+rivalry_and_vindication/10|critic outlasted|Continuing successfully could become an answer that does not depend on accepting every offered quarrel.
+rivalry_and_vindication/11|expert humbled|A better result would expose the distance between expertise and the arrogance attached to it.
+rivalry_and_vindication/12|vindicated pursuit|Conspicuous success could make the earlier dismissal look incurious rather than sensible.
+rivalry_and_vindication/13|indispensable standing|Practical usefulness could make casual contempt too expensive to indulge.
+rivalry_and_vindication/14|equal bargaining|An old patron asking on equal terms would alter the familiar direction of obligation.
+rivalry_and_vindication/15|inherited advantage defeated|The rival could be forced to discover which abilities the inherited position never supplied.
+rivalry_and_vindication/16|exclusion reversed|An invitation would offer the private choice of accepting graciously or remembering how exclusion felt.
+rivalry_and_vindication/17|refusal regretted|The imagined regret matters because the old decision still feels too comfortably settled for its maker.
+rivalry_and_vindication/18|acknowledged rivalry|Winning could be enjoyed openly instead of being diluted by a performance of indifference.
+rivalry_and_vindication/19|waiting reversed|Having the choice to refuse would reverse a small humiliation that has remained unusually memorable.
+rivalry_and_vindication/20|family comparison reversed|A familiar comparison could finally become something anticipated rather than endured.
+rivalry_and_vindication/21|unqualified victory|A victory without indulgence would leave no quiet suspicion that the opponent had allowed it.
+rivalry_and_vindication/22|demonstrated vindication|A skeptic naming the result would remove the need to keep explaining that it exists.
+rivalry_and_vindication/23|unreadable influence|A rival's uncertainty could itself become a useful and satisfying advantage.
+influence_and_control/0|early consultation|Being heard while the options remain open would matter more than being politely informed of the result.
+influence_and_control/1|household authority|Private domestic arrangements should not be settled by somebody who can leave their consequences behind.
+influence_and_control/2|social dependence|Introductions could make personal connections a continuing source of influence.
+influence_and_control/3|confidential access|A delicate question entrusted directly would establish a place beyond ordinary public acquaintance.
+influence_and_control/4|protected arrangement|A favored way of doing things should be difficult for outsiders to overturn casually.
+influence_and_control/5|trusted influence|A trusted voice in the room could keep a preferred judgment present when direct attendance is impossible.
+influence_and_control/6|sought endorsement|Other people seeking approval would reverse the tiring position of having to argue for attention.
+influence_and_control/7|decisive support|A proposal depending on that support would make personal influence visible in a concrete result.
+influence_and_control/8|chosen priorities|The order of the day could follow a deliberate judgment instead of the loudest arriving demand.
+influence_and_control/9|institutional control|A preferred working method could become the normal arrangement rather than an exception repeatedly negotiated.
+influence_and_control/10|project ownership|The last decisions should remain connected to the judgment that carried the difficult earlier work.
+influence_and_control/11|deterrent reputation|A reputation could spare repeated confrontations by making casual opposition seem less inviting.
+influence_and_control/12|visible patronage|A noticeable reward would make loyalty look like a sensible choice to other observers.
+influence_and_control/13|rival dependence|A necessary concession would make the rival approach on terms that cannot simply be dictated.
+influence_and_control/14|final authority|Ending the disagreement could become an act of decision rather than an appeal for everyone's consent.
+influence_and_control/15|unsupervised discretion|A position with room to decide would be more appealing than a grander title surrounded by constant correction.
+influence_and_control/16|direct access|The argument could arrive without an intermediary choosing its emphasis or convenient omissions.
+influence_and_control/17|indebted successor|A successor's advancement could preserve a personal obligation after the formal teaching is finished.
+influence_and_control/18|requested counsel|An invitation to advise would establish a value that unsolicited recommendations struggle to secure.
+influence_and_control/19|retained influence|Stepping back from exhausting duties need not mean becoming easy to ignore.
+influence_and_control/20|controlled access|A private circle could remain shaped by preference rather than the persistence of unwelcome applicants.
+influence_and_control/21|accepted preference|A long-defended choice could become ordinary practice and stop needing a fresh explanation.
+influence_and_control/22|indispensable standing|An important network's reliance would make replacement more difficult than a simple change of title.
+influence_and_control/23|unquestioned discretion|A minor decision could stay minor instead of becoming another demand to justify the right to make it.
+sensory_and_companionship/0|music-filled travel|A season could be remembered through performances and welcoming rooms rather than obligations met.
+sensory_and_companionship/1|comfortable silence|A companion who does not need every pause filled would let the journey remain restful as well as shared.
+sensory_and_companionship/2|shared laughter|The evening could leave people remembering their pleasure more readily than its expense.
+sensory_and_companionship/3|familiar taste explored|Small variations could make a beloved dish interesting again without making it cease to be familiar.
+sensory_and_companionship/4|animal company|An engaging animal offers a form of attention that does not first ask for an explanation of position.
+sensory_and_companionship/5|unhurried conversation|A wandering conversation could follow its own interest without someone needing it to produce a decision.
+sensory_and_companionship/6|unclaimed discovery|A remarkable place could be experienced before its view is turned into evidence of an official purpose.
+sensory_and_companionship/7|shared pursuit|Time together could deepen an interest instead of continually interrupting it for another obligation.
+sensory_and_companionship/8|domestic music|Music beginning without an occasion would make ordinary home life feel more companionable.
+sensory_and_companionship/9|agreeable climate|A place could fit the body's preferences closely enough that the weather stops being a daily argument.
+sensory_and_companionship/10|unburdened friendship|A visit could remain a visit without eventually revealing which favor has been weighing on it.
+sensory_and_companionship/11|attentive affection|A closely chosen gift would show that someone had noticed the small preference without being instructed.
+sensory_and_companionship/12|seasonal belonging|Remaining in one landscape could make subtle changes as memorable as distant spectacles.
+sensory_and_companionship/13|shared understanding|An absorbing interest could become a language of closeness with someone already loved.
+sensory_and_companionship/14|freely given company|An animal approaching of its own accord would offer an uncomplicated sign of familiarity.
+sensory_and_companionship/15|absorbed company|A late conversation nobody wants to end would make time feel pleasantly unclaimed.
+sensory_and_companionship/16|unburdened celebration|A feast could remain a pleasure of food and company without being recruited into another lesson about obligation.
+sensory_and_companionship/17|accepted taste|An unfashionable pleasure would need less defending beside somebody who already enjoys it.
+sensory_and_companionship/18|pleasant teaching|A shared afternoon of learning could end with satisfaction instead of a new expectation for regular service.
+sensory_and_companionship/19|understood remembrance|The right storyteller would know which familiar moment deserves to be allowed its full weight.
+sensory_and_companionship/20|unhurried travel|A pleasant place could earn another day simply by being pleasant.
+sensory_and_companionship/21|private recognition|A modest success could be marked by the people who understand it without being enlarged for public notice.
+sensory_and_companionship/22|unguarded friendship|A remark could be allowed to arrive imperfectly without worrying that it changes the whole impression.
+sensory_and_companionship/23|ordinary contentment|A good day could be sufficient without needing to prove that something greater is approaching.
+status/0|family prominence|The family name should command attention before anyone decides whether its bearer is convenient to notice.
+status/1|rival surpassed|Remembrance would feel incomplete if the celebrated rival still occupies the first place in every account.
+status/2|inherited precedence|An older claim feels like a place in the room that should not have to be requested again.
+status/3|patron independence|Sufficient wealth could turn a patron's displeasure into something that can be afforded.
+status/4|household control|An instruction could be followed without every ordinary matter becoming a negotiation over authority.
+status/5|family vindication|The honor would answer an older exclusion as well as satisfy a present ambition.
+status/6|public vindication|A critic's public acknowledgment would reach the same audience that heard the dismissive judgment.
+status/7|dynastic survival|A political defeat should not have the final authority to erase the family from the future.
+status/8|indispensable standing|Dependence at the center of power could provide security that formal favor alone cannot promise.
+status/9|named remembrance|A visible monument could keep a personal name present after ordinary recollection has thinned.
+status/10|local influence|A modest holding could become a place other people have a reason to approach respectfully.
+status/11|dismissal reversed|Equal treatment from that circle would change the meaning of an exclusion still privately remembered.
+status/12|supported comfort|Retirement would be more attractive if its comforts continued without requiring the labor that paid for them.
+status/13|enviable collection|Discerning envy would confirm that the objects reflect more than indiscriminate expensive purchasing.
+status/14|controlled remembrance|The surviving account should preserve a preferred interpretation before an opponent's version hardens into common knowledge.
+status/15|influence without burdens|Proximity could provide the pleasures of influence while leaving its most exhausting obligations to somebody else.
+child_hopes/0|familiar playmate|A good game feels unfinished when the familiar playmate has to leave.
+child_hopes/1|steady tower|Seeing the pieces remain where they were put makes another careful attempt feel worthwhile.
+child_hopes/2|finished story|The missing ending stays important after an adult has turned to something else.
+child_hopes/3|growing animal|A small animal changing a little at a time gives familiar visits something new to notice.
+child_hopes/4|familiar song|Knowing the next words makes it possible to join in instead of only listening.
+child_hopes/5|rainy day play|Rain need not mean that the pleasant part of the day has suddenly stopped.
+child_hopes/6|included in play|Being given a real little part matters more than being allowed to watch from nearby.
+child_hopes/7|noticed effort|A familiar adult looking closely makes the thing just made feel more important.
+child_hopes/8|favorite toy returned|Another toy does not quite stand in for the one that belongs to the familiar game.
+child_hopes/9|garden return|A remembered path or growing thing makes the next visit easy to look forward to.
+child_hopes/10|small independence|Doing the little task directly brings a pleasure that having it finished by someone else does not.
+child_hopes/11|familiar meal|Recognizable faces and an enjoyable taste make the table a comfortable place to remain.
+child_hopes/12|seasonal discovery|A change that can be seen and touched gives an ordinary place a new reason for excitement.
+child_hopes/13|small gift|Something made by hand can become a simple way of drawing a familiar person's pleased attention.
+child_hopes/14|calm animal nearby|An animal settling close by makes it easier to keep watching without startling it away.
+child_hopes/15|new playmate|Another friendly person means a possible new game and another familiar face to look for.

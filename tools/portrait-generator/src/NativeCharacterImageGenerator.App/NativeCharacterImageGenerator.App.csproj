@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Bannerlord.NativeCharacterImageGenerator.App</AssemblyName>
+    <RootNamespace>Bannerlord.NativeCharacterImageGenerator.App</RootNamespace>
+    <NativePortraitRenderHostOutputDir>$(MSBuildProjectDirectory)\obj\native-portrait-host\$(Configuration)\</NativePortraitRenderHostOutputDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bannerlord.NativeCharacterImageGenerator.SourceCacheVerifier" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NativeCharacterImageGenerator\NativeCharacterImageGenerator.csproj" />
+  </ItemGroup>
+
+  <Target Name="BuildNativePortraitRenderHost" BeforeTargets="Build">
+    <MSBuild Projects="..\NativePortraitRenderHost\NativePortraitRenderHost.csproj"
+             Targets="Restore"
+             Condition="'$(ReignRestoreBundledTools)' == 'true'"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="OutDir;OutputPath;RuntimeIdentifier;SelfContained;PublishSingleFile;IncludeNativeLibrariesForSelfExtract" />
+    <MSBuild Projects="..\NativePortraitRenderHost\NativePortraitRenderHost.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);OutputPath=$(NativePortraitRenderHostOutputDir);AppendTargetFrameworkToOutputPath=false;AppendRuntimeIdentifierToOutputPath=false"
+             RemoveProperties="OutDir;RuntimeIdentifier;SelfContained;PublishSingleFile;IncludeNativeLibrariesForSelfExtract" />
+  </Target>
+
+  <Target Name="CopyNativePortraitRenderHost" AfterTargets="Build">
+    <ItemGroup>
+      <NativePortraitRenderHostFiles Include="$(NativePortraitRenderHostOutputDir)Bannerlord.NativePortraitRenderHost.exe" />
+      <NativePortraitRenderHostFiles Include="$(NativePortraitRenderHostOutputDir)Bannerlord.NativePortraitRenderHost.exe.config" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NativePortraitRenderHostFiles)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyNativePortraitRenderHostToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <PublishedNativePortraitRenderHostFiles Include="$(NativePortraitRenderHostOutputDir)Bannerlord.NativePortraitRenderHost.exe" />
+      <PublishedNativePortraitRenderHostFiles Include="$(NativePortraitRenderHostOutputDir)Bannerlord.NativePortraitRenderHost.exe.config" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PublishedNativePortraitRenderHostFiles)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

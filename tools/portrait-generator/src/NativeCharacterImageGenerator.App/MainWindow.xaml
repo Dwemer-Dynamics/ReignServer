@@ -1,0 +1,419 @@
+<Window x:Class="Bannerlord.NativeCharacterImageGenerator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Bannerlord Native Character Studio"
+        Width="1280"
+        Height="820"
+        MinWidth="980"
+        MinHeight="650"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBrush}"
+        Foreground="{StaticResource TextBrush}">
+    <Grid Margin="18">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="360" />
+            <ColumnDefinition Width="18" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Background="{StaticResource PanelBrush}"
+                CornerRadius="8"
+                Padding="16">
+            <TabControl Background="Transparent" BorderThickness="0">
+                <TabItem Header="Browse">
+            <Grid Margin="0,10,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Text="Native Characters"
+                               FontSize="24"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="Native, War Sails, and Reign canon characters"
+                               Margin="0,4,0,0"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                </StackPanel>
+
+                <TextBox x:Name="SearchBox"
+                         Grid.Row="1"
+                         Margin="0,18,0,0"
+                         TextChanged="SearchBox_OnTextChanged"
+                         ToolTip="Search by name, culture, or native ID" />
+
+                <TextBlock x:Name="CharacterCountText"
+                           Grid.Row="2"
+                           Margin="2,10,0,8"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="Loading character catalog…" />
+
+                <ListBox x:Name="CharacterList"
+                         Grid.Row="3"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Foreground="{StaticResource TextBrush}"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling"
+                         SelectionChanged="CharacterList_OnSelectionChanged">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="12,10" />
+                            <Setter Property="Margin" Value="0,2" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#29303D" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="#3A3328" />
+                                    <Setter Property="Foreground" Value="#FFE4B3" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name, Mode=OneWay}"
+                                           FontWeight="SemiBold"
+                                           FontSize="14"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Margin="0,3,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="12"
+                                           TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding DisplayCulture, Mode=OneWay}" />
+                                    <Run Text="  •  " />
+                                    <Run Text="{Binding Id, Mode=OneWay}" />
+                                    <Run Text="  |  " />
+                                    <Run Text="{Binding RosterSource, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+                </TabItem>
+                <TabItem Header="Create">
+                    <ScrollViewer Margin="0,10,0,0" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="2">
+                            <TextBlock Text="Appearance Lab"
+                                       FontSize="24"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Margin="0,4,0,14"
+                                       Text="Create render-only native candidates from a description, a portrait, or both."
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Text="Physical description or appearance-intent JSON"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBox x:Name="AppearanceDescriptionBox"
+                                     Margin="0,5,0,10"
+                                     Height="112"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     ToolTip="Paste bannerlord_appearance_intent_v1 JSON, or describe age, sex, culture, complexion, hair, facial features, build, and distinguishing marks." />
+                            <TextBlock Text="Reference portrait (optional)"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock x:Name="ReferenceImageText"
+                                       Margin="0,4,0,6"
+                                       Text="No image selected"
+                                       TextTrimming="CharacterEllipsis"
+                                       Foreground="#C8CFDA" />
+                            <WrapPanel>
+                                <Button Content="Choose Image"
+                                        Padding="10,6"
+                                        Click="ChooseReferenceImageButton_OnClick" />
+                                <Button Margin="7,0,0,0"
+                                        Content="Clear"
+                                        Padding="10,6"
+                                        Click="ClearReferenceImageButton_OnClick" />
+                            </WrapPanel>
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center"
+                                           Text="Seed (optional)"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <TextBox x:Name="AppearanceSeedBox"
+                                         Grid.Column="1"
+                                         Margin="10,0,0,0"
+                                         Padding="8,5"
+                                         ToolTip="Leave blank for a stable seed derived from the extracted appearance." />
+                            </Grid>
+                            <Expander Margin="0,10,0,0" Header="Optional helper LLM settings">
+                                <StackPanel Margin="0,8,0,2">
+                                    <TextBlock Text="OpenAI-compatible endpoint"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBox x:Name="AppearanceProviderEndpointBox"
+                                             Margin="0,4,0,7"
+                                             Padding="7,5" />
+                                    <TextBlock Text="Model"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBox x:Name="AppearanceProviderModelBox"
+                                             Margin="0,4,0,7"
+                                             Padding="7,5" />
+                                    <TextBlock Text="API key (session only)"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                    <PasswordBox x:Name="AppearanceProviderApiKeyBox"
+                                                 Margin="0,4,0,7"
+                                                 Padding="7,5"
+                                                 Foreground="{StaticResource TextBrush}"
+                                                 Background="{StaticResource PanelRaisedBrush}"
+                                                 BorderBrush="#343C4B" />
+                                    <Button Content="Apply Helper Settings"
+                                            Padding="10,6"
+                                            Click="ApplyAppearanceProviderButton_OnClick" />
+                                    <TextBlock Margin="0,5,0,0"
+                                               Text="The key is kept only in memory unless supplied by an environment variable."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </StackPanel>
+                            </Expander>
+                            <Button x:Name="CreateCandidatesButton"
+                                    Margin="0,12,0,0"
+                                    Content="Analyze &amp; Create 4 Candidates"
+                                    IsEnabled="False"
+                                    Click="CreateCandidatesButton_OnClick" />
+                            <Button x:Name="RerollCandidatesButton"
+                                    Margin="0,6,0,0"
+                                    Content="Reroll Same Intent"
+                                    IsEnabled="False"
+                                    Click="RerollCandidatesButton_OnClick" />
+                            <TextBlock x:Name="AppearanceAnalysisStatusText"
+                                       Margin="0,9,0,8"
+                                       Text="The built-in analyzer supports descriptions offline. Vision requires an optional provider."
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <ProgressBar x:Name="AppearanceProgressBar"
+                                         Height="7"
+                                         IsIndeterminate="True"
+                                         Visibility="Collapsed" />
+                            <ListBox x:Name="AppearanceCandidateList"
+                                     Margin="0,8,0,0"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     SelectionChanged="AppearanceCandidateList_OnSelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="2,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="72" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="64" Height="80" Background="#0D1016">
+                                                <Image Source="{Binding Preview}" Stretch="UniformToFill" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="9,3,0,0">
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                <TextBlock Margin="0,3,0,0"
+                                                           Text="{Binding Details}"
+                                                           TextWrapping="Wrap"
+                                                           FontSize="11"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <Button x:Name="ExportAppearanceButton"
+                                    Margin="0,10,0,4"
+                                    Content="Export Selected Appearance JSON"
+                                    IsEnabled="False"
+                                    Click="ExportAppearanceButton_OnClick" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+        </Border>
+
+        <Border Grid.Column="2"
+                Background="{StaticResource PanelBrush}"
+                CornerRadius="8"
+                Padding="18">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="SelectedNameText"
+                                   Text="Select a character"
+                                   FontSize="26"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="SelectedDetailsText"
+                                   Margin="0,5,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   Text="Civilian equipment and native geometry will appear here." />
+                    </StackPanel>
+                    <Button x:Name="SaveButton"
+                            Grid.Column="1"
+                            Content="Save PNG"
+                            IsEnabled="False"
+                            Click="SaveButton_OnClick" />
+                </Grid>
+
+                <Border Grid.Row="1"
+                        Margin="0,16"
+                        Background="#0D1016"
+                        BorderBrush="#2B3341"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                    <Grid>
+                        <Image x:Name="PreviewImage"
+                               Margin="10"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock x:Name="EmptyPreviewText"
+                                   Text="Loading installed native character data…"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="16"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="250" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="StatusText"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   Text="Starting…"
+                                   TextWrapping="Wrap" />
+                        <TextBlock x:Name="EquipmentText"
+                                   Margin="0,4,20,0"
+                                   Foreground="#C8CFDA"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="View"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <RadioButton x:Name="CachedCaptureMode"
+                                     Margin="0,5,0,0"
+                                     Content="Cached game capture (reference)"
+                                     IsChecked="True"
+                                     Checked="RenderMode_OnChanged" />
+                        <RadioButton x:Name="NativeEngineMode"
+                                     Margin="0,4,0,0"
+                                     Content="Generate new native source"
+                                     Checked="RenderMode_OnChanged" />
+                        <Button x:Name="GenerateNativeButton"
+                                Margin="0,7,0,7"
+                                Padding="8,5"
+                                Content="Generate New Native Source"
+                                IsEnabled="False"
+                                Click="GenerateNativeButton_OnClick" />
+                        <Separator Margin="0,3,0,8" />
+                        <TextBlock Text="Full source build"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <Button x:Name="BuildAllButton"
+                                Margin="0,6,0,0"
+                                Padding="8,6"
+                                Content="Build ALL Source Images"
+                                IsEnabled="False"
+                                Click="BuildAllButton_OnClick" />
+                        <Button x:Name="BuildFilteredButton"
+                                Margin="0,5,0,0"
+                                Padding="8,5"
+                                Content="Build Search Results"
+                                IsEnabled="False"
+                                Click="BuildFilteredButton_OnClick" />
+                        <Separator Margin="0,8,0,7" />
+                        <TextBlock Text="AI-ready shared source cache"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <ComboBox x:Name="AiCachePresetBox"
+                                  Margin="0,5,0,0"
+                                  SelectedIndex="0"
+                                  ToolTip="WAN matches the 768×1024 portrait request. Legacy retains the previous high-resolution render contract.">
+                            <ComboBoxItem Tag="ai_source_wan_portrait_v3"
+                                          Content="WAN 768×1024 (recommended)" />
+                            <ComboBoxItem Tag="ai_source_close_v1"
+                                          Content="Legacy 3072×3840 quality" />
+                        </ComboBox>
+                        <Button x:Name="BuildAiCacheButton"
+                                Margin="0,6,0,0"
+                                Padding="8,6"
+                                Content="Build Full AI Source Cache"
+                                IsEnabled="False"
+                                Click="BuildAiCacheButton_OnClick" />
+                        <Button x:Name="ResumeAiCacheButton"
+                                Margin="0,5,0,0"
+                                Padding="8,5"
+                                Content="Resume Source Cache Build"
+                                IsEnabled="False"
+                                Click="ResumeAiCacheButton_OnClick" />
+                        <Button x:Name="OpenAiCacheButton"
+                                Margin="0,5,0,0"
+                                Padding="8,5"
+                                Content="Open Cache Folder"
+                                IsEnabled="False"
+                                Click="OpenAiCacheButton_OnClick" />
+                        <Button x:Name="CancelBatchButton"
+                                Margin="0,5,0,0"
+                                Padding="8,5"
+                                Content="Cancel Build"
+                                Visibility="Collapsed"
+                                Click="CancelBatchButton_OnClick" />
+                        <ProgressBar x:Name="BatchProgressBar"
+                                     Margin="0,7,0,0"
+                                     Height="8"
+                                     Minimum="0"
+                                     Maximum="1"
+                                     Value="0"
+                                     Visibility="Collapsed" />
+                        <TextBlock x:Name="BatchProgressText"
+                                   Margin="0,4,0,8"
+                                   FontSize="11"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Visibility="Collapsed" />
+                        <RadioButton x:Name="OfflinePreviewMode"
+                                     Margin="0,0,0,10"
+                                     Content="Rotatable offline 3D"
+                                     Checked="RenderMode_OnChanged" />
+                        <TextBlock Text="Turn preview"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <Slider x:Name="YawSlider"
+                                Minimum="-30"
+                                Maximum="30"
+                                Value="0"
+                                TickFrequency="5"
+                                IsSnapToTickEnabled="True"
+                                ValueChanged="YawSlider_OnValueChanged" />
+                        <TextBlock Margin="0,10,0,0"
+                                   Text="Zoom (waist-up default)"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <Slider x:Name="ZoomSlider"
+                                Minimum="1"
+                                Maximum="4"
+                                Value="3.3"
+                                TickFrequency="0.1"
+                                IsSnapToTickEnabled="True"
+                                ValueChanged="ZoomSlider_OnValueChanged" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,149 @@
+Create an exceptionally photorealistic cinematic scene inside the **portrait gallery of a wealthy Vlandian castle**, strongly reflecting Vlandian feudal aristocracy, hereditary landholding, heraldry, martial prestige, noble bloodlines, and dynastic pride.
+
+This is not merely a decorative hallway. It is a place where the ruling household deliberately displays its history and legitimacy.
+
+The gallery is a long, dignified chamber within the inner castle. Pale dressed-stone walls rise beneath heavy dark oak ceiling beams. Tall, narrow Gothic-style arched windows occupy one side of the chamber, admitting cool natural daylight. Deep window recesses contain stone or timber benches where someone might sit and study the room.
+
+Iron wall sconces and beeswax candles provide warmer illumination after sunset.
+
+The opposite wall contains rows of large framed portraits, memorial panels, heraldic displays, engraved name plaques, and family crests representing generations of the castle's ruling house.
+
+The frames should be heavy carved oak, dark walnut, or gilded wood appropriate to the wealth of the family. Some older frames show age, repairs, darkened varnish, or wear. Newer portraits may appear brighter and more elaborate.
+
+Because **no invented human beings may appear anywhere in the image**, do not generate identifiable ancestors or other people inside the paintings.
+
+Visible portrait frames may instead:
+
+- Contain painted representations of one of the supplied source characters only.
+- Be covered temporarily with dark cloth.
+- Be partially outside the camera's focus.
+- Be turned away for restoration.
+- Be positioned at an angle where the painted figure cannot be seen.
+- Show only a tightly cropped heraldic background, inscription, shield, or non-human decorative portion of the painting.
+
+Never invent a human face or body for an ancestral portrait.
+
+Between portraits may hang shields, swords, battle standards, family banners, carved coats of arms, captured heraldic objects, or commemorative plaques.
+
+Small tables or cabinets may hold:
+
+- Genealogical books.
+- Family records.
+- Sealed letters.
+- Memorial objects.
+- Jewelry cases.
+- Old military decorations.
+- Maps of inherited estates.
+- Marriage agreements.
+- Land grants.
+- Documents concerning succession.
+- Candlesticks.
+- Wax seals.
+
+A Vlandian portrait gallery may be used for:
+
+- Studying one's ancestors.
+- Examining the history of the ruling family.
+- Comparing family resemblance.
+- Considering succession.
+- Discussing inheritance.
+- Looking at the portrait of a deceased relative.
+- Thinking about a parent's expectations.
+- Reflecting on one's own place within a dynasty.
+- Showing an honored guest the family's lineage.
+- Quietly discussing a marriage alliance.
+- Examining heraldic changes between generations.
+- Reading inscriptions beneath portraits.
+- Investigating a disputed branch of the family.
+- Remembering a dead sibling, spouse, parent, or child.
+- Considering whether one's own portrait may someday hang here.
+- Meeting someone privately because the gallery receives little ordinary traffic.
+- Confronting someone beneath the images of their ancestors.
+- Waiting before a particular portrait.
+- Quietly criticizing an ancestor.
+- Feeling either pride or resentment toward the family's history.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image prompt** as human characters.
+
+Every clearly visible human face or body anywhere in the finished image must correspond to one of those supplied source characters.
+
+This rule applies to:
+
+- People physically standing in the gallery.
+- Reflections.
+- Paintings.
+- Portraits.
+- Drawings.
+- Statues.
+- Busts.
+- Tapestries.
+- Decorative artwork.
+- Background figures.
+
+Do not invent ancestors, servants, guards, painters, attendants, children, courtiers, or other human beings.
+
+If one source character is supplied, there must be only that human identity anywhere in the image.
+
+Preserve every supplied character's identity with maximum possible accuracy, including:
+
+- Facial structure.
+- Apparent age.
+- Skin tone and natural skin detail.
+- Eye color, spacing, and shape.
+- Brows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hair color.
+- Hairline.
+- Hairstyle.
+- Facial hair.
+- Scars.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest and torso.
+- Waist.
+- Hips.
+- Body mass.
+- Muscularity.
+- Arm and leg proportions.
+- Overall physique.
+- Relative size compared with other supplied characters.
+
+Do not beautify, slim, exaggerate, age, de-age, feminize, masculinize, or otherwise redesign them.
+
+Clothing may be changed to culturally appropriate Vlandian noble or civilian clothing suitable for walking through a private castle gallery.
+
+Use realistic wool, linen, leather, fine woven fabrics, gowns, tunics, hose, cloaks, belts, boots, embroidery, and restrained heraldic ornament according to rank.
+
+Characters should interact naturally with the space.
+
+A character might:
+
+- Stand close to a portrait.
+- Read an inscription.
+- Examine a shield.
+- Hold a genealogical book.
+- Rest one hand against a window recess.
+- Sit beneath a portrait.
+- Study a family document.
+- Walk slowly down the gallery.
+- Pause before a particular frame.
+- Look troubled, amused, proud, resentful, nostalgic, or thoughtful according to the scene.
+
+Do not pose the characters like fashion models.
+
+The finished image must look like **a real photograph taken inside a genuinely inhabited medieval aristocratic castle**.
+
+Use realistic stone, dark aged wood, old varnish, cloth, metal, wax, parchment, dust, natural window light, candlelight, authentic skin texture, natural posture, and physically believable interaction with the environment.
+
+No video-game appearance. No painterly fantasy rendering. No plastic skin. No generic fantasy castle aesthetic.
+
+Maximum possible photorealism.
+
+---

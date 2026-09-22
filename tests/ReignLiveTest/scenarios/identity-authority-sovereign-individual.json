@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 2,
+  "label": "Disposable sovereign identity authority individual matrix",
+  "seed": 271828,
+  "mode": "individual_chat",
+  "presentation": "headless",
+  "effects": "guarded",
+  "steps": [
+    {
+      "operation": "open",
+      "mode": "individual_chat",
+      "targetSearches": ["CharacterObject_2587"],
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "Without requiring me to introduce myself, state who I am to you and why you know it. Then distinguish my role from yours, state whether I am your sovereign, identify who personally owns Zeonica, identify its current governor, and give Paltos's exact current enemy-kingdom count. Use only current native evidence.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "immediate_family",
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "subject_is_observer_sovereign",
+        "expectedRecognizedRoles": ["lord", "realm_sovereign", "subject_is_observer_sovereign", "same_clan", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "close",
+      "mode": "individual_chat",
+      "assertions": {"requiresSceneMemoryArtifacts": true, "critical": true},
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "open",
+      "mode": "individual_chat",
+      "targetSearches": ["CharacterObject_2579"],
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "Without requiring me to introduce myself, state who I am to you and why you know it. Then distinguish my role from yours, state whether I am your sovereign, identify who personally owns Zeonica, identify its current governor, and give Paltos's exact current enemy-kingdom count. Use only current native evidence.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "same_clan",
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "subject_is_observer_sovereign",
+        "expectedRecognizedRoles": ["lord", "realm_sovereign", "subject_is_observer_sovereign", "same_clan", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "close",
+      "mode": "individual_chat",
+      "assertions": {"requiresSceneMemoryArtifacts": true, "critical": true},
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "open",
+      "mode": "individual_chat",
+      "targetSearches": ["CharacterObject_2602"],
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "Without requiring me to introduce myself, identify me from our shared clan. State your own current office in Zeonica, who personally owns the town, whether ownership and governorship are the same office here, whether I am your sovereign, and Paltos's exact current enemy-kingdom count.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "same_clan",
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "subject_is_observer_sovereign",
+        "expectedRecognizedRoles": ["lord", "realm_sovereign", "subject_is_observer_sovereign", "same_clan", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "close",
+      "mode": "individual_chat",
+      "assertions": {"requiresSceneMemoryArtifacts": true, "critical": true},
+      "timeoutSeconds": 900
+    },
+    {
+      "operation": "open",
+      "mode": "individual_chat",
+      "targetSearches": ["lord_1_9"],
+      "timeoutSeconds": 300
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "We have not been introduced in this encounter. Before I give you a name, say only whether you can actually identify me from evidence available to you. Do not infer my identity, clan, office, or ownership from hidden information.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "I am Acthon. That is my actual name, and I am formally introducing myself to you now. Acknowledge only the identity and current native offices that follow from that verified identity.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "requiresIdentityRecognition": true,
+        "expectedIdentityName": "Acthon",
+        "expectedIdentityState": "verified",
+        "expectedIdentitySource": "exact_self_introduction",
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "subject_is_observer_sovereign",
+        "expectedRecognizedRoles": ["lord", "realm_sovereign", "subject_is_observer_sovereign", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "Now give a direct current accounting: whose sovereign am I, who personally owns Zeonica, who governs it, whether you own or govern it yourself, and exactly how many enemy kingdoms Paltos currently has. Correct any earlier uncertainty using only current native facts.",
+      "categories": ["structural_pipeline", "identity_role_authority", "detailed_factual_accuracy", "performance_resilience"],
+      "assertions": {
+        "minReplies": 1,
+        "requiresCorrelationIds": true,
+        "requiresStructuralEvidence": true,
+        "requiresPromptEvidence": true,
+        "maxPromptChars": 100000,
+        "requiresGroundedGuardedActionRouting": true,
+        "requiresRelationshipReceipt": true,
+        "requiresPoliticalAuthorityEvidence": true,
+        "expectedRealmSovereignKnown": true,
+        "expectedCurrentSettlementOwnerKnown": true,
+        "expectedAuthorityRelationship": "subject_is_observer_sovereign",
+        "expectedRecognizedRoles": ["lord", "realm_sovereign", "subject_is_observer_sovereign", "current_settlement_owner_clan_member"],
+        "expectedCurrentEnemyKingdomCount": 0,
+        "critical": true
+      },
+      "timeoutSeconds": 1200
+    },
+    {
+      "operation": "close",
+      "mode": "individual_chat",
+      "assertions": {"requiresSceneMemoryArtifacts": true, "critical": true},
+      "timeoutSeconds": 900
+    }
+  ]
+}

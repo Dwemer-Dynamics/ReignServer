@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance — stage combined state before guarded Current checkpoint",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "before_native_reload", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

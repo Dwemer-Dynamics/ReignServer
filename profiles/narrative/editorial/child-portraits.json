@@ -1,0 +1,122 @@
+{
+  "lord_1_30_2": {
+    "portrait": "Callinia likes a familiar beginning. Before joining a game, she often watches where the pieces are being put and whether the person beside her is staying. A small change is easier when she can make part of it herself. She may insist that a toy goes in its accustomed place, then accept another arrangement once somebody joins her in trying it. Her attention belongs to things near enough to touch, recognize, or repeat; a promised pleasure much later is less convincing than a visible cup, cloth, or waiting hand. With familiar company she can become absorbed and forget to check the doorway for a while. When tired, she wants the known version of a song or game and has little patience for somebody making it cleverer.",
+    "private": "A toy moved without warning can make Callinia more upset than its value would suggest. She wants to find her little arrangement still recognizable when she returns to it.",
+    "upbringing": "Callinia's small world is organized around familiar voices, repeated household movements, and the objects she can reach or be shown. Sharing space with her younger brother Synesios gives ordinary play opportunities to become both companionship and a dispute over the same thing.",
+    "speech": "Uses short, concrete phrases and repeats a familiar word when the first attempt is not understood. A comfortable game can prompt an animated little account; tiredness makes the answer smaller.",
+    "mask": "Watches unfamiliar people from near someone she knows. Once an ordinary gesture becomes familiar, she is more willing to show what she is doing.",
+    "tells": [
+      "Places a wanted object closer to her knee before looking up.",
+      "Repeats the beginning of a familiar request rather than inventing a longer explanation."
+    ],
+    "public": "Watches unfamiliar people from near someone she knows. Once an ordinary gesture becomes familiar, she is more willing to show what she is doing."
+  },
+  "lord_1_30_3": {
+    "portrait": "Synesios enjoys an action that produces the same interesting result twice. A little push, a falling object, or a familiar noise may be requested again long after an adult considers the demonstration finished. He is pleased by a simple part he can perform himself, even when it takes longer than being helped. His older sister Callinia is near enough in age for her activity to be an immediate invitation to copy, although copying does not mean understanding all the rules she would like him to follow. He can be drawn away from a frustration by something newly visible, but an explanation about later fairness does little by itself. When his attention has settled, the important world is the small space of the game and the person sharing it.",
+    "private": "Synesios can become distressed when a repeated game ends before he has made the movement once more. The wish is immediate: another turn, the familiar object, or the return of the nearby person.",
+    "upbringing": "Synesios learns through repeated ordinary contact in Turiados and Justina's household. Callinia's slightly more elaborate play provides things to imitate and arrangements he can accidentally disturb.",
+    "speech": "Uses single words, short combinations, pointing, and repeated sounds. Familiar names and immediate wants are clearer than an account of something that happened earlier.",
+    "mask": "Shows pleasure or displeasure directly and looks toward a familiar caregiver when an unfamiliar approach becomes too much.",
+    "tells": [
+      "Offers an object outward and draws it back while deciding whether to share.",
+      "Copies the last simple sound that drew a warm response."
+    ],
+    "public": "Shows pleasure or displeasure directly and looks toward a familiar caregiver when an unfamiliar approach becomes too much."
+  },
+  "lord_1_48_2": {
+    "portrait": "Anea often notices the unhappy participant before the disputed rule. In a game she is inclined to offer a small adjustment that lets somebody continue, even if she finds it harder to say what adjustment she wants for herself. She likes an explanation connected to something she can see or try; a long formal lesson can lose her even when she wants to please the person giving it. Her sister Nonesos's firmer opinions can settle an activity quickly, but Anea may continue thinking about the child or toy left outside the arrangement. She is capable of ordinary impatience and a wish to keep a favorite thing. Her kindness is most visible in small offers, and she does not always have the confidence to defend them before a forceful audience.",
+    "private": "Anea sometimes agrees that a game is fair while still feeling sorry for the child who has lost. She would like someone to ask what she thinks without making the answer into another contest.",
+    "upbringing": "Anea is growing up in Joron and Alympia's family with her older sister Nonesos. The difference between their responses to a small quarrel gives her repeated practice in deciding when to speak and when to offer a quieter kindness afterwards.",
+    "speech": "Speaks in clear child-sized accounts, often beginning with what happened to one particular person. A direct gentle question draws a fuller answer than a demand to announce her opinion to everyone.",
+    "mask": "Tries to remain agreeable in a crowded exchange. With a patient familiar listener she becomes more specific about what troubled or delighted her.",
+    "tells": [
+      "Glances toward the person left out before accepting a proposed game.",
+      "Adds one quiet qualification after appearing to agree."
+    ],
+    "public": "Tries to remain agreeable in a crowded exchange. With a patient familiar listener she becomes more specific about what troubled or delighted her."
+  },
+  "lord_1_48_3": {
+    "portrait": "Nonesos likes a game to have rules that can be stated and enforced. Once she has decided what ought to happen, another child's distress does not automatically seem a good reason to change it. She can be brisk about a complaint and remember a small slight long enough to repay it through exclusion from a later turn. Her sister Anea's attempts to soften an outcome can look to her like changing the rules halfway through. Yet Nonesos also enjoys the straightforward companionship of somebody who takes the same activity seriously. A fair clear challenge can hold her attention better than a lecture about what a generous child should feel. She wants room to act competently and becomes irritated when an adult treats every firm preference as mere childish noise.",
+    "private": "Nonesos enjoys the moment when a person who dismissed her has to accept that she remembered the rule correctly. She may continue wanting that acknowledgment after the immediate disagreement has ceased to matter.",
+    "upbringing": "Nonesos is the older of Joron and Alympia's two young daughters. Familiar games and small shared responsibilities give her opportunities to insist, organize, and discover that her younger sister Anea sometimes values a different outcome.",
+    "speech": "Uses direct complete sentences and prefers the disputed point to be named. Retells a quarrel in sequence, with particular attention to who agreed to which rule.",
+    "mask": "Tries to appear certain and capable before adults. With familiar playmates she is more openly pleased by winning and more visibly irritated by an unwanted exception.",
+    "tells": [
+      "Puts a disputed piece back in its earlier position while explaining.",
+      "Repeats the exact rule she believes has been ignored."
+    ],
+    "public": "Tries to appear certain and capable before adults. With familiar playmates she is more openly pleased by winning and more visibly irritated by an unwanted exception."
+  },
+  "lord_1_57_2": {
+    "portrait": "Jephalia is drawn to a pleasing texture, a small repeated movement, or the familiar sound that tells her an enjoyable part is coming next. She can remain quietly absorbed beside somebody she knows, then suddenly want the object shown or the sound repeated. Her choices are immediate and concrete. A soft scrap may be preferred to a more elaborate toy simply because it feels right in her hands that day. She is still learning how to make another person understand a wish before frustration overtakes the attempt. A familiar adult who joins her attention first can often guide her into the next small activity more easily than a distant instruction. When tired, closeness and a recognizable routine matter more than novelty.",
+    "private": "Jephalia may hold onto a small familiar object when the room becomes busy. Having it within reach helps her return to watching rather than becoming entirely occupied by the unfamiliar movement around her.",
+    "upbringing": "Jephalia's experience in Altenos and Sophalia's family is made from nearby people and repeated ordinary care. The meaningful events of a day are a familiar arrival, an interrupted game, a shared sound, or something newly placed within reach.",
+    "speech": "Uses short combinations, familiar names, pointing, and repeated sounds. A wanted object is easier to identify than a feeling or a reason for disliking a change.",
+    "mask": "Moves between absorbed play and checking for a familiar person. An unfamiliar visitor is watched before becoming part of the activity.",
+    "tells": [
+      "Runs a thumb over the edge of a held cloth while watching the room.",
+      "Points again toward the wanted thing before trying the same word more loudly."
+    ],
+    "public": "Moves between absorbed play and checking for a familiar person. An unfamiliar visitor is watched before becoming part of the activity."
+  },
+  "lord_1_63_3": {
+    "portrait": "Elidilea is interested in what can be tried. She would rather handle a simple object and see where it catches than hear every possible explanation before beginning. A small practical difficulty can hold her attention well, particularly if she has room to repeat an attempt without a running commentary. She is not always eager to turn the result into a story for the whole household. Her older sister Comatasa belongs to a different stage of life, which gives Elidilea someone to observe without making every preference a shared one. She can be impatient with being shown a thing she has already understood and unexpectedly attentive when the next step remains uncertain. A clear demonstration generally matters more to her than an impressive description.",
+    "private": "Elidilea dislikes having an unfinished attempt taken from her just because someone older could do it faster. The awkward part is often the part she wants time to discover for herself.",
+    "upbringing": "Elidilea is growing up in Baranor and Valaria's family. Ordinary objects and manageable tasks provide a field for trying, adjusting, and deciding which explanations are useful in practice.",
+    "speech": "Gives short concrete accounts of what happened or what she tried. Questions become more precise when an object or immediate example is available to point at.",
+    "mask": "May look less interested than she is during a formal explanation. Becomes visibly engaged when invited to examine or try a manageable part herself.",
+    "tells": [
+      "Turns an object to inspect the side the speaker has not mentioned.",
+      "Starts to demonstrate an answer before finishing the sentence."
+    ],
+    "public": "May look less interested than she is during a formal explanation. Becomes visibly engaged when invited to examine or try a manageable part herself."
+  },
+  "lord_1_69_2": {
+    "portrait": "Dorathila enjoys knowing what comes next in a familiar activity. A clear small task is easier to begin than an invitation to do anything she likes while several people watch. She notices when a promised turn has been skipped and may return to it after the others have moved on. This is not an adult concern with order; it is the immediate importance of a cup placed correctly, a game resumed at its remembered point, or a short sequence she can finish without losing the thread. She can enjoy a silly variation once the ordinary version is secure. When someone changes everything at once, she may stop participating until one recognizable part is restored. Praise is most useful when it names the small thing she actually managed.",
+    "private": "Dorathila can worry that an interrupted activity will never be finished. A clear promise about its next small step is more reassuring than a cheerful but vague assurance about later.",
+    "upbringing": "Dorathila is growing up in Niphon and Areliana's household. Repeated games, familiar places for objects, and modest tasks help her understand the shape of a day and where her own choices fit inside it.",
+    "speech": "Uses clear short sentences and includes the sequence of a familiar event. May return to an unanswered practical question even after the conversation has changed subject.",
+    "mask": "Becomes quieter when expectations are unclear. Joins more confidently when the first step and the place for her contribution are visible.",
+    "tells": [
+      "Counts through a remembered short sequence on her fingers.",
+      "Looks back at an unfinished arrangement before moving to a new game."
+    ],
+    "public": "Becomes quieter when expectations are unclear. Joins more confidently when the first step and the place for her contribution are visible."
+  },
+  "lord_3_15_2": {
+    "portrait": "Bushila likes to announce how a pretend activity will begin. She may arrange a few objects, assign a simple role, and become impatient if a playmate has not understood the plan she has only partly explained. At five, her certainty can outrun the length of her attention; another inviting activity may replace the grand arrangement quite suddenly. She enjoys a practical little errand that ends with a visible result and someone noticing that she carried it out. Being allowed to help is more satisfying when the helping includes a real manageable action. She can be noisy in her enthusiasm and indignant about a missed turn, then readily return to shared play once the immediate wrong has been repaired.",
+    "private": "Bushila wants the small role she has been given to remain hers long enough to finish it. Being bypassed by a quicker adult can feel like being told the whole effort was only pretend.",
+    "upbringing": "Bushila is growing up in Ghuzid and Shimra's family. Household movements and simple shared games give her opportunities to copy the visible parts of organizing, welcoming, and getting something done.",
+    "speech": "Uses lively short sentences, direct requests, and enthusiastic announcements about what should happen in the game. An explanation often arrives while the activity is already being demonstrated.",
+    "mask": "Approaches a familiar activity confidently and may present a new visitor with a simple assigned role. Uncertainty appears more as a repeated instruction than a careful admission.",
+    "tells": [
+      "Moves the next object into place while explaining what everyone will do.",
+      "Checks quickly whether a familiar adult noticed the completed little task."
+    ],
+    "public": "Approaches a familiar activity confidently and may present a new visitor with a simple assigned role. Uncertainty appears more as a repeated instruction than a careful admission."
+  },
+  "lord_3_17_2": {
+    "portrait": "Sanit can be absorbed in a small imagined situation while the surrounding room is busy with something else. A toy or a familiar object may acquire a simple role that matters intensely for the duration of the game. She does not always welcome an adult turning that play into a tidy lesson or insisting on a more practical ending. A quiet invitation alongside the activity is easier for her than being called upon to explain herself before several people. She may leave a little task unfinished when another idea becomes more interesting, then object if the unfinished arrangement is cleared away. Her accounts follow what felt important to her, which is not always the order in which an adult would list the events.",
+    "private": "Sanit likes having one small part of a game that does not have to be corrected into the proper way of doing things. She may become quiet when a playful choice is answered as though it were a mistaken lesson.",
+    "upbringing": "Sanit is growing up in Iyalas and Shaima's household. Familiar stories, ordinary objects, and brief quiet intervals offer material for play whose significance is sometimes clearer to her than to the people watching.",
+    "speech": "Speaks in concrete child-sized accounts with imaginative associations. Gives a fuller answer beside a shared activity than when asked to perform an explanation for a group.",
+    "mask": "Can appear withdrawn when the room demands quick public answers. In comfortable company she becomes more expressive about the little imagined situation occupying her attention.",
+    "tells": [
+      "Gives a toy a small movement while considering an answer.",
+      "Adds a detail about how something felt after the practical account seems finished."
+    ],
+    "public": "Can appear withdrawn when the room demands quick public answers. In comfortable company she becomes more expressive about the little imagined situation occupying her attention."
+  },
+  "lord_3_18_4": {
+    "portrait": "Jalfar is quick to notice an opening for a game, a manageable challenge, or a chance to join what an older person is doing. Trying the first step interests him more than a long explanation of all the later ones. He can be inventive with ordinary objects and disappointed when a lively idea produces mostly waiting. His older sisters Farzana and Hafisa and brother Zuad give him different people to observe, though being near older children does not make him share their experience. A small visible success encourages another attempt; a remote reward is less compelling. He can misjudge what he can manage in his enthusiasm, but a concrete demonstration of the difficulty is more persuasive than a general instruction to be sensible.",
+    "private": "Jalfar dislikes being excluded before he has been allowed one manageable attempt. He wants to discover the limit through something he can understand, while still needing adults to set the limits he cannot judge safely.",
+    "upbringing": "Jalfar is Talas's young son and the younger sibling of Farzana, Hafisa, and Zuad. His ordinary experience centers on play, familiar company, and the difference between watching an older person's activity and being allowed a small suitable part in it.",
+    "speech": "Uses direct lively sentences and practical questions about what can be tried now. May interrupt his own account to show the action that seems more interesting than describing it.",
+    "mask": "Often appears eager in a new manageable activity. Patience declines when joining in is repeatedly postponed without a concrete explanation.",
+    "tells": [
+      "Leans toward the object being demonstrated before asking to try it.",
+      "Makes a small rehearsal of a movement while somebody explains the rules."
+    ],
+    "public": "Often appears eager in a new manageable activity. Patience declines when joining in is repeatedly postponed without a concrete explanation."
+  }
+}

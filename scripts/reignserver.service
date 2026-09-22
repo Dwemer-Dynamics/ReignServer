@@ -1,0 +1,16 @@
+[Unit]
+Description=ReignServer and vector worker
+Requires=postgresql.service
+After=postgresql.service network-online.target
+
+[Service]
+Type=forking
+PIDFile=/run/reignserver/server.pid
+ExecStart=/usr/local/bin/reignctl start
+ExecStop=/usr/local/bin/reignctl stop
+TimeoutStartSec=120
+TimeoutStopSec=45
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,208 @@
+Create an exceptionally photorealistic cinematic scene inside the **inner courtyard of a powerful Vlandian castle**, strongly reflecting Vlandian feudal aristocracy, western-medieval stone fortification, household hierarchy, heraldic identity, military readiness, landed wealth, and the daily movement of a noble household.
+
+This is the **principal enclosed courtyard within the secure inner castle**, surrounded by the keep and important residential or administrative buildings.
+
+It is not the outer bailey, stable yard, training yard, market square, or ceremonial throne space.
+
+The inner courtyard should feel like one of the castle's primary circulation spaces: a place through which nobles pass between chambers, messengers might normally arrive, household business connects different wings, and people briefly stop to speak before continuing elsewhere.
+
+The courtyard is surrounded by:
+
+- Tall pale or gray dressed-stone walls.
+- Residential wings.
+- The keep.
+- Timber galleries.
+- Narrow arched windows.
+- Stone staircases.
+- Covered passages.
+- Heavy oak doors.
+- Iron hinges.
+- Small balconies.
+- Heraldic banners.
+- Drainage spouts.
+- Wall lanterns.
+- Decorative but restrained carved stonework.
+
+The courtyard ground should be realistic and visually smooth.
+
+Use a believable combination of:
+
+- Broad worn stone slabs in main walking areas.
+- Smooth compacted earth in limited secondary sections.
+- Narrow drainage channels.
+- Subtle moss along damp edges.
+- Naturally weathered stone.
+
+Do **not** create a repetitive tile grid, checkerboard pattern, blocky ground, blotchy procedural textures, or unrealistic patchwork terrain.
+
+A central feature may include one of the following:
+
+- A practical stone well.
+- A modest fountain basin.
+- A cistern access point.
+- A small planted stone feature.
+
+Do not make the courtyard resemble an ornate palace garden.
+
+Other believable objects may include:
+
+- Stone benches.
+- Wooden benches.
+- Barrels temporarily set near a doorway.
+- A small covered notice board without modern text.
+- Firewood stacked under shelter.
+- Water buckets.
+- Closed storage chests.
+- Lanterns.
+- Baskets.
+- Folded cloth.
+- Small tables used temporarily for household business.
+- Weapon racks only near an appropriate guard or armory entrance.
+- Heraldic shields.
+- Seasonal greenery in a few planters.
+
+The space should show signs of genuine daily use:
+
+- Slight wear on steps.
+- Darkened stone near doorways.
+- Small water stains.
+- Dust in dry weather.
+- Rain-darkened paving.
+- Fallen leaves.
+- Small traces of straw carried in from other courtyards.
+- Scuffs from boots.
+
+Likely activities include:
+
+- Crossing from one castle wing to another.
+- Waiting for someone.
+- Reading a letter while standing in daylight.
+- Speaking privately before entering another chamber.
+- Sitting briefly on a bench.
+- Watching the castle around you.
+- Looking toward an upper window or balcony.
+- Inspecting the condition of the courtyard.
+- Reviewing a document before a meeting.
+- Taking fresh air.
+- Escaping a crowded room.
+- Pausing after receiving news.
+- Thinking before entering court.
+- Thinking after leaving court.
+- Watching rain.
+- Warming in sunlight.
+- Looking toward the main gate passage.
+- Waiting for an expected arrival.
+- Discussing household matters.
+- Thinking about the regent's rule.
+- Recovering composure after an argument.
+- Meeting another supplied character by chance.
+- Walking while thinking.
+- Preparing mentally for an audience.
+- Observing the architecture or heraldry of the ruling household.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible human face or body must correspond exactly to one of those supplied source characters.
+
+Do not generate:
+
+- Guards.
+- Servants.
+- Pages.
+- Squires.
+- Messengers.
+- Courtiers.
+- Workers.
+- Household staff.
+- Soldiers.
+- Children.
+- Background nobles.
+- People visible through windows.
+- People standing on balconies.
+- People on upper galleries.
+- Human silhouettes.
+- Reflected people.
+- Unspecified passersby.
+
+If one source character is supplied, exactly one visible human may appear.
+
+If multiple source characters are supplied, only those specific people may appear.
+
+The courtyard may look active through objects and architecture, but **human activity must never be represented by invented background people**.
+
+Do not add human figures to statues, reliefs, tapestries, paintings, heraldic art, or fountains.
+
+Preserve each supplied character's exact:
+
+- Facial identity.
+- Apparent age.
+- Head shape.
+- Skin tone.
+- Natural skin texture.
+- Eye shape, spacing, and color.
+- Eyebrows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hairline.
+- Hair color.
+- Hairstyle.
+- Facial hair.
+- Scars.
+- Freckles.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest and torso proportions.
+- Waist.
+- Hips.
+- Arm length.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative size compared with other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or otherwise redesign them.
+
+Clothing may be changed to realistic **Vlandian civilian or noble clothing appropriate to moving through the inner castle**.
+
+Use believable wool, linen, leather, fine woven fabrics, tunics, gowns, hose, belts, boots, cloaks, gloves where seasonally appropriate, and restrained heraldic ornament.
+
+Armor should appear only where appropriate to the character and current circumstances.
+
+Characters should be naturally engaged with the courtyard.
+
+They may:
+
+- Walk.
+- Pause on steps.
+- Sit on a bench.
+- Hold a letter.
+- Look toward a doorway.
+- Stand beneath a covered gallery.
+- Rest one hand on a stone railing.
+- Talk naturally with another supplied character.
+- Watch rain from beneath shelter.
+
+Avoid posed group portraits.
+
+The finished image must resemble **high-end live-action historical photography inside a real inhabited medieval castle**.
+
+Use realistic stone, wood, metal, fabric, water, weather, skin, posture, atmospheric depth, and daylight.
+
+No video-game rendering.
+
+No fantasy concept-art look.
+
+No artificial glossy surfaces.
+
+No blocky or blotchy ground textures.
+
+Maximum possible photorealism.
+
+---

@@ -1,0 +1,17 @@
+# Build products
+**/bin/
+**/obj/
+**/publish/
+.vs/
+
+# Generated images are local derivatives of the user's installed assets.
+artifacts/
+
+# Never add native game data to this code-only project.
+*.tpac
+*.dds
+*.gtex
+*.fbx
+*.dae
+*.glb
+*.gltf

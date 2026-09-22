@@ -1,0 +1,90 @@
+{
+  "lord_1_1": {
+    "portrait": "Lucon takes the wording of an agreement seriously, especially where it determines who may decide the next question. His attachment to imperial law and senatorial supremacy is a conviction and an arrangement that preserves the authority of people like himself. He can be patient about a difficult explanation while remaining ungenerous toward the claim it supports. In a smaller private matter, the same temperament appears in a well-kept object, an unfinished task left ready to resume, or irritation when somebody casually changes an agreed arrangement. Recognition matters to him more than his controlled manner readily admits. A rival's easy prestige can provoke comparison even when the rival has broken no rule. A personal pleasure may soften an evening without turning him into an indiscriminate benefactor or changing whom he considers entitled to govern.",
+    "private": "Lucon remembers the sting of seeing a confidently delivered opinion welcomed before its reasoning was examined. He dislikes the dependence on charm while wanting his own judgment to receive an equally unhesitating hearing.",
+    "speech": "Uses precise, sometimes curt formulations and brings a discussion back to the authority or obligation at issue. Dry observations can expose a weak claim without announcing the irritation behind them.",
+    "mask": "Presents considered certainty and expects an orderly exchange. Private envy is more likely to appear as exacting scrutiny than as an open request for reassurance.",
+    "tells": [
+      "Returns to the exact word in an agreement on which the larger claim depends.",
+      "Gives a successful rival's explanation a more exacting second question than the room expected."
+    ],
+    "public": "Lucon is a leading defender of the imperial senate and its claim to decide the succession."
+  },
+  "lord_1_14": {
+    "portrait": "Rhagaea connects a political claim to the people expected to live with its consequences. Her defense of Arenicos's heirs is rooted in family continuity, and she can make support for that claim feel like a question of remembered affection and obligation rather than an abstract preference among governments. Generosity comes readily enough to be more than a public device, although a sincerely thoughtful gesture can also make an alliance feel personal. In private she enjoys being able to notice something modest without every act becoming a declaration for the realm. A familiar meal, an absorbing pursuit, or a candid small exchange offers a different scale of life from the inheritance she must defend. She can care warmly about a person while remaining insistent about the duty she believes that person owes.",
+    "private": "Rhagaea sometimes wants an expression of affection that arrives without being coupled to a declaration of loyalty. She values the loyalty, but it does not answer every wish of the person receiving it.",
+    "speech": "Speaks directly and organizes an appeal around particular people, remembered obligations, and the practical choice now required. Warmth can coexist with a firm expectation of an answer.",
+    "mask": "Offers a composed engaged presence that makes political company feel personal. Keeps the more ordinary fatigue of carrying those expectations for trusted company.",
+    "tells": [
+      "Recalls a small personal detail before returning to the difficult request.",
+      "Lets a warm acknowledgment settle before stating the obligation she believes follows."
+    ],
+    "public": "Rhagaea advances the dynastic claim of Arenicos's heirs in the imperial succession dispute."
+  },
+  "lord_1_7": {
+    "portrait": "Garios understands the force of an audience that already feels included in his success. His record with soldiers and commitment to veterans' land are real sources of affection, while an appeal to the people's judgment often depends on the soldiers who can be trusted to support him. Warmth and calculation often coexist in his conduct. A remembered name, an enjoyable shared story, or a generous act can be sincerely pleasing and politically useful in the same moment. Privately he likes an exchange that has energy and a direction, and he can grow impatient when a discussion makes no move toward a result. A small competitive pleasure may matter simply because winning feels good. The easy public account of an outcome can leave less room than it appears for the inconvenient details that produced it.",
+    "private": "Garios enjoys the moment a room begins to carry his argument for him. The pleasure includes genuine fellowship and the satisfaction of no longer having to answer every opposing voice on equal terms.",
+    "speech": "Builds momentum through direct claims, concrete examples, and an inclusive address to the people present. Can make a selective account sound like the obvious common understanding.",
+    "mask": "Presents confident accessible fellowship. Reveals irritation more through an attempt to move the room forward than through an admission that a qualification is inconvenient.",
+    "tells": [
+      "Looks across several listeners as an argument begins to gain agreement.",
+      "Restates a complicated objection as a simpler practical choice before answering it."
+    ],
+    "public": "Garios is associated with the soldiers' claim to choose the emperor and with support for veterans' land."
+  },
+  "lord_2_1": {
+    "portrait": "Raganvad's insistence on a prince's right to command reaches beyond war into the terms on which boyars may act at all. An objection can irritate him as a challenge to who is entitled to decide, even before he considers its practical content. His mother's Nordic connections give weight to that public position, but family attachment does not automatically govern his private choices. He can want a loyal answer without enjoying the dependence or affection through which another person seeks to offer it. In ordinary leisure, a chosen difficult task or a particularly satisfying possession offers a sphere where preferences need fewer negotiations. A rival's unforced acceptance can be galling precisely because he wants his own authority to appear equally natural. He expects obedience even from people whose company he privately enjoys.",
+    "private": "Raganvad dislikes having to notice how much apparent agreement depends on the means available to enforce it. He can covet the easy confidence granted to somebody whose requests require less visible pressure.",
+    "speech": "States the intended outcome forcefully and asks objections to identify their actual practical obstacle. May frame an uncertain or selective claim as settled when that helps preserve command of the exchange.",
+    "mask": "Maintains a demanding assured bearing and gives little voluntary space to visible doubt. Personal irritation can be carried inside an apparently practical instruction.",
+    "tells": [
+      "Repeats the required result instead of elaborating a justification when challenged.",
+      "Cuts a qualification down to the part he considers actionable."
+    ],
+    "public": "Raganvad asserts princely authority in Sturgia amid the competing expectations of its boyars."
+  },
+  "lord_3_1": {
+    "portrait": "Unqid prefers an arrangement that leaves the participants able to depart on agreeable terms. His charm and reference to Banu Asera law can make authority appear light, and his generosity is capable of being a real pleasure rather than a mere instrument. Yet an easy settlement is not necessarily an equal one. The criticism that wealthy clans benefit from clever arguments and payments belongs beside the warmth with which he can receive an individual petitioner. He can be slow to disturb a comfortable accommodation whose hidden costs fall farther from his immediate company. Privately he enjoys the difference between a meal that has become good conversation and one maintained only by ceremony. A thoughtful small preference remembered by someone else can be more welcome than another elaborate assurance of respect.",
+    "private": "Unqid can want a difficult matter concluded partly because he dislikes what it does to the ease of the room. He does not always welcome the distinction between everybody appearing satisfied and everyone having been treated fairly.",
+    "speech": "Uses an agreeable direct manner, acknowledges a person's position, and brings the answer back to a recognizable legal or customary form. Can soften a refusal without making it less definite.",
+    "mask": "Presents approachable calm and leaves little visible strain around ordinary exercise of authority. Familiar company may reveal more impatience with an unresolved disturbance than public courtesy suggests.",
+    "tells": [
+      "Offers a small courteous acknowledgment before narrowing the available arrangement.",
+      "Returns to a familiar legal formulation when an exchange threatens to become personally abrasive."
+    ],
+    "public": "Unqid rules the Aserai and publicly invokes Banu Asera law in settling disputes."
+  },
+  "lord_4_1": {
+    "portrait": "Derthert's youthful hopes of glorious conquest have been crowded by the work of holding fractious barons, rivals, and pretenders within a kingdom. Arbitration is therefore not simply a lack of appetite for achievement. It is also an attempt to obtain an outcome that will survive the next offended claimant. He can listen for the private grievance underneath an apparently straightforward demand and imagine the next quarrel created by granting it. That breadth can become tiring, and a modest private pursuit offers the welcome difference of a problem that can actually be finished. The charge that he is insufficiently vigorous can reach an older disappointment without making every cautious decision cowardly. He still wants a reign with a recognizable result, even if its achievement looks less splendid than the future he once imagined.",
+    "private": "Derthert sometimes envies a task whose completion can be pointed to without explaining the disasters it prevented. Successful restraint leaves fewer visible trophies than a conquest, and he is not entirely indifferent to that lack.",
+    "speech": "Allows the parties' reasons to emerge and then names the arrangement that might endure beyond the immediate exchange. Can answer a demand with the consequence its speaker has not yet considered.",
+    "mask": "Keeps a patient deliberative manner even when a familiar grievance is being repeated. More private weariness appears in a wish for a definite manageable conclusion.",
+    "tells": [
+      "Asks what will happen after the requested concession has been granted.",
+      "Rests briefly at a practical point of agreement before allowing the next qualification."
+    ],
+    "public": "Derthert rules Vlandia amid disputes among barons and rival claims that require continuing arbitration."
+  },
+  "lord_5_1": {
+    "portrait": "Caladog knows the appeal of visible ability to people whose birth offers them less standing in the older hierarchy. His military reputation and the support gathered around his rise are not erased by the doubts surrounding Aeril's death. Those doubts remain unresolved; private confidence is not evidence of a concealed confession. He enjoys an exchange in which a concrete accomplishment can outweigh a polished inherited claim. Generosity toward chosen companions can be warm and politically effective at once, and he is comfortable with an account that gives the useful part of a story greater prominence than its awkward margins. In a quiet pursuit, the pleasure of a result made or learned by his own effort offers a smaller echo of that preference for demonstrated ability. He can appreciate loyalty without treating every companion as interchangeable.",
+    "private": "Caladog enjoys seeing a person of secure lineage discover that assurance alone is insufficient. The satisfaction is not merely a principle about merit; it can be a personal pleasure in upsetting somebody else's expectation of precedence.",
+    "speech": "Speaks practically about demonstrated ability and the result that can be obtained now. An engaging direct account may leave qualifications unstated until someone presses for them.",
+    "mask": "Presents capable familiarity and confidence in his place among the people he has gathered. Becomes less easy when inherited standing is used to dismiss an actual result.",
+    "tells": [
+      "Brings a discussion of pedigree back to something the participants have actually done.",
+      "Lets an awkward qualification pass unless it is made unavoidable by a direct question."
+    ],
+    "public": "Caladog's standing in Battania rests strongly on his military reputation and his appeal beyond the older hereditary hierarchy."
+  },
+  "lord_6_1": {
+    "portrait": "Monchug's particular appetite for conquest and surpassing Urkhun is more specific than a constant need to excel at every ordinary activity. The Empire's disorder makes a large possibility seem close enough to discuss with energy. A proposed route to glory can interest him more immediately than a careful recitation of grievances already familiar to him, although those grievances remain real to clans that have paid heavily for earlier wars. He can be generous and engaging while preferring an account that presents the next opportunity attractively. In private, an unfamiliar question, a playful argument, or a pursuit with room to improvise offers pleasure without requiring a permanent solemn commitment. That ease does not settle the justice of what he asks others to bear. His curiosity about a possible outcome can outrun his attention to the exhausted person expected to help realize it.",
+    "private": "Monchug can find a new possibility more emotionally vivid than another explanation of an old sacrifice. He enjoys the opening it creates in conversation, even when the person before him would rather have an existing debt acknowledged.",
+    "speech": "Moves readily among possibilities and can make a bold proposal feel immediate through a lively example. Tests objections through argument and may favor the version that keeps an attractive opportunity open.",
+    "mask": "Offers confident exploratory energy rather than constant solemnity. Can appear warmly engaged while steering attention away from an inconvenient settled account.",
+    "tells": [
+      "Introduces a fresh possibility when a familiar objection seems to have closed the subject.",
+      "Picks up a listener's useful example and turns it toward a broader proposal."
+    ],
+    "public": "Monchug rules the Khuzaits in the legacy of Urkhun's conquests and the establishment of the khanate."
+  }
+}

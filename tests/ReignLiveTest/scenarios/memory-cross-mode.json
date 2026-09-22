@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "label": "Cross-mode memory smoke test",
+  "seed": 104729,
+  "mode": "individual_chat",
+  "presentation": "headless",
+  "effects": "guarded",
+  "steps": [
+    {
+      "operation": "open",
+      "mode": "individual_chat"
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "A small detail worth remembering: I packed a blue cup beside dried figs before stopping here. What ordinary travel habits do you have?"
+    },
+    {
+      "operation": "send",
+      "mode": "individual_chat",
+      "text": "We also spoke about road dust, quiet mornings, and whether old songs make a journey feel shorter."
+    },
+    {
+      "operation": "scene_boundary",
+      "mode": "individual_chat"
+    },
+    {
+      "operation": "checkpoint",
+      "message": "Optional save/reload checkpoint before cross-mode recall."
+    },
+    {
+      "operation": "open",
+      "mode": "party_chat"
+    },
+    {
+      "operation": "send",
+      "mode": "party_chat",
+      "text": "Can anyone recall the little things from my earlier conversation—not only the most memorable object, but where we were and the other topics around it?"
+    },
+    {
+      "operation": "scene_boundary",
+      "mode": "party_chat"
+    },
+    {
+      "operation": "open",
+      "mode": "wilderness_event"
+    },
+    {
+      "operation": "send",
+      "mode": "wilderness_event",
+      "text": "This setting reminds me of an earlier talk. What details from it seem relevant now, including any mundane ones?"
+    },
+    {
+      "operation": "close",
+      "mode": "wilderness_event"
+    }
+  ]
+}

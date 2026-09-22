@@ -1,0 +1,490 @@
+{
+  "schemaVersion": 2,
+  "suite": "temporary-noble-party-guests",
+  "preparedOnly": false,
+  "autonomous": true,
+  "controller": "Reign MCP Party Agency tools with ReignLiveTest observational fallback",
+  "nativeOperation": "party_agency_test",
+  "requiredBannerlordVersion": "v1.4.8",
+  "profiles": [
+    "preflight", "language_contract", "eligibility_detachment", "waiting_camp",
+    "reviews", "returns", "save_roundtrip", "hostility", "recovery_regression", "evaluate"
+  ],
+  "policy": {
+    "openEndedReviewDays": 5,
+    "fixedTermMinimumDays": 1,
+    "fixedTermMaximumDays": 30,
+    "minimumReturnHours": 1,
+    "maximumReturnHours": 12,
+    "requiredLogicalCaseCount": 40,
+    "languageAccuracyGate": 1.0,
+    "falsePositiveConsentGate": 0,
+    "requiredCleanPassesPerFinalFingerprint": 1
+  },
+  "naturalLanguagePolicy": {
+    "required": true,
+    "productionDialogueOnly": true,
+    "directDialogueActionInvocationProhibited": true,
+    "allowedControlPlane": [
+      "guarded fixture preparation", "target selection", "time advancement", "pause and queue drain",
+      "save and reload", "battle setup and resolution", "provider fault injection", "read-only evidence capture"
+    ],
+    "styles": [
+      "direct", "addressed", "polite", "indirect", "casual", "shorthand",
+      "punctuation variation", "correction", "contextual follow-up", "negation", "hypothetical", "refusal"
+    ],
+    "evidence": [
+      "exact player utterance", "complete NPC reply", "provider fingerprint", "parsed and validated action",
+      "correlation id", "before and after native state", "proof that no direct harness action performed the guest decision"
+    ],
+    "positiveInvitationContract": [
+      "purpose stated", "known risk stated", "NPC relevance stated", "term or review stated",
+      "asked rather than ordered", "explicit agreement requested"
+    ]
+  },
+  "nativeInvitationTemplates": {
+    "fixed": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters have been striking travelers on the western road, and confronting them may end in a fight. I need your judgment and experience, but this is a request rather than an order. Will you agree to travel with my party for six days while we investigate?",
+        "I accept the conditions you have named, and your clan, realm, titles, family, and independent standing remain your own. With that settled, do you explicitly agree to join my party for the six-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "partyless_mercenary_fixed": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters have been striking travelers on the western road, and confronting them may end in a fight. I need your judgment and experience, but this is a request rather than an order. Will you agree to travel with my party for six days while we investigate?",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going personally because these deserters are attacking travelers under my protection and I want their raids ended without punishing innocent villages. The Eleftheroi will receive twenty thousand denars, the captured deserters' usable gear, and one reasonable favor from me when the road is safe. You remain an independent ally, and your clan, standing, titles, family, and command remain your own. With those terms answered plainly, do you explicitly agree to join my party for the six-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "remaining_native_fixed": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters have been striking travelers on the western road, and confronting them may end in a fight. I need your judgment and experience, but this is a request rather than an order. Will you agree to travel with my party for six days while we investigate?",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going personally because these deserters are attacking travelers under my protection. My party presently fields seventy-two fighting men and women. We will inspect the scouts' reports together, travel with six days of provisions and a guarded supply train, locate the camp before committing, offer surrender where it is safe, and withdraw rather than endanger nearby villages. You will receive twenty thousand denars, a fair share of captured deserter equipment, and one reasonable favor when the road is secure. You remain an independent ally, and your clan, realm, titles, family, command, and standing remain your own. With the purpose, force strength, plan, compensation, and safeguards stated plainly, do you explicitly agree to join my party for the six-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "army_fixed": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters have been striking travelers on the western road, and confronting them may end in a fight. I need your command experience, but this is a request rather than an order. Will you agree to leave the present army formation and travel with my party for six days while we investigate? If you lead the army, I am separately asking you to disband its formation while preserving your own party as a waiting camp.",
+        "I accept the conditions you have named, and your clan, realm, titles, family, command, and independent standing remain your own. With the army detachment or formation disbandment expressly agreed, do you explicitly agree to join my party for the six-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "remaining_native_army_fixed": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters have been striking travelers on the western road, and confronting them may end in a fight. I need your command experience, but this is a request rather than an order. Will you agree to leave the present army formation and travel with my party for six days while we investigate? If you lead the army, I am separately asking you to disband its formation while preserving your own party as a waiting camp.",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going personally because the deserters are attacking travelers under my protection. My party presently fields seventy-two fighting men and women. We will inspect the scouts' reports together, carry six days of provisions, locate the camp before committing, offer surrender where it is safe, and withdraw rather than endanger villages. You will receive twenty thousand denars, a fair share of captured equipment, and one reasonable favor. Your clan, realm, titles, family, command, and independent standing remain your own, and your party will wait protected for your return. With our force strength, the army detachment or formation disbandment, and every other term stated plainly, do you explicitly agree to join my party for the six-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "fixed_one": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party for one day while we investigate?",
+        "I accept the conditions you have named, and your permanent standing remains your own. With that settled, do you explicitly agree to join my party for the one-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "remaining_native_fixed_one": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party for one day while we investigate?",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going because the threatened road and villages are under my protection. My party presently fields seventy-two fighting men and women. We will inspect the scouts' report, carry a full day's provisions, locate the deserters before committing, offer surrender if safe, and withdraw rather than endanger villagers. You will receive five thousand denars and a fair share of captured equipment. You remain an independent ally and your permanent standing remains your own. With the one-day term, purpose, force strength, plan, compensation, and safeguards clear, do you explicitly agree to join my party?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "open_ended": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party while we investigate? There is no fixed end date; we will review whether you stay every five days.",
+        "I accept the conditions you have named, and your permanent standing remains your own. There is no fixed end date, and we will review every five days. With that settled, do you explicitly agree to join my party?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "remaining_native_open_ended": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party while we investigate? There is no fixed end date; we will review whether you stay every five days.",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going because these attacks threaten people under my protection. My party presently fields seventy-two fighting men and women. We will inspect the scouts' reports together, keep provisions and an escorted supply route, locate each camp before committing, offer surrender where safe, and withdraw rather than endanger villages. You will receive ten thousand denars for each five-day period and a fair share of captured equipment. You remain an independent ally and your permanent standing remains your own. There is no fixed end date and either of us may end the arrangement at each five-day review. With the force strength and all other terms clear, do you explicitly agree to join my party?"
+      ],
+      "contextualTurnIndexes": [1]
+    },
+    "fixed_thirty": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "A coordinated band of deserters is preying on roads across the region, and the search may bring repeated fighting. I need your judgment and command experience, but this is a request rather than an order. Will you agree to travel with my party for thirty days while we break their network?",
+        "I accept the conditions you have named, and your clan, realm, titles, family, and independent standing remain your own. With that settled, do you explicitly agree to join my party for the thirty-day investigation?"
+      ],
+      "contextualTurnIndexes": [1]
+    }
+    ,
+    "remaining_native_fixed_thirty": {
+      "dialogueMode": "individual_chat",
+      "turns": [
+        "A coordinated band of deserters is preying on roads across the region, and the search may bring repeated fighting. I need your judgment and command experience, but this is a request rather than an order. Will you agree to travel with my party for thirty days while we break their network?",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going personally because the network is attacking roads and villages under my protection. My party presently fields seventy-two fighting men and women. We will review scouts' reports before each move, maintain provisions and guarded resupply, locate camps before committing, offer surrender where safe, and withdraw rather than endanger civilians. You will receive fifty thousand denars, a fair share of captured equipment, and one reasonable favor. You remain an independent ally, and your clan, realm, titles, family, command, and standing remain your own. With the thirty-day term, purpose, force strength, plan, compensation, and safeguards stated plainly, do you explicitly agree to join my party?"
+      ],
+      "contextualTurnIndexes": [1]
+    }
+  },
+  "nativeDepartureTemplates": {
+    "grateful_release": {
+      "turns": [
+        "Before we part, the payment, captured-equipment share, and every other term I promised you have been delivered and recorded by my quartermaster. Please confirm that our agreement is fully settled.",
+        "You have done what I asked, every obligation between us is settled, and I no longer need you to remain with my party. Thank you for your help; please leave now and return to your own party or the nearest safe friendly settlement."
+      ]
+    }
+  },
+  "nativeHostilityTemplates": {
+    "own_faction_warning": {
+      "turns": [
+        "Your kingdom and mine are now at war. If you remain with my party and take part in a battle against your own faction, you will be banished from your former clan and transferred to mine. You may leave instead. Knowing that consequence, do you explicitly agree to remain and accept that risk?"
+      ],
+      "contextualTurnIndexes": [0]
+    }
+  },
+  "cases": [
+    {
+      "id": "PA-LANG-001", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "Three merchant caravans and two patrols have vanished over the last twelve days on the western road. Scouts found abandoned wagons and signs of armed deserters, so this may end in a fight. I need your road experience and judgment, and I am asking rather than ordering you. Will you agree to travel with my party for six days while we investigate those disappearances?",
+        "Those terms are fair. You will ride as an independent ally, not as my retainer, and I accept the conditions you have named. With that settled, do you explicitly agree to join my party for the six-day investigation?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 6, "reviewIntervalDays": 6, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-002", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "Someone inside the customs office is diverting relief wagons, and exposing them may bring hired blades after us. I need your knowledge of merchants and court dealings. I cannot promise when the matter will end, and I am asking rather than commanding you. Will you agree to travel with my party while I investigate? There is no fixed end date; we will review whether you stay every five days.",
+        "I accept the terms and boundaries you have named. You remain an independent ally. There is no fixed end date, and we will review every five days. With that understood, do you explicitly agree to join my party for this investigation?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 5, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-003", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "Two caravans disappeared between Zeonica and the western villages, and the tracks suggest a staged ambush by armed riders. I need your eye for roads and troop movements, but this is your choice, not an order. Will you agree to travel with my party for three days while we search for the missing caravans?",
+        "Your conditions are acceptable, and you will travel as an independent ally. With that settled, do you explicitly agree to join my party for the three-day search?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 3, "reviewIntervalDays": 3, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-004", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "Two village headmen are close to bloodshed over an irrigation boundary, and both will bring armed retainers to the talks. I need your independent counsel to keep the meeting from becoming a battle. I am asking freely, not ordering you. Will you agree to travel with my party until the dispute is settled? There is no fixed end date; we will review whether you stay every five days.",
+        "I accept the limits and conditions you have named. You remain an independent ally. There is no fixed end date, and we will review every five days. Do you now explicitly agree to join my party for these talks?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 5, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-005", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "My lady, four farmsteads were burned along the border and survivors saw disciplined raiders withdrawing before dawn. Following them may mean a hard fight. I need your knowledge of noble levies and border country, and you are free to refuse. Will you agree to ride with my company for ten days while we investigate the attacks?",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica, and this investigation proceeds under my own authority. The burned farmsteads are on Zeonica's western border and under my protection. You may inspect the survivors' statements, scouts' reports, route, provisions, and security arrangements before we ride. You will travel as an independent ally, not my retainer, and I accept every condition you have named. With that understood, do you explicitly agree to join my party for the ten-day investigation?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 10, "reviewIntervalDays": 10, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-006", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "In confidence, the woman is my adult cousin Mara of my own household. The common Varros household at a farmstead on Zeonica's western border is pressing the match under a claimed unpaid dowry, and its household guards intend to prevent her from speaking freely. The farmstead is under my law; this is not a quarrel with your empire. Mara needs an independent witness to hear and record her freely spoken refusal. I intend only to negotiate, never to abduct her or begin a feud. If guards draw steel, we withdraw and appeal to Zeonica's court rather than fight. I need your discretion and standing as that neutral witness. This is a request, not an order. Will you agree to ride with my party for two days?",
+        "You now have the names, household, location, jurisdiction, purpose, and our withdrawal-before-violence plan. I accept every safeguard and condition you have named. This is negotiation only, never an abduction. You will act as an independent witness, not a subordinate or sword arm. With that understood, do you explicitly agree to join my party for those two days?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 2, "reviewIntervalDays": 2, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-007", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "Would you accompany us for forty days while I investigate the raids?",
+        "No, forty days is too long. The raiders burned three grain stores and still have armed scouts watching the road. I need your experience judging organized war bands, but you are free to refuse. I mean twelve days for that investigation. Will you agree to travel with my party for those twelve days?",
+        "I accept the terms and boundaries you have named. You remain an independent ally. With the corrected twelve-day term understood, do you explicitly agree to join my party for the investigation?"
+      ],
+      "contextualTurnIndexes": [2],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 12, "reviewIntervalDays": 12, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-008", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "I need someone I can trust while I determine who betrayed the caravan route.",
+        "The traitor altered caravan manifests and may have allies among the armed gate guards. I need your discretion and your ability to read noble loyalties, but the choice is yours. Will you agree to join my party for seven days while we identify who betrayed the route?",
+        "Your conditions are acceptable, and you will remain an independent ally. With that settled, do you explicitly agree to join my party for the seven-day investigation?"
+      ],
+      "contextualTurnIndexes": [2],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 7, "reviewIntervalDays": 7, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-009", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": ["Would you ever consider traveling with my party if some urgent matter arose?"],
+      "expected": { "recordDelta": 0, "record": "absent" }
+    },
+    {
+      "id": "PA-LANG-010", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": ["Do not leave your party or join mine. I am only asking whether the western road is safe."],
+      "expected": { "recordDelta": 0, "record": "absent" }
+    },
+    {
+      "id": "PA-LANG-011", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": ["Perhaps you could come with us for a while."],
+      "expected": { "recordDelta": 0, "record": "absent" }
+    },
+    {
+      "id": "PA-LANG-012", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": ["No. Remain with your own people; I am withdrawing the invitation."],
+      "expected": { "recordDelta": 0, "record": "absent" }
+    },
+    {
+      "id": "PA-LANG-013", "profile": "language_contract", "required": true,
+      "dialogueMode": "individual_chat", "requiresTarget": true,
+      "turns": [
+        "The prisoner exchange will take place at a neutral crossing where both sides fear an ambush. I need your authority and battlefield judgment to keep the talks honest. I am asking, not ordering you, to detach from the army while your own party waits safely for your return. Will you agree to travel with my party for five days while we negotiate the exchange?",
+        "I accept the terms and boundaries you have named. Your standing and command remain your own, and your party will wait for your return. Do you explicitly agree to join my party for the five-day exchange mission?"
+      ],
+      "contextualTurnIndexes": [1],
+      "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 5, "reviewIntervalDays": 5, "identityPreserved": true, "campProtected": true }
+    },
+    {
+      "id": "PA-LANG-014", "profile": "language_contract", "required": true,
+      "dialogueMode": "targeted_review", "requiresTarget": true,
+      "reviewContext": "The agreed term is ending. The guest is speaking first about whether the journey should continue.",
+      "turns": [
+        "I still need your help. Would you remain with us for another four days for the same investigation?",
+        "I accept the conditions you have named. With those understood, do you explicitly agree to renew our arrangement for four more days?"
+      ],
+      "contextualTurnIndexes": [1],
+      "expected": { "recordDelta": 0, "phase": "Active", "termKind": "Fixed", "fixedTermDays": 4, "reviewIntervalDays": 4, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-015", "profile": "language_contract", "required": true,
+      "dialogueMode": "targeted_review", "requiresTarget": true,
+      "reviewContext": "The open-ended five-day review is due. The guest is speaking first.",
+      "turns": [
+        "Stay with us while this remains unresolved. There is no fixed end date; we will review whether you stay every five days. Are you willing?",
+        "I accept the conditions you have named. There is no fixed end date, and we will review every five days. With those understood, do you explicitly agree to remain with us?"
+      ],
+      "contextualTurnIndexes": [1],
+      "expected": { "recordDelta": 0, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 5, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-016", "profile": "language_contract", "required": true,
+      "dialogueMode": "targeted_review", "requiresTarget": true,
+      "reviewContext": "The player and guest are reviewing whether the journey should continue.",
+      "turns": ["You have done enough. Thank you; return to your people when you are ready."],
+      "expected": { "recordDelta": 0, "phaseOneOf": ["Departing", "Returning"], "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-017", "profile": "language_contract", "required": true,
+      "dialogueMode": "targeted_review", "requiresTarget": true,
+      "reviewContext": "The guest's realm is hostile. Remaining and fighting that realm will cause banishment.",
+      "turns": [
+        "I understand what remaining may cost you. If we fight your realm, are you still willing to stay with us and accept banishment if you take part?",
+        "I accept the conditions you have named, but I need your decision to be unmistakable. Do you explicitly agree to remain and accept banishment if you take part in fighting your own realm?"
+      ],
+      "contextualTurnIndexes": [1],
+      "expected": { "recordDelta": 0, "hostilityWarningAcknowledged": true, "identityPreserved": true }
+    },
+    {
+      "id": "PA-LANG-018", "profile": "language_contract", "required": true,
+      "dialogueMode": "targeted_review", "requiresTarget": true,
+      "reviewContext": "The guest's realm is hostile. Remaining and fighting that realm will cause banishment.",
+      "turns": ["No. I will not ask you to fight your own people. You should leave and return home."],
+      "expected": { "recordDelta": 0, "phaseOneOf": ["Active", "Departing", "Returning"], "hostilityWarningAcknowledged": false, "npcMayRefuseDeparture": true }
+    },
+    {
+      "id": "PA-NATIVE-001", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["partyless"],
+      "invitationTemplate": "partyless_mercenary_fixed",
+      "expected": { "record": "present", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-002", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["ordinary_party_member"],
+      "invitationTemplate": "fixed",
+      "expected": { "record": "present", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-003", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["party_leader"],
+      "invitationTemplate": "remaining_native_fixed",
+      "expected": { "record": "present", "identityPreserved": true, "campProtected": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-004", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["army_member"],
+      "invitationTemplate": "remaining_native_army_fixed",
+      "expected": { "record": "present", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-005", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["army_leader"],
+      "invitationTemplate": "remaining_native_army_fixed",
+      "expected": { "record": "present", "identityPreserved": true, "campProtected": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-006", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["clan_leader"],
+      "invitationTemplate": "remaining_native_fixed",
+      "expected": { "record": "present", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-007", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true, "variants": ["kingdom_ruler"],
+      "invitationTemplate": "remaining_native_fixed",
+      "expected": { "record": "present", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-008", "profile": "eligibility_detachment", "required": true,
+      "requiresTarget": true,
+      "variants": ["governor", "prisoner", "dead", "child", "companion", "quest_bound"],
+      "expected": { "record": "absent", "stateEligible": false }
+    },
+    {
+      "id": "PA-NATIVE-009", "profile": "waiting_camp", "required": true,
+      "requiresTarget": true, "variants": ["thirty_day_fidelity"],
+      "fixtureRole": "party_leader", "invitationTemplate": "remaining_native_fixed_thirty",
+      "expected": { "record": "present", "identityPreserved": true, "campProtected": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-010", "profile": "waiting_camp", "required": true,
+      "requiresTarget": true, "variants": ["finance_and_interaction_neutrality"],
+      "fixtureRole": "party_leader", "invitationTemplate": "remaining_native_fixed",
+      "expected": { "record": "present", "identityPreserved": true, "campProtected": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-011", "profile": "reviews", "required": true,
+      "requiresTarget": true, "variants": ["fixed_expiry"],
+      "fixtureRole": "partyless", "invitationTemplate": "remaining_native_fixed_one",
+      "expected": { "record": "present", "phase": "ReviewDue", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-012", "profile": "reviews", "required": true,
+      "requiresTarget": true, "variants": ["open_five_day"],
+      "fixtureRole": "partyless", "invitationTemplate": "remaining_native_open_ended",
+      "expected": { "record": "present", "phase": "ReviewDue", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-013", "profile": "reviews", "required": true,
+      "variants": ["simultaneous_queue"],
+      "fixtureRole": "partyless", "invitationTemplate": "remaining_native_fixed_one",
+      "expected": { "minimumReviewDueCount": 2, "timePaused": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-014", "profile": "reviews", "required": true,
+      "requiresTarget": true, "variants": ["provider_retry", "provider_departure"],
+      "fixtureRole": "partyless", "invitationTemplate": "remaining_native_fixed_one",
+      "expected": { "record": "present", "timePaused": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-015", "profile": "returns", "required": true,
+      "requiresTarget": true, "variants": ["minimum", "intermediate", "maximum"],
+      "fixtureRole": "party_leader", "invitationTemplate": "remaining_native_fixed",
+      "departureTemplate": "grateful_release",
+      "expected": { "record": "present", "phaseOneOf": ["Returning", "Completed"], "identityPreserved": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-016", "profile": "returns", "required": true,
+      "requiresTarget": true, "variants": ["partyless_safe_settlement"],
+      "fixtureRole": "partyless", "invitationTemplate": "remaining_native_fixed",
+      "departureTemplate": "grateful_release",
+      "expected": { "record": "present", "phase": "Completed", "identityPreserved": true }
+    },
+    {
+      "id": "PA-NATIVE-017", "profile": "save_roundtrip", "required": true,
+      "requiresTarget": true,
+      "variants": ["Active", "ReviewDue", "Departing", "Returning", "Completed", "HostileBanishmentPending"],
+      "fixtureRole": "party_leader", "invitationTemplate": "remaining_native_fixed",
+      "lifecycleDepartureTemplate": "grateful_release",
+      "lifecycleHostilityTemplate": "own_faction_warning",
+      "expected": { "record": "present", "identityPreserved": true, "noDuplicateHeroOrParty": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-018", "profile": "hostility", "required": true,
+      "requiresTarget": true, "variants": ["unwarned_exclusion"],
+      "fixtureRole": "party_leader", "invitationTemplate": "fixed",
+      "expected": { "record": "present", "temporarilyExcludedFromBattle": true, "identityPreserved": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-019", "profile": "hostility", "required": true,
+      "requiresTarget": true, "variants": ["field", "siege", "raid", "naval", "auto_resolve"],
+      "fixtureRole": "party_leader", "invitationTemplate": "remaining_native_fixed",
+      "hostilityTemplate": "own_faction_warning",
+      "expected": { "record": "present", "banishedToPlayerClan": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-020", "profile": "recovery_regression", "required": true,
+      "requiresTarget": true, "variants": ["death", "capture", "missing_source_party", "invalid_return_target"],
+      "fixtureRole": "party_leader", "invitationTemplate": "remaining_native_fixed",
+      "departureTemplate": "grateful_release",
+      "expected": { "record": "present", "phase": "Completed", "nativeRecoveryReleased": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-021", "profile": "recovery_regression", "required": true,
+      "requiresTarget": true, "variants": ["relationship_trait_reputation_rumor_imprisonment"],
+      "fixtureRole": "party_leader", "invitationTemplate": "fixed",
+      "expected": { "record": "present", "identityPreserved": true, "unrelatedStateUnchanged": true, "guestEquipmentProtected": true, "externalEvidenceRequired": true }
+    },
+    {
+      "id": "PA-NATIVE-022", "profile": "evaluate", "required": true,
+      "variants": ["final_fingerprint"],
+      "expected": { "allPriorRequiredInstancesPassed": true, "externalEvidenceRequired": true }
+    }
+  ],
+  "safety": [
+    "preflight and observational fallback profiles never mutate campaign state",
+    "all natural-language and native cases require an exact armed campaign-test Current save",
+    "the MCP derives the save from enrollment and never accepts a caller-nominated disposable save",
+    "never infer disposability from a save name",
+    "pause and drain queues before every checkpoint",
+    "use at most one capacity-checked Prepared milestone and one rolling Current checkpoint",
+    "never delete or overwrite the enrolled baseline",
+    "a missing supported naval route blocks release readiness rather than becoming a silent skip"
+  ],
+  "releaseGate": [
+    "all required case and variant instances completed on one final fingerprint",
+    "100 percent natural-language intent and consent safety",
+    "zero direct dialogue-action bypasses",
+    "zero identity, duplicate-entity, save-isolation, queue, or unexplained-regression failures",
+    "durable campaign-test and live-test reports exist before cleanup"
+  ],
+  "evidence": [
+    "campaign-test enrollment and immutable baseline receipt",
+    "source client server catalog provider and Bannerlord fingerprints",
+    "live-test report and exact natural-language command receipts",
+    "agreement lifecycle records timestamps and review queue state",
+    "identity camp finance roster inventory and interaction snapshots",
+    "save-load battle return recovery and regression receipts",
+    "final Party Agency readiness verdict"
+  ]
+}

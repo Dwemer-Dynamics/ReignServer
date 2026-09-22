@@ -1,0 +1,161 @@
+# Original adult attachment index|semantic aim|personal meaning
+0|first workmanship|The tool recalls the awkward movements that eventually became familiar through practice.
+1|living legacy|The tree's growth gives childhood a continuing presence that is easy to see directly.
+2|personal correspondence|The letters preserve particular turns of voice that a summary of the relationship would miss.
+3|quiet water|The bank offers familiar small changes without demanding that every visit produce something new.
+4|animal companionship|The animal's slower habits are part of a shared familiarity built over many ordinary days.
+5|safe home|The song carries the remembered ease of being somewhere that did not require constant watchfulness.
+6|teacher's judgment|The marginal notes reveal how the teacher approached a difficulty before the answer looked obvious.
+7|first learning|The modest room holds the memory of words beginning to become understandable without another reader's help.
+8|childhood play|The toy preserves a kind of absorbed pleasure that did not depend on being impressive or useful.
+9|shared tending|Small changes in the garden remain connected to time spent beside the beloved person.
+10|shared travel|The road's turns call back particular conversations and pauses rather than only a destination.
+11|family recipes|Preparing the familiar dish restores some of the elder's practical presence in an ordinary meal.
+12|repaired keepsake|The repaired cup remains worth keeping because its familiar use has a value beyond replacing it cheaply.
+13|enduring friendship|Long familiarity leaves less need to explain the ordinary background to every passing mood.
+14|shared mornings|Breakfast gives the household a small recurring chance to meet before separate demands take over.
+15|personal independence|The place recalls an early occasion when a choice could be made and carried through directly.
+16|honest counsel|The servant's candor makes familiar daily contact more useful than agreeable reassurance alone.
+17|independent successors|The former apprentice's progress gives earlier teaching a continuing result beyond the original shared work.
+18|quiet devotion|An unceremonious visit allows devotion to remain a private act rather than a public appearance.
+19|ordinary belonging|Being remembered ordinarily offers relief from the need to arrive as a title or an account of accomplishments.
+20|faithful animal company|The dog's presence is associated with journeys that were easier to endure because they were not entirely solitary.
+21|earned animal trust|The horse's confidence matters partly because it could not be hurried into existence by an instruction.
+22|friendship across rank|The friendship belongs to an earlier familiarity that differences in station do not adequately describe.
+23|younger curiosity|The younger person's questions make familiar things worth considering again from an unaccustomed beginning.
+24|familiar clothing|Repeated repairs have made the cloak particular to its wearer instead of merely old.
+25|personal library|The collection records a succession of interests and choices through books acquired one at a time.
+26|familiar making|The smell of the materials announces a place where attention can settle into practical work.
+27|happy return|The bridge marks a remembered transition from being away to being almost back among familiar people.
+28|songs of home|The collection keeps regional voices near even when the surrounding company sings different tunes.
+29|seasonal belonging|The orchard is remembered through successive kinds of work, weather, and fruit rather than one fixed image.
+30|timely encouragement|The letter arrived at a moment when its confidence was especially difficult to supply privately.
+31|ordinary shared play|The simple pieces carry the pleasure of familiar games more readily than a grander set would.
+32|affectionate making|The uneven workmanship makes the maker's effort visible in a way a polished purchase would conceal.
+33|safe hospitality|The guest room represents a quiet sort of welcome that does not need to be announced ceremonially.
+34|recovered movement|The path recalls progress measured in manageable steps during a period when ordinary movement mattered more.
+35|household continuity|The tree has stood through enough ordinary household change to make the present feel less isolated.
+36|shared reading history|Different hands in the margins make the book a meeting place for readers who did not all read together.
+37|familiar music|The instrument's particular tone is recognizable before the tune is fully underway.
+38|childhood necessity|The well belongs to the repeated practical movements that made the childhood home work from day to day.
+39|earlier friendship|The friend remembers a person still recognizable beneath the responsibilities added afterward.
+40|ordinary anonymity|The place offers relief from being treated as someone whose every preference has significance.
+41|animal routine|The familiar evening behavior gives the day a small dependable moment of company.
+42|family remembrance|The elder's version carries a voice and emphasis that a bare list of names cannot preserve.
+43|comfortable silence|The companion makes quiet feel shared rather than an awkward interval waiting to be repaired.
+44|personal keepsake|The box is small enough to remain close and particular enough not to feel interchangeable.
+45|familiar rest|The worn surface records repeated ordinary pauses more intimately than untouched fine furniture could.
+46|unfinished teaching|The incomplete project leaves a practical question through which the teacher still seems worth consulting.
+47|craft continuity|The craft connects particular movements of the hands to the place that made them familiar.
+48|journey keepsakes|Each ordinary stone calls back where it was noticed and why it was chosen that day.
+49|familiar view|The street offers a recognizable pattern of ordinary movement from a comfortable distance.
+50|former home|The place can remain part of personal memory even after the right to enter it casually has ended.
+51|shared reading|Reading aloud turns a private page into an interval of company with its own shared pace.
+52|thoughtful disagreement|The friend's questions keep familiar conclusions from becoming too comfortable to examine.
+53|household foresight|The preparations make the coming season feel like a shared practical undertaking rather than a threat met separately.
+54|familiar meal|The smell carries an immediate sense of ordinary provision before any explanation of welcome is offered.
+55|early journeys|The map retains the marks and associations of travel undertaken with less experience than is available now.
+56|maintained equipment|The repair preserves an already familiar fit instead of forcing a useful relationship with the object to begin again.
+57|enduring play|The old game lets friends briefly meet through habits formed before their present concerns became so elaborate.
+58|family gathering|The tree makes a shared meeting place recognizable before the people have all arrived.
+59|practical curiosity|The notebook preserves small discoveries that would otherwise have to be learned twice.
+60|unconditional kindness|The neighbor's help remains memorable because no later demand quietly changed what it had meant.
+61|animal respite|The retired horse's familiar presence matters beyond the hard work it can no longer provide.
+62|personal reassurance|The charm offers a familiar thing to touch and remember without needing to possess unusual powers.
+63|children's making|The drawings retain the children's particular ways of noticing rather than a technically accurate view.
+64|harbor stillness|Dusk gives the familiar harbor a brief change of pace between the day's work and evening quiet.
+65|possible reconciliation|The room recalls that a difficult conversation can reach a tolerable ending even after an uneasy beginning.
+66|chosen reading|The book is tied to the pleasure of making an early purchase from personal preference.
+67|peaceful music|The tune recalls a season when listening did not have to compete with a pressing worry.
+68|inherited tending|The garden combines a received pleasure with the practical work needed to keep that pleasure alive.
+69|attentive friendship|Being noticed when tired can spare the effort of explaining a need for quiet or an early departure.
+70|private perspective|The quieter height makes familiar concerns look briefly less crowded together.
+71|recurring company|The shared meal gives friendship a regular place that does not depend on arranging a special occasion.
+72|particular animal|The inconvenient habits are recognizable parts of this animal's company, not simply faults to replace with a better specimen.
+73|unfinished companionship|The unfinished work preserves an ordinary shared intention that still points toward the absent person.
+74|earlier self|The awkward handwriting makes a younger state of mind visible without relying entirely on present recollection.
+75|recognized service|The annual occasion gives the servant's own life a visible place within the household calendar.
+76|market familiarity|The route strings together recognizable stalls, voices, and practical choices into a comfortable ordinary journey.
+77|quiet observation|The pond rewards waiting with small movements that cannot be summoned by impatience.
+78|inherited workmanship|The tools carry both familiar use and the evidence of earlier hands taking care of them.
+79|tangible improvement|The land's changed condition makes personal effort visible through something living and useful.
+80|lasting standards|The teacher's standards still supply a recognizable measure when a quick result would be easier to accept.
+81|forgiven awkwardness|The friendship survived a mistake that once seemed capable of changing its whole character.
+82|restful homecoming|The familiar bed marks the point at which travel's small adjustments can finally stop.
+83|growing animal trust|The animal's increasing ease gives patient care a result visible in ordinary movement and proximity.
+84|familiar stories|The storyteller's repertoire carries the place's preferred ways of making an ordinary experience memorable.
+85|familiar beauty|The flowering wall makes a known boundary something to look forward to rather than merely pass beside.
+86|kept promises|The old promise gives the friendship a small concrete example of continuity that both people can remember.
+87|ordinary household life|The bowls belong to repeated meals that matter collectively even when no single one was remarkable.
+88|family reading|The room gathers a household's different reading interests into a shared familiar place.
+89|regional collection|The coins offer small differences in design and origin that invite comparison without a large display.
+90|possible reconciliation|The place recalls a change in the relationship that was more important than its ordinary appearance suggests.
+91|shared humor|The companion's dry observation can make a difficult moment feel more manageable without denying what is awkward about it.
+92|familiar equipment|The gloves have taken the shape of repeated use and make a practiced movement feel ordinary.
+93|early passage|The crossing holds a youthful memory of distance, movement, and arriving on the other side.
+94|living remembrance|The tree gives thoughts of the absent person something present that can still be tended.
+95|seasonal belonging|The festival marks a recurring moment when the neighborhood recognizes itself through shared activity.
+96|comforting music|The melody carries the practical warmth of helping a child settle rather than the ambition of a performance.
+97|distant friendship|An irregular letter can still restore a familiar conversational voice almost immediately.
+98|patient animal care|The animal's present habits recall a long sequence of small attentive decisions during its raising.
+99|shared making|The workshop allows company and individual concentration to occupy the same comfortable interval.
+100|remembered voices|The notes keep particular phrases from being smoothed into a less personal general recollection.
+101|seasonal continuity|The ritual makes approaching winter something the household recognizes together before its first difficult days.
+102|shared provision|The spring's usefulness reflects the ordinary repeated care of several nearby households.
+103|honest uncertainty|The teacher made admitting an unanswered question feel like the beginning of understanding rather than its failure.
+104|learned confidence|The swimming place recalls a physical uncertainty gradually becoming a familiar capability.
+105|private reading|The lamp marks a small circle of concentration when the rest of the household has grown quieter.
+106|affectionate making|The garment carries a loved person's attention in its fit, stitches, and repeated practical use.
+107|cultivation curiosity|The seeds hold distinct possibilities that patient growing may make visible in another season.
+108|independent successors|The first successful work marks the point at which instruction began to become someone else's own capable judgment.
+109|ordinary welcome|The open kitchen gives the modest house a sense of being lived in that grandeur alone would not provide.
+110|honest friendship|A friend willing to withhold flattery makes sincere agreement easier to believe.
+111|recognized homecoming|The first view from the hill gives the return a clear beginning before the remaining distance is traveled.
+112|family recipes|The recipe carries a practical continuity through meals made by people who never all sat together.
+113|maintained reading|Repairing the book preserved a familiar object whose annotations and handling a new copy would not share.
+114|gentle animal company|The dog's ease around children makes its presence welcome in ordinary shared household space.
+115|seasonal belonging|Changing weather reveals different parts of the familiar grove without making it cease to feel known.
+116|remembered voice|The phrasing restores something of how the person sounded, not merely what information was conveyed.
+117|possible renewal|The place recalls a time when life acquired a workable next step after an earlier arrangement had ended.
+118|shared cultivation|The garden contains living traces of exchanges with other people through seeds that took root.
+119|accepted taste|The companion understands an unfashionable pleasure without first needing a defense of why it is worth the time.
+120|early making|The model preserves an adolescent effort whose uneven details still reveal where attention was most absorbed.
+121|affectionate imperfection|The imperfect singing carries an ease together that a more accomplished performance might not reproduce.
+122|unguarded company|The room offers a place where an ordinary arrival does not need to become an event.
+123|welcomed belonging|The family's welcome gave the friendship an additional ordinary place in which to feel at home.
+124|local workmanship|The fair brings familiar practical skills together with the pleasure of discovering a small unexpected object.
+125|freely given company|The cat's voluntary approach provides an uncomplicated form of attention that cannot be ordered into sincerity.
+126|former home|The stream retains an ordinary sound from a place that is no longer part of the daily route.
+127|recorded stewardship|The ledger makes years of patient practical judgment visible through the details of repeated decisions.
+128|local imagination|The folktales preserve familiar fears and jokes in the particular forms the region gave them.
+129|practical counsel|The cook's advice comes from attending to what actually works under the household's ordinary conditions.
+130|restored music|The repaired instrument carries the additional satisfaction of sound returned through personal effort.
+131|enduring growth|The surviving tree gives a harsh season a visible outcome beyond what was lost to it.
+132|plain questions|The friend's directness often brings an exchange back to the thing that actually needs an answer.
+133|useful cultivation|The herb patch combines a small daily pleasure in growing with a practical reason to pay attention.
+134|familiar movement|The boots hold the comfortable fit of repeated walking and the memory of several ordinary routes.
+135|changed outlook|The book is tied to the unsettling pleasure of finding that an old assumption could be reconsidered.
+136|animal routine|The morning sounds announce a familiar pattern of feeding, movement, and practical attention.
+137|shared stories|Evening storytelling gives the household a shared pace after the day's separate concerns.
+138|shared travel|The former companions remember the practical inconveniences and small amusements that a grand travel account leaves out.
+139|decisive place|The surroundings recall the moment when uncertainty finally gave way to a chosen next action.
+140|unfinished correspondence|The letters retain the uncomfortable sense of conversations that received less attention than they deserved.
+141|familiar warmth|The blanket is associated with a cold season made more bearable through a particular piece of ordinary care.
+142|experienced company|The retired worker's stories preserve the practical texture of a life that an occupational title describes only broadly.
+143|quiet routes|The path offers a familiar way to let a journey remain less hurried and observed.
+144|comfortable cooperation|Working beside the friend gives company a practical rhythm without the need to sustain a performance of conversation.
+145|recovered making|The pottery recalls a period when a small manageable act of making helped the days regain shape.
+146|ordinary hospitality|The custom gives an unfamiliar arrival a recognizable first place within the community.
+147|practical animal care|The shelter is a tangible result of concern that had to become materials, work, and continuing attention.
+148|changed childhood place|Visiting openly gives an old secret place a new ease without removing its remembered excitement.
+149|everyday knowledge|Songs and recipes preserve different ordinary pleasures in a form that can be returned to or shared.
+150|quiet after rain|The washed courtyard offers a brief change of scent and sound within a familiar private space.
+151|patient instruction|The mentor's manner made difficulty feel like something that could be worked through rather than concealed.
+152|familiar perspective|The high window gives ordinary movement below a recognizable pattern that can be watched without joining it.
+153|shared humor|The jokes rely on a household history that makes a few words carry more than an outsider would hear.
+154|earlier aspirations|The friend remembers hopes that are easy to lose from the present account of what a life has become.
+155|journey made local|The growing tree connects an earlier journey to the familiar place where the seed was eventually planted.
+156|visible care|The repairs show that the object has repeatedly been considered worth the effort of keeping useful.
+157|uncomplicated pleasure|The place recalls happiness that did not need an explanation of what it proved or achieved.
+158|kind disagreement|A considerate disagreement makes it possible to remain close without pretending that every judgment is shared.
+159|human home|The people's ordinary presence makes the home recognizable more deeply than the quality of its rooms.

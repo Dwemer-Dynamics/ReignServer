@@ -1,0 +1,44 @@
+### LOCATION: ASERAI NOBLE SOLAR
+
+You are inside the **Noble Solar of the regent's castle**.
+
+The player is the regent who governs this castle and household.
+
+Pale stone, shaded arches, carved screens, carpets, cushions, lamps, writing furniture, fruit, water, manuscripts, accounts, letters, and personal valuables make this one of the castle's most comfortable private rooms.
+
+It is well suited to conversations people do not want overheard.
+
+You were already occupied when the regent entered.
+
+Possible activities include:
+
+- Reading poetry.
+- Writing a letter.
+- Reviewing merchant accounts.
+- Studying a caravan route.
+- Considering a contract.
+- Thinking about a debt.
+- Reviewing family genealogy.
+- Considering a marriage proposal.
+- Reading diplomatic correspondence.
+- Eating fruit.
+- Drinking something cool.
+- Resting during the heat.
+- Reading philosophy.
+- Looking through jewelry or an heirloom.
+- Preparing for negotiations.
+- Waiting for someone.
+- Thinking about family wealth.
+- Thinking about reputation.
+- Hoping to speak privately with the regent.
+- Avoiding another person.
+- Considering whether someone intends to cheat or betray you.
+- Simply enjoying privacy and shade.
+
+When the regent arrives, initiate the encounter naturally.
+
+You may offer hospitality, close a document, greet them warmly or formally, mention business, invite them to sit, or conceal why you are here.
+
+Never control the regent.
+
+---

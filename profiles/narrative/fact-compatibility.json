@@ -1,0 +1,99 @@
+{
+  "schema": "reign-narrative-fact-compatibility-v1",
+  "policy": "Require known native kin for sibling or living-parent references. Observing other families and aspiring to future parenthood remain allowed. Past apprentice-mentoring attachments and active teaching responsibility require an appropriate adult age; no skills or roles are granted. Unknown family evidence selects another concept. Optional maximum ages keep young-child care needs from infantilizing older children.",
+  "concepts": [
+    {
+      "id": "jealousy_cfc9f5bce6f56b5c",
+      "title": "siblings who receive uncomplicated affection",
+      "minAge": 12,
+      "requires": [
+        "sibling"
+      ]
+    },
+    {
+      "id": "temptation_a87a5c6585a92780",
+      "title": "make an unfair comparison with a sibling",
+      "minAge": 12,
+      "requires": [
+        "sibling"
+      ]
+    },
+    {
+      "id": "formative_7c4b7c8d616cf47c",
+      "title": "seeing an older sibling admit uncertainty",
+      "minAge": 12,
+      "requires": [
+        "olderSibling"
+      ]
+    },
+    {
+      "id": "wound_6277bd96889e54f3",
+      "title": "being compared unfavorably with a sibling",
+      "minAge": 12,
+      "requires": [
+        "sibling"
+      ]
+    },
+    {
+      "id": "dream_0c27f93e56b8e21c",
+      "title": "keep siblings close despite different fortunes",
+      "minAge": 12,
+      "requires": [
+        "sibling"
+      ]
+    },
+    {
+      "id": "fear_6b21d434518aed99",
+      "title": "being remembered as the lesser of two siblings",
+      "minAge": 12,
+      "requires": [
+        "sibling"
+      ]
+    },
+    {
+      "id": "fear_9409d5ad6ca34eb3",
+      "title": "a parent dying before questions are answered",
+      "minAge": 12,
+      "requires": [
+        "livingParent"
+      ]
+    },
+    {
+      "id": "temptation_93ac5a2bcb428b60",
+      "title": "protect a favored apprentice from useful criticism",
+      "minAge": 18,
+      "requires": []
+    },
+    {
+      "id": "attachment_d093e1dcb67be28f",
+      "title": "a former apprentice whose progress they follow",
+      "minAge": 21,
+      "requires": []
+    },
+    {
+      "id": "attachment_b4ef511eb68f70ca",
+      "title": "a former apprentice's first successful work",
+      "minAge": 21,
+      "requires": []
+    },
+    {
+      "id": "fear_c62b5631f0e31ee3",
+      "title": "losing the trust of an apprentice",
+      "minAge": 18,
+      "requires": []
+    },
+    {
+      "id": "desire_e53ec0f0d1701657",
+      "title": "hire an apprentice who asks questions",
+      "minAge": 18,
+      "requires": []
+    },
+    {
+      "id": "desire_8c8521431bd6d3cb",
+      "title": "be picked up when tired",
+      "minAge": 0,
+      "maxAge": 6,
+      "requires": []
+    }
+  ]
+}

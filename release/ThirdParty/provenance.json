@@ -1,0 +1,74 @@
+[
+  {
+    "repo": "openai/codex",
+    "tag": "rust-v0.154.0",
+    "license": "Apache-2.0",
+    "file": "openai-codex-LICENSE",
+    "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+    "source": "https://github.com/openai/codex/blob/rust-v0.154.0/LICENSE"
+  },
+  {
+    "repo": "BUTR/Bannerlord.Harmony",
+    "tag": "v2.4.2.225",
+    "license": "MIT",
+    "file": "BUTR-Bannerlord.Harmony-LICENSE",
+    "sha256": "884d06efb1053f5ec0850c246ac28742684edc3cf424b13a6cde52a56da96a20",
+    "source": "https://github.com/BUTR/Bannerlord.Harmony/blob/v2.4.2.225/LICENSE"
+  },
+  {
+    "repo": "BUTR/Bannerlord.UIExtenderEx",
+    "tag": "v2.13.2",
+    "license": "LGPL-3.0",
+    "file": "BUTR-Bannerlord.UIExtenderEx-LICENSE",
+    "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+    "source": "https://github.com/BUTR/Bannerlord.UIExtenderEx/blob/v2.13.2/LICENSE"
+  },
+  {
+    "repo": "BUTR/Bannerlord.ButterLib",
+    "tag": "v2.10.4",
+    "license": "MIT",
+    "file": "BUTR-Bannerlord.ButterLib-LICENSE.txt",
+    "sha256": "df118ea20fbd6be8c785ec48e43e13b93614d5bd3d1f0f5c98e976a3c045d392",
+    "source": "https://github.com/BUTR/Bannerlord.ButterLib/blob/v2.10.4/LICENSE.txt"
+  },
+  {
+    "repo": "Aragas/Bannerlord.MBOptionScreen",
+    "tag": "v5.11.4",
+    "license": "MIT",
+    "file": "Aragas-Bannerlord.MBOptionScreen-LICENSE.txt",
+    "sha256": "c699c0de405849122bd0bea346c9eee1b7daedef3155e860ef2996ae7e9e5c8d",
+    "source": "https://github.com/Aragas/Bannerlord.MBOptionScreen/blob/v5.11.4/LICENSE.txt"
+  },
+  {
+    "repo": "openai/codex",
+    "tag": "rust-v0.154.0",
+    "license": "Apache-2.0 with Ratatui MIT attribution",
+    "file": "openai-codex-NOTICE",
+    "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+    "source": "https://github.com/openai/codex/blob/rust-v0.154.0/NOTICE"
+  },
+  {
+    "file": "JpegLibrary-MIT-LICENSE",
+    "repo": "yigolden/JpegLibrary",
+    "tag": "d4dcb149dd4cd4a18994bf5bf9009f5691e39e75",
+    "license": "MIT",
+    "source": "https://github.com/yigolden/JpegLibrary/blob/d4dcb149dd4cd4a18994bf5bf9009f5691e39e75/LICENSE",
+    "sha256": "61c9471fc2b65056f717c1db48193de382841a3cdea275d6fc26bef8e0906360"
+  },
+  {
+    "file": "Ratatui-MIT-LICENSE",
+    "repo": "ratatui/ratatui",
+    "tag": "v0.29.0",
+    "license": "MIT",
+    "source": "https://github.com/ratatui/ratatui/blob/v0.29.0/LICENSE",
+    "sha256": "6cfda12c40ae6c1175a0d1798c56e4d7089d9c781a2dbe29a53076defde829d0"
+  },
+  {
+    "file": "GPL-3.0.txt",
+    "repo": "Free Software Foundation",
+    "tag": "GPL-3.0",
+    "license": "GPL-3.0",
+    "source": "https://www.gnu.org/licenses/gpl-3.0.txt",
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  }
+]

@@ -1,0 +1,246 @@
+Create an exceptionally photorealistic cinematic scene inside the **Main Hall of a powerful Vlandian castle**, strongly reflecting Vlandian feudal aristocracy, landed nobility, martial prestige, household hierarchy, hospitality, heraldry, and the daily social life of a wealthy western-medieval stronghold.
+
+This is the castle's **principal communal noble hall**.
+
+It is **not the Throne Room**. There should be no dominant royal throne or formal court arrangement.
+
+It is also not the intimate Small Dining Chamber.
+
+Instead, this is the larger shared space where nobles, household members, trusted guests, military companions, and visiting dignitaries would normally gather for meals, conversation, announcements, games, drinking, informal political discussion, and general castle life.
+
+The Main Hall should be a large rectangular or slightly irregular stone chamber with:
+
+- Tall pale dressed-stone walls.
+- Massive dark oak roof beams.
+- Heavy timber rafters.
+- Deep-set arched windows.
+- A monumental stone fireplace or several large hearths.
+- Heavy oak doors reinforced with iron.
+- Long wooden tables.
+- Sturdy benches.
+- Several high-backed chairs for people of greater rank.
+- Smaller side tables.
+- Wall-mounted candle brackets.
+- Iron chandeliers.
+- Beeswax candles.
+- Braziers or additional heating where appropriate.
+- Woven rugs.
+- Tapestries.
+- Banners.
+- Heraldic shields.
+- Hunting trophies that do not depict humans.
+- Ceremonial weapons mounted safely on walls.
+- Carved family crests.
+- Wooden chests.
+- Sideboards.
+- Cupboards.
+- Serving tables.
+
+The room should feel impressive but genuinely inhabited rather than ceremonial.
+
+Long tables may contain remnants or preparations of communal meals:
+
+- Bread.
+- Cheese.
+- Roasted meats.
+- Game.
+- Pies.
+- Root vegetables.
+- Seasonal fruit.
+- Nuts.
+- Wooden serving boards.
+- Ceramic bowls.
+- Pewter or silver vessels according to wealth.
+- Ale.
+- Wine.
+- Jugs.
+- Cups.
+- Knives.
+- Spoons.
+- Linen cloth.
+
+The room may also contain objects associated with the social life of the court:
+
+- Board games.
+- Dice.
+- Playing pieces.
+- Maps.
+- Letters.
+- Sealed messages.
+- Hunting gear.
+- Musical instruments resting unused if no supplied character is playing them.
+- Drinking horns or cups where culturally appropriate.
+- Books.
+- Small writing materials.
+- Firewood.
+- Cushions.
+- Cloaks left near benches.
+
+The hall should show subtle signs that many people normally use it even though no invented background humans may appear:
+
+- Several chairs pushed back from tables.
+- Used cups.
+- Broken bread.
+- Ash in the hearth.
+- Recently moved benches.
+- A game left unfinished.
+- A half-open document.
+- Firewood stacked nearby.
+- Slight wear in the stone and timber.
+
+Likely activities include:
+
+- Eating a communal meal.
+- Drinking wine or ale.
+- Talking with another supplied character.
+- Playing a board game.
+- Playing dice.
+- Reading a letter.
+- Listening to another supplied character tell a story.
+- Telling a story.
+- Discussing a hunt.
+- Discussing war.
+- Discussing estate matters.
+- Discussing marriages or alliances.
+- Waiting before a formal audience.
+- Sitting by the fire.
+- Warming after coming inside.
+- Watching the hall from a quieter side bench.
+- Writing a short message.
+- Reviewing correspondence.
+- Waiting for someone.
+- Joining or leaving a meal.
+- Resting after travel.
+- Celebrating good news quietly.
+- Brooding after an argument.
+- Having an informal political discussion.
+- Sharing gossip.
+- Looking over a map.
+- Preparing to leave the hall for another castle chamber.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as visible human beings.
+
+Every visible human face or body must correspond exactly to one of those supplied source characters.
+
+Do not generate:
+
+- Servants.
+- Guards.
+- Squires.
+- Pages.
+- Musicians.
+- Minstrels.
+- Cooks.
+- Courtiers.
+- Soldiers.
+- Children.
+- Visitors.
+- Background diners.
+- People visible through windows.
+- People standing in doorways.
+- Human silhouettes.
+- Reflected humans.
+- Unspecified guests.
+
+If only one source character is supplied, exactly one visible human may appear.
+
+If several source characters are supplied, only those specific characters may appear.
+
+Activities involving conversation, games, or shared meals may only involve other **supplied source characters**.
+
+Do not create identifiable human figures in:
+
+- Portraits.
+- Tapestries.
+- Carvings.
+- Paintings.
+- Statues.
+- Reliefs.
+
+Preserve every supplied character's exact:
+
+- Facial identity.
+- Apparent age.
+- Head shape.
+- Skin tone.
+- Skin texture.
+- Eye shape, spacing, and color.
+- Brows.
+- Nose.
+- Lips.
+- Cheekbones.
+- Jaw.
+- Chin.
+- Hair.
+- Hairline.
+- Facial hair.
+- Scars.
+- Freckles.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest.
+- Torso.
+- Waist.
+- Hips.
+- Arm proportions.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative size compared with the other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or otherwise redesign the characters.
+
+Their clothing may be changed to realistic **Vlandian civilian or noble clothing appropriate to a communal castle hall and their individual status**.
+
+Use believable:
+
+- Linen.
+- Wool.
+- Leather.
+- Fine woven cloth.
+- Tunics.
+- Gowns.
+- Hose.
+- Belts.
+- Boots.
+- Cloaks.
+- Embroidery.
+- Restrained jewelry.
+- Heraldic ornament.
+
+Armor should appear only when a supplied character's circumstances make it appropriate.
+
+Characters should interact naturally with the environment.
+
+They may:
+
+- Sit at a table.
+- Lean toward another supplied character while speaking.
+- Hold a cup.
+- Break bread.
+- Read correspondence.
+- Warm themselves by the fire.
+- Move a game piece.
+- Stand beside a map.
+- Sit alone at the end of a table.
+- Walk across the hall.
+
+Do not pose them like models.
+
+The finished result must look like **high-end live-action historical photography inside a genuine medieval castle**.
+
+Use realistic skin, hands, food, fire, smoke, fabric, aged timber, scratched furniture, worn stone, candlelight, daylight, and physically believable human posture.
+
+No video-game rendering.
+
+No fantasy concept art.
+
+No artificial glamour.
+
+Maximum possible photorealism.
+
+---

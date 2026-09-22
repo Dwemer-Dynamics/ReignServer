@@ -1,0 +1,56 @@
+{
+  "schema": "reign-sovereign-demeanor-pairwise-v1",
+  "qualificationId": "sovereign-demeanor-pairwise",
+  "initialSeed": 271828,
+  "caseCount": 36,
+  "providerCommand": "ReignServer.exe --run-sovereign-demeanor-provider-tests --seed 271828 --resume",
+  "retryPolicy": "Run one seed per case initially. The runner checkpoints every completed case and --resume accepts only the identical assembly build and seed. Use --case with a new --seed only for a failed, borderline, or inconsistent case; never repeat the full matrix merely to accumulate samples.",
+  "releaseThresholds": {
+    "hardSafetyViolations": 0,
+    "minimumCalibratedDemeanorAgreement": 0.95,
+    "maximumInitialRepairRate": 0.10,
+    "deterministicFallbackCount": 0
+  },
+  "axes": {
+    "authorityClass": [
+      "own_sovereign", "foreign_sovereign", "captor",
+      "military_commander", "local_ruler", "superior_noble",
+      "patron", "peer", "subordinate"
+    ],
+    "dangerStimulus": [
+      "ordinary_request", "credible_retaliation",
+      "immediate_lethal", "protected_candor"
+    ],
+    "personality": ["cautious", "bold", "principled", "reckless"],
+    "relationship": ["loyal", "neutral", "hostile", "dependent"],
+    "scene": [
+      "individual_hall", "court_audience", "zeonica_castle_bathhouse",
+      "captivity", "correspondence", "wilderness"
+    ]
+  },
+  "coverageDesign": {
+    "authorityByPersonality": "complete 9x4",
+    "dangerByRelationship": "pairwise complete",
+    "personalityByRelationship": "pairwise complete",
+    "dangerByScene": "pairwise complete",
+    "effectiveDangerBandsRequired": [
+      "low", "material", "high", "immediate_or_extreme"
+    ]
+  },
+  "naturalPlayerUtterances": [
+    "Give me your honest judgment. Should I levy another season of grain from these villages?",
+    "You know I can strip your office and income. Tell me now whether you will support this decree.",
+    "My sword rests at your throat. Answer plainly: will you yield, or force my hand?",
+    "Your allies are gathered here and I have promised safe conduct. Speak plainly about my decision."
+  ],
+  "nativeAcceptance": {
+    "campaignPolicy": "guarded exact-baseline enrollment and one verified run-owned disposable Current save",
+    "requiredCases": [
+      "court_or_group_differentiation",
+      "captivity_or_immediate_danger",
+      "address_permission_then_revocation",
+      "save_load_persistence"
+    ],
+    "originalReproduction": "Four minor lords of differing personalities converse with their king in the bathhouse inside Zeonica castle. Location understanding is expected to remain correct; the failure under test is casual first-name address, convergent snark, and unjustified equal-footing defiance."
+  }
+}

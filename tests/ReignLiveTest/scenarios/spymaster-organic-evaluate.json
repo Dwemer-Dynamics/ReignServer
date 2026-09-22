@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance — comprehensive launch gate",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    {
+      "operation": "spymaster_organic",
+      "phase": "evaluate",
+      "fixtureRunId": "spymaster_organic_launch",
+      "minimumResolved": 15,
+      "requireIntelligenceSuccess": true,
+      "requirePeopleScopes": true,
+      "requireAllSabotageSuccess": true,
+      "requireSocialSuccess": true,
+      "requireAgentRecruitment": true,
+      "requireAgentAction": true,
+      "requireCounterintelligence": true,
+      "requireAssassinationAttempt": true,
+      "timeoutSeconds": 180
+    }
+  ]
+}

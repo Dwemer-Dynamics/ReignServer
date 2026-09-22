@@ -1,0 +1,193 @@
+Create an exceptionally photorealistic cinematic scene inside the **Noble Solar of a wealthy Vlandian castle**, strongly reflecting Vlandian feudal aristocracy, hereditary status, household politics, martial nobility, privacy, landed wealth, and the personal life of high-ranking castle residents.
+
+The Noble Solar is a **private aristocratic living chamber**, not a throne room, public court, bedchamber, or great hall.
+
+It is a comfortable private room where a noble may withdraw from formal court, read correspondence, receive trusted visitors, conduct sensitive conversations, rest beside the fire, manage personal affairs, drink wine, examine documents, or simply spend time away from servants and crowds.
+
+The chamber should occupy an upper or protected portion of the castle.
+
+Use:
+
+- Thick pale dressed-stone walls.
+- Heavy dark oak ceiling beams.
+- Deep-set arched windows.
+- Window seats with cushions.
+- A substantial stone fireplace.
+- Carved oak wall paneling in selected sections.
+- Heavy wooden doors with iron fittings.
+- Fine but believable tapestries.
+- Woven rugs.
+- Carved chests.
+- Cabinets.
+- Bookshelves.
+- A writing desk.
+- A smaller private table.
+- Comfortable high-backed chairs.
+- Cushioned benches.
+- Candle stands.
+- Beeswax candles.
+- Wine jugs.
+- Drinking cups.
+- Parchment.
+- Sealed letters.
+- Inkpots.
+- Quills.
+- Wax tablets.
+- Small maps.
+- Personal books.
+- Jewelry boxes.
+- Gloves.
+- Belts.
+- Folded cloaks.
+- Personal effects.
+
+The decoration should communicate noble lineage without making the room ceremonial.
+
+Suitable details include:
+
+- Heraldic embroidery.
+- Family colors.
+- Carved coats of arms.
+- A shield displayed on the wall.
+- A carefully hung sword.
+- Hunting imagery.
+- Landscape tapestries.
+- Small religious objects.
+- Marriage gifts.
+- Objects inherited from relatives.
+
+The room should feel genuinely inhabited.
+
+Show natural signs of use such as:
+
+- An open letter.
+- A half-empty cup.
+- A book left face-down.
+- A chair moved from its usual position.
+- A cloak folded over furniture.
+- Writing materials already in use.
+- Firewood near the hearth.
+- Slight wear on armrests and floorboards.
+- Warm firelight against cold stone.
+
+Likely activities include:
+
+- Reading correspondence.
+- Writing a private letter.
+- Reviewing a marriage proposal.
+- Reading a political report.
+- Studying a map.
+- Considering inheritance.
+- Managing personal finances.
+- Looking through family documents.
+- Reading for pleasure.
+- Drinking wine.
+- Sitting beside the hearth.
+- Resting after court.
+- Receiving a trusted visitor.
+- Holding a confidential discussion.
+- Thinking about a feud.
+- Thinking about family.
+- Preparing for an audience.
+- Adjusting clothing or jewelry.
+- Checking personal possessions.
+- Playing a quiet board game.
+- Looking through a private chest.
+- Reflecting upon a recent argument.
+- Waiting for someone.
+- Seeking privacy.
+- Quietly celebrating good news.
+- Brooding over bad news.
+
+### ABSOLUTE CHARACTER AND IDENTITY REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as human beings.
+
+Every visible human must correspond exactly to one of the supplied source characters.
+
+Do not generate:
+
+- Servants.
+- Maids.
+- Guards.
+- Squires.
+- Pages.
+- Courtiers.
+- Family members who were not supplied.
+- Visitors who were not supplied.
+- Background people.
+- People visible through doors.
+- People visible through windows.
+- Reflections containing unspecified humans.
+- Human silhouettes.
+
+If only one source character is supplied, exactly one visible human may appear.
+
+If multiple source characters are supplied, only those specific characters may appear.
+
+Do not invent human figures in portraits, tapestries, carvings, or decorative artwork.
+
+Preserve each supplied character's:
+
+- Exact facial identity.
+- Apparent age.
+- Head shape.
+- Skin tone.
+- Natural skin texture.
+- Eyes.
+- Brows.
+- Nose.
+- Lips.
+- Jaw.
+- Chin.
+- Cheekbones.
+- Hairline.
+- Hair color.
+- Hairstyle.
+- Facial hair.
+- Scars.
+- Freckles.
+- Natural asymmetry.
+- Height.
+- Shoulder width.
+- Chest.
+- Torso.
+- Waist.
+- Hips.
+- Arm proportions.
+- Leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+- Relative scale to any other supplied characters.
+
+Do not beautify, idealize, slim, enlarge, age, de-age, masculinize, feminize, or otherwise redesign them.
+
+Their clothing may be changed to realistic **Vlandian private noble or civilian clothing appropriate to their rank and current activity**.
+
+Use believable linen, wool, leather, fine woven fabrics, tunics, gowns, hose, belts, boots, indoor cloaks, jewelry, embroidery, and restrained heraldic ornament.
+
+Do not automatically use armor.
+
+Characters should use the room naturally rather than pose.
+
+They may:
+
+- Sit by the fire.
+- Read beside a window.
+- Write at the desk.
+- Hold correspondence.
+- Pour wine.
+- Examine a map.
+- Lean naturally against furniture.
+- Search a chest.
+- Sit opposite another supplied character in quiet discussion.
+- Stand while thinking.
+
+The finished image must look like **high-end live-action historical photography inside a real inhabited medieval castle**.
+
+Use realistic skin, hands, cloth, stone, wood, firelight, candlelight, parchment, glass or metal where appropriate, and believable physical interaction.
+
+Maximum possible photorealism.
+
+---

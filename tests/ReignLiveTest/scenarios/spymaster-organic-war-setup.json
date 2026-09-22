@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance - establish player war through production Border Crisis",
+  "mode": "kingdom_event",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    {
+      "operation": "kingdom_event_test",
+      "phase": "force",
+      "fixtureRunId": "spymaster_agent_war_setup",
+      "archetypeId": "border_crisis",
+      "targetVariant": "first",
+      "kingdomId": "new_kingdom",
+      "confirmation": "force Reign kingdom event on disposable save",
+      "timeoutSeconds": 180
+    },
+    {
+      "operation": "world_acknowledge_native_diplomacy_notices",
+      "confirmation": "acknowledge Bannerlord diplomacy notices on disposable save",
+      "timeoutSeconds": 30
+    },
+    { "operation": "wait_for_memory", "waitMilliseconds": 5000, "timeoutSeconds": 30 },
+    {
+      "operation": "kingdom_event_test",
+      "phase": "observe",
+      "fixtureRunId": "spymaster_agent_war_setup",
+      "archetypeId": "border_crisis",
+      "targetVariant": "first",
+      "kingdomId": "new_kingdom",
+      "timeoutSeconds": 180
+    }
+  ]
+}

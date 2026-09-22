@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "label": "Prepare disposable sovereign identity and authority fixture",
+  "mode": "individual_chat",
+  "presentation": "headless",
+  "effects": "guarded",
+  "autoCompleteWhenIdle": true,
+  "steps": [
+    {
+      "schemaVersion": 2,
+      "operation": "prepare_authority_fixture",
+      "mode": "individual_chat",
+      "confirmDisposableCampaign": true,
+      "timeoutSeconds": 300
+    }
+  ]
+}

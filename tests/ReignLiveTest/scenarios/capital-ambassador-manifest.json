@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "preparedOnly": true,
+  "entryPoint": "reign_start_capital_ambassador_test",
+  "confirmation": "start Reign capital ambassador test on disposable save",
+  "fixtureConfirmation": "prepare Reign capital ambassador disposable fixture",
+  "profiles": [
+    "preflight",
+    "prepare_ownership",
+    "deterministic",
+    "server_matrix",
+    "prepare_travel",
+    "prepare_resident",
+    "observe",
+    "lifecycle_a",
+    "move_capital",
+    "simulate_loss",
+    "simulate_war",
+    "lifecycle_b_transition",
+    "save_prepare",
+    "save_verify",
+    "ui",
+    "official_dialogue",
+    "official_dialogue_corpus",
+    "cleanup_marker"
+  ],
+  "baselineBranches": [
+    ["preflight", "prepare_ownership", "preflight"],
+    ["deterministic", "server_matrix"],
+    ["prepare_resident", "save_prepare", "campaign_checkpoint", "campaign_restart", "save_verify", "ui"],
+    ["restore_current", "lifecycle_a", "restore_current"],
+    ["official_dialogue_corpus", "lifecycle_b_transition", "save_prepare", "campaign_checkpoint", "campaign_restart", "save_verify"],
+    ["cleanup_marker", "close_without_save", "delete_exact_run_owned_current"]
+  ],
+  "coverage": [
+    "lifecycle A native designation, relocation, foreign owner capture, and recovery",
+    "lifecycle B eligible appointment, travel/residency, capital migration, shelter, war recall, and removal",
+    "guarded replacement of exactly one deterministic pre-existing posting when every otherwise eligible foreign origin is occupied on the disposable baseline",
+    "capital versus local Court scope",
+    "capital capture clearing with ever-designated persistence",
+    "relation and peace boundaries",
+    "all foreign-envoy candidate exclusions, Charm 49/50 eligibility boundary, and selection from the highest nonempty Charm band at 200/150/100/50",
+    "deterministic selection, duplicate prevention, and one-to-three-day travel",
+    "partyless resident Keep placement, relocation, shelter, dismissal, and war recall",
+    "five direct commercial permissions and nine referral-only categories",
+    "immutable authority context, exact terms hashes, referral delay, counteroffer and decisions",
+    "official envoy history, represented-kingdom archive, current-ruler and successor inheritance",
+    "tone pressure -6/-3/0/+3/+6 with daily cap and no native relation mutation",
+    "Ambassador Gauntlet binding and one eight-exchange/sixteen-turn base natural official corpus with at most one bounded granted-permission follow-up",
+    "request, refusal, ambiguity, clarification, referral, counteroffer, and grant language classes",
+    "one representative provider, transport, and retry-exhaustion failure contract each",
+    "native save/load at resident and recalled transition boundaries with stable fixture fingerprints",
+    "legacy outbound ambassador isolation and explicit test activation"
+  ],
+  "passOnce": [
+    "deterministic",
+    "server_matrix"
+  ],
+  "releaseGate": "Both native lifecycle reports, both guarded save/load boundaries, the base natural corpus plus a bounded ninth grant follow-up when its fixed commercial request is outside the deterministic charter, UI snapshot, deterministic/server matrices, and exact cleanup must pass on the final compatible source/runtime/catalog/campaign fingerprints."
+}

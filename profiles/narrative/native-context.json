@@ -1,0 +1,911 @@
+{
+  "schema": "reign-narrative-native-context-v1",
+  "provenance": {
+    "description": "Display names and unspecified ages extracted from the authoritative native and Reign module data; original catalog identity facts remain unchanged. A missing source age is unknown, not a newborn age.",
+    "sourceHashes": {
+      "spclans.xml": "318afe49eb3a7e4b7b92877da58c69af5571925b31e13c0a3851ba995e47b070",
+      "spkingdoms.xml": "1d0664283c916dbbd11a02bcd55bbba75e1de10354b54bd35508f59720dde41a",
+      "lords.xml": "dd2747bccadc0ed0c2fee1debf38e8a36825b053e497f14d301de030f153abd5",
+      "reign_court_clans.xml": "8e01d68563520ccbd48b823d4e8bbbe4b0035ef28187be4cfe0ca7be105aaee7"
+    }
+  },
+  "clans": {
+    "player_faction": {
+      "name": "Playerland",
+      "leaderId": "main_hero"
+    },
+    "looters": {
+      "name": "Looters",
+      "leaderId": ""
+    },
+    "deserters": {
+      "name": "Deserters",
+      "leaderId": ""
+    },
+    "sea_raiders": {
+      "name": "Sea Raiders",
+      "leaderId": ""
+    },
+    "mountain_bandits": {
+      "name": "Mountain Bandits",
+      "leaderId": ""
+    },
+    "forest_bandits": {
+      "name": "Forest Bandits",
+      "leaderId": ""
+    },
+    "desert_bandits": {
+      "name": "Desert Bandits",
+      "leaderId": ""
+    },
+    "steppe_bandits": {
+      "name": "Steppe Bandits",
+      "leaderId": ""
+    },
+    "ghilman": {
+      "name": "Ghilman",
+      "leaderId": ""
+    },
+    "legion_of_the_betrayed": {
+      "name": "Legion of the Betrayed",
+      "leaderId": ""
+    },
+    "skolderbrotva": {
+      "name": "Skolderbroda",
+      "leaderId": ""
+    },
+    "company_of_the_boar": {
+      "name": "Company of the Golden Boar",
+      "leaderId": ""
+    },
+    "beni_zilal": {
+      "name": "Beni Zilal",
+      "leaderId": ""
+    },
+    "wolfskins": {
+      "name": "Wolfskins",
+      "leaderId": ""
+    },
+    "brotherhood_of_woods": {
+      "name": "Brotherhood of the Woods",
+      "leaderId": ""
+    },
+    "hidden_hand": {
+      "name": "Hidden Hand",
+      "leaderId": ""
+    },
+    "lakepike": {
+      "name": "Lake Rats",
+      "leaderId": ""
+    },
+    "embers_of_flame": {
+      "name": "Embers of the Flame",
+      "leaderId": ""
+    },
+    "jawwal": {
+      "name": "Jawwal",
+      "leaderId": ""
+    },
+    "karakhuzaits": {
+      "name": "Karakhergit",
+      "leaderId": ""
+    },
+    "forest_people": {
+      "name": "Forest People",
+      "leaderId": ""
+    },
+    "eleftheroi": {
+      "name": "Eleftheroi",
+      "leaderId": ""
+    },
+    "clan_empire_north_1": {
+      "name": "Osticos",
+      "leaderId": "lord_1_1"
+    },
+    "clan_empire_north_2": {
+      "name": "Argoros",
+      "leaderId": "lord_1_3"
+    },
+    "clan_empire_north_3": {
+      "name": "Neretzes",
+      "leaderId": "lord_1_5"
+    },
+    "clan_empire_north_4": {
+      "name": "Impestores",
+      "leaderId": "lord_1_20"
+    },
+    "clan_empire_north_5": {
+      "name": "Dolentos",
+      "leaderId": "lord_1_50"
+    },
+    "clan_empire_north_6": {
+      "name": "Chonis",
+      "leaderId": "lord_1_51"
+    },
+    "clan_empire_north_7": {
+      "name": "Phalentes",
+      "leaderId": "lord_1_58"
+    },
+    "clan_empire_north_8": {
+      "name": "Vatatzes",
+      "leaderId": "lord_NE8_l"
+    },
+    "clan_empire_north_9": {
+      "name": "Serapides",
+      "leaderId": "lord_NE9_l"
+    },
+    "clan_empire_west_1": {
+      "name": "Comnos",
+      "leaderId": "lord_1_7"
+    },
+    "clan_empire_west_2": {
+      "name": "Varros",
+      "leaderId": "lord_1_9"
+    },
+    "clan_empire_west_3": {
+      "name": "Dionicos",
+      "leaderId": "lord_1_11"
+    },
+    "clan_empire_west_4": {
+      "name": "Elaches",
+      "leaderId": "lord_1_40"
+    },
+    "clan_empire_west_5": {
+      "name": "Lonalion",
+      "leaderId": "lord_1_45"
+    },
+    "clan_empire_west_6": {
+      "name": "Sorados",
+      "leaderId": "lord_1_52"
+    },
+    "clan_empire_west_7": {
+      "name": "Corenios",
+      "leaderId": "lord_1_53"
+    },
+    "clan_empire_west_8": {
+      "name": "Maneolis",
+      "leaderId": "lord_1_71"
+    },
+    "clan_empire_west_9": {
+      "name": "Palladios",
+      "leaderId": "lord_WE9_l"
+    },
+    "clan_empire_south_1": {
+      "name": "Pethros",
+      "leaderId": "lord_1_14"
+    },
+    "clan_empire_south_2": {
+      "name": "Leonipardes",
+      "leaderId": "lord_1_15"
+    },
+    "clan_empire_south_3": {
+      "name": "Mestricaros",
+      "leaderId": "lord_1_17"
+    },
+    "clan_empire_south_4": {
+      "name": "Hongeros",
+      "leaderId": "lord_1_30"
+    },
+    "clan_empire_south_5": {
+      "name": "Julios",
+      "leaderId": "lord_1_63"
+    },
+    "clan_empire_south_6": {
+      "name": "Vizartos",
+      "leaderId": "lord_1_54"
+    },
+    "clan_empire_south_7": {
+      "name": "Avlonos",
+      "leaderId": "lord_1_55"
+    },
+    "clan_empire_south_8": {
+      "name": "Prienicos",
+      "leaderId": "lord_1_72"
+    },
+    "clan_empire_south_9": {
+      "name": "Vetranis",
+      "leaderId": "lord_SE9_l"
+    },
+    "clan_aserai_1": {
+      "name": "Banu Hulyan",
+      "leaderId": "lord_3_1"
+    },
+    "clan_aserai_2": {
+      "name": "Banu Sarran",
+      "leaderId": "lord_3_3"
+    },
+    "clan_aserai_3": {
+      "name": "Banu Qild",
+      "leaderId": "lord_3_5"
+    },
+    "clan_aserai_4": {
+      "name": "Banu Qaraz",
+      "leaderId": "lord_3_16"
+    },
+    "clan_aserai_5": {
+      "name": "Banu Arbas",
+      "leaderId": "lord_3_17"
+    },
+    "clan_aserai_6": {
+      "name": "Banu Atij",
+      "leaderId": "lord_3_18"
+    },
+    "clan_aserai_7": {
+      "name": "Banu Sarmal",
+      "leaderId": "lord_3_19"
+    },
+    "clan_aserai_8": {
+      "name": "Banu Habbab",
+      "leaderId": "lord_3_22"
+    },
+    "clan_aserai_9": {
+      "name": "Banu Ruwaid",
+      "leaderId": "lord_A9_l"
+    },
+    "clan_vlandia_1": {
+      "name": "dey Meroc",
+      "leaderId": "lord_4_1"
+    },
+    "clan_vlandia_2": {
+      "name": "dey Tihr",
+      "leaderId": "lord_4_3"
+    },
+    "clan_vlandia_3": {
+      "name": "dey Arromanc",
+      "leaderId": "lord_4_6"
+    },
+    "clan_vlandia_4": {
+      "name": "dey Cortain",
+      "leaderId": "lord_4_16"
+    },
+    "clan_vlandia_5": {
+      "name": "dey Gunric",
+      "leaderId": "lord_4_21"
+    },
+    "clan_vlandia_6": {
+      "name": "dey Valant",
+      "leaderId": "lord_4_22"
+    },
+    "clan_vlandia_7": {
+      "name": "dey Fortes",
+      "leaderId": "lord_4_23"
+    },
+    "clan_vlandia_8": {
+      "name": "dey Molarn",
+      "leaderId": "lord_4_24"
+    },
+    "clan_vlandia_9": {
+      "name": "dey Jelind",
+      "leaderId": "lord_4_27"
+    },
+    "clan_vlandia_10": {
+      "name": "dey Folcun",
+      "leaderId": "lord_4_28"
+    },
+    "clan_vlandia_11": {
+      "name": "dey Rothad",
+      "leaderId": "lord_V11_l"
+    },
+    "clan_battania_1": {
+      "name": "fen Gruffendoc",
+      "leaderId": "lord_5_1"
+    },
+    "clan_battania_2": {
+      "name": "fen Derngil",
+      "leaderId": "lord_5_3"
+    },
+    "clan_battania_3": {
+      "name": "fen Uvain",
+      "leaderId": "lord_5_5"
+    },
+    "clan_battania_4": {
+      "name": "fen Penraic",
+      "leaderId": "lord_5_14"
+    },
+    "clan_battania_5": {
+      "name": "fen Giall",
+      "leaderId": "lord_5_16"
+    },
+    "clan_battania_6": {
+      "name": "fen Eingal",
+      "leaderId": "lord_5_17"
+    },
+    "clan_battania_7": {
+      "name": "fen Morcar",
+      "leaderId": "lord_5_15"
+    },
+    "clan_battania_8": {
+      "name": "fen Caernacht",
+      "leaderId": "lord_B8_l"
+    },
+    "clan_khuzait_1": {
+      "name": "Urkhunait",
+      "leaderId": "lord_6_1"
+    },
+    "clan_khuzait_2": {
+      "name": "Khergit",
+      "leaderId": "lord_6_4"
+    },
+    "clan_khuzait_3": {
+      "name": "Arkit",
+      "leaderId": "lord_6_5"
+    },
+    "clan_khuzait_4": {
+      "name": "Tigrit",
+      "leaderId": "lord_6_16"
+    },
+    "clan_khuzait_5": {
+      "name": "Harfit",
+      "leaderId": "lord_6_17"
+    },
+    "clan_khuzait_6": {
+      "name": "Baltait",
+      "leaderId": "lord_6_18"
+    },
+    "clan_khuzait_7": {
+      "name": "Koltit",
+      "leaderId": "lord_6_19"
+    },
+    "clan_khuzait_8": {
+      "name": "Yanserit",
+      "leaderId": "lord_6_20"
+    },
+    "clan_khuzait_9": {
+      "name": "Oburit",
+      "leaderId": "lord_K9_l"
+    },
+    "clan_sturgia_1": {
+      "name": "Gundaroving",
+      "leaderId": "lord_2_1"
+    },
+    "clan_sturgia_2": {
+      "name": "Kuloving",
+      "leaderId": "lord_2_3"
+    },
+    "clan_sturgia_3": {
+      "name": "Vagiroving",
+      "leaderId": "lord_2_5"
+    },
+    "clan_sturgia_4": {
+      "name": "Ormidoving",
+      "leaderId": "lord_2_16"
+    },
+    "clan_sturgia_5": {
+      "name": "Togaroving",
+      "leaderId": "lord_2_17"
+    },
+    "clan_sturgia_6": {
+      "name": "Isyaroving",
+      "leaderId": "lord_2_18"
+    },
+    "clan_sturgia_7": {
+      "name": "Vezhoving",
+      "leaderId": "lord_2_19"
+    },
+    "clan_sturgia_8": {
+      "name": "Ubroving",
+      "leaderId": "lord_2_20"
+    },
+    "clan_sturgia_9": {
+      "name": "Kostoroving",
+      "leaderId": "lord_S9_l"
+    },
+    "reign_house_castle_EN1": {
+      "name": "Quintareon",
+      "leaderId": "reign_court_castle_EN1_father"
+    },
+    "reign_house_castle_EN2": {
+      "name": "Istranorius",
+      "leaderId": "reign_court_castle_EN2_father"
+    },
+    "reign_house_castle_EN3": {
+      "name": "Nerioneran",
+      "leaderId": "reign_court_castle_EN3_father"
+    },
+    "reign_house_castle_EN4": {
+      "name": "Merovorius",
+      "leaderId": "reign_court_castle_EN4_father"
+    },
+    "reign_house_castle_EN5": {
+      "name": "Elarnion",
+      "leaderId": "reign_court_castle_EN5_father"
+    },
+    "reign_house_castle_EN6": {
+      "name": "Istranides",
+      "leaderId": "reign_court_castle_EN6_father"
+    },
+    "reign_house_castle_EN7": {
+      "name": "Pellianicus",
+      "leaderId": "reign_court_castle_EN7_father"
+    },
+    "reign_house_castle_EN8": {
+      "name": "Helianoria",
+      "leaderId": "reign_court_castle_EN8_father"
+    },
+    "reign_house_castle_EN9": {
+      "name": "Draconenus",
+      "leaderId": "reign_court_castle_EN9_father"
+    },
+    "reign_house_town_EN1": {
+      "name": "Vardentis",
+      "leaderId": "reign_court_town_EN1_father"
+    },
+    "reign_house_town_EN2": {
+      "name": "Pellianalon",
+      "leaderId": "reign_court_town_EN2_father"
+    },
+    "reign_house_town_EN3": {
+      "name": "Luceraneran",
+      "leaderId": "reign_court_town_EN3_father"
+    },
+    "reign_house_town_EN4": {
+      "name": "Damaralon",
+      "leaderId": "reign_court_town_EN4_father"
+    },
+    "reign_house_town_EN5": {
+      "name": "Nerionentis",
+      "leaderId": "reign_court_town_EN5_father"
+    },
+    "reign_house_town_EN6": {
+      "name": "Damaricus",
+      "leaderId": "reign_court_town_EN6_father"
+    },
+    "reign_house_castle_EW1": {
+      "name": "Quintarorius",
+      "leaderId": "reign_court_castle_EW1_father"
+    },
+    "reign_house_castle_EW2": {
+      "name": "Luceranorius",
+      "leaderId": "reign_court_castle_EW2_father"
+    },
+    "reign_house_castle_EW3": {
+      "name": "Corvenenus",
+      "leaderId": "reign_court_castle_EW3_father"
+    },
+    "reign_house_castle_EW4": {
+      "name": "Cassianarian",
+      "leaderId": "reign_court_castle_EW4_father"
+    },
+    "reign_house_castle_EW5": {
+      "name": "Varderan",
+      "leaderId": "reign_court_castle_EW5_father"
+    },
+    "reign_house_castle_EW6": {
+      "name": "Aurelenus",
+      "leaderId": "reign_court_castle_EW6_father"
+    },
+    "reign_house_castle_EW7": {
+      "name": "Aureloria",
+      "leaderId": "reign_court_castle_EW7_father"
+    },
+    "reign_house_castle_EW8": {
+      "name": "Aurelalon",
+      "leaderId": "reign_court_castle_EW8_father"
+    },
+    "reign_house_town_EW1": {
+      "name": "Corvenion",
+      "leaderId": "reign_court_town_EW1_father"
+    },
+    "reign_house_town_EW2": {
+      "name": "Istranentis",
+      "leaderId": "reign_court_town_EW2_father"
+    },
+    "reign_house_town_EW3": {
+      "name": "Sorianaris",
+      "leaderId": "reign_court_town_EW3_father"
+    },
+    "reign_house_town_EW4": {
+      "name": "Elarorius",
+      "leaderId": "reign_court_town_EW4_father"
+    },
+    "reign_house_town_EW5": {
+      "name": "Damaroria",
+      "leaderId": "reign_court_town_EW5_father"
+    },
+    "reign_house_town_EW6": {
+      "name": "Quintarides",
+      "leaderId": "reign_court_town_EW6_father"
+    },
+    "reign_house_castle_ES1": {
+      "name": "Damarentis",
+      "leaderId": "reign_court_castle_ES1_father"
+    },
+    "reign_house_castle_ES2": {
+      "name": "Valeraris",
+      "leaderId": "reign_court_castle_ES2_father"
+    },
+    "reign_house_castle_ES3": {
+      "name": "Quintarentis",
+      "leaderId": "reign_court_castle_ES3_father"
+    },
+    "reign_house_castle_ES4": {
+      "name": "Draconarian",
+      "leaderId": "reign_court_castle_ES4_father"
+    },
+    "reign_house_castle_ES5": {
+      "name": "Corvenoria",
+      "leaderId": "reign_court_castle_ES5_father"
+    },
+    "reign_house_castle_ES6": {
+      "name": "Sorianeon",
+      "leaderId": "reign_court_castle_ES6_father"
+    },
+    "reign_house_castle_ES7": {
+      "name": "Merovalon",
+      "leaderId": "reign_court_castle_ES7_father"
+    },
+    "reign_house_castle_ES8": {
+      "name": "Luceranentis",
+      "leaderId": "reign_court_castle_ES8_father"
+    },
+    "reign_house_town_ES1": {
+      "name": "Nerionicus",
+      "leaderId": "reign_court_town_ES1_father"
+    },
+    "reign_house_town_ES2": {
+      "name": "Helianides",
+      "leaderId": "reign_court_town_ES2_father"
+    },
+    "reign_house_town_ES3": {
+      "name": "Cassianeon",
+      "leaderId": "reign_court_town_ES3_father"
+    },
+    "reign_house_town_ES4": {
+      "name": "Cassianicus",
+      "leaderId": "reign_court_town_ES4_father"
+    },
+    "reign_house_town_ES5": {
+      "name": "Vardicus",
+      "leaderId": "reign_court_town_ES5_father"
+    },
+    "reign_house_town_ES6": {
+      "name": "Cassianentis",
+      "leaderId": "reign_court_town_ES6_father"
+    },
+    "reign_house_town_ES7": {
+      "name": "Merovides",
+      "leaderId": "reign_court_town_ES7_father"
+    },
+    "reign_house_castle_S1": {
+      "name": "Svarovich",
+      "leaderId": "reign_court_castle_S1_father"
+    },
+    "reign_house_castle_S2": {
+      "name": "Vezyrev",
+      "leaderId": "reign_court_castle_S2_father"
+    },
+    "reign_house_castle_S3": {
+      "name": "Gorograd",
+      "leaderId": "reign_court_castle_S3_father"
+    },
+    "reign_house_castle_S4": {
+      "name": "Novoslav",
+      "leaderId": "reign_court_castle_S4_father"
+    },
+    "reign_house_castle_S5": {
+      "name": "Olekets",
+      "leaderId": "reign_court_castle_S5_father"
+    },
+    "reign_house_castle_S6": {
+      "name": "Pravograd",
+      "leaderId": "reign_court_castle_S6_father"
+    },
+    "reign_house_castle_S7": {
+      "name": "Belorin",
+      "leaderId": "reign_court_castle_S7_father"
+    },
+    "reign_house_castle_S8": {
+      "name": "Karsovar",
+      "leaderId": "reign_court_castle_S8_father"
+    },
+    "reign_house_town_S1": {
+      "name": "Goromir",
+      "leaderId": "reign_court_town_S1_father"
+    },
+    "reign_house_town_S2": {
+      "name": "Karsevich",
+      "leaderId": "reign_court_town_S2_father"
+    },
+    "reign_house_town_S3": {
+      "name": "Morozenko",
+      "leaderId": "reign_court_town_S3_father"
+    },
+    "reign_house_town_S4": {
+      "name": "Drovensky",
+      "leaderId": "reign_court_town_S4_father"
+    },
+    "reign_house_town_S5": {
+      "name": "Vladavik",
+      "leaderId": "reign_court_town_S5_father"
+    },
+    "reign_house_town_S6": {
+      "name": "Vladenko",
+      "leaderId": "reign_court_town_S6_father"
+    },
+    "reign_house_town_S7": {
+      "name": "Rudovich",
+      "leaderId": "reign_court_town_S7_father"
+    },
+    "reign_house_castle_A1": {
+      "name": "Sahirani",
+      "leaderId": "reign_court_castle_A1_father"
+    },
+    "reign_house_castle_A2": {
+      "name": "Fazirmal",
+      "leaderId": "reign_court_castle_A2_father"
+    },
+    "reign_house_castle_A3": {
+      "name": "Nasirsul",
+      "leaderId": "reign_court_castle_A3_father"
+    },
+    "reign_house_castle_A4": {
+      "name": "Latifqir",
+      "leaderId": "reign_court_castle_A4_father"
+    },
+    "reign_house_castle_A5": {
+      "name": "Bahirfar",
+      "leaderId": "reign_court_castle_A5_father"
+    },
+    "reign_house_castle_A6": {
+      "name": "Yazidraz",
+      "leaderId": "reign_court_castle_A6_father"
+    },
+    "reign_house_castle_A7": {
+      "name": "Alzarsul",
+      "leaderId": "reign_court_castle_A7_father"
+    },
+    "reign_house_castle_A8": {
+      "name": "Kashshar",
+      "leaderId": "reign_court_castle_A8_father"
+    },
+    "reign_house_castle_A9": {
+      "name": "Tariqzid",
+      "leaderId": "reign_court_castle_A9_father"
+    },
+    "reign_house_town_A1": {
+      "name": "Yazidamir",
+      "leaderId": "reign_court_town_A1_father"
+    },
+    "reign_house_town_A2": {
+      "name": "Alzarqani",
+      "leaderId": "reign_court_town_A2_father"
+    },
+    "reign_house_town_A3": {
+      "name": "Damasrani",
+      "leaderId": "reign_court_town_A3_father"
+    },
+    "reign_house_town_A4": {
+      "name": "Mazaldani",
+      "leaderId": "reign_court_town_A4_father"
+    },
+    "reign_house_town_A5": {
+      "name": "Rashanqir",
+      "leaderId": "reign_court_town_A5_father"
+    },
+    "reign_house_town_A6": {
+      "name": "Tariqdani",
+      "leaderId": "reign_court_town_A6_father"
+    },
+    "reign_house_town_A7": {
+      "name": "Hadramdani",
+      "leaderId": "reign_court_town_A7_father"
+    },
+    "reign_house_town_A8": {
+      "name": "Rashandani",
+      "leaderId": "reign_court_town_A8_father"
+    },
+    "reign_house_castle_V1": {
+      "name": "Montelonne",
+      "leaderId": "reign_court_castle_V1_father"
+    },
+    "reign_house_castle_V2": {
+      "name": "Demeriers",
+      "leaderId": "reign_court_castle_V2_father"
+    },
+    "reign_house_castle_V3": {
+      "name": "Rochefort",
+      "leaderId": "reign_court_castle_V3_father"
+    },
+    "reign_house_castle_V4": {
+      "name": "Hautcourt",
+      "leaderId": "reign_court_castle_V4_father"
+    },
+    "reign_house_castle_V5": {
+      "name": "Belmontmont",
+      "leaderId": "reign_court_castle_V5_father"
+    },
+    "reign_house_castle_V6": {
+      "name": "Touronne",
+      "leaderId": "reign_court_castle_V6_father"
+    },
+    "reign_house_castle_V7": {
+      "name": "Serrenonne",
+      "leaderId": "reign_court_castle_V7_father"
+    },
+    "reign_house_castle_V8": {
+      "name": "Tourac",
+      "leaderId": "reign_court_castle_V8_father"
+    },
+    "reign_house_town_V1": {
+      "name": "Valmontfort",
+      "leaderId": "reign_court_town_V1_father"
+    },
+    "reign_house_town_V2": {
+      "name": "Aubermont",
+      "leaderId": "reign_court_town_V2_father"
+    },
+    "reign_house_town_V3": {
+      "name": "Perrinac",
+      "leaderId": "reign_court_town_V3_father"
+    },
+    "reign_house_town_V5": {
+      "name": "Estrelonne",
+      "leaderId": "reign_court_town_V5_father"
+    },
+    "reign_house_town_V6": {
+      "name": "Serrenault",
+      "leaderId": "reign_court_town_V6_father"
+    },
+    "reign_house_town_V7": {
+      "name": "Perrinmont",
+      "leaderId": "reign_court_town_V7_father"
+    },
+    "reign_house_town_V8": {
+      "name": "Hautaine",
+      "leaderId": "reign_court_town_V8_father"
+    },
+    "reign_house_town_V9": {
+      "name": "Lorieneron",
+      "leaderId": "reign_court_town_V9_father"
+    },
+    "reign_house_castle_B1": {
+      "name": "Wyrecairn",
+      "leaderId": "reign_court_castle_B1_father"
+    },
+    "reign_house_castle_B2": {
+      "name": "Wyreglen",
+      "leaderId": "reign_court_castle_B2_father"
+    },
+    "reign_house_castle_B3": {
+      "name": "Sulder",
+      "leaderId": "reign_court_castle_B3_father"
+    },
+    "reign_house_castle_B4": {
+      "name": "Iorbryn",
+      "leaderId": "reign_court_castle_B4_father"
+    },
+    "reign_house_castle_B5": {
+      "name": "Caerder",
+      "leaderId": "reign_court_castle_B5_father"
+    },
+    "reign_house_castle_B6": {
+      "name": "Iorath",
+      "leaderId": "reign_court_castle_B6_father"
+    },
+    "reign_house_castle_B7": {
+      "name": "Aberwych",
+      "leaderId": "reign_court_castle_B7_father"
+    },
+    "reign_house_castle_B8": {
+      "name": "Trevtor",
+      "leaderId": "reign_court_castle_B8_father"
+    },
+    "reign_house_town_B1": {
+      "name": "Sulwych",
+      "leaderId": "reign_court_town_B1_father"
+    },
+    "reign_house_town_B2": {
+      "name": "Tormere",
+      "leaderId": "reign_court_town_B2_father"
+    },
+    "reign_house_town_B3": {
+      "name": "Mordawn",
+      "leaderId": "reign_court_town_B3_father"
+    },
+    "reign_house_town_B4": {
+      "name": "Penmor",
+      "leaderId": "reign_court_town_B4_father"
+    },
+    "reign_house_town_B5": {
+      "name": "Brynder",
+      "leaderId": "reign_court_town_B5_father"
+    },
+    "reign_house_castle_K1": {
+      "name": "Boroqmur",
+      "leaderId": "reign_court_castle_K1_father"
+    },
+    "reign_house_castle_K2": {
+      "name": "Sangurqan",
+      "leaderId": "reign_court_castle_K2_father"
+    },
+    "reign_house_castle_K3": {
+      "name": "Mungolqor",
+      "leaderId": "reign_court_castle_K3_father"
+    },
+    "reign_house_castle_K4": {
+      "name": "Noyansai",
+      "leaderId": "reign_court_castle_K4_father"
+    },
+    "reign_house_castle_K5": {
+      "name": "Khargbatu",
+      "leaderId": "reign_court_castle_K5_father"
+    },
+    "reign_house_castle_K6": {
+      "name": "Qorchimur",
+      "leaderId": "reign_court_castle_K6_father"
+    },
+    "reign_house_castle_K7": {
+      "name": "Chaganbek",
+      "leaderId": "reign_court_castle_K7_father"
+    },
+    "reign_house_castle_K8": {
+      "name": "Torgutbek",
+      "leaderId": "reign_court_castle_K8_father"
+    },
+    "reign_house_castle_K9": {
+      "name": "Gansarsai",
+      "leaderId": "reign_court_castle_K9_father"
+    },
+    "reign_house_town_K1": {
+      "name": "Hulagugur",
+      "leaderId": "reign_court_town_K1_father"
+    },
+    "reign_house_town_K2": {
+      "name": "Erketbatu",
+      "leaderId": "reign_court_town_K2_father"
+    },
+    "reign_house_town_K3": {
+      "name": "Yelbekqan",
+      "leaderId": "reign_court_town_K3_father"
+    },
+    "reign_house_town_K4": {
+      "name": "Erketjin",
+      "leaderId": "reign_court_town_K4_father"
+    },
+    "reign_house_town_K5": {
+      "name": "Altugqor",
+      "leaderId": "reign_court_town_K5_father"
+    },
+    "reign_house_town_K6": {
+      "name": "Dorbetqan",
+      "leaderId": "reign_court_town_K6_father"
+    }
+  },
+  "kingdoms": {
+    "empire": {
+      "name": "Northern Empire",
+      "rulerId": "lord_1_1"
+    },
+    "empire_w": {
+      "name": "Western Empire",
+      "rulerId": "lord_1_7"
+    },
+    "empire_s": {
+      "name": "Southern Empire",
+      "rulerId": "lord_1_14"
+    },
+    "sturgia": {
+      "name": "Sturgia",
+      "rulerId": "lord_2_1"
+    },
+    "aserai": {
+      "name": "Aserai",
+      "rulerId": "lord_3_1"
+    },
+    "vlandia": {
+      "name": "Vlandia",
+      "rulerId": "lord_4_1"
+    },
+    "battania": {
+      "name": "Battania",
+      "rulerId": "lord_5_1"
+    },
+    "khuzait": {
+      "name": "Khuzait",
+      "rulerId": "lord_6_1"
+    }
+  },
+  "unspecifiedAgeHeroIds": [
+    "lord_6_6"
+  ]
+}

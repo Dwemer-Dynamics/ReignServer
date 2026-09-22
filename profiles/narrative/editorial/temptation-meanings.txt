@@ -1,0 +1,161 @@
+# Original adult temptation index|semantic aim|personal meaning
+0|exclusive credit|Accepting the praise without correction offers a warmer moment than interrupting it to describe the shared effort.
+1|avoided apology|A gift seems capable of expressing regret without the exposure of naming the actual wrong.
+2|rare possession|The chance to possess the object makes the ordinary budget feel briefly less important than avoiding its loss to another buyer.
+3|pleasing promises|An enthusiastic yes postpones the uncomfortable admission that the available time is already spoken for.
+4|decisive argument|The confidence offers an unusually effective point precisely because it was never entrusted for public use.
+5|absorbing leisure|The familiar hobby promises immediate satisfaction while the duty remains unpleasantly available for later.
+6|favored talent|A friend's ability makes an exception feel easier to justify than it would for an unfamiliar candidate.
+7|hidden mistake|Waiting offers a short interval in which the mistake is still private, even as the cost of addressing it may grow.
+8|distant curiosity|The unanswered question makes the journey's dangers feel less vivid than the possibility of finally seeing for oneself.
+9|avoided disappointment|Accepting the obligation preserves the other person's present pleasure while moving the difficulty into a later day.
+10|wanted company|A flattering invitation offers an immediate sense of being wanted that can make its actual purpose less carefully examined.
+11|ambitious investment|The imagined project's success makes reserves seem like idle resources rather than protection against an ordinary bad season.
+12|visible decisiveness|A harsh response promises a clear impression of authority before the more difficult judgment has been worked through.
+13|tested loyalty|An unnecessary test offers the hope of reassurance without having to ask directly for it.
+14|exciting beginnings|The new project's possibility feels cleaner than the slow effort and compromises now visible in the unfinished one.
+15|public generosity|A generous public promise offers approval at the moment of speaking, before its practical cost has arrived.
+16|immediate comfort|An available sympathetic listener can seem more appealing than waiting for someone whose discretion is better known.
+17|avoided grief|Work fills attention with concrete demands that leave less room for the unsettled feeling underneath.
+18|protected seniority|Dismissing a younger speaker briefly protects a familiar position from the discomfort of needing their correction.
+19|continued possession|The borrowed object's usefulness makes returning it feel easier to postpone than its owner may realize.
+20|impressive solutions|An elegant appearance offers a satisfying account of the answer before its ordinary practicality has been tested.
+21|easy assistance|A patron's offer promises relief now, making the terms that shape later choices tempting to leave unread.
+22|withheld warmth|Coldness provides a way to make the slight felt without openly naming how much it mattered.
+23|acknowledged grievance|Reopening the quarrel seems to offer another chance to receive the acknowledgment missing from its earlier ending.
+24|confident appearance|An assured answer preserves the moment's authority without exposing the question that remains unresolved privately.
+25|visible endurance|Continuing past tiredness offers another piece of evidence for a reputation that has begun to feel important to maintain.
+26|favored animal|Affection makes the particular animal's inconvenience seem more deserving of indulgence than the rule was designed to allow.
+27|needed usefulness|Unrequested help offers a practical role in another person's life before they have had to choose whether it is wanted.
+28|meaningful giving|The wish to make the gift feel exactly right can push its cost beyond the ordinary limit.
+29|avoided refusal|Silence delays the discomfort of saying no while leaving the other person to interpret what it means.
+30|retrospective credit|An ambiguous account could make a late recognition of the problem sound like earlier foresight.
+31|last word|The argument retains the appeal of prevailing after the practical question that began it has faded.
+32|beautiful completion|A beautiful result can make a small rule seem like an obstacle worth quietly stepping around.
+33|comforting explanation|The appealing explanation settles an uncertainty pleasantly before there has been enough evidence to justify the relief.
+34|hidden disappointment|Keeping the feeling private avoids the risk that explaining it will make it seem smaller or more embarrassing.
+35|competitive leisure|Turning the hobby into a contest offers a new measure of success that can crowd out its simpler pleasure.
+36|protected competence|A sincere question can be mistaken for a challenge when it touches an area of private uncertainty.
+37|familiar standing|Remaining in the unsuitable role preserves a known identity while postponing the uncertainty of leaving it.
+38|scarce approval|Approval from the dismissive person seems especially valuable because it has been so difficult to obtain.
+39|sheltered distance|A practical demand provides a respectable reason to avoid a conversation that might require greater openness.
+40|protected friendship|Lending seems to preserve warmth immediately, even when the later repayment may make the friendship less comfortable.
+41|maintained belonging|Accepting the invitation avoids missing the occasion, while tiredness can be treated as a private cost to bear later.
+42|moved generosity|The story's immediate emotional force makes a promise feel clearer than its future demands actually are.
+43|respectable appearance|Concealing the interest seems to protect a familiar public impression from an unnecessary awkward question.
+44|guarded hurt|Sarcasm can make the listener feel the sting without revealing the vulnerable reason behind it.
+45|controlled detail|A minor detail offers a small area that can still be made perfect when the larger work is harder to control.
+46|untroubled loyalty|Avoiding the correction keeps the relationship comfortable now, while leaving the actual mistake in place.
+47|flattering remembrance|A small embellishment makes the story more enjoyable to tell and improves the teller's place within it.
+48|proved independence|Refusing useful help offers a quick demonstration of self-sufficiency, even when the task becomes unnecessarily difficult.
+49|indispensable usefulness|Taking the responsibility offers a secure practical place, while its accumulating demands are easier to underestimate.
+50|favorable comparison|A selective comparison with the sibling could briefly make the personal position feel stronger.
+51|promised companionship|A new acquaintance's possibility can seem to answer loneliness before the particular person has been understood.
+52|protected ambition|An inconvenient objection threatens a plan that already provides a pleasing imagined future.
+53|animal affection|The immediate appeal of the animal can overshadow the less vivid work of providing care after the novelty fades.
+54|rival diminished|Dismissing the idea avoids giving a rival the satisfying acknowledgment that their judgment has been useful.
+55|quick reconciliation|Restoring trust at once promises a more complete emotional ending than a slower repair with remaining limits.
+56|visible honor|Ceremonial recognition offers an immediate public satisfaction that can distract from the practical help still missing.
+57|decisive departure|Leaving suddenly gives an experience of exclusion a personal ending that can feel less helpless than waiting.
+58|dramatic repair|A large gesture promises a visible turning point without the uncertain pace of rebuilding trust through ordinary conduct.
+59|settled belief|Leaving the comfortable belief unexamined preserves an assurance that a difficult question might unsettle.
+60|public vindication|An accusation invites an audience to make the concern feel real before the evidence has been carefully separated from suspicion.
+61|visible duty|Giving up the pleasure offers a clear sign of seriousness even when the sacrifice is not actually needed.
+62|lasting allegiance|Gratitude feels like a reassuring personal bond that may be easier to overestimate while the favor is still fresh.
+63|borrowed confidence|A remembered success offers confidence more easily than the current preparation the new situation requires.
+64|avoided listening|Advice gives the exchange a useful-looking direction before the difficult account has had time to unfold.
+65|private importance|Possessing an undisclosed fact can make a place in the relationship feel more significant than it otherwise does.
+66|defended investment|Continuing the project postpones the painful possibility that earlier judgment and effort will not produce the hoped-for result.
+67|tested reassurance|Another test promises certainty that the previous reassurance never quite managed to make lasting.
+68|controlled outcomes|Choosing for the other person offers a quicker and more predictable result than allowing their uncertain answer to shape it.
+69|assumed friendship|Long familiarity makes the friendship seem able to wait safely while more insistent demands receive attention.
+70|amusing disclosure|The story's likely amusement makes its private ownership easier to forget at the moment of telling.
+71|unseen shortcuts|Without a witness, a small shortcut appears to offer the same result with less immediate effort.
+72|misplaced recognition|The audience's approval remains enticing even when its standards do not reflect what is privately valued in the work.
+73|threatened affection|A difference of judgment can feel like a wider withdrawal of personal regard before the actual disagreement is considered.
+74|familiar methods|The old method offers the comfort of practiced movements while better evidence asks for an uncertain adjustment.
+75|favored expertise|A beloved subject invites an appearance of mastery that may outrun the knowledge actually acquired.
+76|purchased certainty|Spending offers a concrete action that can hide the less comfortable fact that the right answer is still unclear.
+77|created obligation|A gift could make a future request easier to press while allowing the present gesture to appear entirely generous.
+78|controlled attention|Silence offers a way to make the other person seek an answer more anxiously.
+79|premature peace|Promising reconciliation relieves the immediate tension before the private feeling has caught up with the declared ending.
+80|favored protection|Shielding the apprentice preserves a warm relationship now, even when the criticism would help the work improve.
+81|unclaimed effort|Calling the duty beneath personal abilities makes an unappealing ordinary task seem easier to refuse with dignity.
+82|last word|Remaining in the exchange preserves one more chance to determine its remembered ending.
+83|protected trust|An elegant excuse keeps a trusted person's familiar image intact without requiring the more troubling evidence to be weighed fully.
+84|controlled safety|Restrictions on others offer a visible response to a fear whose actual likelihood may be harder to judge.
+85|convenient exceptions|An inconsistent application makes the immediate household situation easier while quietly weakening the rule's claim to fairness.
+86|unexplained solitude|Leaving without explanation secures quiet immediately, while the concern or offense it may cause remains out of view.
+87|sentimental possession|The object's personal associations make its cost feel different from an ordinary purchase, even during a difficult season.
+88|unqualified victory|A fair compromise can be resisted because its language still feels too close to admitting defeat.
+89|concealed refusal|Public agreement preserves present ease while leaving the real conflict to emerge through later evasion.
+90|quick closeness|A shared interest creates a pleasant sense of familiarity that can be mistaken for evidence of wider trustworthiness.
+91|desired affection|Admiration offers a warm response that may be easier to treat as affection than examine for its limits.
+92|competitive risk|The rival's success makes caution feel like falling behind before the actual circumstances of the risk are compared.
+93|hidden expense|Concealing the cost protects the project's appealing story from the practical objections it might otherwise attract.
+94|pleasing remembrance|A coherent enjoyable account is more satisfying to repeat than the awkward details that make it accurate.
+95|needed care|Continued caring preserves the relationship's familiar purpose even as repeated boundary violations make it harder to sustain.
+96|indispensable standing|Keeping the task close maintains a dependable reason for other people to need personal involvement.
+97|returned embarrassment|A joke offers a socially acceptable-looking way to make an embarrassing remark cost its speaker something.
+98|guarded hope|Keeping the grievance active can feel safer than allowing renewed hope to become vulnerable to another disappointment.
+99|attractive rank|The title offers a pleasing identity before the ordinary work attached to it has been experienced.
+100|avoided discomfort|Several harmless distractions can feel preferable to the short unpleasant interval needed to finish the task.
+101|easy reassurance|A large promise can soothe the child immediately while placing its uncertain fulfillment beyond the present exchange.
+102|substitute generosity|Giving something tangible can seem easier than offering the sustained attention that the person actually needs.
+103|unprepared discovery|The unfamiliar route promises interest before the importance of missing supplies has become concrete.
+104|private favor|A quiet exception offers a desired result without the public discussion that would reveal its conflict with the rule.
+105|dramatic change|A large answer makes an ordinary disappointment feel more significant and more decisively addressed.
+106|confirmed suspicion|The rumor fits an existing interpretation well enough to make its uncertain source less tempting to examine.
+107|protected strength|Concealing the injury preserves an appearance of capability while moving its practical cost into a private struggle.
+108|agreeable company|A comfortable conversation offers immediate relief from the useful but tiring corrections honest companions may provide.
+109|controlled safety|Extra protection gives personal anxiety something to do even when the loved person would prefer more freedom.
+110|defended character|Explaining good intentions can protect a valued self-image while drawing attention away from the actual apology.
+111|guarded recognition|Refusing praise avoids the vulnerable moment of accepting that another person has seen something personally important.
+112|unchanged familiarity|The treasured memory makes a familiar arrangement feel worth keeping even after its practical conditions have changed.
+113|proved endurance|Continuing provides one more sign of effort after tiredness has begun to reduce the quality of the judgment guiding it.
+114|protected appearance|A small deception seems to preserve an ordinary public impression without requiring a difficult explanation.
+115|anticipated rejection|Reading the delay as rejection offers a definite explanation sooner than the uncertain facts can supply one.
+116|private contest|An unannounced contest provides a personal measure of victory without requiring the other person's agreement to compete.
+117|avoided conversation|An expensive gift promises warmth and visible effort without the uncertainty of a candid exchange.
+118|defended seriousness|Duty offers an unquestionable reason to avoid pleasures that might otherwise require admitting what is actually wanted.
+119|performed inquiry|Asking the question can create an appearance of openness while leaving the preferred conclusion safely untouched.
+120|familiar confidence|Familiarity offers a quick substitute for checking whether the particular work has actually been done well.
+121|critic defeated|Proving the old critic wrong promises a gratifying ending to an exchange that continues privately long after it ended aloud.
+122|unexposed planning|Planning keeps the project full of possibility without exposing its first practical attempt to a disappointing result.
+123|pleasing promises|A promise lets the listener remain hopeful while postponing the discomfort of a clear limit.
+124|enlarged disagreement|Calling the matter one of honor makes retreat feel less available and a personal preference more difficult for others to question.
+125|completed training|The desired completion makes the animal's discomfort easy to treat as a temporary obstacle rather than useful information.
+126|needed affection|Dependence provides a visible reason to remain close that can be mistaken for freely chosen affection.
+127|hidden ambition|Concealing the ambition protects it from criticism while making it harder for others to understand the disappointment around it.
+128|unchanged public judgment|Revising the statement would expose a change of mind to an audience whose interpretation cannot be controlled.
+129|familiar standards|A harsh quick judgment allows an unfamiliar custom to be dismissed before its purpose has been understood.
+130|immediate generosity|The pleasure of meeting a visible new need can crowd out obligations whose recipients are not presently asking.
+131|avoided embarrassment|Postponing the concern avoids an awkward disclosure now while leaving the actual uncertainty unresolved.
+132|convenient agreement|A quiet companion offers less immediate resistance to the interpretation that everyone is content with the plan.
+133|absorbing escape|The pleasing hobby offers a manageable world at the moment the urgent task feels least welcome.
+134|justified jealousy|Treating jealousy as evidence would make the uncomfortable feeling appear to be another person's fault.
+135|promising novelty|A new connection offers discovery before familiarity has revealed the ordinary effort every durable friendship requires.
+136|visible sacrifice|A public sacrifice can provide recognition while leaving part of its practical cost to people whose consent is less visible.
+137|private endorsement|Secret approval would provide reassurance without reopening the decision before the people who might challenge it.
+138|meaningful possession|The heirloom's personal history can make any proposed limit on its upkeep feel like a refusal to value that history.
+139|avoided comparison|Avoiding the successful person offers relief from a comparison that feels difficult to set aside while together.
+140|effective attention|Influence produces visible responses that can be easier to mistake for understanding than a quieter honest conversation.
+141|unasked protection|Speaking for the person offers an immediate useful role while avoiding the possibility that their own answer will differ.
+142|withheld affection|Withdrawing warmth can make the disagreement costly without having to win its actual argument.
+143|compensating advantage|Old hardship supplies a personally persuasive reason to accept an advantage that would otherwise be difficult to defend.
+144|sheltered courtesy|Formal politeness can keep an exchange orderly while withholding the direct answer that would make it useful.
+145|unstated return|A generous offer can create a hopeful private expectation without the risk of negotiating it openly.
+146|ranked recognition|Discounting a low-status compliment preserves a preferred hierarchy of whose judgment is allowed to matter.
+147|unfinished rivalry|The rivalry still provides a familiar measure of personal standing even after its original practical purpose has disappeared.
+148|familiar caution|A known fear offers a ready reason to avoid the uncertain experience that might challenge it.
+149|perfect expression|Refining the wording provides a controllable task while useful action remains more exposed to an uncertain result.
+150|special allowance|Disclosing a personal truth can become a way to press for an exception rather than simply ask to be understood.
+151|transferred burden|An agreeable subordinate offers a path by which the difficult task may disappear from immediate personal attention.
+152|guarded competence|Taking offense protects against the exposed feeling of hearing needed advice from someone else.
+153|comfortable reassurance|A soothing response offers a pleasant moment without the effort of engaging the actual practical difficulty.
+154|constant reassurance|Frequent attention supplies repeated visible signs that can be easier to count than the quieter evidence of commitment.
+155|severe self-judgment|Calling the unfinished ambition a failure provides a definite verdict before the possibility of another approach has been considered.
+156|ended uncertainty|Deciding while tired promises an end to the question when there may be too little attention left to weigh it well.
+157|absorbing escape|A new hobby offers a fresh area of interest untouched by the difficult conversation waiting in the relationship.
+158|preferred work|The cherished project supplies immediate personal meaning while the promised task feels mainly like an external claim.
+159|competitive pleasure|A demand to excel offers a clear standard of success while gradually making the original uncomplicated enjoyment harder to recover.

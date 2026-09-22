@@ -1,0 +1,3 @@
+Create a natural cinematic scene in a comfortable medieval tavern bedroom in {townName}. The agreed adult companions are approaching the player with a warm, individual welcome before settling into conversation. Show the player visibly, using the player's reference identity. Everyone is clothed; the mood is intimate, relaxed and non-explicit. Use warm lamplight, convincing period furnishings and restrained natural expressions.
+
+Use every identity in the supplied reference sheet exactly once: {participants}. Preserve faces, adult ages, physiques and distinguishing features. Compose one square image with all figures and faces comfortably inside the frame. The supplied sheet is identity guidance, not the requested layout. No writing, labels, borders or interface elements.

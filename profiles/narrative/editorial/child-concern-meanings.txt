@@ -1,0 +1,129 @@
+# Category/family/index|semantic aim|personal meaning
+desire/child_wants/0|familiar comfort|Being carried lets the tired body stop working so hard while staying close to someone familiar.
+desire/child_wants/1|small choices|Choosing the cup makes a small part of the meal feel personally decided.
+desire/child_wants/2|familiar company|A known person nearby makes the change from waking activity to sleep easier.
+desire/child_wants/3|finished play|The game still has a wanted next move even when somebody else considers it finished.
+desire/child_wants/4|noticed discovery|The pebble becomes more interesting when another person pauses to look closely too.
+desire/child_wants/5|fair turns|Waiting is easier when the promised turn actually arrives.
+desire/child_wants/6|patient answers|A simple question can stay important after an adult has already grown tired of it.
+desire/child_wants/7|small independence|Trying directly offers a pleasure that having the task completed quickly by a helper does not.
+desire/child_wants/8|favorite object|A familiar object within reach makes an unfamiliar interval easier to settle into.
+desire/child_wants/9|shared play|Someone joining the imagined game makes its little world feel more lively and real.
+desire/child_wants/10|predictable routine|A little warning gives the change a beginning that can be recognized instead of arriving all at once.
+desire/child_wants/11|bodily comfort|A scratch or tight fold can claim attention long after the person dressing the child has moved on.
+desire/child_wants/12|familiar company|A known voice makes it easier to look toward what is happening without feeling quite so alone.
+desire/child_wants/13|quiet recovery|A quieter place allows the excitement of the gathering to become manageable again.
+desire/child_wants/14|another attempt|A second chance keeps a small mistake from becoming the end of the interesting activity.
+desire/child_wants/15|useful inclusion|A little real part in the task feels different from simply being told to remain nearby.
+fear/child_cautions/0|explained noise|An unexpected noise is more alarming when neither the room nor its ordinary sounds are familiar.
+fear/child_cautions/1|familiar company|A familiar person briefly out of sight can make the surrounding space feel much larger.
+fear/child_cautions/2|animal proximity|A large moving body can feel too close before there is time to understand where it is going.
+fear/child_cautions/3|bedtime shadows|The dark corner leaves just enough unseen to invite an unwelcome imagined shape.
+fear/child_cautions/4|favorite object|Losing the toy would interrupt both the game and the comfort of knowing where the familiar thing belongs.
+fear/child_cautions/5|secure footing|A wet step offers less of the expected certainty when a foot is put down.
+fear/child_cautions/6|familiar handling|Being lifted by an unfamiliar person can feel like losing the choice to move closer or away.
+fear/child_cautions/7|included in play|The game remains visible and enjoyable for others while the wanted place in it seems closed.
+fear/child_cautions/8|uncertain depths|Water beyond the familiar shallow part hides where a secure footing might be found.
+fear/child_cautions/9|angry voices|The sound carries alarm even when the words do not explain what has happened.
+fear/child_cautions/10|familiar company|A delayed return can make the familiar expectation less reassuring with each repeated look toward the doorway.
+fear/child_cautions/11|favorite object|A broken object may no longer be able to take its accustomed part in a favorite game.
+fear/child_cautions/12|unfamiliar pain|The treatment is harder to face when it is unclear which touch will hurt and when it will end.
+fear/child_cautions/13|bedtime shadows|An exciting story can leave a creature feeling nearer once the room grows quiet.
+fear/child_cautions/14|familiar routes|Similar unfamiliar doorways make it difficult to recognize which one leads back to a known place.
+fear/child_cautions/15|unmocked effort|Laughter at an awkward attempt can make the next try feel watched in an unpleasant way.
+value/child_rules/0|fair turns|A turn that arrives as expected makes sharing easier to accept the next time.
+value/child_rules/1|kept promises|A small familiar promise becomes part of what the child expects to happen next.
+value/child_rules/2|gentle animals|Gentle movement lets a small animal remain close enough to watch and enjoy.
+value/child_rules/3|favorite object|Having the familiar thing returned makes lending feel less like losing it forever.
+value/child_rules/4|comfort after hurt|A hurt playmate settling after comfort is a simple visible sign that the upset need not continue.
+value/child_rules/5|shared play|Another person can give the game a new movement or part that was missing before.
+value/child_rules/6|explained noise|Knowing what made the sound gives the frightening moment an ordinary shape.
+value/child_rules/7|answered greeting|A returned greeting confirms that the familiar person has noticed and welcomed the approach.
+value/child_rules/8|familiar meal|Sharing a liked taste with a trusted person adds company to the pleasure of eating it.
+value/child_rules/9|asked permission|Being asked gives a little time to decide before the wanted toy is already elsewhere.
+value/child_rules/10|another attempt|Trying again can change a disappointing result while the first mistake is still remembered.
+value/child_rules/11|noticed effort|A small success feels larger when a familiar person gives it a moment of real attention.
+value/child_rules/12|familiar comfort|A resting place at home should be recognizable enough to settle into when tired.
+value/child_rules/13|acknowledged help|A small word or gesture can continue the pleasant connection after the helper has finished.
+value/child_rules/14|repairable things|An attempt at repair leaves open the possibility that the familiar object can be used again.
+value/child_rules/15|another attempt|A mistake is easier to recover from when the familiar person's warmth remains available.
+attachment/child_bonds/0|favorite object|The worn edges fit the hands and the familiar movements of play.
+attachment/child_bonds/1|bedtime melody|The repeated tune helps the end of the day feel like something already known.
+attachment/child_bonds/2|small treasures|The stone's shape makes it recognizable among many ordinary things that look less particular.
+attachment/child_bonds/3|familiar texture|The soft scrap offers a little familiar texture that can be carried between places.
+attachment/child_bonds/4|animal company|The animal's patient presence makes approaching it feel like a familiar small pleasure.
+attachment/child_bonds/5|sunny place|Warm light turns an ordinary patch of floor into a place worth returning to.
+attachment/child_bonds/6|familiar meal|The smell announces an ordinary comfort before the bread is seen or tasted.
+attachment/child_bonds/7|favorite cup|The cup belongs to the remembered pattern of sitting down for a meal.
+attachment/child_bonds/8|play refuge|The sheltered corner gives play a small recognizable boundary of its own.
+attachment/child_bonds/9|familiar company|The storyteller's voice is part of the pleasure even when the story is already known.
+attachment/child_bonds/10|pretend errands|The little basket makes a pretend journey feel like a task with a useful purpose.
+attachment/child_bonds/11|familiar routes|The repeated path offers turns and small landmarks that can be anticipated.
+attachment/child_bonds/12|answered greeting|The repeated exchange marks a familiar meeting as something shared by both people.
+attachment/child_bonds/13|quiet play|The cushion gives a quiet game a comfortable place to begin again.
+attachment/child_bonds/14|personal making|Ordinary scraps made into a toy carry the pleasure of recognizing how the plaything came together.
+attachment/child_bonds/15|familiar view|A low window offers a manageable view in which passing changes are easy to notice.
+formative/child_experiences/0|comfort after hurt|Help arriving after the tumble made the upset shorter and the next movement less frightening.
+formative/child_experiences/1|repairable things|The repair showed that a damaged little object did not always have to disappear from use.
+formative/child_experiences/2|fair turns|The toy returning gave sharing a reassuring ending that could be remembered on another occasion.
+formative/child_experiences/3|explained noise|An ordinary explanation made the remembered sound less mysterious when it happened again.
+formative/child_experiences/4|familiar company|The return gave a period of waiting a familiar face at its end.
+formative/child_experiences/5|gentle animals|The animal settling made the difference between a hurried movement and a gentle one visible.
+formative/child_experiences/6|another attempt|Rebuilding made the fallen structure part of a continuing game instead of its final disappointment.
+formative/child_experiences/7|bedtime comfort|Comfort helped the frightening dream become something that had ended rather than remained in the room.
+formative/child_experiences/8|changing weather|The cleared sky gave a wet interrupted day another possible beginning.
+formative/child_experiences/9|included in play|An invitation supplied a place in the game without the need to keep asking from its edge.
+formative/child_experiences/10|noticed effort|The useful effort receiving attention made another little attempt more inviting.
+formative/child_experiences/11|another attempt|Trying again after the spill showed that an accident need not end permission to help.
+formative/child_experiences/12|favorite object|Finding the object again gave the worried search a concrete and happy ending.
+formative/child_experiences/13|flexible stories|A different version showed that a familiar story could contain a small surprise and remain enjoyable.
+formative/child_experiences/14|settled disagreement|The playmates continuing together made a small quarrel look less final.
+formative/child_experiences/15|predictable routine|Repetition made the next step recognizable before someone needed to explain it again.
+wound/child_hurts/0|included in play|The remembered exclusion makes another closed circle of play particularly noticeable.
+wound/child_hurts/1|favorite object|The damage remains upsetting because the little object had a familiar place that another thing does not quite fill.
+wound/child_hurts/2|unmocked effort|The remembered laughter can make a new attempt more hesitant when the same kind of attention is near.
+wound/child_hurts/3|familiar company|A brief separation left an uneasy feeling that can return before its ordinary ending is remembered.
+wound/child_hurts/4|fair turns|The forgotten turn makes another instruction to wait harder to accept confidently.
+wound/child_hurts/5|kept promises|The small unkept promise left a familiar expectation with no recognizable ending.
+wound/child_hurts/6|familiar company|The visit's end left the pleasant activity feeling interrupted by the departure of its companion.
+wound/child_hurts/7|finished play|Being hurried left the wanted last step of the task still occupying attention.
+wound/child_hurts/8|angry voices|The raised voice left an alarm that lasted longer than the exchange that caused it.
+wound/child_hurts/9|noticed discovery|The little discovery seemed less easy to show again after its first offered look received no response.
+wound/child_hurts/10|shared play|The quiet game was less satisfying while the wished-for companion remained absent.
+wound/child_hurts/11|finished story|The interrupted story left a wanted next part that the child could not supply confidently alone.
+jealousy/child_comparisons/0|fair turns|Another child's extra time makes the waiting part of the game feel unusually long.
+jealousy/child_comparisons/1|noticed effort|The same small task looks more valuable when another child's attempt receives the praise.
+jealousy/child_comparisons/2|familiar company|The favored nearby place seems more desirable when someone else is already occupying it.
+jealousy/child_comparisons/3|useful inclusion|Carrying the object appears to mark another child as specially trusted with the interesting part.
+jealousy/child_comparisons/4|admired skill|The trick makes a playmate's next turn something others stop to watch.
+jealousy/child_comparisons/5|wanted plaything|The other toy's colors draw attention before the familiar toy has a chance to be enjoyed again.
+jealousy/child_comparisons/6|small choices|Choosing the game seems like the best turn because it decides what everyone else will do.
+jealousy/child_comparisons/7|another attempt|Quick forgiveness for another child makes a remembered correction feel more noticeable.
+jealousy/child_comparisons/8|useful inclusion|The errand offers the other child a part in the activity that seems more real than waiting nearby.
+jealousy/child_comparisons/9|extended waking|Staying awake looks like permission to remain in the interesting part of the household day.
+jealousy/child_comparisons/10|animal company|The animal choosing someone else makes its familiar attention briefly seem scarce.
+jealousy/child_comparisons/11|heard request|A quicker answer elsewhere makes the child's own waiting request feel easier to overlook.
+temptation/child_impulses/0|extended turn|The next enjoyable move can make handing the toy over feel inconveniently early.
+temptation/child_impulses/1|hidden mistake|Keeping the mistake unseen seems briefly easier than facing the response to showing it.
+temptation/child_impulses/2|extra taste|The wanted morsel is close enough that asking can feel like an unnecessary delay.
+temptation/child_impulses/3|favorite story|The familiar favorite part feels more urgent than the storyteller's slower route toward it.
+temptation/child_impulses/4|included in play|Joining the mischief seems like a quick way to stop being outside the shared amusement.
+temptation/child_impulses/5|small treasures|Calling the trinket one's own offers the immediate pleasure of keeping it close.
+temptation/child_impulses/6|small independence|Frustration can make even useful help feel like another interruption of the attempt.
+temptation/child_impulses/7|shared play|The wish for company makes the companion's need to keep resting briefly difficult to consider.
+temptation/child_impulses/8|finished obligation|Saying the task is finished seems to open the way back to a more appealing activity.
+temptation/child_impulses/9|wanted object|Reaching for the object promises an immediate result that waiting does not.
+temptation/child_impulses/10|noticed presence|The forbidden sound has already shown that it can make someone look toward its source.
+temptation/child_impulses/11|avoided tidying|Leaving the mess allows the next interesting thing to begin without the dull intervening cleanup.
+secret/child_privacies/0|small treasures|Knowing the pebble's little place makes it feel securely part of a private collection.
+secret/child_privacies/1|private play|The toy's special name belongs to the child's own way of making the game familiar.
+secret/child_privacies/2|bedtime shadows|The small fear can remain unspoken even when the shadow is watched carefully.
+secret/child_privacies/3|extended turn|The game still invites another turn after the child has stopped asking aloud.
+secret/child_privacies/4|private play|The imagined adventure can continue without another person deciding what must happen in it.
+secret/child_privacies/5|play refuge|A hiding place gives pretend play a little space whose discovery can be controlled.
+secret/child_privacies/6|noticed effort|The wish for praise can remain present even after the helping has apparently ended.
+secret/child_privacies/7|familiar song|The tune carries a quiet pleasure without needing to be requested every time it comes to mind.
+secret/child_privacies/8|private play|A silly private name makes an ordinary object briefly amusing in a way nobody else has to understand.
+secret/child_privacies/9|unspoken disappointment|Silence can hold a wanted thing that was not received without explaining the whole upset.
+secret/child_privacies/10|favorite story|One moment in the story carries a special appeal that is easier to enjoy than explain.
+secret/child_privacies/11|small treasures|The collection makes ordinary found things into familiar objects with their own little places.

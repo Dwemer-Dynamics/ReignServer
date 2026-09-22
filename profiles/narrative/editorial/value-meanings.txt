@@ -1,0 +1,161 @@
+# Original adult value index|semantic aim|personal meaning
+0|kept promises|A precise commitment protects the trust that an impressive but unkeepable assurance spends carelessly.
+1|safe hospitality|A guest should be able to disagree without wondering whether the roof still offers protection.
+2|fair compensation|The cost of good work includes the time and judgment concealed by a clean finished result.
+3|unafraid learning|An explanation can teach a child something useful that fear only teaches the child to conceal.
+4|private generosity|The good done should remain worthwhile when there is no audience to connect it to the giver.
+5|accountable authority|Power becomes too easy to misuse when the practical cost always arrives at someone else's door.
+6|humane handling|A frightened animal cannot be expected to understand the impatience of the person holding the lead.
+7|honest uncertainty|An admitted gap leaves room for a better answer; confident invention closes it prematurely.
+8|worker dignity|Being paid for labor does not surrender the right to ordinary respectful treatment.
+9|clear obligations|A debt should be accepted with an understanding of what repayment will actually require.
+10|unhurried grief|Someone else's discomfort with mourning is not a sound measure of when it should end.
+11|useful continuity|A working tradition carries accumulated practical judgment that novelty alone does not replace.
+12|fair experiment|An unfamiliar idea deserves the chance to fail or succeed through more than a confident first dismissal.
+13|dignified refusal|A refusal can be firm without becoming a spectacle designed to diminish the person asking.
+14|family candor|Affection that vanishes during disagreement is difficult to trust during apparent harmony.
+15|tool care|A useful tool is easier to preserve through small regular attention than replace after neglect.
+16|practical apology|The person harmed should not be left carrying the whole inconvenience after the apology is spoken.
+17|unconditional hospitality|A bed and a meal should not become a concealed price for the guest's later agreement.
+18|preparation recognized|An easy result often depends on attention that nobody notices unless it is missing.
+19|safe truth|An honest answer should become easier in a well-led room, not more dangerous.
+20|equal accountability|A rule loses much of its claim to respect when its maker quietly stands outside it.
+21|lifelong learning|Age changes what a learner brings to a subject without removing the right to begin it.
+22|considerate departure|A friend should receive a chance to understand a withdrawal before discovering it through absence.
+23|personal privacy|A closed subject may simply belong to its owner rather than conceal an offense against the listener.
+24|ordinary beauty|A well-shaped cup or pleasing corner can improve a day without requiring a grand occasion.
+25|unwasted food|Discarding good food to make an impression turns an ordinary necessity into a careless performance.
+26|honest loyalty|A loyal person should sometimes be the one willing to make an unwelcome correction.
+27|independent help|Dependence is safer when the person receiving support still has meaningful decisions left to make.
+28|considered courage|Fear acknowledged honestly can be judged and acted through more wisely than fear denied for appearance.
+29|attentive gifts|A gift should show interest in the person receiving it rather than only the giver's ability to spend.
+30|practical care|Preparation is one way to spare another person the consequences of avoidable confusion.
+31|restraint toward helplessness|An enemy unable to resist no longer offers a fair occasion to prove boldness.
+32|sustainable work|Rest belongs within a workable life rather than only after every possible demand has been satisfied.
+33|fair credit|A shared result should not become one person's achievement when its story is told outside the room.
+34|household voice|A question can reveal an ordinary problem before unquestioning obedience makes it expensive.
+35|open opportunity|An origin tells something about a starting place, not everything about what can be learned afterward.
+36|responsible mercy|Mercy should consider the people who will live with its next consequences as well as its immediate recipient.
+37|finite patience|Understanding a delay does not oblige everyone else to keep arranging life around its endless continuation.
+38|direct disagreement|An argument about the actual decision gives both people more room than an insult aimed at ancestry.
+39|recognized service|Learning a name is a small acknowledgment that the person serving has a life beyond the present task.
+40|shared knowledge|Knowledge gains another chance to remain useful when an interested learner can carry it onward.
+41|protected confidence|A confidence is entrusted precisely because the speaker cannot control every later opportunity to misuse it.
+42|informed authority|An inconvenient fact can become more damaging through silence than through the discomfort of hearing it promptly.
+43|patient teaching|An apprentice's mistake is information about what still needs explaining or practicing.
+44|clean water|A source used by many households cannot be kept dependable through indifference at each individual doorstep.
+45|clear agreements|The obligations should be comprehensible before an advantage is taken from the other party's confusion.
+46|ended grievance|A child should not be assigned a lifelong enemy merely to keep an older quarrel supplied with successors.
+47|specific feedback|A sincere attempt deserves an answer precise enough to help the next one improve.
+48|elder dignity|An older person's slower pace should not erase the claim to a say in a shared day.
+49|improved custom|Keeping a useful habit does not require preserving every inconvenience that happened to grow around it.
+50|practical results|An impressive explanation should eventually meet the ordinary test of what the work actually accomplishes.
+51|unguarded affection|Closeness should allow a dull or difficult day without requiring fresh proof of being worth the company.
+52|purposeful punishment|A punishment without a clear purpose can become a display whose cost is borne by someone already powerless.
+53|understood animal fear|An animal's reaction becomes more manageable when its cause is considered instead of simply resented.
+54|unranked judgment|A useful observation does not become less accurate because its speaker lacks an important title.
+55|uncoerced hospitality|A guest should be able to decline a dish, invitation, or diversion without the host making it a personal contest.
+56|clear boundaries|An early limit is often kinder and easier to meet than a later accusation built from unspoken resentment.
+57|practical faith|A declared devotion ought to be recognizable in ordinary conduct beyond the words used to describe it.
+58|supported accusation|A public claim can damage a life before its audience discovers how little the speaker actually knows.
+59|returned trust|A borrowed object carries the practical trust of the person who expects to use it again.
+60|possible change|A person can take a different direction while still acknowledging where the earlier one led.
+61|secure means|Wealth is more reassuring when it can withstand a poor season than when it only produces an impressive evening.
+62|mutual candor|Partners need room to disagree privately without the relationship itself becoming the threatened consequence.
+63|uncoerced promises|A promise extracted under pressure does not reveal the same choice as a commitment made freely.
+64|capable successors|Good teaching should eventually produce judgment that can go beyond what the teacher originally supplied.
+65|need before display|An unnecessary waste becomes harder to excuse when the unmet practical need is already visible.
+66|shared meal|A meal can provide a temporary common ground without requiring either person to declare the whole quarrel settled.
+67|unassumed consent|Quiet may mean hesitation, weariness, or caution rather than a considered agreement.
+68|welcomed questions|A better question should improve a lesson rather than threaten the teacher's place within it.
+69|personal making|Something made within the home gives the place a particular history that purchased display cannot supply.
+70|earned craft|Affection for the work is a reason to practice carefully, not a substitute for learning how to do it well.
+71|gracious rivalry|A rival's genuine excellence remains worth recognizing even when the comparison is privately uncomfortable.
+72|renewed loyalty|A servant's continued loyalty depends on how the relationship is lived, not merely on how long it has existed.
+73|individual grief|Different ways of mourning can carry equal attachment without looking alike to an observer.
+74|explained authority|A hard choice is easier to live with when the people bearing it can understand why it was made.
+75|practical remembrance|Tending what remains can honor someone through use and care rather than a repeated formal statement.
+76|adult accountability|A child learns something useful when an adult admits a mistake without pretending that authority has vanished.
+77|individual judgment|A stranger should have some chance to be encountered as a person before a category decides the whole assessment.
+78|unclaimed time|A private interval should not become available to anyone merely because no visible appointment occupies it.
+79|uncruel humor|A helpless target's forced smile is poor evidence that the joke has been enjoyable company.
+80|reliable care|Repeated modest attention is more useful to someone depending on it than a rare dramatic gesture.
+81|purposeful candor|An unwelcome truth should be spoken to clarify or help, not simply to enjoy the listener's discomfort.
+82|equal privacy|A poor household does not lose its claim to private space because its belongings are less impressive.
+83|ordinary peace|A peaceful day can contain ends worth enjoying in themselves instead of only preparation for the next struggle.
+84|playful art|An artistic effort can be valuable because it gives pleasure rather than because it makes a solemn claim.
+85|household foresight|A lean season is easier to meet when preparation begins before scarcity has made every choice urgent.
+86|measured consequences|Immediate anger is an unreliable guide to a consequence another person may have to live with for years.
+87|accurate witness|A direct observation should remain distinguishable from the explanation later heard from somebody else.
+88|unconditional kindness|A small humane act need not wait until the recipient shares every important opinion.
+89|room for beginners|An awkward first attempt is the ordinary beginning of a skill rather than evidence that the person should stop.
+90|ordinary work remembered|A community's daily continuity rests on more people than its formal celebrations usually name.
+91|clear favors|An unstated expectation can turn a welcome favor into a resentment neither person was prepared to negotiate.
+92|clear-eyed affection|Affection can remain real while acknowledging a loved person's poor judgment in a particular matter.
+93|maintained responsibility|A damaged neglected tool can reveal how easily a modest recurring obligation has been allowed to slide.
+94|dignified departure|Leaving bad service should not require accepting lifelong disgrace as its price.
+95|revisable reputation|A person's current conduct deserves some power to change a judgment formed from an earlier account.
+96|defeated dignity|Victory offers enough advantage without making humiliation an additional deliberate reward.
+97|meaningful inheritance|An heirloom can preserve a relationship or familiar use that its sale price cannot describe.
+98|patient answers|A repeated question may be the child's effort to understand, not a calculated attempt to exhaust an adult.
+99|informed planning|The person doing the work often knows which apparently small requirement will determine whether the plan succeeds.
+100|personal commitments|A private promise should not become the first thing abandoned whenever a more visible demand appears.
+101|quiet usefulness|A life can leave valuable results without those results becoming attached to a celebrated name.
+102|local knowledge|Familiarity with a place can answer a practical question that more prestigious general knowledge misses.
+103|attentive hospitality|A host's care includes noticing the guest who is too polite to explain what is making the visit difficult.
+104|recoverable mistakes|A mistake can call for repair without becoming the only fact through which every later action is interpreted.
+105|revisable caution|Caution is more useful when it changes with the evidence rather than preserving the first alarming possibility forever.
+106|ordinary courtesy|Money can obtain many conveniences without making discourtesy less tiresome for the person receiving it.
+107|practical trust|Doing something manageable together can give a strained relationship evidence beyond another earnest conversation.
+108|living choices|Respect for the dead need not give every past preference permanent authority over the living household.
+109|quiet observation|The best practical detail may come from the person who has spent more time watching than announcing a position.
+110|teachable pride|Pride in good work should keep standards demanding without making correction impossible to hear.
+111|shared celebration|An occasion's workers should receive some of its pleasure instead of only the extra labor it creates.
+112|safe refusal|A friendship becomes easier to trust when an ordinary refusal does not threaten to end it.
+113|legitimate rest|A pause can be part of sustaining useful effort rather than proof that no effort is valued.
+114|attentive use|A familiar landscape can continue to provide more if its limits are noticed before they are exceeded.
+115|gratitude without submission|Being grateful for help should not make every later disagreement a supposed act of betrayal.
+116|accountable explanation|Understanding how a mistake happened does not by itself settle the practical responsibility for it.
+117|household care|The treatment of someone with few choices reveals more than the courtesy shown to an impressive guest.
+118|competent help|A good intention should include learning enough not to make the recipient's situation harder.
+119|private life|Personal attachments and pleasures need some deliberate room rather than whatever exhausted time remains.
+120|considerate passage|The next traveler should be able to use the place without first clearing the careless traces of the last one.
+121|unwasted nourishment|Food that will otherwise spoil can still meet a need while there is time to offer it.
+122|useful directions|A stranger asking the way needs a route that can actually be followed, not merely a confident gesture.
+123|patient reassurance|A frightened person may need time to understand an explanation before being ready to act on it.
+124|modeled kindness|A child's understanding of kindness grows from the conduct seen repeatedly around ordinary inconvenience.
+125|powerful humor|A powerful speaker's amusement can place the listener in the difficult position of having to appear entertained.
+126|bounded disagreement|A quarrel should leave some shared activities in which the relationship can still breathe.
+127|maintained friendship|An old friendship needs current attention if its familiarity is to remain more than a pleasant memory.
+128|kept promises|A private commitment should not become weaker simply because nobody else heard it being made.
+129|uncruel comfort|A comfort that requires someone else's humiliation is carrying a cost its owner should be willing to notice.
+130|visible authorship|A craftsperson's name can preserve responsibility and credit together in the finished object.
+131|honest remembrance|A family story is more trustworthy when the uncertain part is allowed to remain uncertain.
+132|informed independence|A little practical understanding can make a confident deception easier to recognize before it becomes expensive.
+133|consistent safety|A precaution is meant to prevent harm, not merely create an appearance when an observer is present.
+134|guest privacy|An invitation into the house is not an invitation for the host to examine everything the guest carries.
+135|unclaimed pursuit|A private interest can earn its place through the pleasure it gives without producing something to sell.
+136|linguistic respect|Learning another person's language accepts some of the effort of meeting them halfway.
+137|useful questions|A thoughtful question can help someone discover a better next step than a hurried confident instruction.
+138|safe imperfection|Home should permit small mistakes and untidy moods without making each one a judgment of belonging.
+139|thoughtful disagreement|A friendship can gain understanding when a real difference is considered instead of carefully concealed.
+140|unburdened grief|A bereaved person should not have to perform gratitude on top of the effort of meeting the day.
+141|animal commitment|An animal's needs continue after the first pleasure of acquiring it has become ordinary.
+142|responsive fairness|Equal consideration can require different practical help when the people involved face different difficulties.
+143|responsible succession|The work may sometimes be better served by making room for another capable person to lead it.
+144|accurate credit|A remembered success should keep the other contributors visible instead of slowly gathering around one convenient name.
+145|need before display|An impressive household appearance cannot make hidden hunger within it a less immediate failure of care.
+146|honest refusal|An ordinary no should not need a fabricated story that creates further obligations to keep it believable.
+147|unconditional gifts|A gift should not reveal an additional price only after it has been accepted with gratitude.
+148|unmanipulated trust|A relationship should be judged through real conduct rather than an artificial crisis arranged to provoke a revealing mistake.
+149|dignified humility|Recognizing limits can make learning possible without requiring a poor opinion of the entire person.
+150|finished improvement|A small completed repair can be more useful than a repeatedly announced transformation that never begins.
+151|ordinary friendship|Friends need some time that is enjoyable without being spent solving a problem or demonstrating devotion.
+152|shared burden|Visible sharing makes a hard obligation less likely to disappear onto the person least able to refuse it.
+153|understood obedience|A person repeating the instructed movement may still need to understand the reason that makes it useful.
+154|chosen vocation|A child's eventual work should have room for abilities and wishes that the parent did not anticipate.
+155|unconditional dignity|A person retains a claim to humane regard on a day when there is nothing useful they can provide.
+156|attentive listening|A careful hearing can reveal an avoidable misunderstanding before it becomes a practical injury.
+157|modest ambition|A privately satisfying aim does not need to become impressive to strangers before it deserves attention.
+158|domestic peace|Peace becomes more credible when practiced in the small disputes of the household as well as praised elsewhere.
+159|intrinsic pleasure|Something loved for itself can keep a life from becoming only an account of usefulness and obligation.

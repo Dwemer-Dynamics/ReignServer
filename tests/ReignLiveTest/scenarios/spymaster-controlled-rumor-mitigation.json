@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster controlled acceptance — exact-mission rumor mitigation success",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "ui_open", "targetSearch": "spymaster", "timeoutSeconds": 60 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "reputation", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "next-social-scope", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "next-social-scope", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-action", "value": "mitigate_target_rumor", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-target", "value": "foreign-noble-with-rumor", "timeoutSeconds": 60 },
+    { "operation": "wait_for_memory", "waitMilliseconds": 3000, "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-social-item", "value": "first", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "begin", "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "capture", "batch": "controlled_rumor_mitigation", "minimumNewMissions": 1, "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "spymaster_organic", "phase": "control_outcomes", "batch": "controlled_rumor_mitigation", "missionTypes": ["mitigate_target_rumor"], "minimum": 1, "unitRoll": 0.0, "confirmation": "force Reign Spymaster outcomes on disposable save", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "ui_close", "timeoutSeconds": 30 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 12, "timeoutSeconds": 7200 },
+    { "operation": "wait_for_memory", "waitMilliseconds": 5000, "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "verify_controlled_outcomes", "batch": "controlled_rumor_mitigation", "missionTypes": ["mitigate_target_rumor"], "minimum": 1, "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "after_controlled_rumor_mitigation", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

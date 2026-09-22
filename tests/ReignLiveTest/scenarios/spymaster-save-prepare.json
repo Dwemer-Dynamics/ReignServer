@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster native save/load fixture preparation",
+  "seed": 147147,
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "guarded",
+  "autoCompleteWhenIdle": true,
+  "steps": [
+    { "operation": "spymaster_test", "profile": "prepare_reload", "fixtureRunId": "spymaster_native_roundtrip", "seed": 147147, "timeoutSeconds": 120 },
+    { "operation": "save_checkpoint", "saveName": "Reign_Spymaster_Automation_A", "timeoutSeconds": 300 }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster controlled acceptance — exact-mission capture and successful breakout",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "ui_open", "targetSearch": "spymaster", "timeoutSeconds": 60 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "subterfuge", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-target", "value": "foreign-governed", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-action", "value": "assassinate_governor", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "begin", "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "capture", "batch": "controlled_capture_breakout", "minimumNewMissions": 1, "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "spymaster_organic", "phase": "control_outcomes", "batch": "controlled_capture_breakout", "missionTypes": ["assassinate_governor"], "minimum": 1, "unitRoll": 0.999999, "consequenceUnitRoll": 0.5, "confirmation": "force Reign Spymaster outcomes on disposable save", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "ui_close", "timeoutSeconds": 30 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 18, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "verify_controlled_capture", "batch": "controlled_capture_breakout", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "spymaster_organic", "phase": "attempt_breakout", "unitRoll": 0.0, "controlConfirmation": "force Reign Spymaster outcomes on disposable save", "allowIrreversible": true, "confirmation": "run irreversible Reign Spymaster test on disposable save", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "wait_for_memory", "waitMilliseconds": 5000, "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "after_controlled_capture_breakout_success", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

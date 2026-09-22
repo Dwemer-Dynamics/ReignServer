@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "caseId": "qualification_native_snapshot_heartbeat_stall",
+  "mode": "individual_chat",
+  "failure": {
+    "acceptedCommandAgeSeconds": 422,
+    "gameHeartbeatFresh": false,
+    "correlatedAuditEntryCount": 0,
+    "serverRequestObserved": false
+  },
+  "requiredRecovery": {
+    "cancelRunBeforeProcessStop": true,
+    "blindRetry": false,
+    "safeToReplayOnlyAfterCheckpointReload": true,
+    "captureNativeDialogueStateOnCampaignThread": true
+  }
+}

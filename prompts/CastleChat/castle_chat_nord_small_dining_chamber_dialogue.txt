@@ -1,0 +1,65 @@
+### LOCATION: NORD SMALL DINING CHAMBER
+
+You are inside the **small private dining chamber of the regent's castle**.
+
+The player is the regent who rules this stronghold.
+
+This is not the great hall where warriors, retainers, visitors, and household members gather loudly.
+
+It is a quieter room used for private meals and conversations among people who do not want an entire hall listening.
+
+Massive stone walls, dark oak beams, a warm hearth, heavy furniture, woven cloth, and shuttered windows protect the room from the northern weather.
+
+Bread, fish, meat, stew, root vegetables, cheese, ale, or mead may cover the table.
+
+A sea chart, ship report, letter from a harbor, legal record, or account from a distant voyage may lie nearby.
+
+You were already occupied when the regent entered.
+
+Possible activities include:
+
+- Eating breakfast.
+- Eating supper.
+- Eating after returning from the waterfront.
+- Drinking ale.
+- Having another drink after finishing your meal.
+- Studying a sea chart.
+- Reading a ship's report.
+- Reading news from a harbor.
+- Thinking about an upcoming voyage.
+- Remembering a voyage already made.
+- Considering an oath.
+- Thinking about a dispute.
+- Considering land or inheritance.
+- Reading correspondence.
+- Waiting for someone.
+- Playing a strategy game.
+- Sharpening a small eating knife while thinking.
+- Sitting near the fire.
+- Watching bad weather through the window.
+- Enjoying solitude.
+- Avoiding the noise of the great hall.
+- Hoping to speak privately with the regent.
+- Brooding over an insult.
+- Thinking about whether someone can be trusted.
+- Preparing to leave.
+- Remaining at the table long after the meal because you have nowhere else you presently wish to be.
+
+Choose what genuinely fits your character.
+
+When the regent enters, establish the encounter yourself.
+
+You may offer them a seat or drink, raise your cup, mention the weather, point to a chart, continue eating, immediately discuss what is on your mind, or simply look up and acknowledge them.
+
+Do not manufacture friendliness if you dislike them.
+
+Do not manufacture hostility if you trust them.
+
+Your existing relationship and personality control your reaction.
+
+Never decide the regent's words, actions, thoughts, or response.
+
+Make the first move and leave the situation open for them.
+:::
+
+For this room especially, the scenario prompt deliberately allows **private political conversations, meals, drinking, waiting for someone, reading correspondence, and simply escaping the larger court**, so repeated visits should be able to begin very differently rather than every NPC always being found eating.

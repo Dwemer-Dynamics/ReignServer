@@ -1,0 +1,161 @@
+# Original adult wound index|semantic aim|personal meaning
+0|serious effort|A dismissive tone can still make a new effort feel in danger of being judged before it is understood.
+1|independent recognition|Family comparisons carry an old pressure to become impressive in somebody else's preferred way.
+2|unconditional affection|A mistake can feel as though it threatens the relationship as well as the immediate result.
+3|fair blame|An accusation brings a particular urgency to separate what actually happened from the convenient explanation.
+4|protected confidence|A friendly invitation to speak privately now leaves a question about where the words might travel next.
+5|unconditional affection|Praise can sound incomplete when it never seems to arrive during an unproductive ordinary day.
+6|a fair hearing|Being interrupted during an explanation recalls the helplessness of a judgment already settled elsewhere.
+7|meaningful possessions|Another person's casual handling can miss how much private history an inexpensive object carries.
+8|personal agency|An apparently helpful arrangement becomes uncomfortable when there is no remaining place for a personal choice.
+9|unmocked effort|Beginning a skill can bring the remembered expectation of laughter alongside the genuine wish to learn.
+10|unburdened help|An offer of assistance is harder to accept without first wondering what permanent obligation might follow it.
+11|steadfast company|An awkward public moment can prompt a quick glance toward whether familiar support is still nearby.
+12|dignified apology|Admitting a wrong can feel risky when a previous admission became permission to press an advantage.
+13|meaningful participation|A flattering welcome is less satisfying when the conversation never expects a real contribution.
+14|unhurried grief|Advice to move on can recall the loneliness of being asked to make grief easier for its observers.
+15|fair credit|A confident public account is watched closely for the moment another person's influence begins absorbing the work.
+16|kept promises|A small forgotten commitment can carry more weight than its practical inconvenience initially suggests.
+17|safe questions|An unclear instruction may be endured longer than is useful before the remembered risk of asking is overcome.
+18|heard concerns|The word inconvenient can make an ordinary concern feel as though it has no acceptable time to be voiced.
+19|individual regard|A comparison meant as praise can still leave uncertainty about whether the actual person has been noticed.
+20|explained departure|An unexplained silence can revive the old effort to infer which unspoken mistake ended the connection.
+21|accepted taste|A harmless preference may be offered cautiously while the listener's first expression is watched.
+22|secure belonging|A trusted person's casual talk of replacement can unsettle a relationship that had appeared dependable.
+23|unmocked mistakes|An amusing retelling may feel threatening when a small failure has once outgrown every other remembered fact.
+24|legitimate rest|Stopping before exhaustion can carry an old and unwanted sense of having left something morally unfinished.
+25|supported responsibility|An important assignment is harder to welcome when the promised help remains vague.
+26|unranked judgment|A reference to age can feel like the beginning of dismissal even before the actual argument has been considered.
+27|consistent regard|Public praise is harder to trust when a closed door once changed the tone completely.
+28|dignified help|A manageable need can become a private struggle simply because asking still feels disproportionately exposing.
+29|bounded generosity|An offered kindness is now accompanied by attention to whether the recipient recognizes where it ends.
+30|safe reconciliation|Pressure to declare forgiveness can feel like another demand to ignore the conditions that made the hurt possible.
+31|family autonomy|A family quarrel can revive the unwelcome expectation that affection must be demonstrated by choosing an opponent.
+32|independent recognition|A personal success loses some pleasure when its first explanation is what it has obtained for the family.
+33|heard concerns|A quiet request can seem ineffective beside the remembered fact that anger once received the first real response.
+34|unreversed responsibility|An apology that immediately seeks reassurance can recall being asked to care for the person responsible for the hurt.
+35|unburdened kindness|An unusually warm approach may prompt a private wait for the request that will explain it.
+36|animal companionship|A dismissive remark about the animal can sound like a dismissal of an important ordinary relationship.
+37|room for unfamiliarity|An unfamiliar ceremony can bring more attention to possible embarrassment than its practical importance warrants.
+38|preparation recognized|A smooth result can leave an old worry that the work making it smooth will again remain invisible.
+39|independent friendship|Criticism of a friend's station can feel like an attempt to claim authority over a personally chosen bond.
+40|patient instruction|A teacher's impatience can make a difficult stage feel like the last chance rather than part of learning.
+41|individual identity|Admiration for a relative becomes uncomfortable when it begins to sound like an instruction to copy a life.
+42|unmocked ambition|A new hope may be described modestly at first to see whether the listener will make room for it.
+43|freedom to leave|An ordinary departure can carry more guilt than the present arrangement actually asks for.
+44|fair interpretation|Careful wording becomes especially important when an earlier account was repeatedly read as something worse.
+45|honest loyalty|A disagreement can require extra reassurance because it once became an accusation about the entire relationship.
+46|practical repair|Concealing a mistake can seem more disturbing than acknowledging it because concealment leaves the actual harm untouched.
+47|wanted company|An invitation is watched for whether the company remains welcome after the useful introductions have been made.
+48|unguarded emotion|A cheerful public expectation can make private distress feel even less permissible to reveal.
+49|personal privacy|A letter left out of reach can provide a small reassurance that a familiar boundary will remain intact.
+50|mutual candor|A difficult truth can feel as though speaking it puts affection itself up for negotiation.
+51|revisable reputation|Meeting an old acquaintance can bring the unwanted expectation of being introduced through the same embarrassing story.
+52|fair opportunity|An assessment made before any real attempt can make the offered opportunity feel merely ceremonial.
+53|protected work|Another person's hurry near unfinished work recalls how easily patient effort can be damaged in a moment.
+54|clear expectations|Unexplained uncertainty is harder to tolerate when earlier patience was treated as permission to provide no answer.
+55|practical support|Encouraging words are now weighed against whether anything changes about the difficulty that prompted them.
+56|recoverable ability|An offer to take over can sting when an injury once became a permanent judgment of incapacity.
+57|emotional boundaries|Another person's rising temper can provoke an old impulse to manage it before considering whether that duty is actually owed.
+58|unhurried grief|A judgment about excessive mourning can recall the effort of keeping a real loss within someone else's comfort.
+59|legitimate wishes|A modest pleasure may still seem to need a fuller justification than anyone has actually requested.
+60|safe honesty|A request for candor is met with attention to whether an unwelcome answer is truly being permitted.
+61|remembered companionship|Waiting at an agreed meeting can awaken an old worry about whether the arrangement mattered equally to both people.
+62|predictable routine|A sudden change can unsettle more than its practical size explains because a familiar support once vanished without warning.
+63|uncoerced promises|A demand for an immediate commitment can recall agreeing while too distressed to consider its full cost.
+64|unclaimed pursuits|An interest's usefulness can become a defensive subject even when its private pleasure should have been sufficient.
+65|cherished places|A threat to a familiar place recalls a previous experience of caring without having enough influence to protect it.
+66|recognized preparation|Being called inexperienced can feel unfairly final when the preparation behind the present attempt is unseen.
+67|lasting regard|A pleasant arrangement is harder to settle into when earlier welcome ended as soon as its convenience did.
+68|attentive receiving|A casually accepted gift can leave a sharp sense that the particular effort of choosing it went unnoticed.
+69|gratitude without submission|An appeal to past generosity can sound like an attempt to remove the right to object to present treatment.
+70|acknowledged fear|Admitting fear may still feel like losing standing, even when naming it would make the next action clearer.
+71|dignified reconciliation|A first conciliatory gesture can be difficult to offer after an earlier one became material for ridicule.
+72|fair responsibility|A difficult result prompts a careful distinction between choices that could be made and circumstances that could not be controlled.
+73|personal privacy|A simple wish to be alone can become tiring when it seems likely to require a defense of innocence.
+74|earned achievement|A remark about luck can obscure the particular preparation and effort that made success possible.
+75|meaningful participation|An instruction without room for judgment recalls being valued only for carrying out someone else's intention.
+76|respected refusal|A quiet no may be followed by unexpected firmness because repetition once proved necessary to make a boundary real.
+77|unconditional affection|Another person's praise can feel like a limited resource when ordinary warmth once had to be won from a comparison.
+78|possible renewal|A fresh attempt can carry the old worry that the earlier failure has already decided how it will be received.
+79|chosen confidence|An unsolicited secret can feel less like trust than a burden whose consequences have been handed over without consent.
+80|steady approval|A mentor's uncertain reaction can make progress difficult to judge even when the work itself has clearly improved.
+81|kept promises|Time passing does not erase the personal meaning of a commitment still remembered by the person waiting for it.
+82|independent friendship|Pressure about a harmless companion can recall affection being treated as something subject to another person's permission.
+83|fair credit|A shared reminiscence is heard carefully for whether the original contribution still has a place in its telling.
+84|dignified recovery|Needing practical care can revive the discomfort of being made to feel inconvenient precisely when independence was limited.
+85|individual judgment|A family name offered during an introduction can bring concern about an inherited verdict arriving before any direct experience.
+86|supported learning|A new responsibility is harder to welcome when there is no clear answer about how its unfamiliar parts will be learned.
+87|safe questions|A genuine question can be softened more than necessary because it once drew an accusation of disrespect.
+88|permitted needs|Praise for being undemanding can feel as though it quietly depends on never asking for anything important.
+89|accepted origins|A familiar custom may be kept private when earlier mockery made sharing it feel exposing.
+90|protected confidence|A vulnerable account no longer feels safely heard if it may later become an example in someone else's lesson.
+91|clear boundaries|Setting a limit can still carry an unwanted need to prove that past help has not been forgotten.
+92|legitimate solitude|A quiet interval can feel difficult to claim without reassuring others that their company has not been rejected.
+93|uncoerced care|A demand made through a loved person's needs can feel especially difficult to examine freely.
+94|fair responsibility|An appeal to smooth things over can revive the feeling of being assigned someone else's offense to apologize for.
+95|considered courage|Practical caution can become an unexpectedly sensitive subject when it has previously been treated as a character defect.
+96|safe refusal|An invitation may seem conditional if an earlier questionable favor proved to be the hidden cost of remaining included.
+97|meaningful possessions|A practical decision about an object feels incomplete when no one asks what personal history it carries.
+98|legitimate kindness|A kind impulse may be concealed from a skeptical audience to keep it from becoming an argument about gullibility.
+99|recoverable mistakes|A small failure can seem to place more than personal pride at risk when the whole household once claimed disappointment in it.
+100|independent safety|An offer of protection is examined for whether it preserves any meaningful room to make a choice.
+101|bodily comfort|An ordinary discomfort may be endured too quietly when it has previously been dismissed as an excessive concern with appearance.
+102|reciprocal loyalty|A request for loyalty can feel incomplete until there is some sign that the obligation runs in both directions.
+103|shared sacrifice|A demand to give something up is harder to accept when those making it protect themselves from the same risk.
+104|unmocked fear|A genuine alarm can be hidden quickly when an earlier admission supplied someone else's amusement.
+105|available comfort|Seeking reassurance can feel like an intrusion before the listener has actually shown any impatience.
+106|trusted recollection|A disputed detail can prompt careful private checking because an earlier clear memory was made to feel unreliable.
+107|unranked ideas|A proposed improvement can seem vulnerable to dismissal for its origin rather than its practical merits.
+108|accurate regard|Praise becomes tiring when accepting it requires continuing a version of the self that cannot be maintained comfortably.
+109|bounded mediation|Another quarrel can seem like an approaching obligation even when the participants have shown no willingness to listen.
+110|personal complexity|A casual public label can feel limiting when one ordinary preference has already been allowed to explain too much.
+111|animal grief|A loss involving an animal may remain private because earlier mourning was treated as a failure of toughness.
+112|appropriate responsibility|Someone else's disappointment can feel like an assigned burden before there has been time to ask whether it is actually deserved.
+113|faithful interpretation|A quoted phrase is uncomfortable when it has once traveled farther than the meaning intended with it.
+114|acknowledged repair|Making amends can feel unfinished when the practical change is accepted but never allowed to alter the judgment.
+115|mutual affection|Affection is harder to enjoy when every meeting seems to require fitting into one person's preferred terms.
+116|fair appraisal|An inspection can bring the expectation that anything successful will be passed over in the search for a defect.
+117|open learning|Asking to learn can feel like claiming a privilege when it has previously been treated as presumption.
+118|heard presence|A louder companion can revive the old experience of being physically present but absent from the exchange.
+119|understood interruption|An abrupt ending to a promising activity leaves a particular need to know what changed and whether anything can be resumed.
+120|intrinsic friendship|Calling a friendship useful can feel like missing the part that made it personally precious.
+121|independent taste|A privately chosen purchase can carry remembered embarrassment even when its enjoyment remains entirely harmless.
+122|recognized agency|Advice becomes uncomfortable when it begins by denying that a personal wish can be understood by the person expressing it.
+123|permitted pride|Satisfaction in good work can be kept smaller in public than it is felt privately.
+124|reliable reassurance|A comforting answer is harder to settle into when a trusted person's earlier certainty proved insufficiently considered.
+125|dependable arrangements|Another request to be flexible can recall a pattern in which one person repeatedly carried the inconvenience.
+126|individual agency|A description of personal usefulness can sound like an arrangement that has forgotten to ask for agreement.
+127|direct answers|A clear refusal would have been easier to accept than prolonged politeness that left the request suspended.
+128|a fair hearing|Repeated postponement can make the promised conversation feel less like a future event than a way of avoiding one.
+129|practical support|Admiration for endurance can seem hollow when it replaces help that could actually reduce the strain.
+130|legitimate peace|A quiet pleasant period can carry an old concern that enjoyment itself will be judged as neglect of duty.
+131|room for unfamiliarity|An unfamiliar task may invite extra preparation to avoid another mistake being mistaken for a lack of intelligence.
+132|fair blame|An appeal to preserve harmony can feel like an invitation to let the wrong account become permanent.
+133|regard beyond wealth|A change in money can seem capable of altering personal welcome after an earlier loss did exactly that.
+134|unconditional affection|Affection can feel insecure when another person's success is interpreted as a corresponding loss of personal standing.
+135|heard experience|An honest account may be shortened prematurely to avoid the remembered accusation that explaining pain is self-indulgent.
+136|honest readiness|Public confidence can feel like a demand to hide the practical information that more preparation is still needed.
+137|heeded warnings|A preventable problem can bring frustration sharpened by the memory of having tried to draw attention to it earlier.
+138|accepted taste|A harmless absorbing interest can still be guarded as though it were something requiring correction.
+139|chosen tradition|A familiar custom is difficult to praise unreservedly when preserving it once meant continuing a private hurt.
+140|safe questions|A shift in warmth after a reasonable question can make welcome feel dependent on remaining conveniently uncurious.
+141|unchanged commitments|An altered promise can feel especially unfair once the personal cost of keeping one side has already been paid.
+142|unburdened care|Basic care is harder to receive comfortably when it has once been presented as a debt with no possible end.
+143|dignified reassurance|An ordinary request for reassurance can be kept unspoken rather than risk becoming a joke again.
+144|unguarded emotion|A disappointing result may be met with a practiced public expression that leaves the private feeling nowhere to go.
+145|respected privacy|A boundary crossed for amusement can make later playful approaches harder to distinguish from another deliberate intrusion.
+146|participating in care|Being kept away from helping a beloved person left concern with too little practical place to go.
+147|secure participation|A shared project can feel less dependable when its language suggests that anyone could occupy the same personal place.
+148|legitimate rest|A pause can feel borrowed from an obligation even when the work has been carried far enough for the day.
+149|recognized achievement|An accomplishment called merely expected duty loses acknowledgment of the difficulty involved in actually carrying it through.
+150|unforced regard|An expectation to admire someone can revive the discomfort of being asked to praise a person who offered little reciprocal respect.
+151|permitted remembrance|An old memory may remain private if bringing it up has previously been treated as disrupting a more convenient account.
+152|wanted company|A social approach can seem directed past the actual person toward the more important connection behind them.
+153|sincere friendship|A friendly gesture can be offered more cautiously after an earlier one was read as an attempt to obtain advantage.
+154|safe uncertainty|Admitting an unanswered question feels important because concealing one once allowed a manageable difficulty to grow.
+155|ordinary affection|A wish for warmth can be kept hidden when it has previously been used to make the person feel less adult.
+156|acknowledged sacrifice|A quiet sacrifice can leave a lingering ache when its cost was real but its existence was never recognized.
+157|regard after success|Success can carry an unexpected loneliness when a trusted person's interest disappears once encouragement is no longer needed.
+158|early consultation|Being informed of a decision made in one's name can revive a sharp need to recover the missing choice.
+159|unconditional affection|A useful role can feel secure while the more private question of being loved remains unanswered.

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance - own noble, own notable, and foreign noble investigations",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "ui_open", "targetSearch": "spymaster", "timeoutSeconds": 60 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "intelligence", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "people", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-target", "value": "first", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-action", "value": "person_skills", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "begin", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "next-people-group", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-target", "value": "first", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-action", "value": "person_relationships", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "begin", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "next-people-group", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-target", "value": "foreign-noble", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-action", "value": "person_rumors", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "begin", "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "capture", "batch": "people_scope_wave", "minimumNewMissions": 3, "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "ui_close", "timeoutSeconds": 30 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 10, "timeoutSeconds": 7200 },
+    { "operation": "wait_for_memory", "waitMilliseconds": 5000, "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "after_people_scope_wave", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

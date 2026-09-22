@@ -1,0 +1,171 @@
+Create an exceptionally photorealistic cinematic scene inside the **stable courtyard of a powerful Vlandian castle**, strongly reflecting Vlandia's feudal aristocracy, mounted nobility, knightly culture, hunting traditions, military travel, and dependence upon high-quality horses.
+
+This is an active working courtyard within the secure castle complex.
+
+It should not resemble a modern equestrian center or an immaculate fantasy stable.
+
+The courtyard is enclosed by pale stone castle walls and large timber stable buildings with:
+
+- Heavy oak posts.
+- Dark timber framing.
+- Stone foundations.
+- Wide stable doors.
+- Iron hinges.
+- Covered galleries.
+- Hay loft openings.
+- Wooden shutters.
+- Tack rooms.
+- Feed storage.
+- Small equipment sheds.
+- Water troughs.
+- Hitching rails.
+- Saddle racks.
+- Bridle hooks.
+- Buckets.
+- Brushes.
+- Hay.
+- Straw.
+- Blankets.
+- Horseshoes.
+- Hoof tools.
+- Leather tack.
+- Saddlebags.
+- Riding cloaks.
+- Lances stored safely where appropriate.
+- Hunting equipment.
+- Carriage or wagon equipment where believable.
+
+The central courtyard ground should be **smooth, naturally compacted earth**, worn by hooves and boots.
+
+Avoid tiled, square, blocky, checkerboard, or blotchy terrain.
+
+The ground may show realistic:
+
+- Hoofprints.
+- Damp areas.
+- Thin scattered straw.
+- Small patches of mud near troughs.
+- Dry dust in warm weather.
+- Smoothly worn paths between stable doors.
+
+Several realistic horses may be present.
+
+Vlandian horses should reflect the needs of a wealthy feudal cavalry culture and may include:
+
+- Powerful warhorses.
+- Riding horses.
+- Hunters.
+- Palfreys.
+- Pack horses.
+- Younger horses in training.
+
+Do not make every horse enormous or armored.
+
+Horses must look anatomically real, naturally proportioned, correctly interacting with the ground and stable equipment, and behaviorally believable.
+
+Possible activities include:
+
+- Grooming a horse.
+- Brushing its coat.
+- Checking its legs.
+- Cleaning a hoof.
+- Examining a horseshoe.
+- Saddling.
+- Unsaddling.
+- Adjusting a bridle.
+- Checking girth straps.
+- Preparing saddlebags.
+- Feeding a horse.
+- Offering an apple or piece of carrot.
+- Holding reins.
+- Walking a horse slowly.
+- Cooling a horse after travel.
+- Inspecting a valuable mount.
+- Checking a horse after a difficult journey.
+- Preparing for a hunt.
+- Preparing for travel.
+- Preparing for military departure.
+- Inspecting riding equipment.
+- Cleaning tack.
+- Repairing a strap.
+- Choosing between available mounts.
+- Sitting on a bench near the stables.
+- Talking privately while occupied with a horse.
+- Seeking somewhere less formal than the castle interior.
+- Spending time with a favored horse for personal comfort.
+
+### ABSOLUTE HUMAN CHARACTER REQUIREMENTS
+
+Use **ONLY the full-body source character images supplied directly with this image-generation prompt** as human beings.
+
+Every visible human must correspond exactly to one supplied source character.
+
+Do not generate:
+
+- Stable hands.
+- Grooms.
+- Guards.
+- Knights.
+- Squires.
+- Servants.
+- Pages.
+- Farriers.
+- Riders.
+- Workers.
+- Children.
+- Courtiers.
+- Background people.
+- People visible through doors or windows.
+- Human silhouettes.
+- Reflections containing unspecified humans.
+
+If one human source character is supplied, exactly one visible human may appear.
+
+Realistic horses and ordinary stable animals may appear without character reference images, but **no additional humans may be invented**.
+
+If a particular named or identifiable horse is supplied as a visual reference, preserve that animal's appearance as accurately as possible. Otherwise generate only believable culturally appropriate horses rather than extraordinary fantasy animals.
+
+Preserve each supplied human character's exact:
+
+- Facial identity.
+- Apparent age.
+- Skin tone.
+- Skin texture.
+- Eyes.
+- Eyebrows.
+- Nose.
+- Lips.
+- Jaw.
+- Chin.
+- Hair.
+- Facial hair.
+- Scars.
+- Height.
+- Shoulder width.
+- Torso proportions.
+- Waist.
+- Hips.
+- Arm and leg proportions.
+- Body mass.
+- Muscularity.
+- Overall physique.
+
+Do not alter a character's physique to make them look more suited to riding.
+
+Clothing may be changed to realistic **Vlandian riding, traveling, hunting, civilian, or noble stable clothing** appropriate to their status and activity.
+
+Use believable linen, wool, leather, tunics, hose, trousers where appropriate, gowns adapted naturally where appropriate, riding boots, cloaks, gloves, belts, and restrained noble ornament.
+
+Armor should appear only when the situation genuinely warrants military preparation.
+
+Characters should interact naturally and safely with horses.
+
+Hands must contact reins, brushes, saddles, tack, and the animal's body correctly.
+
+Horse scale, anatomy, hooves, legs, reins, saddles, and human-horse interaction must be physically believable.
+
+The finished result must look like **live-action historical photography taken in a real medieval castle stable courtyard**.
+
+Maximum possible photorealism.
+
+---

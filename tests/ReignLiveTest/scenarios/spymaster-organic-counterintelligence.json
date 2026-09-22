@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance — natural counterintelligence attempts",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "ui_open", "targetSearch": "spymaster", "timeoutSeconds": 60 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "intelligence", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "lands", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-target", "value": "player-holding", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "select-action", "value": "counterintelligence", "timeoutSeconds": 30 },
+    { "operation": "ui_action", "targetSearch": "spymaster", "text": "begin", "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "capture", "batch": "counterintelligence_attempt_1", "minimumNewMissions": 1, "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "ui_close", "timeoutSeconds": 30 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 12, "timeoutSeconds": 7200 },
+    { "operation": "wait_for_memory", "waitMilliseconds": 3000, "timeoutSeconds": 30 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "after_counterintelligence_attempt_1", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}

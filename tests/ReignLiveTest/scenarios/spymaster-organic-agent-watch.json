@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "label": "Spymaster organic acceptance — twelve natural foreign-agent cycles",
+  "mode": "spymaster",
+  "presentation": "visible",
+  "effects": "full",
+  "steps": [
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_01", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_02", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_03", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_04", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_05", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_06", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_07", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_08", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_09", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_10", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_11", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 },
+    { "operation": "world_advance", "mode": "passive_world", "days": 5, "timeoutSeconds": 7200 },
+    { "operation": "spymaster_organic", "phase": "observe", "stage": "agent_cycle_12", "fixtureRunId": "spymaster_organic_launch", "timeoutSeconds": 120 }
+  ]
+}
