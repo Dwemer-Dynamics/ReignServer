@@ -95,7 +95,10 @@ ORDER BY observed_ts DESC LIMIT 1;", new Dictionary<string, object>
             List<string> knownBy = MergeStringLists(ReadStringList(item, "known_by"), ReadStringList(item, "knownBy"));
             if (knownBy.Count == 0 && !string.IsNullOrWhiteSpace(owner)) knownBy.Add(owner);
             List<string> hiddenFrom = MergeStringLists(ReadStringList(item, "hidden_from"), ReadStringList(item, "hiddenFrom"));
-            string truthStatus = FirstNonEmpty(ReadFirstString(item, "truthStatus", "truth_status", "status"), kind == "belief" ? "believed" : "asserted");
+            string truthStatus = IsPrivateMentalLayer(kind)
+                ? (kind == "belief" ? "believed" : "interpretation")
+                : FirstNonEmpty(ReadFirstString(item, "truthStatus", "truth_status", "status"), "asserted");
+            if (IsPrivateMentalLayer(kind)) knownBy = new List<string> { owner };
             ExecuteSql(connection, @"INSERT INTO temporal_knowledge_assertions
 (assertion_id,campaign_id,fact_key,subject_id,predicate,object_id,claim,perspective_owner_id,assertion_kind,confidence,truth_status,
 valid_from_ts,valid_to_ts,observed_ts,supersedes_assertion_id,source_event_id,source_record_id,known_by_json,hidden_from_json,visibility,payload_json)
@@ -146,12 +149,17 @@ VALUES($id,$from,$to,$type,$assertion,$ts,NULL,'{}');", new Dictionary<string, o
             KnowledgeAccessContext knowledge, List<string> queryTerms, int limit)
         {
             List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT * FROM temporal_knowledge_assertions
-WHERE campaign_id=$campaign AND valid_to_ts IS NULL ORDER BY observed_ts DESC LIMIT $limit;",
-                new Dictionary<string, object> { ["campaign"] = campaignId ?? "", ["limit"] = Math.Max(20, limit * 10) });
+WHERE campaign_id=$campaign AND valid_to_ts IS NULL
+AND (assertion_kind NOT IN ('belief','comprehension','interpretation') OR perspective_owner_id=$observer)
+ORDER BY observed_ts DESC LIMIT $limit;",
+                new Dictionary<string, object> { ["campaign"] = campaignId ?? "", ["observer"] = knowledge == null ? "" : knowledge.NpcId,
+                    ["limit"] = Math.Max(20, limit * 10) });
             string npc = knowledge == null ? "" : knowledge.NpcId;
             return rows.Where(row =>
                 {
                     if (KnowledgeListContains(row, "hidden_from_json", npc)) return false;
+                    if (IsPrivateMentalLayer(ReadString(row, "assertion_kind", ""))
+                        && !KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), npc)) return false;
                     string visibility = ReadString(row, "visibility", "private");
                     bool visible = string.IsNullOrWhiteSpace(npc) || visibility.Equals("public", StringComparison.OrdinalIgnoreCase)
                         || KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), npc)
@@ -175,9 +183,13 @@ WHERE campaign_id=$campaign AND valid_to_ts IS NULL ORDER BY observed_ts DESC LI
             {
                 string claim = FirstNonEmpty(ReadString(row, "claim", ""),
                     ReadString(row, "subject_id", "") + " " + ReadString(row, "predicate", "") + " " + ReadString(row, "object_id", ""));
-                text.Append("- [").Append(ReadString(row, "truth_status", "asserted")).Append(", confidence ")
+                string kind = ReadString(row, "assertion_kind", "");
+                string status = IsPrivateMentalLayer(kind) ? (kind == "belief" ? "believed" : "interpretation")
+                    : ReadString(row, "truth_status", "asserted");
+                text.Append("- [").Append(status).Append(", owner=")
+                    .Append(ReadString(row, "perspective_owner_id", "unknown")).Append(", confidence ")
                     .Append(ReadDouble(row, "confidence", 0.5d).ToString("0.00", CultureInfo.InvariantCulture)).Append("] ")
-                    .Append(LimitText(claim, 700)).Append(" (source ").Append(ReadString(row, "source_event_id", "unknown")).AppendLine(")");
+                    .Append(claim).Append(" (source ").Append(ReadString(row, "source_event_id", "unknown")).AppendLine(")");
             }
             return text.ToString().TrimEnd();
         }

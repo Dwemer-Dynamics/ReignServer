@@ -501,8 +501,8 @@ namespace ReignBetaServer
         {
             bool correspondence = (requestType ?? "").IndexOf("correspondence", StringComparison.OrdinalIgnoreCase) >= 0;
             var preserve = correspondence
-                ? new[] { "shouldReply", "body", "reason", "actionGate", "rebellionDecision", "campaignOrder", "evidenceSourceIds", "uncertainty" }
-                : new[] { "reply", "participation", "reactionTargetHeroStringId", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "conceptionGate", "socialSignals", "identityIntroductions", "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "courtKnowledgeWrites", "sceneStateUpdates", "stateUpdates", "suggestedActions", "evidenceSourceIds", "uncertainty" };
+                ? new[] { "shouldReply", "body", "reason", "actionGate", "proposalDecisions", "rebellionDecision", "campaignOrder", "continuityWrites", "evidenceSourceIds", "uncertainty" }
+                : new[] { "reply", "participation", "reactionTargetHeroStringId", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals", "identityIntroductions", "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "courtKnowledgeWrites", "sceneStateUpdates", "stateUpdates", "continuityWrites", "suggestedActions", "evidenceSourceIds", "uncertainty" };
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 ["schema"] = "reign-codex-compact-metadata-v1",

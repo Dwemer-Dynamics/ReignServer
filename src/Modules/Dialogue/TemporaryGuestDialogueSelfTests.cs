@@ -15,7 +15,7 @@ namespace ReignBetaServer
             var native = TestDict("schema", "reign-temporary-guest-dialogue-v1", "enabled", true,
                 "heroId", heroId, "agreementId", "guest_fixture_agreement", "purpose", "One-day Phycaon outing",
                 "termKind", "Fixed", "phase", "Active", "startedDay", 110d, "reviewDueDay", 111d,
-                "inMainParty", true, "observedWorldDay", 110.1d);
+                "inMainParty", true, "observedWorldDay", 110.1d, "agreementRevision", 3);
             var payload = PromptParityPayload("in_person", false);
             payload["heroStringId"] = heroId;
             payload["worldDay"] = 110.1d;
@@ -68,6 +68,122 @@ namespace ReignBetaServer
                 native["phase"] = phase;
                 check("no_duplicate_departure_" + phase, flagged("I will leave your party.", accepted), null);
             }
+            native["phase"] = "Active";
+
+            var routingPayload = ReadDictionary(DefaultActionTestSnapshot(), "payload");
+            var routingHero = ReadDictionary(routingPayload, "hero");
+            routingPayload["speakerHeroStringId"] = heroId;
+            routingPayload["heroStringId"] = heroId;
+            routingHero["heroStringId"] = heroId;
+            routingHero["currentPartyId"] = "player_party";
+            routingPayload["worldDay"] = 110.1d;
+            routingPayload["temporaryPartyGuest"] = native;
+            var settings = new Dictionary<string, object>(LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
+            const string capturedRenewal = "I feel we are getting to the end of our search, Ive heard no reports of him falling, I used Northern Empire contacts and he isnt a prisoner, theres a very good chance hes alive and nearby. It means a great deal to have you with me. Lets talk again in another 20 days and see if you still feel the same about me as I do you. Your scouting and advise has been invaluable.";
+            var renewalGate = TestDict("needed", true, "commitment", "accepted", "intent",
+                "Hulara renews her traveling companion commitment to Michael's party for 20 more days, contingent on Michael answering her contingency plan question before she scouts ahead.");
+            native["phase"] = "ReviewDue";
+            var lifecycleAllowed = new HashSet<string> { "accept_temporary_party_guest", "renew_temporary_party_guest", "end_temporary_party_guest" };
+            foreach (string utterance in new[] { capturedRenewal, "Stay another 20 days as my traveling companion.",
+                "Extend our scout arrangement by 20 more days.", "Renew our arrangement for 20 additional days." })
+            {
+                var gate = CloneDictionary(renewalGate);
+                check("renewal_survives_continuity_" + results.Count,
+                    !NormalizeAlreadySatisfiedContinuityGate(gate, routingPayload, routingHero), gate);
+                var choices = BuildAllowedActionPlannerChoices(settings, routingPayload, routingHero, gate,
+                    utterance, "I agree to twenty more days.", 10);
+                check("renewal_not_initial_join_" + results.Count,
+                    choices.Any(x => ReadString(x, "command", "") == "renew_temporary_party_guest")
+                    && !choices.Any(x => ReadString(x, "command", "") == "accept_temporary_party_guest"), choices);
+                var renewal = BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
+                    utterance, "I agree to twenty more days.", lifecycleAllowed);
+                var terms = ReadDictionary(renewal, "terms");
+                check("renewal_exact_twenty_and_identity_" + results.Count,
+                    ReadString(renewal, "command", "") == "renew_temporary_party_guest"
+                    && ReadDouble(terms, "durationDays", 0d) == 20d
+                    && ReadString(terms, "termKind", "") == "fixed"
+                    && ReadBool(terms, "consentConfirmed", false)
+                    && ReadString(terms, "agreementId", "") == "guest_fixture_agreement"
+                    && ReadInt(terms, "expectedAgreementRevision", -1) == 3
+                    && ReadDouble(terms, "expectedReviewDueDay", 0d) == 111d, renewal);
+                var planned = TestDict("command", "renew_temporary_party_guest", "terms", TestDict(
+                    "agreementId", "invented", "expectedReviewDueDay", 999d, "purpose", "Scouting", "termKind", "fixed", "durationDays", 20));
+                CompleteConversationActionTerms(planned, routingPayload, routingHero, utterance);
+                check("planner_terms_bound_to_native_" + results.Count,
+                    ReadString(ReadDictionary(planned, "terms"), "agreementId", "") == "guest_fixture_agreement"
+                    && ReadInt(ReadDictionary(planned, "terms"), "expectedAgreementRevision", -1) == 3
+                    && ReadDouble(ReadDictionary(planned, "terms"), "expectedReviewDueDay", 0d) == 111d
+                    && ReadDouble(ReadDictionary(planned, "terms"), "durationDays", 0d) == 20d
+                    && ReadString(ReadDictionary(planned, "terms"), "purpose", "") == "Scouting", planned);
+            }
+            foreach (string commitment in new[] { "refused", "conditional", "considering", "roleplay_only" })
+            {
+                var gate = CloneDictionary(renewalGate);
+                gate["commitment"] = commitment;
+                check("renewal_does_not_invent_consent_" + commitment,
+                    TemporaryPartyGuestCandidateToPreserve(gate, capturedRenewal, routingPayload, routingHero) == ""
+                    && BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
+                        capturedRenewal, "We need to discuss it.", lifecycleAllowed) == null, null);
+            }
+            foreach (string intent in new[] { "The speaker agrees to stay for twenty more days.",
+                "The speaker extends the scout arrangement by 20 additional days.",
+                "The travelling companion accepts another 20 days of service." })
+            {
+                var gate = TestDict("needed", true, "commitment", "accepted", "intent", intent);
+                var renewal = BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
+                    "Do you agree?", intent, lifecycleAllowed);
+                check("renewal_variant_" + results.Count, ReadString(renewal, "command", "") == "renew_temporary_party_guest"
+                    && ReadDouble(ReadDictionary(renewal, "terms"), "durationDays", 0) == 20, renewal);
+            }
+            var missingTermGate = TestDict("needed", true, "commitment", "accepted", "intent", "The speaker renews the scout arrangement.");
+            check("unrelated_renewed_friendship_not_guest_renewal", TemporaryPartyGuestCandidateToPreserve(
+                TestDict("needed", true, "commitment", "accepted", "intent", "The speaker renews a friendship."),
+                "I appreciate your friendship.", routingPayload, routingHero) == "", null);
+            check("missing_extension_term_not_invented", BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate,
+                routingPayload, routingHero, "Stay longer?", "I will stay a little longer.", lifecycleAllowed) == null, null);
+            var openRenewal = BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate, routingPayload, routingHero,
+                "Renew our arrangement with no fixed end date, reviewed every five days.", "I agree.", lifecycleAllowed);
+            check("explicit_open_ended_renewal_preserved", ReadString(ReadDictionary(openRenewal, "terms"), "termKind", "") == "open_ended"
+                && ReadInt(ReadDictionary(openRenewal, "terms"), "reviewIntervalDays", 0) == 5, openRenewal);
+            var transportPayload = ReadDictionary(DefaultActionTestSnapshot(), "payload");
+            var transportHero = ReadDictionary(transportPayload, "hero");
+            string transportHeroId = ReadString(transportHero, "heroStringId", "");
+            var transportNative = CloneDictionary(native);
+            transportNative["heroId"] = transportHeroId;
+            transportPayload["speakerHeroStringId"] = transportHeroId;
+            transportPayload["temporaryPartyGuest"] = transportNative;
+            transportPayload["worldDay"] = 110.1d;
+            var transportAction = BuildAcceptedTemporaryPartyGuestFallbackAction(renewalGate, transportPayload, transportHero,
+                capturedRenewal, "I agree to twenty more days.", lifecycleAllowed);
+            var transportRecord = NormalizeActionCommand(transportAction, "guest_dialogue_transport_" + Guid.NewGuid().ToString("N"),
+                out var transportErrors, transportPayload, capturedRenewal);
+            var transportTerms = TryParseJsonObject(ReadString(transportRecord, "termsJson", ""));
+            check("native_action_transport_keeps_exact_terms_and_revision", transportErrors.Count == 0
+                && ReadString(transportRecord, "type", "") == "RegularRenewTemporaryPartyGuest"
+                && ReadString(transportRecord, "actorHeroStringId", "") == transportHeroId
+                && ReadString(transportTerms, "agreementId", "") == "guest_fixture_agreement"
+                && ReadInt(transportTerms, "expectedAgreementRevision", -1) == 3
+                && ReadDouble(transportTerms, "durationDays", 0) == 20d,
+                TestDict("record", transportRecord, "errors", transportErrors));
+            foreach (string phase in new[] { "Returning", "Completed", "Departing", "AwaitingStart" })
+            {
+                native["phase"] = phase;
+                check("renewal_not_eligible_" + phase,
+                    !DialoguePlannerCandidateEligible("renew_temporary_party_guest", routingPayload, routingHero, renewalGate, capturedRenewal), null);
+            }
+            native["phase"] = "ReviewDue";
+            native["inMainParty"] = false;
+            check("absent_guest_cannot_renew", !DialoguePlannerCandidateEligible("renew_temporary_party_guest",
+                routingPayload, routingHero, renewalGate, capturedRenewal), null);
+            native["inMainParty"] = true;
+            native["observedWorldDay"] = 109d;
+            check("stale_context_cannot_renew", !DialoguePlannerCandidateEligible("renew_temporary_party_guest",
+                routingPayload, routingHero, renewalGate, capturedRenewal), null);
+            native["observedWorldDay"] = 110.1d;
+            native["reviewActionStatus"] = "Failed";
+            native["reviewActionMessage"] = "This noble already has an active temporary-party agreement.";
+            check("native_failure_grounded_in_next_turn", BuildTemporaryGuestDialoguePromptBlock(routingPayload, heroId)
+                .Contains("This noble already has an active temporary-party agreement."), null);
             native["phase"] = "Active";
 
             string campaign = "guest_dialogue_test_" + Guid.NewGuid().ToString("N");

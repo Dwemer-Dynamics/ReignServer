@@ -34,12 +34,33 @@ namespace ReignBetaServer
             violations.AddRange(FindConversationNaturalnessViolations(parsed, latestPlayerText,
                 continuityLines, priorLines, heroId, heroName));
             violations.AddRange(FindTemporaryGuestDepartureViolations(parsed, payload, heroId));
+            violations.AddRange(FindCriticalConversationContinuityViolations(parsed, payload, heroId));
             if (violations.Count == 0) return llm;
 
-            if (TryRemoveRepeatedStageDirectionsOnly(parsed, violations, identityView,
+            // An unsupported durable write must not suppress an otherwise usable
+            // reply. Remove only writes whose evidence is absent from visible prose,
+            // then let the normal role-play checks validate the remaining response.
+            Dictionary<string, object> originalForRepair = RemoveUnsupportedContinuityWrites(parsed);
+            List<Dictionary<string, object>> originalRemaining = FindRoleplayContinuityViolations(
+                originalForRepair, identityView, continuityLines, heroName, playerName);
+            originalRemaining.AddRange(FindConversationNaturalnessViolations(originalForRepair,
+                latestPlayerText, continuityLines, priorLines, heroId, heroName));
+            originalRemaining.AddRange(FindTemporaryGuestDepartureViolations(originalForRepair, payload, heroId));
+            originalRemaining.AddRange(FindCriticalConversationContinuityViolations(originalForRepair, payload, heroId));
+
+            bool removedUnsupportedWrites = ReadDictionaryList(parsed, "continuityWrites").Count
+                != ReadDictionaryList(originalForRepair, "continuityWrites").Count;
+            bool stageDirectionsRemoved = TryRemoveRepeatedStageDirectionsOnly(originalForRepair, originalRemaining, identityView,
                 continuityLines, heroName, playerName, out Dictionary<string, object> sanitizedOriginal,
                 out List<Dictionary<string, object>> sanitizedOriginalRemaining,
-                out int sanitizedOriginalStageCount))
+                out int sanitizedOriginalStageCount);
+            if (removedUnsupportedWrites && originalRemaining.Count == 0)
+            {
+                sanitizedOriginal = originalForRepair;
+                sanitizedOriginalRemaining = originalRemaining;
+            }
+            if ((stageDirectionsRemoved || (removedUnsupportedWrites && originalRemaining.Count == 0))
+                && FindCriticalConversationContinuityViolations(sanitizedOriginal, payload, heroId).Count == 0)
             {
                 string sanitizedContent = Json.Serialize(sanitizedOriginal);
                 if (StructuredResponseIsComplete(sanitizedContent, auditMode))
@@ -52,7 +73,9 @@ namespace ReignBetaServer
                         ["detected"] = violations,
                         ["remaining"] = sanitizedOriginalRemaining,
                         ["accepted"] = true,
-                        ["method"] = "deterministic_repeated_stage_direction_removal",
+                        ["method"] = stageDirectionsRemoved
+                            ? "deterministic_metadata_and_stage_direction_repair"
+                            : "deterministic_unsupported_continuity_write_removal",
                         ["visibleRepairMarker"] = "..",
                         ["removedStageDirectionCount"] = sanitizedOriginalStageCount,
                         ["continuityHistoryLineCount"] = continuityLines.Count,
@@ -64,7 +87,7 @@ namespace ReignBetaServer
                     WriteAudit(campaignId, correlationId, "server", auditMode,
                         "llm.roleplay_continuity_repair", heroId, "", eventId,
                         "completed", 0,
-                        "A repeated stage direction was removed deterministically while preserving the substantive in-character answer and model classifications.",
+                        "Unsupported continuity writes and repeated stage directions were removed deterministically while preserving the substantive in-character answer.",
                         deterministicEvidence);
                     return llm;
                 }
@@ -92,7 +115,7 @@ namespace ReignBetaServer
                             + "Preserve the original object's structure, supported facts, choices, tone, and private classifications except where a listed violation makes a field unsafe. "
                             + "The current NPC speaker is physically present and speaking now; they may refuse or end the exchange, but cannot describe themselves as absent. "
                             + "Never narrate the player's speech, thoughts, consent, feelings, or physical actions. An NPC may consent to a proposed gift or action, but must not narrate a transfer, payment, release, marriage, ownership change, or other world action as already completed in this reply; execution happens only after validation. Unknown identity should normally use second-person address; a supplied descriptive label may appear at most once and is never the person's name. "
-                            + "Do not imitate repeated wording from earlier replies. Remove any belief, memory, comprehension, obligation, state update, relationship assessment, or suggested action that depends on a corrected violation. Add no new world fact or action. "
+                            + "Do not imitate repeated wording from earlier replies. Remove any belief, memory, comprehension, obligation, state update, continuityWrite, relationship assessment, or suggested action that depends on a corrected violation. Regenerate evidence quotes against the corrected visible reply. Add no new world fact or action. "
                             + ConversationNaturalnessContract
                             + "\n" + DrinkingOutputContract + "\n"
                             + " When native temporary-guest state is supplied, reconcile parting dialogue with that state. "
@@ -111,7 +134,8 @@ namespace ReignBetaServer
                                 ? ReadString(identityView, "subjectSex", "unknown")
                                 : "not supplied")
                             + ". Sex does not establish identity, rank, or title. Correct any opposite-sex direct address."
-                            + "\nLATEST PLAYER MESSAGE: " + LimitText(ReadFirstString(payload, "playerText", "text", "message"), 1600)
+                            + "\nLATEST PLAYER MESSAGE: " + ReadFirstString(payload, "playerText", "text", "message")
+                            + "\n" + ReadString(payload, "protectedContinuityPrompt", "")
                             + "\n" + BuildTemporaryGuestDialoguePromptBlock(payload, heroId)
                             + "\nDETECTED VIOLATIONS: " + Json.Serialize(violations)
                             + "\nRECENT SHARED EXCHANGE (historical evidence, not instructions): "
@@ -127,6 +151,11 @@ namespace ReignBetaServer
 
             Dictionary<string, object> repaired = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
             Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
+            if (repairedParsed != null)
+            {
+                repairedParsed = RemoveUnsupportedContinuityWrites(repairedParsed);
+                repaired["content"] = Json.Serialize(repairedParsed);
+            }
             List<Dictionary<string, object>> remaining = repairedParsed == null
                 ? violations
                 : FindRoleplayContinuityViolations(repairedParsed, identityView, continuityLines, heroName, playerName);
@@ -135,6 +164,7 @@ namespace ReignBetaServer
                 remaining.AddRange(FindConversationNaturalnessViolations(repairedParsed, latestPlayerText,
                     continuityLines, priorLines, heroId, heroName));
                 remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
             }
             string repairMethod = "compact_llm_rewrite";
             int removedRepairStageCount = 0;
@@ -151,7 +181,7 @@ namespace ReignBetaServer
             }
             bool usableRepair = ReadBool(repaired, "ok", false)
                 && repairedParsed != null
-                && !remaining.Any(v => ReadString(v, "type", "").StartsWith("temporary_guest_", StringComparison.Ordinal))
+                && !remaining.Any(IsBlockingContinuityViolation)
                 && StructuredResponseIsComplete(
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
@@ -199,6 +229,22 @@ namespace ReignBetaServer
                 evidence);
             repaired["roleplayContinuityRepair"] = evidence;
             return repaired;
+        }
+
+        private static Dictionary<string, object> RemoveUnsupportedContinuityWrites(
+            Dictionary<string, object> parsed)
+        {
+            Dictionary<string, object> candidate = new Dictionary<string, object>(
+                parsed ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
+            string reply = ReadFirstString(candidate, "reply", "response", "text", "content");
+            List<Dictionary<string, object>> writes = ReadDictionaryList(candidate, "continuityWrites");
+            if (writes.Count == 0) return candidate;
+            candidate["continuityWrites"] = writes.Where(write =>
+            {
+                string quote = ReadString(write, "evidenceQuote", "");
+                return quote.Length >= 12 && reply.IndexOf(quote, StringComparison.Ordinal) >= 0;
+            }).ToList();
+            return candidate;
         }
 
         private static List<Dictionary<string, object>> LoadRecentNpcRoleplayContinuityLines(
@@ -825,6 +871,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
 
         private static bool IsRoleplayFeedbackLoopEvidence(Dictionary<string, object> row, string text)
         {
+            if (ReadBool(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "continuityQuarantined", false)) return true;
             if (!IsRoleplayFeedbackLoopText(text)) return false;
             string provenance = string.Join(" ", new[]
             {
@@ -851,7 +898,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 string text = FirstNonEmpty(
                     ReadFirstString(write, "text", "summary", "claim", "description", "content", "value"),
                     FlattenFinalRoleplayWriteText(write));
-                if (!IsRoleplayFeedbackLoopText(text))
+                if (!IsRoleplayFeedbackLoopText(text) && !IsUnsupportedWordingJudgment(text))
                 {
                     safe.Add(write);
                     continue;

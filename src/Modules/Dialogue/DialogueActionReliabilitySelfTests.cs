@@ -181,6 +181,8 @@ namespace ReignBetaServer
                     "Adram, stay behind our party on the road and keep to our route."),
                 TestDict("command", "follow", "text",
                     "Adram, stay close and follow me through this room."),
+                TestDict("command", "follow", "text",
+                    "Adram, walk with me and stay by my side wherever I go."),
                 TestDict("command", "stop_following", "text",
                     "Adram, break off the escort and go your own way."),
                 TestDict("command", "stop_following", "text",

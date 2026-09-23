@@ -122,7 +122,8 @@ namespace ReignBetaServer
                 }
             }
             double targetDay = ExtractTargetWorldDay(normalized, currentDay);
-            bool exact = explicitExactRecall || ordered.Contains("exact_history", StringComparer.OrdinalIgnoreCase);
+            bool exact = explicitExactRecall || ordered.Contains("exact_history", StringComparer.OrdinalIgnoreCase)
+                || scores["world_affairs"] > 0d || LooksLikeNamedWorldRecall(topic);
             return new Dictionary<string, object>
             {
                 ["primaryLane"] = primary,
@@ -294,7 +295,7 @@ namespace ReignBetaServer
             }
 
             List<Dictionary<string, object>> matched = new List<Dictionary<string, object>>();
-            List<string> terms = MemoryQueryTerms(topic).Where(term => !ExactRecallStopWords.Contains(term, StringComparer.OrdinalIgnoreCase)).Take(10).ToList();
+            List<string> terms = MemoryQueryTerms(topic).Where(term => !ExactRecallStopWords.Contains(term, StringComparer.OrdinalIgnoreCase)).Take(64).ToList();
             string fts = BuildFtsQuery(terms);
             string excludeCurrent = string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND s.session_id<>$excluded_session";
             Dictionary<string, object> searchParameters = new Dictionary<string, object> { ["query"] = fts, ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" };
@@ -422,19 +423,21 @@ WHERE session_id=$session AND status='active'
                 && ReadString(turn, "exchange_id", "").Equals(anchorExchangeId, StringComparison.OrdinalIgnoreCase));
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             int remaining = Math.Max(120, effectiveBudget - sourceHeader.Length);
-            for (int index = 0; index < prioritized.Count && remaining >= 120; index++)
+            for (int index = 0; index < prioritized.Count && (remaining >= 120 || charBudget >= 24000); index++)
             {
                 Dictionary<string, object> turn = prioritized[index];
                 string line = RenderExactHistoryTurn(turn, knowledge);
+                bool requiredWholeTurn = charBudget >= 24000 && (ReadString(turn, "turn_id", "") == anchorTurnId
+                    || (anchorExchangeId.Length > 0 && ReadString(turn, "exchange_id", "") == anchorExchangeId));
                 int partnerReserve = index == 0 && hasExchangePartner
                     ? (effectiveBudget < 1200 ? 120 : Math.Min(800, Math.Max(180, effectiveBudget / 3)))
                     : 0;
                 int allowed = Math.Max(0, remaining - partnerReserve - 1);
-                if (allowed < 120)
+                if (allowed < 120 && !requiredWholeTurn)
                 {
                     continue;
                 }
-                string rendered = ExactHistoryLineExcerpt(line, terms, allowed);
+                string rendered = charBudget >= 24000 ? (requiredWholeTurn || line.Length <= allowed ? line : "") : ExactHistoryLineExcerpt(line, terms, allowed);
                 if (string.IsNullOrWhiteSpace(rendered))
                 {
                     continue;
@@ -455,7 +458,10 @@ WHERE session_id=$session AND status='active'
             }
             return new Dictionary<string, object>
             {
-                ["text"] = SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
+                ["text"] = charBudget >= 24000
+                    ? RenderContinuityRecord(string.Join(",", included), "targeted_historical_exchange", npcId, sessionId,
+                        ReadDouble(anchor, "world_day", 0d), 95, true, SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge))
+                    : SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
                 ["matchedTurnIds"] = matched.Select(row => ReadString(row, "turn_id", "")).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                 ["expandedTurnIds"] = included,
                 ["sessionId"] = sessionId,
@@ -804,7 +810,7 @@ ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candi
                 string line = RenderExactHistoryTurn(turn, knowledge);
                 int remaining = budget - used;
                 if (remaining < 180) break;
-                string rendered = line.Length <= remaining ? line : ExactHistoryLineExcerpt(line, new List<string>(), remaining);
+                string rendered = line.Length <= remaining ? line : "";
                 if (string.IsNullOrWhiteSpace(rendered)) continue;
                 selected.Add(new Dictionary<string, object>
                 {
@@ -832,7 +838,7 @@ ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candi
                     string locationId = ReadString(sourceSession, "location_id", ReadFirstString(sourceSessionPayload, "locationId", "settlementId"));
                     List<string> sourceParticipants = TextListFromJson(ReadString(sourceSession, "participants_json", "[]"));
                     string sourceScene = ReadString(sourceSessionPayload, "sceneContext", "");
-                    builder.AppendLine("[MOST RECENT SOURCE-BEARING SESSION " + rowSession + "]");
+                    builder.AppendLine("[HISTORICAL SOURCE SESSION " + rowSession + "]");
                     builder.AppendLine("Session setting metadata: location=" + FirstNonEmpty(locationName, locationId, "unknown")
                         + "; channel=" + ReadString(sourceSession, "channel", "")
                         + "; participants=" + (sourceParticipants.Count == 0 ? "unknown" : string.Join(", ",

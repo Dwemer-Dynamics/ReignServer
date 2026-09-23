@@ -1,5 +1,11 @@
 # Reign Offline-First Verification Lab
 
+## Conversation continuity maintenance and isolated contracts
+
+The `prompt_efficiency` suite's `pipeline.prompt_caching` check runs `RunConversationContinuitySelfTests` against isolated storage, without providers or a listener. It exercises accepted agenda/relationship history, source privacy, scene handoffs, whole-record selection, final prompt coverage/capacity, letters and the repair transaction. Run it only through artifact-bound `reign_run_offline_verification` and retain the successful canonical Release validation/hygiene report. See `conversationContinuity` in `reign.testing.json` and `docs/agent/testing/DIALOGUE_AND_PROVIDERS.md` for the procedure and coverage limits.
+
+Maintenance entry point: `ReignServer --continuity-repair --manifest <absolute-json> --report <absolute-json>`. The default is a rolled-back preview. Use the checked-in `scripts/Repair-ConversationContinuity.ps1` wrapper with the validated executable hash; it handles exact campaign selection, stop-state checks and verified backup evidence for an explicitly authorized apply. Direct application additionally needs maintenance mode, matching reviewed manifest and backup hashes, an exact current timeline and unchanged source provenance. This is a non-listening transaction, not a provider request or historical event replay. Private manifests/reports/backups remain outside version control. Deployment, shutdown, game advancement and paid testing are separate authorizations.
+
 For selecting among contract, Verification Lab, feature harness, disposable
 campaign, and human acceptance layers, use the canonical
 [testing tool guide](../../docs/agent/TESTING_TOOL_GUIDE.md) and the generated
@@ -23,6 +29,8 @@ The Verification Lab is the release-safety harness for Bannerlord Reign. It runs
 The offline aggregate checks contain many assertions. For example, `pipeline.canned_cases` currently runs every registered canned case and `rebellion.lifecycle_matrix` expands into its full lifecycle matrix.
 
 ## Running It
+
+Temporary guest renewal regressions run through the existing artifact-bound `reign_run_offline_verification` tool with `tier=offline`, `suite=prompt_efficiency`, and a successful Release `validationRunId`. The `pipeline.prompt_caching` assertions exercise the captured Hulara twenty-more-day exchange, current agreement routing, native revision binding, consent/stale-context controls and receipt-informed prompts. The paired MCP tests also execute the client review-session policy. Neither suite invokes providers or changes a live campaign. Native lock cleanup, town entry and save/load require the separately enrolled disposable-campaign procedure in the client checkout's `docs/agent/testing/DIALOGUE_AND_PROVIDERS.md`.
 
 For starting-population work, use `reign_run_offline_verification` with the successful Release `validationRunId`, `tier=quick` (or `offline`), and `suite=starting_children`. This focused, provider-free suite executes `contracts.starting_children`; the complete `contracts` suite also includes it. The suite proves planning and receipt replay, while native child aging and save acceptance require a separately authorized disposable new campaign. Runtime observations are available through `reign_get_live_test_status`, under `characterInitialization.startingChildren`; there is no command to seed an existing save.
 

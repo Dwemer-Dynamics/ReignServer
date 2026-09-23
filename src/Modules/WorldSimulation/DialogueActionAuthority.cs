@@ -8,7 +8,7 @@ namespace ReignBetaServer
         private static void BindDialogueActionAuthority(
             Dictionary<string, object> record, Dictionary<string, object> terms,
             Dictionary<string, object> payload, string command, string mappedType,
-            string correlationId, List<string> errors)
+            string correlationId, List<string> errors, Dictionary<string, object> raw = null)
         {
             if (!IsDialogueActionSource(ReadString(record, "source", ""))) return;
             Dictionary<string, object> hero = ReadDictionary(payload, "hero") ?? new Dictionary<string, object>();
@@ -30,6 +30,10 @@ namespace ReignBetaServer
 
             Dictionary<string, object> receipt = ReadDictionary(terms, "authorityReceipt")
                 ?? new Dictionary<string, object>();
+            var agencyAction = new Dictionary<string, object>(record);
+            foreach (var field in raw ?? new Dictionary<string, object>())
+                if (!agencyAction.ContainsKey(field.Key)) agencyAction[field.Key] = field.Value;
+            if (!BindConversationAgencyAuthority(payload, command, terms, receipt, errors, agencyAction)) return;
             string policy;
             if (mappedType.StartsWith("Diplomacy", StringComparison.OrdinalIgnoreCase))
             {

@@ -427,7 +427,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                 contributions[priorSpeakerId] = ReadString(priorContribution, "text", "");
             }
 
-            foreach (Dictionary<string, object> result in results.Where(x => ReadBool(x, "ok", true)))
+            foreach (Dictionary<string, object> result in results.Where(x => ReadBool(x, "ok", true) && !ReadBool(x, "replayed", false)))
             {
                 string speakerId = ReadFirstString(result, "heroStringId", "heroId", "speakerHeroStringId");
                 if (string.IsNullOrWhiteSpace(speakerId)) continue;
@@ -537,6 +537,10 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
             {
                 assessments = CompleteSequentialPartyRelationshipAssessments(payload, assessments, playerId, exchangeId);
             }
+            // A server-supplied neutral boundary occupies the reaction slot so
+            // party completion cannot regenerate a positive reaction to begging.
+            assessments = assessments.Where(a => !(ReadString(a, "actKind", "") == "negotiation_boundary"
+                && ReadString(a, "valence", "") == "neutral")).ToList();
             List<Dictionary<string, object>> relationshipPairs = ReadDictionaryList(payload, "relationshipPairs");
             HashSet<string> participants = new HashSet<string>(ReadStringList(payload, "participants"), StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> row in relationshipPairs)

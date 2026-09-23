@@ -100,6 +100,13 @@ namespace ReignBetaServer
         {
             var result = new List<Dictionary<string, object>>();
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
+            bool wordingCritique = Regex.IsMatch(reply ?? "", @"\b(?:say|said|word|saying|learned to say)\s+['""‘’“”]?(?:we|I|our)['""‘’“”]?(?:\s+(?:not|instead|rather)|[.!?,])", RegexOptions.IgnoreCase);
+            bool askedAboutWords = Regex.IsMatch(playerText ?? "", @"\b(?:wording|pronouns?|how should I (?:say|phrase)|what word)\b", RegexOptions.IgnoreCase);
+            var recentOwn = (ownHistory ?? new List<Dictionary<string, object>>()).Where(row => IsNaturalnessSpeaker(row, heroId, heroName)).Reverse().Take(3).ToList();
+            if (wordingCritique && !askedAboutWords && recentOwn.Any(row => Regex.IsMatch(ReadString(row, "text", ""),
+                @"\b(?:say|said|word|saying)\s+['""‘’“”]?(?:we|I|our)\b", RegexOptions.IgnoreCase)))
+                result.Add(new Dictionary<string, object> { ["type"] = "repeated_wording_lecture",
+                    ["match"] = reply, ["detail"] = "This speaker has recently criticized the same pronoun framing. Respond to the present meaning; retain a concrete unresolved boundary without repeating a grammar lesson." });
             if (!IsConversationAccounting(reply) || RequestsLiteralAccounting(playerText)) return result;
             var own = (ownHistory ?? new List<Dictionary<string, object>>())
                 .Where(row => IsNaturalnessSpeaker(row, heroId, heroName)).Reverse().Take(3).ToList();

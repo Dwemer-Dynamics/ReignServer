@@ -91,6 +91,7 @@ UNIQUE(campaign_id,timeline_id,hero_id));");
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> speaker = ReadDictionary(payload, "speaker");
             string heroId = CharacterIdFrom(speaker);
+            ApplyPlayerInputAudienceToPayload(payload, heroId);
             string name = ReadString(speaker, "name", heroId);
             double age = ReadDouble(speaker, "age", 0d);
             string sessionId = FirstNonEmpty(ReadString(payload, "conversationSessionId", ""), ReadString(payload, "eventId", "family_chambers"));
@@ -111,6 +112,7 @@ ORDER BY world_day DESC LIMIT 12;", new Dictionary<string, object> { ["campaign"
             prompt.AppendLine("You portray one child in a safe, grounded Bannerlord family scene. Never apply adult traits, reputation, romance, sexuality, marriage, pregnancy, politics, coercion, punishment, combat, or campaign actions.");
             prompt.AppendLine("Match development exactly: infants may babble or react nonverbally; toddlers use very short speech; older children may play, study, ask questions, or converse naturally.");
             prompt.AppendLine("Do not speak for the player or another participant. The child may remember every listed childhood experience while still a child.");
+            prompt.AppendLine("Player spans inside single asterisks (*...*) describe actions, never words the player spoke. Speech outside those spans is audible unless the immediately preceding action says the player whispers to a named recipient. Only that recipient hears the words; others may notice a whisper but cannot know its content. Keep spoken reply paragraphs separate from *visible action paragraphs* with a blank line.");
             prompt.AppendLine("Child: " + name + "; exact age: " + age.ToString("0.00", CultureInfo.InvariantCulture)
                 + "; culture: " + ReadString(speaker, "cultureId", "") + "; mother: " + ReadString(speaker, "motherId", "") + "; father: " + ReadString(speaker, "fatherId", ""));
             prompt.AppendLine("Time-aware scene contract: " + ReadString(payload, "castleDialoguePrompt", ""));
@@ -150,6 +152,7 @@ ON CONFLICT(experience_id) DO UPDATE SET summary=$summary,updated_ts=$ts;", new 
             var childResponse = new Dictionary<string, object>
             {
                 ["ok"] = true, ["mode"] = "family_chambers", ["reply"] = reply,
+                ["privateAudienceHeroStringId"] = ReadBool(payload, "privatePlayerInputForSpeaker", false) ? heroId : "",
                 ["emotion"] = LimitText(ReadString(parsed, "emotion", "engaged"), 40),
                 ["intent"] = LimitText(ReadString(parsed, "intent", "participate"), 80),
                 ["participation"] = "speak", ["relationshipSignal"] = "neutral",

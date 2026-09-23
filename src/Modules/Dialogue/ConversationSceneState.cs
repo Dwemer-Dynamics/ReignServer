@@ -473,6 +473,9 @@ updated_ts INTEGER NOT NULL);");
                     Dictionary<string, object> row = QuerySql(connection,
                         "SELECT * FROM conversation_scene_state WHERE hero_id=$id AND expires_world_hour>$hour LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = id, ["hour"] = hour }).FirstOrDefault();
+                    // Narrative location survives an hourly legacy cache expiry or
+                    // session reload until native movement/room/timeline changes.
+                    row = LoadSceneContinuityHandoff(connection, payload, participant) ?? row;
                     current[id] = ResolveSceneParticipantState(campaignId, participant, row, detailedParticipantIds.Contains(id), UsesCastleRoomAttireContext(payload));
                 }
             }
@@ -1036,6 +1039,7 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
                     UpsertConversationSceneOverride(connection, subject, location, locationClass, clothing, sceneTurnId, mode, hour, ts);
                     applied.Add(new Dictionary<string, object> { ["heroStringId"] = subject, ["location"] = location, ["clothing"] = clothing, ["source"] = "npc_reply" });
                 }
+                SaveSceneContinuityHandoffs(connection, payload, participants, sceneTurnId, speakerId, playerText, reply);
                 transaction.Commit();
             }
             return new Dictionary<string, object> { ["sceneTurnId"] = sceneTurnId, ["worldHour"] = hour, ["denied"] = denied, ["applied"] = applied };

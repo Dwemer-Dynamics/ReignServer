@@ -35,10 +35,10 @@ namespace ReignBetaServer
         {
             "reply", "participation", "reactionTargetHeroStringId", "decisionBrief",
             "politicalConduct", "emotion", "intent", "relationshipSignal",
-            "relationshipAssessments", "actionGate", "conceptionGate", "socialSignals",
+            "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals",
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
             "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites",
-            "courtKnowledgeWrites", "sceneStateUpdates", "drinkingEvents", "stateUpdates",
+            "courtKnowledgeWrites", "sceneStateUpdates", "drinkingEvents", "stateUpdates", "continuityWrites",
             "suggestedActions", "chancellorDecision", "rebellionDecision", "campaignOrder"
         };
 
@@ -215,7 +215,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             var properties = CommonConversationProperties(kind, payload);
-            var required = new List<string> { "reply", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate" };
+            var required = new List<string> { "reply", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions" };
             if (kind != CodexConversationContractKind.Individual)
             {
                 required.Add("participation");
@@ -238,6 +238,7 @@ namespace ReignBetaServer
                 ["relationshipSignal"] = String(),
                 ["relationshipAssessments"] = Array(RelationshipAssessment()),
                 ["actionGate"] = ActionGate(new[] { "accepted", "commanded", "conditional", "refused", "threat", "roleplay_only", "final_private_report" }),
+                ["proposalDecisions"] = Array(ProposalDecision()),
                 ["identityIntroductions"] = Array(IdentityIntroduction()),
                 ["memoryWrites"] = Array(MemoryWrite()),
                 ["beliefWrites"] = Array(BeliefWrite()),
@@ -247,6 +248,7 @@ namespace ReignBetaServer
                 ["dynamicCharacteristicWrites"] = Array(DynamicCharacteristicWrite()),
                 ["sceneStateUpdates"] = Array(SceneStateUpdate()),
                 ["drinkingEvents"] = Array(DrinkingEvent()),
+                ["continuityWrites"] = Array(ContinuityWrite()),
                 ["stateUpdates"] = Object(new Dictionary<string, object>
                 {
                     // Strict structured output requires the keys to be present.
@@ -271,6 +273,21 @@ namespace ReignBetaServer
                 properties["reactionTargetHeroStringId"] = String();
             }
             return properties;
+        }
+
+        private static Dictionary<string, object> ContinuityWrite()
+        {
+            return Object(new Dictionary<string, object>
+            {
+                ["id"] = String(), ["kind"] = String(new[] { "agenda", "relationship", "episode" }),
+                ["subject"] = String(), ["peerId"] = String(),
+                ["status"] = String(new[] { "open", "active", "waiting", "blocked", "deferred", "resolved", "abandoned", "invalidated" }),
+                ["meaning"] = String(), ["nextStep"] = String(), ["completionCriterion"] = String(),
+                ["triggerPeople"] = Array(String()), ["triggerPlaces"] = Array(String()),
+                ["parentId"] = String(), ["dueWorldDay"] = Number(0, null),
+                ["importance"] = Number(0, 1), ["evidenceQuote"] = String(),
+                ["transitionReason"] = String(), ["expectedRevision"] = Integer()
+            }, null, false);
         }
 
         private static bool HasChancellorContract(Dictionary<string, object> payload)
@@ -307,11 +324,34 @@ namespace ReignBetaServer
                 ["body"] = String(),
                 ["reason"] = String(),
                 ["actionGate"] = ActionGate(new[] { "none", "conditional", "accepted", "refused", "final_private_report" }),
+                ["proposalDecisions"] = Array(ProposalDecision()),
                 ["rebellionDecision"] = String(new[] { "none", "accept_recruitment", "accept_player_join", "surrender" }),
-                ["campaignOrder"] = CampaignOrder()
+                ["campaignOrder"] = CampaignOrder(),
+                ["continuityWrites"] = Array(ContinuityWrite())
             };
-            return Object(properties, new[] { "shouldReply", "body", "reason", "actionGate", "rebellionDecision", "campaignOrder" }, false,
+            return Object(properties, new[] { "shouldReply", "body", "reason", "actionGate", "proposalDecisions", "rebellionDecision", "campaignOrder", "continuityWrites" }, false,
                 "Reign's complete structured contract for written correspondence.");
+        }
+
+        private static Dictionary<string, object> ProposalDecision()
+        {
+            var properties = new Dictionary<string, object>
+            {
+                ["topic"] = String(new[] { "travel", "allegiance", "property", "service", "political_support", "intimacy", "information", "favor" }),
+                ["objectId"] = String(), ["recordId"] = String(), ["expectedRevision"] = Number(0, null), ["subject"] = String(),
+                ["disposition"] = String(new[] { "cannot", "personal_refusal", "terms_refusal", "undecided", "conditional", "accepted", "accepted_under_duress" }),
+                ["engagement"] = String(new[] { "request", "repeat", "clarify", "apology", "withdraw" }),
+                ["apologyAccepted"] = Boolean(),
+                ["tactic"] = String(new[] { "appeal", "compensation", "patronage", "deception", "threat", "blackmail" }),
+                ["stakes"] = String(new[] { "ordinary", "major", "life_changing" }),
+                ["benefit"] = String(new[] { "personal", "wealth", "power", "prestige", "protection", "dynasty" }),
+                ["objections"] = Array(String(new[] { "capability", "duty", "loyalty", "principle", "risk", "price", "credibility", "relationship" })),
+                ["reason"] = String(), ["reconsideration"] = String(), ["evidenceKeys"] = Array(String()),
+                ["playerQuote"] = String(), ["replyQuote"] = String(),
+                ["terms"] = Object(new Dictionary<string, object> { ["gold"] = Number(0, null), ["durationDays"] = Number(0, null),
+                    ["paymentDeferred"] = Boolean(), ["benefit"] = String(), ["conditions"] = String() }, null, true)
+            };
+            return Object(properties, properties.Keys.ToArray(), false);
         }
 
         private static Dictionary<string, object> DecisionBrief()

@@ -14,13 +14,13 @@ namespace ReignBetaServer
             + "Preserve the agreed duration using campaignCalendar.daysPerSeason/daysPerWeek. With no fixed end date use open_ended, reviewed every five days. "
             + "A guest already in the player's party needs no repeated join action. Renew and end require that speaker's active native agreement. "
             + "Discussing a destination, traveling together, 'we will', a disguise, or another person's scouting duties does not order the addressed NPC's party. "
-            + "Map commands require an actual direction to an eligible separate NPC party; never move the human main party. The follow command instead uses a present scene agent when native scene movement is available, and otherwise follows the resolved party on the campaign map. "
+            + "Map commands require an actual direction to an eligible separate NPC party; never move the human main party. An accepted follow command creates one lasting agreement: the NPC follows the player in person when present and escorts the player's party on the campaign map, including after scene changes. "
             + "Employment or banner cover does not grant clan membership, faction-combat consent, banishment, or settlement ownership. "
             + "For paid temporary service keep wageGold, wagePeriodDays and wageRecipientHeroStringId (or wageRecipientRelation=self/father/mother) in guest terms, with exact accepted amounts. Wages are paid after each completed period. Clarify a different payment schedule. Never turn wages into barter for a town. "
             + "An accepted service agreement that starts later uses accept_temporary_party_guest with deferStart=true; this records terms without moving the NPC. AwaitingStart needs a fresh accepted departure with startNow=true. Preserve pending terms unless a change is explicitly accepted. "
             + "A personal item gift uses transfer_item with delivery=personal. Use delivery=equip only when wearing/equipping the item was expressly requested and accepted; otherwise personal ownership must still change. "
             + "Keep item modifiers, quantity, source equipment slot/set and target equipment slot/set when specified. Do not sell or remove protected guest gear without that hero's explicit consent. "
-            + "follow is context aware: a present scene agent follows the resolved scene target, otherwise an eligible separate hero party follows the resolved map party. show_the_way leads to a resolved scene hero or an exact native destination tag from scene hints. Never invent coordinates or tags. "
+            + "follow applies in person and on the campaign map until stop_following; it is not limited to the current scene. show_the_way leads to a resolved scene hero or an exact native destination tag from scene hints. Never invent coordinates or tags. "
             + "Missing required terms need clarification; never invent payment amounts, duration, assets or identifiers. The planner records an accepted request, not completed effects. Only a native receipt establishes execution.";
 
         private static readonly HashSet<string> SeparatePartyCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -65,6 +65,8 @@ namespace ReignBetaServer
             Dictionary<string, object> hero, Dictionary<string, object> gate, string playerText)
         {
             command = CanonicalCommand(command);
+            if (command == "accept_temporary_party_guest" && TemporaryGuestAlreadySatisfied(payload, hero)) return false;
+            if (command == "renew_temporary_party_guest" && !GuestCanRenew(CurrentSpeakerGuest(payload, hero))) return false;
             bool sceneFollow = command == "follow"
                 && ReadBool(ReadDictionary(payload, "nativeSceneMovement"), "available", false);
             if (SeparatePartyCommands.Contains(command) && !sceneFollow
@@ -93,6 +95,10 @@ namespace ReignBetaServer
             action["terms"] = terms;
             if (command == "transfer_item") CompleteNamedGiftTerms(action, terms, payload, text);
             CompleteFallbackDirectiveTerms(action, payload, hero, text, includeTestValues: false);
+            // Fallback completion may replace the dictionary; bind the terms actually attached to the action.
+            terms = ReadDictionary(action, "terms") ?? terms;
+            BindTemporaryGuestActionTerms(command, terms, payload, hero);
+            action["terms"] = terms;
         }
 
         private static bool HasExplicitCurrentSettlementReference(string text)
@@ -138,9 +144,11 @@ namespace ReignBetaServer
             var calendar = ReadDictionary(payload, "campaignCalendar");
             bool openEnded = ContainsAnyNormalized(text, "open ended", "no fixed end date", "every five days");
             double days = openEnded ? 0 : ExtractItemAmount(text, "days?");
+            if (!openEnded && days <= 0)
+                days = ExtractItemAmount(Regex.Replace(text, @"\b(?:more|additional|extra)\s+(?=days?\b)", ""), "days?");
             bool fixedSeason = Regex.IsMatch(text, @"\bfor (?:the|a|one|1|this) season\b|\b(?:full|one) season (?:of )?(?:service|travel)\b");
             if (!openEnded && fixedSeason) days = ReadDouble(calendar, "daysPerSeason", 0);
-            var explicitDays = Regex.Match(exchange ?? "", @"(?<![\w.\d])(\d+(?:\.\d+)?)\s+days?\b", RegexOptions.IgnoreCase);
+            var explicitDays = Regex.Match(exchange ?? "", @"(?<![\w.\d])(\d+(?:\.\d+)?)\s+(?:(?:more|additional|extra)\s+)?days?\b", RegexOptions.IgnoreCase);
             if (!openEnded && explicitDays.Success && double.TryParse(explicitDays.Groups[1].Value,
                 System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double exactDays)) days = exactDays;
             if ((!openEnded && fixedSeason && days <= 0) || double.IsNaN(days) || double.IsInfinity(days)

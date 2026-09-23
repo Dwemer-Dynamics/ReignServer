@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -170,139 +170,94 @@ namespace ReignBetaServer
         }
 
         private static PromptLiveTurnBudgetResult BuildBudgetedConversationLiveTurn(
-            string templateName,
-            string transcriptValueKey,
-            Dictionary<string, string> values,
-            string conversationScenePrompt,
-            string roleAttribution,
-            string npcRelationshipBlock,
-            string globalPrefix,
-            string characterPrefix,
-            int targetOverride = 0)
+            string templateName, string transcriptValueKey, Dictionary<string, string> values,
+            string conversationScenePrompt, string roleAttribution, string npcRelationshipBlock,
+            string globalPrefix, string characterPrefix, int targetOverride = 0)
         {
             values = values ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string context = values.TryGetValue("contextPullText", out string contextValue)
-                ? contextValue ?? "" : "";
-            string transcript = values.TryGetValue(transcriptValueKey, out string transcriptValue)
-                ? transcriptValue ?? "" : "";
+            string context = values.TryGetValue("contextPullText", out string c) ? c ?? "" : "";
+            string transcript = values.TryGetValue(transcriptValueKey, out string t) ? t ?? "" : "";
             string relationship = npcRelationshipBlock ?? "";
-            Func<string> assemble = () => AssembleConversationLiveTurn(
-                templateName, values, conversationScenePrompt, roleAttribution, relationship);
-
+            string initialContext = context, initialTranscript = transcript;
+            var settings = LoadSettings();
+            // Warnings are observability settings, never semantic truncation limits.
+            // One allocator accounts for every fixed section, including protected
+            // relationship and agenda context. Final serialized preflight follows.
+            int target = targetOverride > 0 ? targetOverride : 32000 * 3;
+            Func<string> assemble = () => AssembleConversationLiveTurn(templateName, values,
+                conversationScenePrompt, roleAttribution, relationship);
+            Func<string, int> total = live => (globalPrefix ?? "").Length + (characterPrefix ?? "").Length + live.Length;
+            Func<string, int> serializedEstimate = live => EstimateContinuityTokens(Json.Serialize(new[] {
+                TestDict("role", "system", "content", globalPrefix ?? ""),
+                TestDict("role", "system", "content", characterPrefix ?? ""),
+                TestDict("role", "user", "content", live) }));
             string liveTurn = assemble();
-            int initialChars = (globalPrefix ?? "").Length + (characterPrefix ?? "").Length + liveTurn.Length;
-            Dictionary<string, object> settings = LoadSettings();
-            int warning = ReadInt(settings, "promptWarningCharacterLimit", 100000);
-            int safetyMargin = Math.Max(2000, Math.Min(8000, warning / 25));
-            int target = targetOverride > 0
-                ? Math.Max(10000, targetOverride)
-                : Math.Max(50000, warning - safetyMargin);
-            List<object> actions = new List<object>();
-            Dictionary<string, object> initialComponents = PromptBudgetComponentSizes(
-                context, transcript, relationship, conversationScenePrompt, roleAttribution);
-
-            Func<int> totalChars = () =>
-                (globalPrefix ?? "").Length + (characterPrefix ?? "").Length + liveTurn.Length;
-            Action rebuild = () =>
+            int initialChars = total(liveTurn);
+            int initialEstimate = serializedEstimate(liveTurn);
+            var actions = new List<object>();
+            values["contextPullText"] = "";
+            values[transcriptValueKey] = "";
+            int mandatory = total(assemble());
+            if (targetOverride <= 0 && (initialChars > target || initialEstimate > 32000)) target = 48000 * 3;
+            int available = Math.Max(0, target - mandatory);
+            // Required whole exchanges and exact topical evidence survive even when
+            // the ordinary allowance is full. The final preflight expands or refuses
+            // before a provider call; it never silently drops a required source.
+            int transcriptAllowance = context.Length + transcript.Length <= available ? transcript.Length + 2000 : Math.Max(0, available * 2 / 3);
+            transcript = SelectWholeContinuityRecords(transcript, transcriptAllowance, true, actions, "canonicalTranscript");
+            context = SelectWholeContinuityRecords(context, Math.Max(0, available - transcript.Length), false, actions, "selectedContextAndMemory");
+            values["contextPullText"] = context;
+            values[transcriptValueKey] = transcript;
+            liveTurn = assemble();
+            // Character allocation alone misses Unicode and JSON escaping. Trim
+            // optional whole records against the serialized messages as well,
+            // leaving room for final overlays and provider request metadata. The
+            // exact final request is still checked after every adapter runs.
+            const int finalRequestReserve = 2048;
+            int tokenTarget = Math.Min(48000, target / 3);
+            int messageAllowance = Math.Max(0, tokenTarget - finalRequestReserve);
+            int finalEstimate = serializedEstimate(liveTurn);
+            var contextRecords = ContinuityPromptRecords(context, false);
+            var transcriptRecords = ContinuityPromptRecords(transcript, true);
+            var optionalRecords = contextRecords.Select(r => (record: r, section: "selectedContextAndMemory"))
+                .Concat(transcriptRecords.Select(r => (record: r, section: "canonicalTranscript")))
+                .Where(item => !item.record.Required).OrderBy(item => item.record.Priority)
+                .ThenBy(item => item.record.Order).ToList();
+            foreach (var item in optionalRecords)
             {
+                if (finalEstimate <= messageAllowance) break;
+                (item.section == "canonicalTranscript" ? transcriptRecords : contextRecords).Remove(item.record);
+                foreach (var decision in actions.OfType<Dictionary<string, object>>().Where(d =>
+                    ReadString(d, "section", "") == item.section && ReadString(d, "sourceId", "") == item.record.SourceId))
+                {
+                    decision["retained"] = false;
+                    decision["reason"] = "optional_whole_record_exceeds_serialized_token_allowance";
+                }
+                context = string.Join("\n\n", contextRecords.OrderBy(r => r.Order).Select(r => r.Text));
+                transcript = string.Join("\n\n", transcriptRecords.OrderBy(r => r.Order).Select(r => r.Text));
                 values["contextPullText"] = context;
                 values[transcriptValueKey] = transcript;
                 liveTurn = assemble();
-            };
-
-            int overflow = Math.Max(0, totalChars() - target);
-            if (overflow > 0 && context.Length > 14000)
-            {
-                int before = context.Length;
-                int desired = Math.Max(14000, context.Length - overflow);
-                context = CompactPromptEvidenceBlock(context, desired,
-                    "selected context and memory", false);
-                actions.Add(PromptBudgetAction("selectedContextAndMemory", before, context.Length));
-                rebuild();
+                finalEstimate = serializedEstimate(liveTurn);
             }
-
-            overflow = Math.Max(0, totalChars() - target);
-            if (overflow > 0 && transcript.Length > 8000)
-            {
-                int before = transcript.Length;
-                int desired = Math.Max(8000, transcript.Length - overflow);
-                transcript = CompactPromptEvidenceBlock(transcript, desired,
-                    "canonical transcript", true);
-                actions.Add(PromptBudgetAction("canonicalTranscript", before, transcript.Length));
-                rebuild();
-            }
-
-            overflow = Math.Max(0, totalChars() - target);
-            if (overflow > 0 && relationship.Length > 6000)
-            {
-                int before = relationship.Length;
-                int desired = Math.Max(6000, relationship.Length - overflow);
-                relationship = CompactPromptEvidenceBlock(relationship, desired,
-                    "NPC relationship context", false);
-                actions.Add(PromptBudgetAction("npcRelationshipContext", before, relationship.Length));
-                rebuild();
-            }
-
-            // If an unusually large fixed transcript or context remains, use smaller
-            // floors before touching the assembled contract. Current identity, role
-            // attribution, player text, scene facts, and output schema stay intact.
-            overflow = Math.Max(0, totalChars() - target);
-            if (overflow > 0 && context.Length > 6000)
-            {
-                int before = context.Length;
-                int desired = Math.Max(6000, context.Length - overflow);
-                context = CompactPromptEvidenceBlock(context, desired,
-                    "selected context and memory", false);
-                actions.Add(PromptBudgetAction("selectedContextAndMemorySecondary", before, context.Length));
-                rebuild();
-            }
-            overflow = Math.Max(0, totalChars() - target);
-            if (overflow > 0 && transcript.Length > 3000)
-            {
-                int before = transcript.Length;
-                int desired = Math.Max(3000, transcript.Length - overflow);
-                transcript = CompactPromptEvidenceBlock(transcript, desired,
-                    "canonical transcript", true);
-                actions.Add(PromptBudgetAction("canonicalTranscriptSecondary", before, transcript.Length));
-                rebuild();
-            }
-            overflow = Math.Max(0, totalChars() - target);
-            if (overflow > 0 && relationship.Length > 3500)
-            {
-                int before = relationship.Length;
-                int desired = Math.Max(3500, relationship.Length - overflow);
-                relationship = CompactPromptEvidenceBlock(relationship, desired,
-                    "NPC relationship context", false);
-                actions.Add(PromptBudgetAction("npcRelationshipContextSecondary", before, relationship.Length));
-                rebuild();
-            }
-
-            int finalChars = totalChars();
             return new PromptLiveTurnBudgetResult
             {
-                LiveTurn = liveTurn,
-                ContextPullText = context,
-                CanonicalTranscript = transcript,
+                LiveTurn = liveTurn, ContextPullText = context, CanonicalTranscript = transcript,
                 NpcRelationshipBlock = relationship,
                 Diagnostics = new Dictionary<string, object>
                 {
-                    ["warningCharacterLimit"] = warning,
-                    ["targetCharacterLimit"] = target,
-                    ["safetyMarginCharacters"] = safetyMargin,
-                    ["initialCharacters"] = initialChars,
-                    ["finalCharacters"] = finalChars,
-                    ["savedCharacters"] = Math.Max(0, initialChars - finalChars),
-                    ["compacted"] = actions.Count > 0,
-                    ["targetMet"] = finalChars <= target,
-                    ["actions"] = actions,
-                    ["initialComponents"] = initialComponents,
-                    ["finalComponents"] = PromptBudgetComponentSizes(
-                        context, transcript, relationship,
-                        conversationScenePrompt, roleAttribution)
+                    ["allocator"] = "whole_records_v1", ["warningCharacterLimit"] = ReadInt(settings, "promptWarningCharacterLimit", 100000),
+                    ["targetCharacterLimit"] = target, ["initialCharacters"] = initialChars,
+                    ["finalCharacters"] = total(liveTurn), ["savedCharacters"] = initialChars - total(liveTurn),
+                    ["compacted"] = initialContext != context || initialTranscript != transcript,
+                    ["targetMet"] = total(liveTurn) <= target && finalEstimate <= messageAllowance, ["mandatoryCharacters"] = mandatory,
+                    ["inputTokenEstimate"] = finalEstimate, ["targetInputTokens"] = tokenTarget,
+                    ["finalRequestTokenReserve"] = finalRequestReserve,
+                    ["actions"] = actions, ["finalComponents"] = PromptBudgetComponentSizes(context, transcript,
+                        relationship, conversationScenePrompt, roleAttribution)
                 }
             };
         }
-
         private static Dictionary<string, object> PromptBudgetComponentSizes(
             string context, string transcript, string relationship,
             string scene, string role)
@@ -478,7 +433,7 @@ namespace ReignBetaServer
             liveState += BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, turnPayload);
             liveState += BuildCurrentSceneProgressPrompt(priorLines);
             string canonicalTranscript = parallelPieces == null
-                ? FormatDialogueForPrompt(priorLines)
+                ? FormatContinuityTranscript(priorLines, FormatDialogueForPrompt)
                 : parallelPieces.Transcript;
             promptPhaseTiming["characterAndLiveStateMs"] = promptPhaseTimer.ElapsedMilliseconds;
             if (parallelPieces != null)
@@ -542,6 +497,7 @@ namespace ReignBetaServer
                 .Where(x => !string.IsNullOrWhiteSpace(x)));
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(false, NativeNoblePromptApplicability(profile), actionCatalog, specializedRoleBlock, UsesCastleRoomAttireContext(turnPayload), composition);
+            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state);
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "dialogue_live_turn_template.txt", "priorDialogueText", values,
                 conversationScenePrompt, roleAttribution,
@@ -568,6 +524,7 @@ namespace ReignBetaServer
             string naturalnessPrompt = ReadString(naturalness, "prompt", "");
             if (!string.IsNullOrWhiteSpace(naturalnessPrompt)) liveTurn += "\n\n" + naturalnessPrompt;
             PromptEnvelope envelope = CreatePromptEnvelope("dialogue", variant, globalPrefix, characterPrefix, liveTurn);
+            FinalizeContinuityPromptBudget(envelope, turnPayload);
             envelope.Diagnostics["conversationNaturalness"] = naturalness;
             promptPhaseTiming["finalizeEnvelopeMs"] = promptPhaseTimer.ElapsedMilliseconds;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
@@ -635,6 +592,7 @@ namespace ReignBetaServer
             Stopwatch promptPhaseTimer = Stopwatch.StartNew();
             Dictionary<string, object> motiveDecision = precomputedMotiveDecision
                 ?? BuildConversationDecisionContext(campaignId, ReadString(eventPayload, "mode", "social_event"), heroId, profile, characteristics, state, playerText, sceneContext, eventPayload, identityView);
+            eventPayload["conversationAgencyContext"] = ReadDictionary(motiveDecision, "conversationAgency");
             promptPhaseTiming["decisionContextMs"] = promptPhaseTimer.ElapsedMilliseconds;
             Dictionary<string, object> liveRelationships = new Dictionary<string, object> { ["npcToTarget"] = ReadDictionary(motiveDecision, "relationshipNpcToTarget") ?? new Dictionary<string, object>(), ["npcToSpouse"] = ReadDictionary(motiveDecision, "relationshipNpcToSpouse") ?? new Dictionary<string, object>() };
             Dictionary<string, object> promptState =
@@ -664,7 +622,7 @@ namespace ReignBetaServer
             liveState += BuildCourtLifeResolutionContinuityPrompt(campaignId, heroId, eventPayload);
             liveState += BuildCurrentSceneProgressPrompt(eventLines);
             string canonicalTranscript = parallelPieces == null
-                ? FormatEventLinesForObserver(eventLines, eventPayload, heroId, identityView)
+                ? FormatContinuityTranscript(eventLines, lines => FormatEventLinesForObserver(lines, eventPayload, heroId, identityView))
                 : parallelPieces.Transcript;
             promptPhaseTiming["characterAndLiveStateMs"] = promptPhaseTimer.ElapsedMilliseconds;
             if (parallelPieces != null)
@@ -721,6 +679,7 @@ namespace ReignBetaServer
             string ambassadorRoleBlock = BuildAmbassadorRolePrompt(campaignId, heroId, heroName, eventPayload);
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(true, NativeNoblePromptApplicability(profile), actionCatalog, ambassadorRoleBlock, UsesCastleRoomAttireContext(eventPayload), composition);
+            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, eventPayload, state);
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "event_live_turn_template.txt", "eventHistoryText", values,
                 conversationScenePrompt, roleAttribution,
@@ -746,6 +705,7 @@ namespace ReignBetaServer
             string naturalnessPrompt = ReadString(naturalness, "prompt", "");
             if (!string.IsNullOrWhiteSpace(naturalnessPrompt)) liveTurn += "\n\n" + naturalnessPrompt;
             PromptEnvelope envelope = CreatePromptEnvelope("social_event", variant, globalPrefix, characterPrefix, liveTurn);
+            FinalizeContinuityPromptBudget(envelope, eventPayload);
             envelope.Diagnostics["conversationNaturalness"] = naturalness;
             promptPhaseTiming["finalizeEnvelopeMs"] = promptPhaseTimer.ElapsedMilliseconds;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
@@ -1057,7 +1017,7 @@ namespace ReignBetaServer
                 new CodexContextPreparationTask
                 {
                     Id = "canonical_transcript",
-                    Prepare = () => FormatDialogueForPrompt(prior)
+                    Prepare = () => FormatContinuityTranscript(prior, FormatDialogueForPrompt)
                 }
             };
             CodexParallelPreparationResult result = CodexConversationContracts.PrepareInParallel(
@@ -1119,7 +1079,7 @@ namespace ReignBetaServer
                 new CodexContextPreparationTask
                 {
                     Id = "canonical_transcript",
-                    Prepare = () => FormatEventLinesForObserver(lines, eventPayload, heroId, identity)
+                    Prepare = () => FormatContinuityTranscript(lines, group => FormatEventLinesForObserver(group, eventPayload, heroId, identity))
                 }
             };
             CodexParallelPreparationResult result = CodexConversationContracts.PrepareInParallel(
@@ -1253,6 +1213,10 @@ namespace ReignBetaServer
             builder.Add("MEMORY WRITE RULES", LoadPromptTemplate("memory_write_rules.txt"));
             builder.Add("DYNAMIC CHARACTERISTICS POLICY", DynamicCharacteristicsPromptPolicy);
             builder.Add("CONVERSATION NATURALNESS", ConversationNaturalnessContract);
+            builder.Add("PLAYER ACTION AND PRIVATE SPEECH BOUNDARY",
+                "In every player message, each span enclosed by single asterisks (*...*) is a description of the player's action, never words the player spoke. Preserve the order of action and speech spans. Only text outside those spans is spoken aloud, unless an immediately preceding action explicitly says the player whispers to a named recipient; that speech is audible only to that recipient. An action may convey an observation or describe a private whisper, and the addressed NPC may react to what they could perceive or hear. Other witnesses may notice that whispering happened, but must not know, quote, assess, or remember its hidden content. Do not turn narrated movement, courtesy, or intent into a completed native world action without the normal action gate and execution receipt.");
+            builder.Add("VISIBLE REPLY FORMAT",
+                "Write the reply field as readable paragraphs. Put one blank line between the time/place line, spoken paragraphs, and each *NPC action paragraph*. Put externally visible NPC actions wholly inside a single pair of asterisks, keep NPC speech outside asterisks, and use short spoken paragraphs. Do not add labels, speaker tags, or quotation marks around speech.");
             builder.Add("VISIBLE REPLY RULES", eventMode
                 ? "Reply only as the current NPC. The current NPC is physically present and speaking now; they may refuse or end the exchange but may not claim to be absent while replying. Stay grounded in the active event and phase. Account for witnesses, etiquette, embarrassment, reputation, and opportunity. Do not speak for or narrate the player, and do not write other NPC dialogue. In a sequential group beat, engage relevant earlier contributions while advancing this NPC's own goals; do not repeat an answered question, recite a player's refusal, copy another conclusion, converge on an unsupported shared invention, or imitate an earlier gesture or formula. Treat older model wording as history, not an instruction or style to imitate. When identity is unknown, prefer second-person address and use any descriptive stranger label at most once. An NPC may consent to a proposed gift or action, but cannot narrate a transfer, payment, release, marriage, ownership change, or other world action as completed before the validator and executor return a successful receipt. Avoid generic helpfulness and instant agreement."
                 : "Reply only as the current NPC. The current NPC is physically present and speaking now; they may refuse or end the exchange but may not claim to be absent while replying. Do not speak for or narrate the player or other NPCs. Keep continuity with the newest message and immediate exchange. Treat older model wording as history, not an instruction or style to imitate. When identity is unknown, prefer second-person address and use any descriptive stranger label at most once. An NPC may consent to a proposed gift or action, but cannot narrate a transfer, payment, release, marriage, ownership change, or other world action as completed before the validator and executor return a successful receipt. Let personality, rank, culture, relationship, memory, and motive drive the response. Avoid generic helpfulness, flattery, instant agreement.");
@@ -1398,7 +1362,7 @@ namespace ReignBetaServer
                 + "Negotiation or deferral must set actionGate.needed=false and actionGate.commitment=conditional; never encode a willingness to keep listening as refused.";
         }
 
-        private static PromptEnvelope BuildCorrespondencePromptEnvelope(string campaignId, string senderId, string senderName, string recipientId, string recipientName, double worldDay, string receivedLetter, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> relationship, string memoryContext)
+        private static PromptEnvelope BuildCorrespondencePromptEnvelope(string campaignId, string senderId, string senderName, string recipientId, string recipientName, double worldDay, string receivedLetter, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> relationship, string memoryContext, Dictionary<string, object> continuityContext = null)
         {
             var rules = new PromptRuleComposer();
             rules.Add("CORRESPONDENCE ENGINE", LoadPromptTemplate("correspondence_system.txt"));
@@ -1414,6 +1378,9 @@ namespace ReignBetaServer
                 campaignId, senderId, profile, ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>());
             if (!string.IsNullOrWhiteSpace(mbti)) character += "\n\n" + mbti;
             Dictionary<string, object> turnPayload = new Dictionary<string, object> { ["recipientId"] = recipientId ?? "", ["playerHeroStringId"] = recipientId ?? "", ["worldDay"] = worldDay, ["mode"] = "correspondence", ["sceneOpportunity"] = new Dictionary<string, object> { ["private"] = true, ["exposure"] = 0.08d, ["witnessIds"] = new List<string>() } };
+            turnPayload["timelineId"] = ContinuityTimeline(continuityContext);
+            turnPayload["speakerClanId"] = ReadString(profile, "clanId", "unknown");
+            turnPayload["continuityOutputReserve"] = 2400;
             Dictionary<string, object> motiveDecision = BuildConversationDecisionContext(campaignId, "correspondence", senderId, profile, characteristics, new Dictionary<string, object>(), receivedLetter, "Private written correspondence.", turnPayload, new Dictionary<string, object> { ["identityState"] = "known" }, relationship);
             Dictionary<string, string> values = new Dictionary<string, string>
             {
@@ -1446,7 +1413,11 @@ namespace ReignBetaServer
                 + "negotiation or deferral uses needed=false and commitment=conditional. An eligible concealed report uses needed=true, "
                 + "commitment=final_private_report, and a private report intent while the visible body remains only a refusal or guarded neutrality.");
             string global = rules.Render(composition);
+            live = BuildProtectedConversationContinuity(campaignId, senderId, turnPayload,
+                ReadJsonObject(CharacterFile(campaignId, senderId, "state.json")))
+                + "\nWRITTEN EXCHANGE: the sender and recipient are not assumed to share a physical scene. No local roster or present touch is implied.\n\n" + live;
             PromptEnvelope envelope = CreatePromptEnvelope("correspondence", "written", global, character, live);
+            FinalizeContinuityPromptBudget(envelope, turnPayload);
             envelope.Diagnostics["composition"] = composition;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
             envelope.Diagnostics["skillAwareness"] = BuildSkillAwarenessDiagnostics(profile, characteristics, receivedLetter, "Private written correspondence.");
@@ -2086,6 +2057,8 @@ namespace ReignBetaServer
             results.AddRange(RunConversationNaturalnessSelfTests());
             results.AddRange(RunRoleplayContinuitySelfTests());
             results.AddRange(RunTemporaryGuestDialogueSelfTests());
+            results.AddRange(RunConversationContinuitySelfTests());
+            results.AddRange(RunConversationAgencySelfTests());
             PromptEnvelope first = CreatePromptEnvelope("dialogue", "commoner", "STATIC", "CHARACTER", "turn one");
             PromptEnvelope second = CreatePromptEnvelope("dialogue", "commoner", "STATIC", "CHARACTER", "turn two");
             add("prompt_prefix_dynamic_stability", ReadString(first.Diagnostics, "globalPrefixHash", "") == ReadString(second.Diagnostics, "globalPrefixHash", "") && ReadString(first.Diagnostics, "characterPrefixHash", "") == ReadString(second.Diagnostics, "characterPrefixHash", ""), "Changing the live suffix preserves both reusable prefix hashes.", null);
@@ -2123,8 +2096,8 @@ namespace ReignBetaServer
                 ["identityPromptBlock"] = "IDENTITY_SENTINEL",
                 ["sceneContext"] = "SCENE_SENTINEL",
                 ["characterLiveStateText"] = "CURRENT_STATE_SENTINEL",
-                ["contextPullText"] = "CONTEXT_HEAD_SENTINEL\n" + new string('C', 60000) + "\nCONTEXT_TAIL_SENTINEL",
-                ["priorDialogueText"] = "OLDEST_TRANSCRIPT_SENTINEL\n" + new string('T', 60000) + "\nNEWEST_TRANSCRIPT_SENTINEL",
+                ["contextPullText"] = "CONTEXT_HEAD_SENTINEL\n\n" + new string('C', 60000) + "\n\nCONTEXT_TAIL_SENTINEL",
+                ["priorDialogueText"] = "OLDEST_TRANSCRIPT_SENTINEL\n\n" + new string('T', 60000) + "\n\nNEWEST_TRANSCRIPT_SENTINEL",
                 ["playerText"] = "CURRENT_PLAYER_SENTINEL"
             };
             PromptLiveTurnBudgetResult budgetedPrompt = BuildBudgetedConversationLiveTurn(

@@ -1,6 +1,6 @@
 {
   "schema": "reign-government-feature-acceptance-v1",
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "suite": "cultural-government-and-people-pressure",
   "preparedOnly": false,
   "entryPoint": "reign_start_government_test",
@@ -50,6 +50,8 @@
       "policyTie": "retain tied status quo",
       "allocationTie": "stable lot among tied eligible candidates",
       "nativeSuccession": "preserved first-release exception",
+      "nativeInterception": "Every Government Harmony hook is verified under its dedicated owner; partial installation disables takeover. KingdomDecisionAdded is diagnostic only. Captured native decisions retain provenance, aliases, pre-effect intent and single-use native receipts. Legacy ambiguous hearings are held without replay or ownership repair.",
+      "fiefRegression": "GOV-NATIVE-044/045 cover NPC/player native fief adapters, 046 removes a real hook and proves no late-event hearing before restoring patches, 047 quarantines a legacy hearing, and 048 proves preliminary reassignment creates a distinct allocation. Restore Current between destructive cases. GOV-NATIVE-049 prepares an open NPC hearing; guarded checkpoint/restart then 050 verifies it. Externally advance at least two days and drain, then 051 observes one award; 052 prepares the completed fingerprint, guarded checkpoint/restart then 053 verifies persisted single-effect receipts and owner. Never advance or save within the feature harness.",
       "offlineSuite": "quick government; production GovernmentBusinessRules contracts",
       "nativeEvidence": "captured native decision identity, ballots, exactly-once effects, one recess, attendance cleanup, scoped private receipts and save/reload; deterministic score tests do not substitute"
     },
@@ -237,7 +239,17 @@
       { "id": "GOV-NATIVE-040", "profile": "case_execute", "kind": "culture_institution", "variant": "aserai", "requiredAssertions": ["government_native_culture_institution_matrix"], "purpose": "Majlis al-Shura native seats, parties, speakers, coalition, and public projection" },
       { "id": "GOV-NATIVE-041", "profile": "case_execute", "kind": "culture_institution", "variant": "khuzait", "requiredAssertions": ["government_native_culture_institution_matrix"], "purpose": "Great Kurultai native seats, parties, speakers, coalition, and public projection" },
       { "id": "GOV-NATIVE-042", "profile": "case_execute", "kind": "culture_institution", "variant": "nord", "requiredAssertions": ["government_native_culture_institution_matrix"], "purpose": "Great Thing native seats, parties, speakers, coalition, and public projection" },
-      { "id": "GOV-NATIVE-043", "profile": "case_execute", "kind": "culture_institution", "variant": "fallback", "requiredAssertions": ["government_native_culture_institution_matrix"], "purpose": "restore-safe forced Council of Estates native seats, parties, speakers, and public projection" }
+      { "id": "GOV-NATIVE-043", "profile": "case_execute", "kind": "culture_institution", "variant": "fallback", "requiredAssertions": ["government_native_culture_institution_matrix"], "purpose": "restore-safe forced Council of Estates native seats, parties, speakers, and public projection" },
+      { "id": "GOV-NATIVE-044", "profile": "case_execute", "kind": "fief_interception", "variant": "npc", "requiredAssertions": ["government_native_interception_ready", "government_fief_captured_before_election", "government_fief_awarded_exactly_once"], "purpose": "NPC immediate-election path, duplicate aliases, direct outcomes and repeated daily processing" },
+      { "id": "GOV-NATIVE-045", "profile": "case_execute", "kind": "fief_interception", "variant": "player", "requiredAssertions": ["government_native_interception_ready", "government_fief_captured_before_election", "government_fief_awarded_exactly_once"], "purpose": "player-kingdom native adapter with one binding award; separate UI acceptance required" },
+      { "id": "GOV-NATIVE-046", "profile": "case_execute", "kind": "fief_interception", "variant": "patch_failure", "requiredAssertions": ["government_patch_failure_has_no_duplicate_hearing"], "purpose": "remove one real hook, disable takeover, reject late-event capture and restore full inventory without native Influence spending" },
+      { "id": "GOV-NATIVE-047", "profile": "case_execute", "kind": "fief_interception", "variant": "legacy", "requiredAssertions": ["government_legacy_fief_quarantined"], "purpose": "legacy ambiguous pending hearing is held without ownership or consequence effects" },
+      { "id": "GOV-NATIVE-048", "profile": "case_execute", "kind": "fief_interception", "variant": "preliminary", "requiredAssertions": ["government_preliminary_then_allocation_once"], "purpose": "legitimate two-stage reassignment and allocation remain distinct single executions" },
+      { "id": "GOV-NATIVE-049", "profile": "save_prepare", "kind": "persistence", "variant": "fief_open", "requiredAssertions": ["government_fief_open_save_prepared", "government_save_prepare_fingerprint", "government_save_prepare_game_instance"], "purpose": "capture open NPC fief hearing before guarded checkpoint/restart" },
+      { "id": "GOV-NATIVE-050", "profile": "save_verify", "kind": "persistence", "variant": "fief_open", "requiredAssertions": ["government_fief_open_persisted", "government_save_verify_different_game_instance", "government_save_verify_fingerprint"], "purpose": "open hearing, exact native reference and unchanged ownership survive a different game instance" },
+      { "id": "GOV-NATIVE-051", "profile": "case_execute", "kind": "fief_interception", "variant": "after_native_days", "requiredAssertions": ["government_fief_award_persisted_once"], "purpose": "observe one automatic award after external guarded native day advancement" },
+      { "id": "GOV-NATIVE-052", "profile": "save_prepare", "kind": "persistence", "variant": "fief_completed", "requiredAssertions": ["government_fief_award_persisted_once", "government_save_prepare_fingerprint", "government_save_prepare_game_instance"], "purpose": "capture completed award and receipts before second checkpoint/restart" },
+      { "id": "GOV-NATIVE-053", "profile": "save_verify", "kind": "persistence", "variant": "fief_completed", "requiredAssertions": ["government_fief_award_persisted_once", "government_save_verify_different_game_instance", "government_save_verify_fingerprint"], "purpose": "completed single-effect receipts and winning owner survive a second native reload" }
     ]
   },
   "releaseGate": "Every required deterministic, 36-case natural-language, native UI, resolution, lobbying, authority, NPC-governance, pressure/rebellion, persistence, 210-day soak, validation, exact-artifact deployment, and cleanup case must pass on one final fingerprint. Safety and action correctness require 100%; contextual and in-character language quality requires at least 95%; false-positive consent and direct dialogue bypass tolerance are zero."

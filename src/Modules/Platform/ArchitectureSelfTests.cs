@@ -456,6 +456,11 @@ namespace ReignBetaServer
                         "Structured party and social-event JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
                     add("structured_dialogue_first_attempt_budget", StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 8000,
                         "Structured individual-dialogue JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
+                    add("empty_structured_response_retry_omits_redundant_character_context",
+                        !FormatRetryNeedsCharacterContext("{}")
+                        && !FormatRetryNeedsCharacterContext("  ")
+                        && FormatRetryNeedsCharacterContext("{\"reply\":\"A partial reply\"}"),
+                        "A retry after an empty provider response reuses the original character messages without appending a second large character context block.", null);
 
                     string volatileMarker =
                         "volatile_native_state_"
@@ -1061,7 +1066,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 14000, null, "", 30);
                     string protectedText = ReadString(protectedHistory, "text", "");
                     add("recall_answer_not_factual_source", ReadString(protectedHistory, "sessionId", "") == "social_event_social_memory_event"
-                        && protectedText.Contains("MOST RECENT SOURCE-BEARING SESSION")
+                        && protectedText.Contains("[HISTORICAL SOURCE SESSION social_event_social_memory_event]")
+                        && !protectedText.Contains("MOST RECENT SOURCE-BEARING SESSION")
                         && !protectedText.Contains("roadside camp") && protectedText.Contains("violet ribbon"),
                         "A prior NPC reconstruction remains stored history but is excluded from the authoritative source scene supplied for another reconstruction.", protectedHistory);
                 }

@@ -9,6 +9,7 @@ param(
     [switch]$SkipServer
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ClientDeploymentStorage.ps1')
 if ($SkipClient -and $SkipServer) { throw 'Select at least one component.' }
 if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$') { throw 'Invalid WSL distribution name.' }
 $workspaceRoot = (Resolve-Path -LiteralPath $Workspace).Path
@@ -78,10 +79,16 @@ if (-not $SkipClient) {
     # Keep staging and recoverable backups outside that search root, on the same volume.
     $deploymentRoot = Join-Path $game '.reign-deployment'
     if ((Test-Path -LiteralPath $deploymentRoot) -and ((Get-Item -LiteralPath $deploymentRoot).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Redirected deployment storage is not supported.' }
+    $stageSources = @('GUI','ModuleData','EventArt','TavernArt','Videos','PortraitCache','TavernHousePortraits') | ForEach-Object { Join-Path $workspaceRoot "ReignBeta\$_" }
+    $stageSources += @((Join-Path $workspaceRoot 'ReignBeta\SubModule.xml'), $client)
+    Assert-ReignDeploymentHeadroom -GameRoot $game -StageSources $stageSources | Out-Null
+    $helper = Join-Path $env:USERPROFILE "Reign\Tools\$deploymentId\native-portrait-generator"
+    Assert-ReignDeploymentHeadroom -GameRoot $helper -StageSources @($native) | Out-Null
     New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
     $stage = Join-Path $deploymentRoot "stage-$deploymentId"
     if (Test-Path -LiteralPath $stage) { throw 'The deployment staging path already exists.' }
     New-Item -ItemType Directory -Path $stage | Out-Null
+    Write-ReignStorageMarker -Root $deploymentRoot -Kind stage -DeploymentId $deploymentId
     foreach ($directory in @('GUI','ModuleData','EventArt','TavernArt','Videos','PortraitCache','TavernHousePortraits')) {
         Copy-Item -LiteralPath (Join-Path $workspaceRoot "ReignBeta\$directory") -Destination (Join-Path $stage $directory) -Recurse
     }
@@ -97,7 +104,6 @@ if (-not $SkipClient) {
         if ((Get-FileHash -LiteralPath (Join-Path $bin $file.Name)).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) { throw 'Client copy checksum failed.' }
     }
     & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $stage
-    $helper = Join-Path $env:USERPROFILE "Reign\Tools\$deploymentId\native-portrait-generator"
     if (Test-Path -LiteralPath $helper) { throw 'The helper deployment path already exists.' }
     New-Item -ItemType Directory -Path (Split-Path $helper) -Force | Out-Null
     Copy-Item -LiteralPath $native -Destination $helper -Recurse
@@ -121,27 +127,9 @@ if (-not $SkipClient) {
     # absent even though the module folder still exists.
     Assert-BannerlordClosed $game
     if ((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $legacyArenaBackup)) { throw 'Deployment backup path already exists.' }
-    $moduleMoved = $false
-    $arenaMoved = $false
-    $stageActivated = $false
-    try {
-        if (Test-Path -LiteralPath $module) { [IO.Directory]::Move($module, $backup); $moduleMoved = $true }
-        if (Test-Path -LiteralPath $legacyArena) { [IO.Directory]::Move($legacyArena, $legacyArenaBackup); $arenaMoved = $true }
-        [IO.Directory]::Move($stage, $module)
-        $stageActivated = $true
-        & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $module
-    }
-    catch {
-        $activationFailure = $_
-        try {
-            if ($stageActivated) { [IO.Directory]::Move($module, (Join-Path $deploymentRoot "failed-$deploymentId")) }
-            if ($moduleMoved) { [IO.Directory]::Move($backup, $module) }
-            if ($arenaMoved) { [IO.Directory]::Move($legacyArenaBackup, $legacyArena) }
-        }
-        catch {
-            throw "Client activation failed: $($activationFailure.Exception.Message). Rollback also failed: $($_.Exception.Message). Inspect the retained module and backup folders."
-        }
-        throw $activationFailure
+    $activation = Invoke-ReignClientActivation -Module $module -Stage $stage -Backup $backup -LegacyArena $legacyArena -LegacyArenaBackup $legacyArenaBackup -DeploymentRoot $deploymentRoot -DeploymentId $deploymentId -Verify {
+        param($activatedModule)
+        & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $activatedModule
     }
     New-Item -ItemType Directory -Path (Split-Path $recordPath) -Force | Out-Null
     if (Test-Path -LiteralPath $recordPath) { Copy-Item -LiteralPath $recordPath -Destination "$recordPath.before-$runId" }
@@ -156,10 +144,19 @@ if (-not $SkipClient) {
     Move-Item -LiteralPath "$recordPath.next" -Destination $recordPath -Force
     $generator = ConvertTo-WslPath (Join-Path $helper 'Bannerlord.NativeCharacterImageGenerator.App.exe')
     $nativeSaveRoot = ConvertTo-WslPath (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Mount and Blade II Bannerlord\Game Saves')
-    $writeBridge = 'import json,pathlib,sys; p=pathlib.Path("/var/www/html/ReignServer/data/windows-bridge.json"); t=p.with_suffix(".next"); t.write_text(json.dumps({"schema":"reign-windows-bridge-v1","nativeGenerator":sys.argv[1],"nativeSaveRoot":sys.argv[2]})); t.replace(p)'
+    $writeBridge = 'import json,pathlib,sys; p=pathlib.Path("/var/www/html/ReignServer/data/windows-bridge.json"); d=json.loads(p.read_text()) if p.is_file() else {"schema":"reign-windows-bridge-v1"}; d["nativeGenerator"]=sys.argv[1]; d["nativeSaveRoot"]=sys.argv[2]; t=p.with_suffix(".next"); t.write_text(json.dumps(d)); t.chmod(0o600); t.replace(p)'
     & wsl.exe -d $Distro -u reign -- python3 -c $writeBridge $generator $nativeSaveRoot
     if ($LASTEXITCODE -ne 0) { throw 'The client deployed, but its WSL portrait bridge record could not be written.' }
-    Write-Output "Reign $($release.version) client deployed to $module; previous files retained."
+    # Retention starts only after the installed client and bridge are verified.
+    # Any failure here leaves the current rollback untouched and is reported for manual review.
+    try {
+        if ($activation.ModuleMoved) { Write-ReignStorageMarker -Root $deploymentRoot -Kind before -DeploymentId $deploymentId }
+        Remove-Item -LiteralPath (Join-Path $deploymentRoot "stage-$deploymentId.reign-owned.json") -Force
+        Invoke-ReignStorageRetention -Root $deploymentRoot -KeepBackups 2
+    } catch {
+        Write-Warning "Client deployed, but deployment storage retention did not finish: $($_.Exception.Message)"
+    }
+    Write-Output "Reign $($release.version) client deployed to $module."
 }
 
 if (-not $SkipServer) {

@@ -202,6 +202,7 @@ namespace ReignBetaServer
                     .Select(CloneDictionary)
                     .ToList()
             };
+            result["conversationAgency"] = BuildConversationAgencyContext(campaignId, subjectId, targetId, payload, profile, characteristics, result);
             result["prompt"] = BuildConversationDecisionPrompt(result)
                 + "\n\n" + ReadString(
                     politicalRiskPosture, "prompt", "");
@@ -313,7 +314,7 @@ namespace ReignBetaServer
                         {
                             ["reply"] = value
                         },
-                        identityView))
+                        identityView, checkSceneLocation: false))
                 {
                     value = "";
                 }
@@ -1980,7 +1981,8 @@ UNIQUE(subject_id,target_id,kind,session_id));");
 
         private static bool VerifiedPoliticalAuthorityContradiction(
             Dictionary<string, object> parsed,
-            Dictionary<string, object> identityView)
+            Dictionary<string, object> identityView,
+            bool checkSceneLocation = true)
         {
             Dictionary<string, object> authority =
                 ReadDictionary(identityView, "authorityView")
@@ -2037,7 +2039,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 : @"lord|lady|owner|ownership|hold|rule|authority";
             string settlementName = ReadString(
                 authority, "currentSettlementName", "");
-            if (CurrentConversationSettlementContradiction(
+            if (checkSceneLocation && CurrentConversationSettlementContradiction(
                     visible, settlementName))
                 return true;
             if (!sovereignKnown && !settlementOwnerKnown)

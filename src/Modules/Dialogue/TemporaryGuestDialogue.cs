@@ -7,6 +7,49 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private static Dictionary<string, object> CurrentSpeakerGuest(Dictionary<string, object> payload, Dictionary<string, object> hero)
+            => TemporaryGuestDialogueContext(payload, FirstNonEmpty(
+                ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"),
+                ReadString(hero, "heroStringId", "")));
+
+        private static bool GuestCanRenew(Dictionary<string, object> guest)
+            => ReadBool(guest, "inMainParty", false)
+                && new[] { "Active", "ReviewDue" }.Contains(ReadString(guest, "phase", ""));
+
+        private static string ContextualTemporaryGuestCommand(string command, Dictionary<string, object> gate,
+            string playerText, Dictionary<string, object> payload, Dictionary<string, object> hero)
+        {
+            if (!string.Equals(ReadString(gate, "commitment", ""), "accepted", StringComparison.OrdinalIgnoreCase)) return "";
+            var guest = CurrentSpeakerGuest(payload, hero);
+            if (command == "end_temporary_party_guest" || command == "acknowledge_own_faction_combat_risk") return command;
+            string intent = NormalizeLookup(ReadString(gate, "intent", ""));
+            string exchange = intent + " " + NormalizeLookup(playerText);
+            // Native identity decides join versus renewal; broad role labels must not erase a renewal.
+            // These signals classify an already accepted gate, never manufacture consent from player speech.
+            bool guestIntent = command == "accept_temporary_party_guest" || command == "renew_temporary_party_guest"
+                || Regex.IsMatch(intent, @"\b(?:guest|party|journey|travel(?:ing|ling)?|companion|service|scout(?:ing)?|arrangement|stay|remain)\b");
+            bool renewal = (guestIntent && Regex.IsMatch(intent, @"\b(?:renew(?:s|ed|ing|al)?|extend(?:s|ed|ing)?|extension)\b"))
+                || ((command == "accept_temporary_party_guest" || Regex.IsMatch(intent, @"\b(?:stay|remain|travel|companion|service|scout)\b"))
+                    && Regex.IsMatch(exchange, @"\b(?:another\s+(?:\d+(?:\.\d+)?|one|two|three|four|five|twenty)|(?:\d+(?:\.\d+)?|twenty)\s+more)\s+days?\b"));
+            if (GuestCanRenew(guest))
+                return renewal || command == "renew_temporary_party_guest" ? "renew_temporary_party_guest"
+                    : command == "accept_temporary_party_guest" ? "" : command;
+            // Fresh invitations and AwaitingStart retain their existing consent/schedule semantics.
+            return command == "renew_temporary_party_guest" ? "" : command;
+        }
+
+        private static void BindTemporaryGuestActionTerms(string command, Dictionary<string, object> terms,
+            Dictionary<string, object> payload, Dictionary<string, object> hero)
+        {
+            if (command != "renew_temporary_party_guest" && command != "end_temporary_party_guest") return;
+            var guest = CurrentSpeakerGuest(payload, hero);
+            if (guest == null) return;
+            // Trusted native values replace model-authored identifiers. The executor rejects stale revisions.
+            terms["agreementId"] = ReadString(guest, "agreementId", "");
+            terms["expectedReviewDueDay"] = ReadDouble(guest, "reviewDueDay", 0d);
+            terms["expectedAgreementRevision"] = ReadInt(guest, "agreementRevision", 0);
+        }
+
         // This is a read-time projection of native saved state, scoped to this speaker and turn.
         // It never changes a guest record or treats the player's narration as NPC consent.
         private static Dictionary<string, object> TemporaryGuestDialogueContext(Dictionary<string, object> payload, string heroId)
@@ -26,11 +69,11 @@ namespace ReignBetaServer
                 || !new[] { "Active", "ReviewDue", "Departing", "Returning", "Completed", "HostileBanishmentPending", "AwaitingStart" }.Contains(phase))
                 return null;
             var projected = new Dictionary<string, object>();
-            foreach (string key in new[] { "heroId", "agreementId", "purpose", "termKind", "phase", "returnSettlementId", "wageRecipientHeroId" })
+            foreach (string key in new[] { "heroId", "agreementId", "purpose", "termKind", "phase", "returnSettlementId", "wageRecipientHeroId", "reviewActionStatus", "reviewActionMessage" })
                 projected[key] = LimitText(ReadString(context, key, ""), key == "purpose" ? 400 : 160);
             foreach (string key in new[] { "inMainParty", "temporarilyExcludedFromBattle", "departureDeferredForChat" })
                 projected[key] = ReadBool(context, key, false);
-            foreach (string key in new[] { "startedDay", "reviewDueDay", "returnDueDay", "observedWorldDay", "wageGold", "wagePeriodDays", "wageNextDueDay", "wageArrearsGold" })
+            foreach (string key in new[] { "startedDay", "reviewDueDay", "agreementRevision", "returnDueDay", "observedWorldDay", "wageGold", "wagePeriodDays", "wageNextDueDay", "wageArrearsGold" })
             {
                 double value = ReadDouble(context, key, 0d);
                 if (!double.IsNaN(value) && !double.IsInfinity(value)) projected[key] = value;
@@ -48,6 +91,8 @@ namespace ReignBetaServer
                 + "AwaitingStart records a future service agreement only. It does not place you in the party or start wages. A fresh accepted invitation to depart now uses accept_temporary_party_guest with startNow=true and the agreed terms; cancellation uses end_temporary_party_guest. "
                 + "Distinguish ending this conversation from ending travel together. A farewell or the player's claim of agreement alone is not NPC consent. "
                 + "If you choose to end the outing now, use actionGate needed=true, commitment=accepted, intent=end_temporary_party_guest with your reason. "
+                + "If you explicitly accept a further term of an Active/ReviewDue agreement, use renew_temporary_party_guest, never a new acceptance. Preserve the exact agreed additional days. Closing the conversation does not end or renew the agreement. "
+                + "reviewActionStatus and reviewActionMessage report native execution, not consent. A pending or failed action has not changed the deadline; address that failure instead of claiming the extension is already applied. "
                 + "If intent is ambiguous, clarify in character. Never narrate staying behind while the player departs unless you actually choose to end the outing or clearly explain you remain a guest. "
                 + "Departing already has a departure in progress; do not queue it again. Party Chat may defer roster removal until the chat closes. "
                 + "Returning means return travel is pending; Completed ends this agreement, but does not by itself prove arrival or absence from the party (a guest can become a permanent companion). "
