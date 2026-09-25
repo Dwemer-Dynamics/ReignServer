@@ -519,6 +519,52 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             catch { if (ownsTransaction) ExecuteSql(connection, "ROLLBACK;"); throw; }
         }
 
+        private static Dictionary<string, object> VisibleFailedRepairWithoutEffects(Dictionary<string, object> parsed)
+        {
+            var visible = CloneDictionary(parsed);
+            MarkRepairedVisibleResponse(visible, false);
+            foreach (string alias in new[] { "action_gate", "relationship_assessments", "relationship_updates",
+                "memory_writes", "belief_writes", "obligation_writes", "comprehension_writes",
+                "continuity_writes", "dynamic_characteristic_writes", "court_knowledge_writes",
+                "scene_state_updates", "identity_introductions", "suggested_actions", "actions",
+                "social_signals", "drinking_events", "proposal_decisions", "state_updates", "conception_gate" })
+                visible.Remove(alias);
+            foreach (string key in new[] { "relationshipAssessments", "relationshipUpdates", "memoryWrites", "beliefWrites",
+                "obligationWrites", "comprehensionWrites", "continuityWrites", "dynamicCharacteristicWrites",
+                "courtKnowledgeWrites", "sceneStateUpdates", "identityIntroductions", "suggestedActions",
+                "socialSignals", "drinkingEvents", "proposalDecisions" })
+                visible[key] = new List<Dictionary<string, object>>();
+            visible["stateUpdates"] = new Dictionary<string, object>();
+            visible["relationshipSignal"] = "unchanged";
+            visible["actionGate"] = new Dictionary<string, object> { ["needed"] = false,
+                ["commitment"] = "roleplay_only", ["intent"] = "", ["confidence"] = 0d,
+                ["reason"] = "The reply did not pass repair; no action is authorized." };
+            visible["conceptionGate"] = new Dictionary<string, object> { ["needed"] = false, ["completed"] = false };
+            visible["conversationAgencyReceipt"] = new Dictionary<string, object> { ["ok"] = false,
+                ["updates"] = new List<Dictionary<string, object>>(), ["visibleFailure"] = true };
+            return visible;
+        }
+
+        private static bool TryReturnMarkedVisibleFailure(Dictionary<string, object> llm,
+            Dictionary<string, object> repair, Dictionary<string, object> original,
+            Dictionary<string, object> request, string mode)
+        {
+            foreach (var source in new[] { repair, original })
+            {
+                if (source == null || !ConversationStructuredObjectHasUsableVisibleReply(source)) continue;
+                var complete = CompleteConversationStructuredResponse(source,
+                    NormalizeLookup(mode).Replace(' ', '_'), out _);
+                string content = Json.Serialize(complete);
+                if (!StructuredResponseIsComplete(content, mode)
+                    || !ConversationVisibleReplyPassesRequestQualityGate(content, request, mode)) continue;
+                llm["ok"] = true;
+                llm["content"] = Json.Serialize(VisibleFailedRepairWithoutEffects(complete));
+                llm["visibleRepairFailure"] = true;
+                return true;
+            }
+            return false;
+        }
+
         private static Dictionary<string, object> EnforceConversationAgencyResponse(Dictionary<string, object> llm,
             Dictionary<string, object> request, Dictionary<string, object> motive, Dictionary<string, object> payload,
             string campaignId, string correlationId, string mode, string heroId,
@@ -531,6 +577,8 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             var parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             if (parsed == null) return llm;
             var evaluation = EvaluateConversationAgency(parsed, context);
+            var diagnosticAgencyIssues = ReadStringList(evaluation, "issues").ToList();
+            DiagnosticValidation("Check negotiation metadata", ReadBool(evaluation, "ok", false), diagnosticAgencyIssues, parsed);
             bool repaired = false;
             if (!ReadBool(evaluation, "ok", false))
             {
@@ -553,20 +601,47 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 string model = ReadString(request, "model", ""); if (model.Length > 0) repairRequest["model"] = model;
                 var response = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
                 var candidate = ReadBool(response, "ok", false) ? TryParseJsonObject(ReadString(response, "content", "")) : null;
+                if (candidate != null && ConversationStructuredObjectHasUsableVisibleReply(candidate))
+                    candidate = CompleteConversationStructuredResponse(candidate,
+                        NormalizeLookup(mode).Replace(' ', '_'), out _);
                 var checkedCandidate = candidate == null ? null : EvaluateConversationAgency(candidate, context);
+                DiagnosticValidation("Recheck negotiation repair", checkedCandidate != null && ReadBool(checkedCandidate, "ok", false),
+                    checkedCandidate == null ? new List<string> { "The repair did not return a usable JSON candidate." } : ReadStringList(checkedCandidate, "issues"), candidate);
                 if (checkedCandidate != null && ReadBool(checkedCandidate, "ok", false)
                     && StructuredResponseIsComplete(Json.Serialize(candidate), mode)
                     && (validateRepair == null || validateRepair(candidate)))
-                { parsed = candidate; evaluation = checkedCandidate; repaired = true; }
+                {
+                    MarkRepairedVisibleResponse(candidate, true);
+                    parsed = candidate; evaluation = checkedCandidate; repaired = true;
+                }
                 else
                 {
-                    // No rejected draft or invented agreement becomes an authoritative event.
-                    llm["ok"] = false; llm["errorCode"] = "conversation_agency_repair_unusable";
-                    llm["error"] = "The NPC decision could not be reconciled with the current negotiation. No agreement or action was applied; the conversation can be retried.";
-                    llm["conversationAgency"] = evaluation;
+                    // The original reply passed the earlier visible/continuity gates. Return its
+                    // dialogue with the failed-repair marker, but discard every proposed effect.
+                    if (!StructuredResponseIsComplete(Json.Serialize(parsed), mode)
+                        || !ConversationStructuredObjectHasUsableVisibleReply(parsed))
+                    {
+                        llm["ok"] = false; llm["errorCode"] = "conversation_agency_repair_unusable";
+                        llm["error"] = "The NPC decision could not be reconciled with the current negotiation. No usable reply was available.";
+                        llm["conversationAgency"] = evaluation;
+                        return llm;
+                    }
+                    var visible = VisibleFailedRepairWithoutEffects(parsed);
+                    payload["conversationAgencyReceipt"] = ReadDictionary(visible, "conversationAgencyReceipt");
+                    llm["content"] = Json.Serialize(visible);
+                    llm["conversationAgency"] = new Dictionary<string, object> { ["accepted"] = false,
+                        ["visibleFailure"] = true, ["visibleRepairMarker"] = ".,", ["issues"] = ReadStringList(evaluation, "issues") };
+                    WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "",
+                        "completed_with_revalidation_override", 0,
+                        "The agency repair failed; the marked original reply was returned without negotiation or authorized action effects.",
+                        ReadDictionary(llm, "conversationAgency"));
                     return llm;
                 }
             }
+            if (repaired)
+                WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "", "completed", 0,
+                    "The negotiation metadata repair passed revalidation.", new Dictionary<string, object> {
+                        ["issues"] = diagnosticAgencyIssues, ["accepted"] = true, ["remaining"] = ReadStringList(evaluation, "issues") });
             if (ReadDictionaryList(evaluation, "updates").Count > 0 && persist)
             {
                 string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), correlationId);

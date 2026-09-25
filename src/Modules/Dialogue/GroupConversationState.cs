@@ -33,6 +33,11 @@ text TEXT NOT NULL DEFAULT '',
 addressed_ids_json TEXT NOT NULL DEFAULT '[]',
 ts INTEGER NOT NULL);" );
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_session ON group_conversation_contributions(session_id,ts,contribution_id);");
+            EnsureDatabaseColumn(connection, "group_conversation_contributions", "scene_turn_id", "TEXT NOT NULL DEFAULT ''");
+            EnsureDatabaseColumn(connection, "group_conversation_contributions", "audience_json", "TEXT NOT NULL DEFAULT '[]'");
+            EnsureDatabaseColumn(connection, "group_conversation_contributions", "validation_status", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
+            EnsureDatabaseColumn(connection, "group_conversation_contributions", "delivery_order", "BIGINT NOT NULL DEFAULT 0");
+            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_beat ON group_conversation_contributions(session_id,scene_turn_id,ts);");
         }
 
         private static string GroupConversationSessionId(Dictionary<string, object> payload)
@@ -48,6 +53,11 @@ ts INTEGER NOT NULL);" );
                 .Select(item => ReadFirstString(item, "heroStringId", "heroId", "id"))
                 .Concat(ReadStringList(payload, "activeHeroIds"))
                 .Concat(ReadStringList(payload, "participantHeroIds"))
+                // NPC active-id lists omit the player. Include an explicitly
+                // present player profile in the same observer/audience contract.
+                .Concat(ReadDictionaryList(payload,"participantProfiles")
+                    .Where(p=>ReadString(p,"role","").Equals("player",StringComparison.OrdinalIgnoreCase))
+                    .Select(IdentityHeroId))
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
@@ -67,12 +77,21 @@ ts INTEGER NOT NULL);" );
             string sessionId = GroupConversationSessionId(payload);
             List<string> participants = GroupConversationParticipantIds(payload);
             Dictionary<string, object> stored = new Dictionary<string, object>();
+            var delivered = new List<Dictionary<string, object>>();
             if (!string.IsNullOrWhiteSpace(sessionId))
             {
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
                     stored = QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault() ?? new Dictionary<string, object>();
+                    if (!TextListFromJson(ReadString(stored,"participant_ids_json","[]")).Contains(currentSpeakerId,StringComparer.OrdinalIgnoreCase))
+                        stored = new Dictionary<string,object>();
+                    string beat = ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId");
+                    if (beat.Length > 0)
+                        delivered = QuerySql(connection, @"SELECT * FROM group_conversation_contributions
+WHERE session_id=$id AND scene_turn_id=$beat AND role='npc' AND text<>'' AND speaker_id<>$observer
+AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY delivery_order,ts,contribution_id;",
+                            new Dictionary<string, object> { ["id"] = sessionId, ["beat"] = beat, ["observer"] = currentSpeakerId });
                 }
             }
 
@@ -103,14 +122,24 @@ ts INTEGER NOT NULL);" );
                 List<string> topics = TextListFromJson(ReadString(stored, "topics_json", "[]"));
                 if (topics.Count > 0) builder.AppendLine("Active topic terms: " + string.Join(", ", topics.Take(8)));
             }
-            builder.AppendLine("The latest player contribution appears once in the live-turn section below.");
+            builder.AppendLine("Only delivered contributions establish who has answered this player turn. Queue position, an empty reply or a pending request never establishes an answer.");
+            foreach (var contribution in delivered)
+            {
+                string speech = ReadString(contribution, "text", "");
+                builder.Append("Delivered by ").Append(ObserverSafeParticipantName(payload, currentSpeakerId,
+                    ReadString(contribution, "speaker_id", ""), ReadString(contribution, "speaker_name", "")))
+                    .Append(" [").Append(ReadString(contribution, "validation_status", "legacy_unknown")).Append("]: ");
+                bool alreadyQuoted = (recentLines ?? new List<Dictionary<string, object>>()).Any(r => ReadString(r, "text", "") == speech);
+                builder.AppendLine(alreadyQuoted ? "complete speech is in the attributed current transcript" : speech);
+            }
+            builder.AppendLine("A visible failed repair is speech only and grants no accepted fact, promise or native-action authority. The latest player contribution appears once in the live-turn section below.");
             return builder.ToString().TrimEnd();
         }
 
         private static void UpdateSharedGroupConversationState(string campaignId, Dictionary<string, object> payload,
             string npcId, string npcName, string reply, string sessionId, long ts)
         {
-            if (!IsSharedGroupConversation(payload) || string.IsNullOrWhiteSpace(sessionId)) return;
+            if (!IsSharedGroupConversation(payload) || string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(reply)) return;
             RecordPresentNpcSelfIntroduction(
                 campaignId,
                 payload,
@@ -154,16 +183,20 @@ last_text=$text,open_questions_json=$questions,topics_json=$topics,state_json=$s
                     {
                         ["session"] = sessionId, ["campaign"] = campaignId, ["mode"] = ReadString(payload, "mode", ""),
                         ["participants"] = Json.Serialize(participants), ["speaker"] = npcId ?? "", ["name"] = npcName ?? "",
-                        ["text"] = LimitText(reply, 4000), ["questions"] = Json.Serialize(questions), ["topics"] = Json.Serialize(topics),
+                        ["text"] = reply, ["questions"] = Json.Serialize(questions), ["topics"] = Json.Serialize(topics),
                         ["state"] = Json.Serialize(snapshot), ["ts"] = ts
                     });
                 ExecuteSql(connection, @"INSERT OR IGNORE INTO group_conversation_contributions
-(contribution_id,session_id,speaker_id,speaker_name,role,text,addressed_ids_json,ts)
-VALUES($id,$session,$speaker,$name,'npc',$text,$addressed,$ts);", new Dictionary<string, object>
+(contribution_id,session_id,speaker_id,speaker_name,role,text,addressed_ids_json,ts,scene_turn_id,audience_json,validation_status,delivery_order)
+VALUES($id,$session,$speaker,$name,'npc',$text,$addressed,$ts,$beat,$audience,$validation,
+(SELECT COALESCE(MAX(delivery_order),0)+1 FROM group_conversation_contributions WHERE session_id=$session));", new Dictionary<string, object>
                 {
-                    ["id"] = "group_" + PromptHash(sessionId + "|" + npcId + "|" + reply).Substring(0, 24),
+                    ["id"] = "group_" + PromptHash(sessionId + "|" + ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId") + "|" + npcId + "|" + reply).Substring(0, 24),
                     ["session"] = sessionId, ["speaker"] = npcId ?? "", ["name"] = npcName ?? "",
-                    ["text"] = LimitText(reply, 4000), ["addressed"] = Json.Serialize(addressed), ["ts"] = ts
+                    ["text"] = reply, ["addressed"] = Json.Serialize(addressed), ["ts"] = ts,
+                    ["beat"] = ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId"),
+                    ["audience"] = Json.Serialize(participants),
+                    ["validation"] = reply.TrimEnd().EndsWith(".,", StringComparison.Ordinal) ? "visible_failed_repair" : "accepted_speech"
                 });
                 transaction.Commit();
             }

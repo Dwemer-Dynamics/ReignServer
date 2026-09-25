@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
@@ -18,6 +19,22 @@ namespace ReignBetaServer
                 && (ReadString(resident, "schema", "") == "reign-encountered-resident-v1"
                     || ReadString(snapshot, "portraitSourceProfile", "") == ResidentOutfitRenderContract);
         }
+
+        private static bool IsTavernHousePortrait(Dictionary<string, object> payload)
+        {
+            if (!PreserveResidentClothing(payload) || ReadBool(payload, "sharedCacheOutput", false)) return false;
+            var snapshot = ReadDictionary(payload, "nativeCharacterSnapshot");
+            var tavern = ReadDictionary(snapshot, "tavernHouse");
+            string heroId = ReadString(snapshot, "heroStringId", "");
+            return ReadInt(tavern, "schema", 0) == 1
+                && ReadString(tavern, "heroStringId", "") == heroId
+                && Regex.IsMatch(ReadString(tavern, "castId", ""), @"^reign_tavern_[A-Za-z0-9_]+$")
+                && ReadDouble(snapshot, "age", 0) >= 18;
+        }
+
+        private static string TavernHousePortraitRole(Dictionary<string, object> payload)
+            => ReadBool(ReadDictionary(ReadDictionary(payload, "nativeCharacterSnapshot"), "tavernHouse"), "madam", false)
+                ? "madam" : "worker";
 
         private static string BuildResidentPortraitPrompt(Dictionary<string, object> payload)
         {

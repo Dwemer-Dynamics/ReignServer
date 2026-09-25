@@ -268,6 +268,35 @@ namespace ReignBetaServer
                 snapshot["campaignId"] = "campaign"; payload["promptPurpose"] = "tavern_house_scene";
                 Require(!PreserveResidentClothing(payload), "A scene request inherited single-character portrait framing.");
             });
+            Check("tavern_clothing_prompt_routes_all_adult_staff_to_adult_portraits", () => {
+                var tavern = new Dictionary<string, object> { ["schema"] = 1, ["heroStringId"] = "worker-a",
+                    ["castId"] = "reign_tavern_town_EW2_01", ["madam"] = false };
+                var snapshot = new Dictionary<string, object> { ["schema"] = "reign-native-portrait-snapshot-v1",
+                    ["campaignId"] = "campaign", ["heroStringId"] = "worker-a", ["age"] = 25,
+                    ["portraitSourceProfile"] = ResidentOutfitRenderContract, ["tavernHouse"] = tavern };
+                var payload = new Dictionary<string, object> { ["campaignId"] = "campaign", ["heroStringId"] = "worker-a",
+                    ["nativeCharacterSnapshot"] = snapshot, ["promptPurpose"] = "portrait", ["gender"] = "male",
+                    ["ageYears"] = 25, ["physicalConfidence"] = new Dictionary<string, object> { ["score"] = 10 } };
+                Require(IsTavernHousePortrait(payload) && PreserveResidentClothing(payload)
+                    && UsesAdultPortraitClothingEdit(payload), "An adult male worker did not enter the Tavern clothing edit.");
+                string workerPrompt = BuildAdultPortraitClothingPrompt(payload);
+                Require(workerPrompt.Contains("TAVERN HOUSE worker") && workerPrompt.Contains("Change only the clothing")
+                    && !workerPrompt.Contains("[TAVERN ROLE]") && !workerPrompt.Contains("Culturally appropriate"),
+                    "The common clothing prompt was not expanded or replaced by a culture prompt.");
+                tavern["madam"] = true;
+                Require(BuildAdultPortraitClothingPrompt(payload).Contains("TAVERN HOUSE madam"), "The same prompt did not identify the madam.");
+                var settings = new Dictionary<string, object> { ["adultPortraitProvider"] = "OpenRouter",
+                    ["adultPortraitOpenRouterImageModel"] = "selected-adult-portrait-model", ["portraitProvider"] = "NanoGPT" };
+                var profile = ResolveImageGenerationProfile(settings, "adultPortrait");
+                Require(profile.Name == "adultPortrait" && profile.Provider == "OpenRouter"
+                    && profile.OpenRouterModel == "selected-adult-portrait-model", "Tavern clothing bypassed the configured adult portrait profile.");
+                snapshot["age"] = 17;
+                Require(!UsesAdultPortraitClothingEdit(payload), "A minor entered the Tavern clothing edit.");
+                snapshot["age"] = 25; tavern["heroStringId"] = "other";
+                Require(!UsesAdultPortraitClothingEdit(payload), "An unrelated Tavern identity entered the clothing edit.");
+                tavern["heroStringId"] = "worker-a"; payload["promptPurpose"] = "tavern_house_scene";
+                Require(!UsesAdultPortraitClothingEdit(payload), "A scene request entered the portrait clothing edit.");
+            });
             Check("reference_sheet_preserves_every_cell", () => {
                 byte[] Solid(byte r, byte g, byte b) { var pixels = new byte[8 * 16 * 4]; for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b; pixels[i + 3] = 255; } return PngEncoder.EncodeRgba(pixels, 8, 16); }
                 byte[] red = Solid(255, 0, 0), blue = Solid(0, 0, 255);
@@ -279,9 +308,14 @@ namespace ReignBetaServer
                 Require(w == 1024 && h == 1024, "Scene did not fit the registered square aperture.");
             });
             Check("editable_prompt_pack_and_fixed_boundary", () => {
-                var defaults = TavernHousePromptDefaults(); Require(defaults.Count == 4 && defaults.Values.All(x => !string.IsNullOrWhiteSpace(x)), "An editable prompt is missing.");
+                var defaults = TavernHousePromptDefaults(); Require(defaults.Count == 5 && defaults.Values.All(x => !string.IsNullOrWhiteSpace(x)), "An editable prompt is missing.");
                 Require(defaults["tavern_house_look_again_summary.txt"].Contains("complete attributed conversation"), "Summary default truncates or ignores full conversation.");
                 Require(defaults["tavern_house_look_again_image.txt"].Contains("{summary}") && defaults["tavern_house_arrival_image.txt"].Contains("{participants}"), "Image prompt lost summary/identity placeholders.");
+                Require(defaults["tavern_house_portrait_clothing.txt"].Contains("[TAVERN ROLE]"), "Tavern clothing prompt lost its role token.");
+                var meta = PromptMetadataByName()["tavern_house_portrait_clothing.txt"];
+                Require(ReadBool(meta, "visible", false) && ReadString(meta, "category", "") == "image"
+                    && ReadString(meta, "label", "") == "Tavern House: Portrait Clothing",
+                    "Tavern clothing prompt is not visible in the WebUI image prompt library.");
                 Require(TavernHouseImageBoundary.Contains("Everyone remains clothed") && TavernHouseImageBoundary.Contains("include the player visibly") && TavernHouseImageBoundary.Contains("Never depict sexual acts"), "Runtime scene boundary or player identity is missing.");
             });
             Check("look_again_uses_configured_adult_event_profile_with_safe_scene_contract", () => {

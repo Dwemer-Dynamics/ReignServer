@@ -25,17 +25,42 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
             var existing = QuerySql(connection, "SELECT receipt_json FROM conversation_continuity_repairs WHERE manifest_hash=$hash;",
                 new Dictionary<string, object> { ["hash"] = hash }).FirstOrDefault();
             if (existing != null) return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["manifestHash"] = hash };
+            if (manifest.ContainsKey("expectedRestoreGeneration"))
+            {
+                string expectedGeneration = ReadString(manifest, "expectedRestoreGeneration", "");
+                if (expectedGeneration == "uninitialized" || expectedGeneration != ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""))
+                    throw new InvalidOperationException("Staging predates the active memory generation; refresh the preview after deployment before applying.");
+            }
             var changes = new List<Dictionary<string, object>>();
             foreach (var operation in ReadDictionaryList(manifest, "operations"))
             {
                 string kind = ReadString(operation, "kind", ""), id = ReadString(operation, "id", "");
                 if (id.Length == 0 || string.IsNullOrWhiteSpace(ReadString(operation, "reviewReason", ""))) throw new InvalidOperationException("Every repair needs an exact source id and review reason.");
+                if (kind == "rebuild_scene_memory")
+                {
+                    changes.Add(ApplyStagedSceneMemory(connection, manifest, operation));
+                    continue;
+                }
+                if (kind == "set_memory_mode")
+                {
+                    var beforeState = ReadMemoryPrecisionState(connection);
+                    if (id != "current" || CanonicalJson(beforeState) != CanonicalJson(ReadDictionary(operation,"expectedState")))
+                        throw new InvalidOperationException("Campaign memory state changed; review a fresh mode transition.");
+                    string mode = ReadString(operation,"mode","");
+                    if (!new[] { "legacy", "shadow", "precision" }.Contains(mode)) throw new InvalidOperationException("Unknown memory mode.");
+                    ExecuteSql(connection,"UPDATE memory_precision_state SET mode=$mode,projection_generation=projection_generation+1,updated_ts=$ts WHERE state_id='current';",
+                        TestDict("mode",mode,"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                    ExecuteSql(connection,"DELETE FROM memory_projections;");
+                    changes.Add(TestDict("kind",kind,"before",beforeState,"after",ReadMemoryPrecisionState(connection),"databaseRewound",false));
+                    continue;
+                }
                 string table, key;
                 switch (kind)
                 {
                     case "scope_private_assertion": table = "temporal_knowledge_assertions"; key = "assertion_id"; break;
                     case "recover_agenda": table = "conversation_turns"; key = "turn_id"; break;
                     case "quarantine_memory": table = "memories"; key = "memory_id"; break;
+                    case "quarantine_summary": table = "summaries"; key = "summary_id"; break;
                     case "quarantine_belief": table = "beliefs"; key = "belief_id"; break;
                     case "quarantine_comprehension": table = "comprehension"; key = "comprehension_id"; break;
                     default: throw new InvalidOperationException("Unsupported continuity repair operation.");
@@ -43,7 +68,7 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                 var before = QuerySql(connection, "SELECT * FROM " + table + " WHERE " + key + "=$id;", TestDict("id", id)).SingleOrDefault();
                 if (before == null) throw new InvalidOperationException("Repair source is missing: " + id);
                 var expected = ReadDictionary(operation, "expected") ?? new Dictionary<string, object>();
-                string requiredText = kind == "recover_agenda" ? "text" : kind == "scope_private_assertion" || kind == "quarantine_belief" ? "claim" : kind == "quarantine_memory" ? "summary" : "text";
+                string requiredText = kind == "recover_agenda" ? "text" : kind == "scope_private_assertion" || kind == "quarantine_belief" ? "claim" : kind == "quarantine_memory" || kind == "quarantine_summary" ? "summary" : "text";
                 if (!expected.ContainsKey(requiredText) || expected.Count < 3) throw new InvalidOperationException("Repair preconditions must include exact source text and provenance.");
                 foreach (var field in expected)
                 {
@@ -134,11 +159,15 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                 if (schema != ReignPostgreSqlStorage.CampaignSchemaName(campaign)) throw new InvalidOperationException("Campaign registration is missing or mismatched.");
                 using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
                 {
+                    if (HasArg(args, "--stage")) ExecuteSql(connection,"SET TRANSACTION READ ONLY;");
                     ExecuteSql(connection, "SET LOCAL search_path TO \"" + schema + "\",reign_meta;");
                     var active = QuerySql(connection, "SELECT timeline_id FROM world_history_timelines WHERE campaign_id=$campaign AND is_active=1;", TestDict("campaign", campaign));
                     if (active.Count != 1 || ReadString(active[0], "timeline_id", "") != timeline) throw new InvalidOperationException("Active timeline changed; refresh the reviewed manifest.");
-                    var result = RepairConversationContinuity(connection, manifest);
-                    result["mode"] = apply ? "applied" : "preview_rolled_back";
+                    bool stage = HasArg(args, "--stage");
+                    if (stage && apply) throw new InvalidOperationException("Staging and applying are separate operations.");
+                    if (stage && ReadString(manifest, "schema", "") != "reign-memory-stage-request-v1") throw new InvalidOperationException("A memory staging request is required.");
+                    var result = stage ? BuildMemoryStagingManifest(connection, manifest) : RepairConversationContinuity(connection, manifest);
+                    result["mode"] = stage ? "staged_read_only" : apply ? "applied" : "preview_rolled_back";
                     result["manifestFileSha256"] = hash;
                     string output = Path.GetFullPath(ArgValue(args, "--report", path + ".receipt.json"));
                     if (apply) transaction.Commit(); else transaction.Rollback();

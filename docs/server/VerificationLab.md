@@ -1,5 +1,11 @@
 # Reign Offline-First Verification Lab
 
+## Conversation Diagnostics (2026-09-24)
+
+The architecture memory fixtures now use complete retained records within the source budget and persist/reload their exact conversation rows before compaction, matching the existing source-provenance guard. This repairs stale fixture assumptions without changing production memory behavior. Diagnostic cases also cover background work after HTTP delivery, fixed visible-response timing, damaged-tail recovery and Codex generation timing through completion. Run the browser matrices from the paired Reign workspace (or set `REIGN_WORKSPACE`) so the sibling server checkout resolves the authoritative palette.
+
+The existing artifact-bound `interaction_architecture` suite runs `diagnostic_*` cases in a unique store below isolated `VerificationDir`, with injected responses and no listening server/provider calls. It emits `browser-fixture.json` alongside the shared exact Control Center HTML. Use the two intercepted browser matrices described in [ConversationDiagnostics.md](ConversationDiagnostics.md). Fixtures cover empty and reasoning-only output, actual negotiation rejection/revalidation, physical retries, immutable paging, persistence, concurrency, failed storage, export and confined clearing. `reign.testing.json` owns the catalog; existing artifact retention owns test cleanup. Native delivery and paid provider acceptance are not established by these tests.
+
 ## Conversation continuity maintenance and isolated contracts
 
 The `prompt_efficiency` suite's `pipeline.prompt_caching` check runs `RunConversationContinuitySelfTests` against isolated storage, without providers or a listener. It exercises accepted agenda/relationship history, source privacy, scene handoffs, whole-record selection, final prompt coverage/capacity, letters and the repair transaction. Run it only through artifact-bound `reign_run_offline_verification` and retain the successful canonical Release validation/hygiene report. See `conversationContinuity` in `reign.testing.json` and `docs/agent/testing/DIALOGUE_AND_PROVIDERS.md` for the procedure and coverage limits.

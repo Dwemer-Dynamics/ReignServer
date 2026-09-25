@@ -1,4 +1,10 @@
-Depict the established non-explicit moment described by this conversation summary in the tavern bedroom at {townName}:
+﻿Depict the established moment described by this conversation summary in the tavern bedroom at {townName}:
 {summary}
 
-Use all and only the supplied adult identities, including the player: {participants}. Preserve the identity mapping, faces, physiques, ages and distinguishing features. Show everyone clothed in one natural square cinematic composition with their faces and important gestures inside the central safe area. Ground expressions, posture and atmosphere in the summary. If explicit activity is referenced, show a quiet clothed moment before or afterward without depicting it. Do not reproduce the contact-sheet layout, add people or duplicate anyone. No labels, captions, writing, borders or UI.
+Use the summary as the scene. Render that moment exactly, including sex if the summary is sexual. Do not replace it with a quiet clothed beat, a fade-out, a before/after cutaway, or a sanitized version.
+
+If the summary describes sex, show it explicitly: nude or barely clothed adult bodies, clothes pulled aside or hanging off, exposed breasts, cocks, cunts, asses, mouths, hands, thrusting, grinding, riding, sucking, penetration, and the positions named in the summary. Private parts visible. Keep clothing only where the summary says it is still on or barely hanging on.
+
+Use all and only the supplied adult identities, including the player: {participants}. Preserve the identity mapping, faces, physiques, ages and distinguishing features. Compose one natural square cinematic still with every figure and face comfortably inside the frame, important bodies and sexual contact readable in the central safe area. Ground expressions, posture, lust, affection, lighting and atmosphere in the summary.
+
+Do not reproduce the contact-sheet layout, add people, remove people, or duplicate anyone. No labels, captions, writing, borders or UI. No censorship.

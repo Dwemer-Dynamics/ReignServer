@@ -596,7 +596,9 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
         {
             Dictionary<string, object> session;
             List<Dictionary<string, object>> turns;
+            string sceneJobId;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (var closure = connection.BeginTransaction())
             {
                 session = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
@@ -604,23 +606,30 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                 {
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Conversation session was not found.", ["sessionId"] = sessionId };
                 }
-                if (!ReadString(session, "status", "open").Equals("open", StringComparison.OrdinalIgnoreCase)
-                    || !string.IsNullOrWhiteSpace(ReadString(session, "scene_summary_id", "")))
+                turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;",
+                    new Dictionary<string, object> { ["id"] = sessionId });
+                var existingScene=QuerySql(connection,"SELECT payload_json FROM summaries WHERE summary_id=$id;",
+                    new Dictionary<string,object>{["id"]=ReadString(session,"scene_summary_id","")}).FirstOrDefault();
+                if (existingScene != null && ReadString(TryParseJsonObject(ReadString(existingScene,"payload_json","{}")),"sourceHash","")==MemorySourceHash(turns))
                 {
+                    if (ReadString(session,"status","")!="closed" && ReadString(session,"status","")!="interrupted")
+                        ExecuteSql(connection,"UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,close_reason=$reason WHERE session_id=$id;",
+                            new Dictionary<string,object>{["status"]=interrupted?"interrupted":"closed",["ts"]=ts,["day"]=worldDay,["reason"]=reason??"",["id"]=sessionId});
+                    closure.Commit();
                     return new Dictionary<string, object>
                     {
                         ["ok"] = true, ["idempotent"] = true, ["sessionId"] = sessionId,
                         ["sceneSummaryId"] = ReadString(session, "scene_summary_id", "")
                     };
                 }
-                turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;",
-                    new Dictionary<string, object> { ["id"] = sessionId });
+                sceneJobId = EnqueueMemoryJob(connection, campaignId, "scene_summary", ReadString(session, "npc_id", ""), "scene:" + sessionId, sessionId);
                 ExecuteSql(connection, @"UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,
 close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 {
                     ["status"] = interrupted ? "interrupted" : "closed", ["ts"] = ts, ["day"] = worldDay,
                     ["reason"] = reason ?? "", ["id"] = sessionId
                 });
+                closure.Commit();
             }
 
             List<Dictionary<string, object>> playerTurns = turns
@@ -628,25 +637,17 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 .ToList();
             bool recallOnlySession = playerTurns.Count > 0
                 && playerTurns.All(turn => IsPureConversationRecallRequest(ReadString(turn, "text", "")));
-            Dictionary<string, object> scene = CreateConversationSceneSummary(campaignId, session, turns, ts, null, !recallOnlySession);
-            string sceneId = ReadString(scene, "summaryId", "");
+            ProcessMemoryBackgroundJob(campaignId, sceneJobId);
+            Dictionary<string, object> scene;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, "UPDATE conversation_sessions SET scene_summary_id=$summary WHERE session_id=$id;",
-                    new Dictionary<string, object> { ["summary"] = sceneId, ["id"] = sessionId });
+                var job = QuerySql(connection, "SELECT result_json FROM memory_background_jobs WHERE job_id=$id;",
+                    new Dictionary<string, object> { ["id"] = sceneJobId }).Single();
+                scene = TryParseJsonObject(ReadString(job, "result_json", "{}")) ?? new Dictionary<string, object>();
             }
-            Dictionary<string, object> arc = string.IsNullOrWhiteSpace(sceneId) || recallOnlySession
-                ? new Dictionary<string, object>()
-                : UpdateRollingConversationArc(campaignId, ReadString(session, "npc_id", ""), ReadString(session, "player_id", ""),
-                    ReadString(scene, "memoryLane", "interpersonal_history"), ts,
-                    ReadDictionary(scene, "knowledgeBoundary"));
-            Dictionary<string, object> continuityArcRepairs = string.IsNullOrWhiteSpace(sceneId) || recallOnlySession
-                ? new Dictionary<string, object>()
-                : RepairExistingRollingConversationArcsAfterReengagement(
-                    campaignId,
-                    ReadString(session, "npc_id", ""),
-                    ReadString(session, "player_id", ""),
-                    ts);
+            string sceneId = ReadString(scene, "summaryId", "");
+            Dictionary<string,object> arc = ReadDictionary(scene,"arc") ?? new Dictionary<string,object>();
+            Dictionary<string,object> continuityArcRepairs = ReadDictionary(scene,"continuityArcRepairs") ?? new Dictionary<string,object>();
             string playerId = ReadString(session, "player_id", "");
             List<string> memoryOwners = TextListFromJson(ReadString(session, "participants_json", "[]"))
                 .Where(id => !string.IsNullOrWhiteSpace(id)
@@ -1048,15 +1049,13 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
                 summaryCorrelationId);
             string summaryText = ReadString(compact, "summary", "");
             if (string.IsNullOrWhiteSpace(summaryText))
-            {
-                summaryText = LimitText(string.Join(" ", pseudoRows.Select(row => ReadString(row, "summary", ""))), 1800);
-            }
+                summaryText = string.Join("\n---\n", pseudoRows.Select(row => ReadString(row, "summary", "")));
             summaryText = EnsureConversationSummaryProvenance(summaryText,
                 Math.Max(500, Math.Min(5000, ReadInt(summarySettings, "memoryConsolidationMaxSummaryChars", 1800))));
             summaryText = SanitizeUnknownIdentityEvidenceText(summaryText, identityKnowledge);
             string originalSummaryText = summaryText;
             summaryText = NormalizeHistoricalRoleplayContinuityText(summaryText,
-                Math.Max(500, Math.Min(5000, ReadInt(summarySettings, "memoryConsolidationMaxSummaryChars", 1800))),
+                Math.Max(summaryText.Length + 4096, 5000),
                 false);
             bool continuityNormalized = !string.Equals(
                 originalSummaryText, summaryText, StringComparison.Ordinal);
@@ -1064,22 +1063,17 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
             Dictionary<string, object> sceneRoute = BuildMemoryRetrievalRoute(summarySettings, routingText,
                 new Dictionary<string, object> { ["worldDay"] = ReadDouble(session, "end_world_day", ReadDouble(session, "start_world_day", 0d)) });
             string memoryLane = SelectConversationSceneMemoryLane(sceneRoute);
-            string summaryId = "scene_" + Guid.NewGuid().ToString("N");
+            string summaryId = "scene_" + PromptHash(sessionId + "|" + MemorySourceHash(turns) + "|" + MemoryPrecisionVersion).Substring(0, 32);
             List<string> participants = TextListFromJson(ReadString(session, "participants_json", "[]"));
             List<string> sourceEventIds = turns
                 .Select(turn => ReadString(turn, "event_id", ""))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            List<string> knownBy = participants
-                .Where(id => !string.IsNullOrWhiteSpace(id)
-                    && !string.Equals(id, playerId, StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (knownBy.Count == 0 && !string.IsNullOrWhiteSpace(npcId))
-            {
-                knownBy.Add(npcId);
-            }
+            List<string> knownBy = participants.Where(id => turns.All(turn => ReadString(turn,"speaker_id","") == id
+                || TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(id,StringComparer.OrdinalIgnoreCase))).ToList();
+            participants = knownBy.ToList();
+            string summaryOwner = knownBy.Contains(npcId,StringComparer.OrdinalIgnoreCase) ? npcId : "";
             List<string> tags = MergeStringLists(ReadStringList(compact, "tags"),
                 new[] { "scene", "conversation", "reported_speech", "claim_attribution", memoryLane });
             if (verifiedLieEvidence.Count > 0)
@@ -1091,16 +1085,20 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
                 tags = MergeStringLists(tags, new[] { "recall_reconstruction", "audit_only", "non_source" });
             }
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (var publication = connection.BeginTransaction())
             {
+                VerifyMemoryPublicationFence(connection);
+                VerifyMemorySourceRows(connection, "conversation_turns", "turn_id", turns);
                 ExecuteSql(connection, @"INSERT INTO summaries(
 summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,location_id,
 participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,
 status,source,vector_id,embedding_status,updated_ts,payload_json,memory_lane)
 VALUES($id,$scope,$owner,'scene',$summary,$events,$start,$end,$count,$location,$participants,'[]',$known,'[]','private',
-$importance,$confidence,$tags,$status,$source,'',$embedding,$updated,$payload,$lane);",
+$importance,$confidence,$tags,$status,$source,'',$embedding,$updated,$payload,$lane)
+ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,updated_ts=$updated;",
                     new Dictionary<string, object>
                     {
-                        ["id"] = summaryId, ["scope"] = "scene:" + sessionId, ["owner"] = npcId, ["summary"] = summaryText,
+                        ["id"] = summaryId, ["scope"] = "scene:" + sessionId, ["owner"] = summaryOwner, ["summary"] = summaryText,
                         ["events"] = Json.Serialize(sourceEventIds),
                         ["start"] = turns.Min(turn => ReadLong(turn, "ts", 0)), ["end"] = turns.Max(turn => ReadLong(turn, "ts", 0)),
                         ["count"] = turns.Select(turn => ReadString(turn, "exchange_id", "")).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
@@ -1109,7 +1107,12 @@ $importance,$confidence,$tags,$status,$source,'',$embedding,$updated,$payload,$l
                         ["confidence"] = ReadDouble(compact, "confidence", 0.8d), ["tags"] = Json.Serialize(tags), ["updated"] = now,
                         ["payload"] = Json.Serialize(new Dictionary<string, object>
                         {
+                            ["timelineId"] = ReadString(TryParseJsonObject(ReadString(session,"payload_json","{}")),"timelineId",""),
+                            ["worldDay"] = turns.Max(t => ReadDouble(t,"world_day",0d)),
                             ["sessionId"] = sessionId, ["method"] = ReadString(compact, "method", "deterministic"),
+                            ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
+                            ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                            ["sourceHash"] = MemorySourceHash(turns), ["processingVersion"] = MemoryPrecisionVersion,
                             ["retrievalRoute"] = sceneRoute, ["retrievalEligible"] = retrievalEligible,
                             ["recallReconstruction"] = !retrievalEligible,
                             ["evidenceClass"] = "dialogue_reported_speech",
@@ -1147,8 +1150,12 @@ $importance,$confidence,$tags,$status,$source,'',$embedding,$updated,$payload,$l
                     LinkMemorySource(connection, "summary", summaryId, "relationship_receipt", ReadString(item, "receipt_id", ""), evidenceOrdinal++);
                 }
                 LinkMemorySource(connection, "summary", summaryId, "session", sessionId, 0);
+                ExecuteSql(connection, "UPDATE conversation_sessions SET scene_summary_id=$summary WHERE session_id=$id;",
+                    new Dictionary<string, object> { ["summary"] = summaryId, ["id"] = sessionId });
+                publication.Commit();
             }
             return new Dictionary<string, object> { ["ok"] = true, ["summaryId"] = summaryId, ["summary"] = summaryText, ["memoryLane"] = memoryLane,
+                ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
                 ["sourceTurnIds"] = turns.Select(turn => ReadString(turn, "turn_id", "")).ToList(), ["retrievalEligible"] = retrievalEligible,
                 ["sourceEventIds"] = sourceEventIds,
                 ["knowledgeBoundary"] = new Dictionary<string, object>
@@ -1303,7 +1310,7 @@ AND memory_lane=$lane AND ($player='' OR participants_json LIKE $player_like) OR
             }
             string originalArcText = text;
             text = NormalizeHistoricalRoleplayContinuityText(text,
-                Math.Max(500, Math.Min(5000, ReadInt(arcSettings, "memoryConsolidationMaxSummaryChars", 1800))),
+                Math.Max(text.Length + 4096, 5000),
                 true);
             bool continuityNormalized = !string.Equals(
                 originalArcText, text, StringComparison.Ordinal);
@@ -1315,7 +1322,10 @@ AND memory_lane=$lane AND ($player='' OR participants_json LIKE $player_like) OR
             List<string> tags = MergeStringLists(ReadStringList(compact, "tags"), new[] { "rolling_arc", memoryLane });
             List<string> participants = MergeStringLists(new[] { npcId, playerId }, new List<string>());
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (var publication = connection.BeginTransaction())
             {
+                VerifyMemoryPublicationFence(connection);
+                VerifyMemorySourceRows(connection, "summaries", "summary_id", scenes);
                 ExecuteSql(connection, @"INSERT OR REPLACE INTO summaries(
 summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,location_id,
 participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,
@@ -1331,6 +1341,9 @@ VALUES($id,$scope,$owner,'arc',$summary,'[]',$start,$end,$count,'',$participants
                         ["payload"] = Json.Serialize(new Dictionary<string, object>
                         {
                             ["sourceSummaryIds"] = scenes.Select(row => ReadString(row, "summary_id", "")).ToList(),
+                            ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
+                            ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                            ["sourceHash"] = MemorySourceHash(scenes), ["processingVersion"] = MemoryPrecisionVersion,
                             ["correlationId"] = arcCorrelationId,
                             ["roleplayContinuityNormalized"] = continuityNormalized,
                             ["latestSceneProvesReengagement"] = true
@@ -1345,6 +1358,7 @@ VALUES($id,$scope,$owner,'arc',$summary,'[]',$start,$end,$count,'',$participants
                 {
                     LinkMemorySource(connection, "summary", arcId, "summary", ReadString(scene, "summary_id", ""), ordinal++);
                 }
+                publication.Commit();
             }
             return new Dictionary<string, object>
             {

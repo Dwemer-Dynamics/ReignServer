@@ -64,32 +64,41 @@ payload_json TEXT NOT NULL DEFAULT '{}');" );
             string owner = ReadFirstString(item, "believer", "believerId", "believer_id", "ownerId", "owner_id", "heroStringId");
             string explicitFactKey = ReadFirstString(item, "factKey", "fact_key", "propositionId", "proposition_id");
             if (string.IsNullOrWhiteSpace(claim) && string.IsNullOrWhiteSpace(subject)) return "";
+            AcquirePostgreSqlTransactionMutationLock(connection);
 
-            string identity = !string.IsNullOrWhiteSpace(explicitFactKey)
-                ? NormalizeLookup(explicitFactKey)
-                : !string.IsNullOrWhiteSpace(subject) && !string.IsNullOrWhiteSpace(predicate)
-                    ? NormalizeLookup(subject) + "|" + predicate + "|" + NormalizeLookup(objectId)
-                    : NormalizeLookup(LimitText(claim, 500));
+            string timeline = ContinuityTimeline(item);
+            string identity = StableMemoryFactIdentity(item, subject, predicate, objectId, claim);
             string factKey = "fact_" + PromptHash(identity).Substring(0, 24);
-            Dictionary<string, object> previous = QuerySql(connection, @"SELECT assertion_id,claim,confidence FROM temporal_knowledge_assertions
-WHERE campaign_id=$campaign AND perspective_owner_id=$owner AND fact_key=$fact AND valid_to_ts IS NULL
-ORDER BY observed_ts DESC LIMIT 1;", new Dictionary<string, object>
+            Dictionary<string, object> previous = QuerySql(connection, @"SELECT * FROM temporal_knowledge_assertions
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND perspective_owner_id=$owner AND fact_key=$fact AND valid_to_ts IS NULL
+ORDER BY revision DESC LIMIT 1 FOR UPDATE;", new Dictionary<string, object>
             {
-                ["campaign"] = campaignId ?? "", ["owner"] = owner ?? "", ["fact"] = factKey
+                ["campaign"] = campaignId ?? "", ["owner"] = owner ?? "", ["fact"] = factKey, ["timeline"] = timeline
             }).FirstOrDefault();
             string previousId = previous == null ? "" : ReadString(previous, "assertion_id", "");
             double confidence = ClampDouble(ReadDouble(item, "confidence", 0.5d), 0d, 1d);
+            if (item.ContainsKey("expectedRevision") && ReadInt(item, "expectedRevision", 0) != ReadInt(previous, "revision", 0))
+                throw new InvalidOperationException("Memory assertion revision changed.");
+            string acceptedText = ReadString(item, "sourceAcceptedText", "");
+            if (!IsPrivateMentalLayer(kind))
+            {
+                string claimedKind = ReadString(item,"assertionKind","reported");
+                kind = new[] { "reported", "proposed", "committed" }.Contains(claimedKind) ? claimedKind : "reported";
+            }
+            string evidenceQuote = ReadString(item, "evidenceQuote", "");
+            if (evidenceQuote.Length > 0 && (acceptedText.Length == 0 || !acceptedText.Contains(evidenceQuote, StringComparison.Ordinal)))
+                throw new InvalidOperationException("Memory assertion quote is not present in its accepted source.");
             if (previous != null && string.Equals(NormalizeLookup(ReadString(previous, "claim", "")), NormalizeLookup(claim), StringComparison.Ordinal)
                 && Math.Abs(ReadDouble(previous, "confidence", 0d) - confidence) < 0.02d)
             {
-                ExecuteSql(connection, "UPDATE temporal_knowledge_assertions SET observed_ts=$ts,source_event_id=$event,payload_json=$payload WHERE assertion_id=$id;",
-                    new Dictionary<string, object> { ["ts"] = ts, ["event"] = sourceEventId ?? "", ["payload"] = Json.Serialize(item), ["id"] = previousId });
+                // Repeating a recalled claim does not move its original learning
+                // time or discard the evidence supporting the prior version.
                 return previousId;
             }
 
             if (!string.IsNullOrWhiteSpace(previousId))
-                ExecuteSql(connection, "UPDATE temporal_knowledge_assertions SET valid_to_ts=$ts WHERE assertion_id=$id AND valid_to_ts IS NULL;",
-                    new Dictionary<string, object> { ["ts"] = ts, ["id"] = previousId });
+                ExecuteSql(connection, "UPDATE temporal_knowledge_assertions SET valid_to_ts=$ts,valid_to_day=$day WHERE assertion_id=$id AND valid_to_ts IS NULL;",
+                    new Dictionary<string, object> { ["ts"] = ts, ["id"] = previousId, ["day"] = ReadDouble(item, "worldDay", 0d) });
 
             string assertionId = "assert_" + Guid.NewGuid().ToString("N");
             List<string> knownBy = MergeStringLists(ReadStringList(item, "known_by"), ReadStringList(item, "knownBy"));
@@ -97,12 +106,14 @@ ORDER BY observed_ts DESC LIMIT 1;", new Dictionary<string, object>
             List<string> hiddenFrom = MergeStringLists(ReadStringList(item, "hidden_from"), ReadStringList(item, "hiddenFrom"));
             string truthStatus = IsPrivateMentalLayer(kind)
                 ? (kind == "belief" ? "believed" : "interpretation")
-                : FirstNonEmpty(ReadFirstString(item, "truthStatus", "truth_status", "status"), "asserted");
+                : kind; // Dialogue cannot self-certify a native effect or objective truth.
             if (IsPrivateMentalLayer(kind)) knownBy = new List<string> { owner };
             ExecuteSql(connection, @"INSERT INTO temporal_knowledge_assertions
 (assertion_id,campaign_id,fact_key,subject_id,predicate,object_id,claim,perspective_owner_id,assertion_kind,confidence,truth_status,
-valid_from_ts,valid_to_ts,observed_ts,supersedes_assertion_id,source_event_id,source_record_id,known_by_json,hidden_from_json,visibility,payload_json)
-VALUES($id,$campaign,$fact,$subject,$predicate,$object,$claim,$owner,$kind,$confidence,$truth,$ts,NULL,$ts,$supersedes,$event,$record,$known,$hidden,$visibility,$payload);",
+valid_from_ts,valid_to_ts,observed_ts,supersedes_assertion_id,source_event_id,source_record_id,known_by_json,hidden_from_json,visibility,payload_json,
+timeline_id,revision,source_hash,event_day,learned_day,recorded_ts,cardinality,processing_version)
+VALUES($id,$campaign,$fact,$subject,$predicate,$object,$claim,$owner,$kind,$confidence,$truth,$ts,NULL,$ts,$supersedes,$event,$record,$known,$hidden,$visibility,$payload,
+$timeline,$revision,$hash,$day,$learned,$ts,$cardinality,$version);",
                 new Dictionary<string, object>
                 {
                     ["id"] = assertionId, ["campaign"] = campaignId ?? "", ["fact"] = factKey,
@@ -111,8 +122,14 @@ VALUES($id,$campaign,$fact,$subject,$predicate,$object,$claim,$owner,$kind,$conf
                     ["confidence"] = confidence, ["truth"] = truthStatus, ["ts"] = ts, ["supersedes"] = previousId,
                     ["event"] = sourceEventId ?? "", ["record"] = sourceRecordId ?? "", ["known"] = Json.Serialize(knownBy),
                     ["hidden"] = Json.Serialize(hiddenFrom), ["visibility"] = ReadString(item, "visibility", "private"),
-                    ["payload"] = Json.Serialize(item)
+                    ["payload"] = Json.Serialize(item), ["timeline"] = timeline, ["revision"] = ReadInt(previous, "revision", 0) + 1,
+                    ["hash"] = acceptedText.Length == 0 ? "" : PromptHash(acceptedText),
+                    ["day"] = ReadDouble(item, "eventWorldDay", ReadDouble(item, "worldDay", 0d)),
+                    ["learned"] = ReadDouble(item, "worldDay", 0d), ["cardinality"] = ReadString(item, "cardinality", "many"),
+                    ["version"] = acceptedText.Length == 0 ? "legacy_unverified" : MemoryPrecisionVersion
                 });
+            LinkMemorySource(connection, "assertion", assertionId, "event", sourceEventId ?? "", 0);
+            if (!string.IsNullOrWhiteSpace(sourceRecordId)) LinkMemorySource(connection, "assertion", assertionId, kind, sourceRecordId, 0);
 
             EnsureTemporalNode(connection, assertionId, "assertion", FirstNonEmpty(claim, predicate), item, ts);
             if (!string.IsNullOrWhiteSpace(subject))
@@ -148,20 +165,29 @@ VALUES($id,$from,$to,$type,$assertion,$ts,NULL,'{}');", new Dictionary<string, o
         private static List<Dictionary<string, object>> LoadTemporalKnowledgeForPrompt(ReignDbConnection connection, string campaignId,
             KnowledgeAccessContext knowledge, List<string> queryTerms, int limit)
         {
-            List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT * FROM temporal_knowledge_assertions
-WHERE campaign_id=$campaign AND valid_to_ts IS NULL
+            var result = new List<Dictionary<string,object>>();
+            string npc=knowledge?.NpcId ?? "";
+            const int batch=128;
+            for(int offset=0;result.Count<Math.Max(1,limit);offset+=batch)
+            {
+            var rows = QuerySql(connection, @"SELECT * FROM temporal_knowledge_assertions
+WHERE campaign_id=$campaign AND ($timeline='' OR timeline_id=$timeline)
+AND event_day<=$day AND learned_day<=$day AND (valid_to_day IS NULL OR valid_to_day>$day)
+AND (valid_to_ts IS NULL OR valid_to_day IS NOT NULL)
 AND (assertion_kind NOT IN ('belief','comprehension','interpretation') OR perspective_owner_id=$observer)
-ORDER BY observed_ts DESC LIMIT $limit;",
+AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(hidden_from_json::jsonb) h(value) WHERE lower(h.value)=lower($observer))
+AND (perspective_owner_id=$observer OR lower(visibility) IN ('world','global','common','public','local','nearby','kingdom','clan','settlement','party','army') OR lower(visibility) LIKE 'public_%' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(known_by_json::jsonb) k(value) WHERE lower(k.value)=lower($observer)))
+AND ($query='' OR to_tsvector('simple',claim || ' ' || subject_id || ' ' || predicate || ' ' || object_id) @@ websearch_to_tsquery('simple',$query))
+ORDER BY ts_rank(to_tsvector('simple',claim),websearch_to_tsquery('simple',$query)) DESC,learned_day DESC,revision DESC,assertion_id LIMIT $batch OFFSET $offset;",
                 new Dictionary<string, object> { ["campaign"] = campaignId ?? "", ["observer"] = knowledge == null ? "" : knowledge.NpcId,
-                    ["limit"] = Math.Max(20, limit * 10) });
-            string npc = knowledge == null ? "" : knowledge.NpcId;
-            return rows.Where(row =>
+                    ["timeline"] = knowledge?.TimelineId ?? "", ["day"] = knowledge?.WorldDay ?? double.MaxValue,
+                    ["query"] = BuildFtsQuery(queryTerms ?? new List<string>()), ["batch"] = batch, ["offset"] = offset });
+            result.AddRange(rows.Where(row =>
                 {
                     if (KnowledgeListContains(row, "hidden_from_json", npc)) return false;
                     if (IsPrivateMentalLayer(ReadString(row, "assertion_kind", ""))
                         && !KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), npc)) return false;
-                    string visibility = ReadString(row, "visibility", "private");
-                    bool visible = string.IsNullOrWhiteSpace(npc) || visibility.Equals("public", StringComparison.OrdinalIgnoreCase)
+                    bool visible = KnowledgeVisibilityAllows(row, knowledge ?? new KnowledgeAccessContext())
                         || KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), npc)
                         || KnowledgeListContains(row, "known_by_json", npc);
                     if (!visible) return false;
@@ -169,10 +195,10 @@ ORDER BY observed_ts DESC LIMIT $limit;",
                     string haystack = NormalizeLookup(ReadString(row, "claim", "") + " " + ReadString(row, "subject_id", "") + " "
                         + ReadString(row, "predicate", "") + " " + ReadString(row, "object_id", ""));
                     return queryTerms.Any(term => haystack.Contains(NormalizeLookup(term)));
-                })
-                .OrderByDescending(row => ReadDouble(row, "confidence", 0d))
-                .ThenByDescending(row => ReadLong(row, "observed_ts", 0))
-                .Take(Math.Max(1, limit)).ToList();
+                }).Take(Math.Max(1,limit)-result.Count));
+            if(rows.Count<batch) break;
+            }
+            return result;
         }
 
         private static string FormatTemporalKnowledgeForPrompt(List<Dictionary<string, object>> rows)

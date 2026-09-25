@@ -1792,6 +1792,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                     retryParsed, opportunity)
                 && !VerifiedIdentityGroundingContradiction(
                     retryParsed, context);
+            bool markedFailure = false;
             if (usableRepair)
             {
                 MarkRepairedVisibleResponse(
@@ -1800,38 +1801,42 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             }
             else
             {
-                retry["ok"] = false;
-                retry["errorCode"] = "motive_repair_unusable";
-                retry["error"] = "The motive repair did not return a usable structured response; no deterministic dialogue fallback was substituted.";
+                markedFailure = TryReturnMarkedVisibleFailure(retry, retryParsed, parsed, request, auditMode);
+                if (!markedFailure)
+                {
+                    retry["ok"] = false;
+                    retry["errorCode"] = "motive_repair_unusable";
+                    retry["error"] = "The motive repair returned no usable visible reply.";
+                }
             }
             Dictionary<string, object> repairEvidence = new Dictionary<string, object>
             {
                 ["problems"] = problems,
                 ["accepted"] = usableRepair,
                 ["revalidationCleared"] = revalidationCleared,
-                ["secondAttemptReturned"] = usableRepair,
+                ["secondAttemptReturned"] = usableRepair || markedFailure,
                 ["deterministicFallback"] = false,
                 ["visibleRepairMarker"] = usableRepair
                     ? (revalidationCleared ? ".." : ".,")
-                    : "",
+                    : markedFailure ? ".," : "",
                 ["method"] = usableRepair
                     ? "compact_original_json_correction_returned"
-                    : "unusable_repair_no_dialogue_returned",
+                    : markedFailure ? "marked_visible_failure_without_effects" : "unusable_repair_no_dialogue_returned",
                 ["originalResponseChars"] = Json.Serialize(parsed).Length,
                 ["repairRequestChars"] = Json.Serialize(retryRequest).Length
             };
             retry["motiveRepair"] = repairEvidence;
             WriteAudit(campaignId, correlationId, "server", auditMode,
                 "llm.motive_repair", heroId, "", eventId,
-                !usableRepair ? "failed"
+                !usableRepair && !markedFailure ? "failed"
                     : revalidationCleared ? "completed"
                     : "completed_with_revalidation_override",
                 ReadLong(retry, "durationMs", 0),
-                !usableRepair
-                    ? "The motive repair did not return usable structured dialogue; no fallback response was written."
+                !usableRepair && !markedFailure
+                    ? "The motive repair returned no usable visible reply."
                     : revalidationCleared
                         ? "Contradictory or incomplete motive evidence was repaired once and cleared revalidation."
-                        : "The second motive repair remained validator-rejected but was returned without a canned fallback.",
+                        : "The motive repair remained validator-rejected; marked dialogue was returned without structured effects.",
                 repairEvidence);
             return retry;
         }

@@ -117,6 +117,8 @@ namespace ReignBetaServer
             string sourceHash = Sha256Hex(source);
             var rebound = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(snapshot));
             rebound["campaignId"] = campaign;
+            rebound["tavernHouse"] = new Dictionary<string, object> { ["schema"] = 1, ["castId"] = cast.Id,
+                ["heroStringId"] = cast.Id, ["madam"] = cast.Madam };
             var physique = new Dictionary<string, object> { ["schema"] = "reign-native-physique-v1", ["weight"] = cast.BodyWeight, ["build"] = cast.BodyBuild,
                 ["weightSource"] = "validated_authored_native_batch", ["buildSource"] = "validated_authored_native_batch", ["sourceSha256"] = sourceHash };
             ValidateNativePhysique(physique, source);

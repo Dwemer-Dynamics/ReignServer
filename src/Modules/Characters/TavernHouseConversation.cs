@@ -16,7 +16,8 @@ namespace ReignBetaServer
         private static readonly ConcurrentDictionary<string, object> TavernHouseLocks = new ConcurrentDictionary<string, object>(StringComparer.Ordinal);
         private static readonly string[] TavernHousePromptFileNames = {
             "tavern_house_negotiation_role.txt", "tavern_house_arrival_image.txt",
-            "tavern_house_look_again_summary.txt", "tavern_house_look_again_image.txt" };
+            "tavern_house_look_again_summary.txt", "tavern_house_look_again_image.txt",
+            "tavern_house_portrait_clothing.txt" };
 
         internal static Dictionary<string, string> TavernHousePromptDefaults()
         {

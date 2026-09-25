@@ -9,9 +9,25 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private static List<Dictionary<string, object>> PersistArchitectureSceneFixture(string campaignId, List<Dictionary<string, object>> turns)
+        {
+            const string session = "unknown_identity_scene_summary";
+            using var connection = OpenCampaignConnection(campaignId);
+            int ordinal = 0;
+            foreach (var turn in turns)
+                InsertConversationTurn(connection, ReadString(turn, "turn_id", ""), session, ReadString(turn, "event_id", ""), ++ordinal,
+                    ReadString(turn, "exchange_id", ""), ReadString(turn, "role", ""), ReadString(turn, "speaker_id", ""), ReadString(turn, "speaker_name", ""),
+                    ReadString(turn, "text", ""), "in_person", 0d, ReadLong(turn, "ts", 0), "town_test", new List<string> { "npc_a", "main_hero" },
+                    TryParseJsonObject(ReadString(turn, "payload_json", "{}")));
+            // Compaction now verifies exact persisted source rows, including default
+            // columns. A fabricated partial dictionary cannot establish provenance.
+            return QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY turn_order;", TestDict("session", session));
+        }
+
         private static List<Dictionary<string, object>> RunInteractionArchitectureSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
+            results.AddRange(RunConversationDiagnosticsSelfTests());
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
             var providerChoice = new Dictionary<string, object> {
@@ -39,12 +55,12 @@ namespace ReignBetaServer
                 @"<div id='diagnosticNavigation'[\s\S]*?</div>").Value;
             add("control_center_navigation_contract",
                 System.Text.RegularExpressions.Regex.Matches(mainNavigation, "data-tab=").Count == 12
-                && System.Text.RegularExpressions.Regex.Matches(diagnosticNavigation, "data-tab=").Count == 12
+                && System.Text.RegularExpressions.Regex.Matches(diagnosticNavigation, "data-tab=").Count == 13
                 && mainNavigation.Contains("data-tab='diagnostic-tools'")
                 && mainNavigation.Contains("data-tab='options'")
                 && diagnosticNavigation.Contains(" hidden>")
                 && controlCenter.Contains("function selectControlCenterTab(tab)"),
-                "Eleven everyday pages including Options and one Diagnostics entry expose twelve subordinate diagnostic pages.", null);
+                "Eleven everyday pages including Options and one Diagnostics entry expose thirteen subordinate diagnostic pages.", null);
             add("control_center_retired_tools_absent",
                 !controlCenter.Contains("relationshipSimulation") && !controlCenter.Contains("runDirectorSample")
                 && !controlCenter.Contains("/relationships/simulation/") && !controlCenter.Contains(".simulationChart"),
@@ -448,9 +464,13 @@ namespace ReignBetaServer
                         .Select(index => "record_" + index + " " + new string((char)('a' + (index % 20)), 1800))
                         .ToList();
                     string balancedSummarySource = BuildBalancedSummarySource(longSummaryRecords, 10000);
+                    var retainedSummaryRecords = balancedSummarySource.Split(new[] { "\n---\n" }, StringSplitOptions.RemoveEmptyEntries);
                     add("memory_summary_balanced_source_coverage",
-                        Enumerable.Range(1, 12).All(index => balancedSummarySource.Contains("record_" + index, StringComparison.Ordinal)),
-                        "Long scene and consolidation inputs retain bounded evidence from every chronological record instead of truncating all later speakers.",
+                        balancedSummarySource.Length <= 10000 && retainedSummaryRecords.Length > 0
+                        && retainedSummaryRecords.All(longSummaryRecords.Contains)
+                        && retainedSummaryRecords.Select(record => longSummaryRecords.IndexOf(record)).SequenceEqual(retainedSummaryRecords.Select(record => longSummaryRecords.IndexOf(record)).OrderBy(x => x))
+                        && BuildBalancedSummarySource(longSummaryRecords, 30000) == string.Join("\n---\n", longSummaryRecords),
+                        "Budgeted summary input retains whole chronological records; sufficient capacity preserves every record without clipping source evidence.",
                         new Dictionary<string, object> { ["sourceChars"] = balancedSummarySource.Length, ["recordCount"] = longSummaryRecords.Count });
                     add("structured_event_first_attempt_budget", StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 8000,
                         "Structured party and social-event JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
@@ -995,7 +1015,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["participants_json"] = Json.Serialize(new List<string> { "npc_a", "main_hero" }),
                         ["payload_json"] = "{}"
                     },
-                    new List<Dictionary<string, object>>
+                    PersistArchitectureSceneFixture(campaignId, new List<Dictionary<string, object>>
                     {
                         new Dictionary<string, object>
                         {
@@ -1035,7 +1055,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                                 ["identityView"] = new Dictionary<string, object> { ["knowsIdentity"] = false }
                             })
                         }
-                    },
+                    }),
                     602L,
                     new Dictionary<string, object>
                     {

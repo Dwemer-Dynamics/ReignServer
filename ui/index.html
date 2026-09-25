@@ -103,6 +103,35 @@
     progress { accent-color:var(--goldAntique); background:var(--panelSmoke); }
     * { scrollbar-color:var(--goldAntique) var(--panelSmoke); }
     .actions { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 12px; }
+    .cdWorkspace { display:grid; grid-template-columns:minmax(210px,280px) minmax(0,1fr); gap:14px; }
+    .cdRail,.cdTranscript,.cdExchange,.cdResponse,.cdStep,.cdEvidence,.cdField { min-width:0; }
+    .cdRail { align-self:start; max-height:80vh; overflow:auto; }
+    .cdConversation { display:block; width:100%; text-align:left; margin-bottom:10px; padding:12px; }
+    .cdConversation[aria-pressed=true] { background:var(--panelActive); }
+    .cdConversation strong,.cdConversation span { display:block; overflow-wrap:anywhere; }
+    .cdConversation .hint { margin:7px 0; }
+    .cdPreview { font-size:12px; color:var(--textSecondary); }
+    .cdExchange { margin:0 0 22px; border-bottom:1px solid var(--borderBronze); padding-bottom:16px; }
+    .cdPlayer { margin-bottom:12px; padding:12px; background:var(--panelStandard); }
+    .cdPlayer h3 { margin:0 0 8px; }
+    .cdResponse { background:var(--panelRaised); border:1px solid var(--borderBronze); padding:12px; border-radius:4px; }
+    .cdResponse > summary { color:var(--textPrimary); }
+    .cdResponseMeta,.cdExpandHint { display:block; margin:8px 0; color:var(--textSecondary); font-size:12px; }
+    .cdExpandHint { color:var(--goldHighlight); }
+    .cdProse { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; }
+    .cdStep { margin:10px 0; padding:10px; background:var(--panelSmoke); border-left:2px solid var(--goldAntique); }
+    .cdChildren { margin-left:12px; }
+    .cdEvidence,.cdDataItem,.cdRaw { margin:10px 0; padding:8px; border:1px solid var(--borderBronze); }
+    .cdField { margin:10px 0; }
+    .cdField h4 { margin:0 0 8px; }
+    .cdField strong { color:var(--goldAntique); display:block; margin-bottom:5px; }
+    .cdComparison { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; }
+    .cdComparison > .cdField { padding:10px; background:var(--panelStandard); }
+    .cdProblem { color:var(--semanticDanger); overflow-wrap:anywhere; }
+    .cdNotice { color:var(--textSecondary); border-left:2px solid var(--goldAntique); padding-left:10px; }
+    .cdInlineLabel { display:flex; align-items:center; gap:8px; margin:0 10px; }
+    .cdCaptureLabel { grid-template-columns:minmax(200px,300px) 24px; }
+    @media(max-width:800px) { .cdWorkspace,.cdComparison { grid-template-columns:minmax(0,1fr); } .cdRail { max-height:300px; } .cdChildren { margin-left:4px; } }
     pre { white-space:pre-wrap; overflow-wrap:anywhere; overflow:auto; max-height:560px; margin:0; padding:12px; background:var(--canvasVoid); border:1px solid var(--borderBronze); border-radius:6px; color:var(--textPrimary); }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .labTranscript { min-height:300px; max-height:540px; line-height:1.5; }
@@ -298,6 +327,7 @@
       <p>Server health, logs, audits, and testing tools.</p>
       <nav class='tabs' aria-label='Diagnostic pages'>
       <button class='tab' data-tab='diagnostics'>Overview</button>
+      <button class='tab' data-tab='conversationdiagnostics'>Conversation Diagnostics</button>
       <button class='tab' data-tab='logging'>Logging</button>
       <button class='tab' data-tab='logs'>Log Viewer</button>
       <button class='tab' data-tab='audit'>Audit Viewer</button>
@@ -777,6 +807,35 @@
         <label>Cache Key <input id='diagCacheKey'></label>
         <div class='actions'><button onclick='diagnosePortrait()'>Diagnose Portrait Folder</button></div>
         <pre id='portraitDiagnosticsOutput'>Portrait diagnostics not loaded yet.</pre>
+      </div>
+    </section>
+
+    <section id='conversationdiagnostics' class='page'>
+      <div class='card'>
+        <h2>Conversation Diagnostics</h2>
+        <p class='hint'>Read a conversation, expand a response, then open each step to see what happened and why.</p>
+        <label class='cdCaptureLabel'>Save all LLM debug information <input id='cdCapture' type='checkbox' onchange='setConversationCapture(this.checked)'></label>
+        <p id='cdCaptureStatus' role='status'>Loading capture status…</p>
+        <p class='hint'>Full capture keeps original prompts, provider responses and returned reasoning until you clear them. Credentials are excluded. The setting survives restarts; in-flight captures finish recording.</p>
+        <div class='grid2'>
+          <label>Campaign <select id='cdCampaign' onchange='resetConversationDiagnostics()'><option value=''>All captured campaigns</option></select></label>
+          <label>Find conversation <input id='cdSearch' type='search' placeholder='Character, words, or correlation ID' oninput='scheduleConversationSearch()'></label>
+          <label>Conversation type <select id='cdMode' onchange='resetConversationDiagnostics()'><option value=''>All types</option><option value='other'>Other LLM activity</option></select></label>
+          <label>Outcome <select id='cdStatus' onchange='resetConversationDiagnostics()'><option value=''>All outcomes</option><option value='repaired'>Repaired</option><option value='failed'>Failed</option><option value='interrupted'>Interrupted</option><option value='in_progress'>In progress</option></select></label>
+          <label>From <input id='cdFrom' type='date' onchange='resetConversationDiagnostics()'></label>
+          <label>Through <input id='cdTo' type='date' onchange='resetConversationDiagnostics()'></label>
+        </div>
+        <div class='actions'>
+          <button onclick='loadConversationDiagnostics()'>Refresh</button>
+          <label class='cdInlineLabel'>Live refresh <input id='cdLive' type='checkbox' checked></label>
+          <button id='cdExport' onclick='exportConversationDiagnostics()' disabled>Export selected conversation</button>
+          <button id='cdClear' class='danger' onclick='clearConversationDiagnostics()' disabled>Clear selected captures</button>
+        </div>
+        <p id='cdStatusText' role='status'></p>
+      </div>
+      <div class='cdWorkspace'>
+        <aside class='card cdRail' aria-label='Conversations'><div id='cdConversations'></div><button id='cdMoreConversations' onclick='moreDiagnosticConversations()' hidden>More conversations</button></aside>
+        <div class='card cdTranscript' aria-label='Conversation transcript'><h2 id='cdConversationTitle'>Select a conversation</h2><p class='hint'>Each response opens its own timeline. Nested durations overlap; the response total is wall-clock time.</p><div id='cdResponses'></div><button id='cdMoreResponses' onclick='moreDiagnosticResponses()' hidden>More responses</button></div>
       </div>
     </section>
 
@@ -1365,6 +1424,7 @@
       if (tab === 'verification') { loadVerificationStatus(); loadVerificationResults(); }
       if (tab === 'livebridge') { liveBridgeRuntime(); liveBridgeReadiness(); }
       if (tab === 'diagnostics') loadDiagnostics();
+      if (tab === 'conversationdiagnostics') loadConversationDiagnostics();
       if (tab === 'characters') { loadCampaigns().then(loadCharacterRoster); }
     }
 
@@ -3666,5 +3726,6 @@
     loadSettings();
     loadCampaigns();
   </script>
+  <script>@CONVERSATION_DIAGNOSTICS_SCRIPT@</script>
 </body>
 </html>

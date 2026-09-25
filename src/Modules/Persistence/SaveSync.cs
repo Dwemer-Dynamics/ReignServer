@@ -997,7 +997,7 @@ namespace ReignBetaServer
             string value = (table ?? "").ToLowerInvariant();
             if (value.StartsWith("conversation_") || value == "letters" || value == "correspondence_threads") return "conversations";
             if (value == "events") return "events";
-            if (value == "memories" || value == "summaries" || value == "comprehension" || value == "memory_sources" || value == "knowledge_receipts" || value == "beliefs") return "memories";
+            if (value == "memories" || value == "summaries" || value == "comprehension" || value.StartsWith("memory_") || value.StartsWith("temporal_knowledge_") || value == "knowledge_receipts" || value == "beliefs") return "memories";
             if (value.StartsWith("relationship_") || value.StartsWith("ambient_relationship") || value == "relationships" || value.StartsWith("passive_relationship") || value.StartsWith("life_change") || value.StartsWith("conception") || value == "parentage" || value.StartsWith("marriage_")) return "relationships";
             if (value.StartsWith("world_history_")) return "worldHistory";
             if (value.StartsWith("rumor_" ) || value == "rumors") return "rumors";

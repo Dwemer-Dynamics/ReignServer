@@ -172,7 +172,7 @@ namespace ReignBetaServer
         private static PromptLiveTurnBudgetResult BuildBudgetedConversationLiveTurn(
             string templateName, string transcriptValueKey, Dictionary<string, string> values,
             string conversationScenePrompt, string roleAttribution, string npcRelationshipBlock,
-            string globalPrefix, string characterPrefix, int targetOverride = 0)
+            string globalPrefix, string characterPrefix, int targetOverride = 0, Dictionary<string, object> capacity = null)
         {
             values = values ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string context = values.TryGetValue("contextPullText", out string c) ? c ?? "" : "";
@@ -183,7 +183,9 @@ namespace ReignBetaServer
             // Warnings are observability settings, never semantic truncation limits.
             // One allocator accounts for every fixed section, including protected
             // relationship and agenda context. Final serialized preflight follows.
-            int target = targetOverride > 0 ? targetOverride : 32000 * 3;
+            const int finalRequestReserve = 2048;
+            int inputAllowance = ReadInt(capacity, "inputAllowance", ConversationUnverifiedInputLimit);
+            int target = Math.Min(targetOverride > 0 ? targetOverride : 32000 * 3, inputAllowance * 3);
             Func<string> assemble = () => AssembleConversationLiveTurn(templateName, values,
                 conversationScenePrompt, roleAttribution, relationship);
             Func<string, int> total = live => (globalPrefix ?? "").Length + (characterPrefix ?? "").Length + live.Length;
@@ -198,7 +200,19 @@ namespace ReignBetaServer
             values["contextPullText"] = "";
             values[transcriptValueKey] = "";
             int mandatory = total(assemble());
-            if (targetOverride <= 0 && (initialChars > target || initialEstimate > 32000)) target = 48000 * 3;
+            // Expand for the protected floor before selecting optional records. A large
+            // optional history alone must not force the maximum working budget.
+            values["contextPullText"] = string.Join("\n\n", ContinuityPromptRecords(context, false).Where(r => r.Required).Select(r => r.Text));
+            values[transcriptValueKey] = string.Join("\n\n", ContinuityPromptRecords(transcript, true).Where(r => r.Required).Select(r => r.Text));
+            int protectedEstimate = serializedEstimate(assemble());
+            values["contextPullText"] = "";
+            values[transcriptValueKey] = "";
+            if (targetOverride <= 0)
+            {
+                int desired = initialChars > target || initialEstimate > 32000 ? 48000 : 32000;
+                desired = Math.Max(desired, SelectConversationInputStep(protectedEstimate + finalRequestReserve));
+                target = Math.Min(inputAllowance, desired) * 3;
+            }
             int available = Math.Max(0, target - mandatory);
             // Required whole exchanges and exact topical evidence survive even when
             // the ordinary allowance is full. The final preflight expands or refuses
@@ -213,8 +227,7 @@ namespace ReignBetaServer
             // optional whole records against the serialized messages as well,
             // leaving room for final overlays and provider request metadata. The
             // exact final request is still checked after every adapter runs.
-            const int finalRequestReserve = 2048;
-            int tokenTarget = Math.Min(48000, target / 3);
+            int tokenTarget = Math.Min(inputAllowance, target / 3);
             int messageAllowance = Math.Max(0, tokenTarget - finalRequestReserve);
             int finalEstimate = serializedEstimate(liveTurn);
             var contextRecords = ContinuityPromptRecords(context, false);
@@ -252,6 +265,9 @@ namespace ReignBetaServer
                     ["compacted"] = initialContext != context || initialTranscript != transcript,
                     ["targetMet"] = total(liveTurn) <= target && finalEstimate <= messageAllowance, ["mandatoryCharacters"] = mandatory,
                     ["inputTokenEstimate"] = finalEstimate, ["targetInputTokens"] = tokenTarget,
+                    ["protectedInputTokenEstimate"] = protectedEstimate, ["inputAllowance"] = inputAllowance,
+                    ["capacityRouteKey"] = ReadString(capacity, "routeKey", ""),
+                    ["capacityVerified"] = ReadBool(capacity, "capacityVerified", false),
                     ["finalRequestTokenReserve"] = finalRequestReserve,
                     ["actions"] = actions, ["finalComponents"] = PromptBudgetComponentSizes(context, transcript,
                         relationship, conversationScenePrompt, roleAttribution)
@@ -469,7 +485,7 @@ namespace ReignBetaServer
                 ["actionSuggestionRules"] = LoadPromptTemplate("action_suggestion_rules.txt"),
                 ["memoryWriteRules"] = LoadPromptTemplate("memory_write_rules.txt"),
                 ["internalPosture"] = LoadPromptTemplate("dialogue_internal_posture.txt"),
-                ["outputSchema"] = LoadPromptTemplate("dialogue_output_schema.json")
+                ["outputSchema"] = CompactPrecisionSchema(LoadPromptTemplate("dialogue_output_schema.json"))
             };
             string conversationScenePrompt = ReadString(turnPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(turnPayload, heroId, heroName, playerName);
@@ -498,10 +514,11 @@ namespace ReignBetaServer
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(false, NativeNoblePromptApplicability(profile), actionCatalog, specializedRoleBlock, UsesCastleRoomAttireContext(turnPayload), composition);
             roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state);
+            var capacity = ResolveConversationPromptCapacity(turnPayload, "dialogue");
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "dialogue_live_turn_template.txt", "priorDialogueText", values,
                 conversationScenePrompt, roleAttribution,
-                npcRelationshipBlock, globalPrefix, characterPrefix);
+                npcRelationshipBlock, globalPrefix, characterPrefix, capacity: capacity);
             promptPhaseTiming["budgetCompactionMs"] = promptPhaseTimer.ElapsedMilliseconds;
             contextPullText = budgeted.ContextPullText;
             canonicalTranscript = budgeted.CanonicalTranscript;
@@ -524,7 +541,7 @@ namespace ReignBetaServer
             string naturalnessPrompt = ReadString(naturalness, "prompt", "");
             if (!string.IsNullOrWhiteSpace(naturalnessPrompt)) liveTurn += "\n\n" + naturalnessPrompt;
             PromptEnvelope envelope = CreatePromptEnvelope("dialogue", variant, globalPrefix, characterPrefix, liveTurn);
-            FinalizeContinuityPromptBudget(envelope, turnPayload);
+            FinalizeContinuityPromptBudget(envelope, turnPayload, capacity);
             envelope.Diagnostics["conversationNaturalness"] = naturalness;
             promptPhaseTiming["finalizeEnvelopeMs"] = promptPhaseTimer.ElapsedMilliseconds;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
@@ -659,7 +676,7 @@ namespace ReignBetaServer
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
                 ["actionSuggestionRules"] = LoadPromptTemplate("action_suggestion_rules.txt"),
                 ["memoryWriteRules"] = LoadPromptTemplate("memory_write_rules.txt"),
-                ["outputSchema"] = LoadPromptTemplate("event_output_schema.json")
+                ["outputSchema"] = CompactPrecisionSchema(LoadPromptTemplate("event_output_schema.json"))
             };
             string conversationScenePrompt = ReadString(eventPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(eventPayload, heroId, heroName, playerName);
@@ -680,10 +697,11 @@ namespace ReignBetaServer
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(true, NativeNoblePromptApplicability(profile), actionCatalog, ambassadorRoleBlock, UsesCastleRoomAttireContext(eventPayload), composition);
             roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, eventPayload, state);
+            var capacity = ResolveConversationPromptCapacity(eventPayload, "social_event");
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "event_live_turn_template.txt", "eventHistoryText", values,
                 conversationScenePrompt, roleAttribution,
-                npcRelationshipBlock, globalPrefix, characterPrefix);
+                npcRelationshipBlock, globalPrefix, characterPrefix, capacity: capacity);
             promptPhaseTiming["budgetCompactionMs"] = promptPhaseTimer.ElapsedMilliseconds;
             contextPullText = budgeted.ContextPullText;
             canonicalTranscript = budgeted.CanonicalTranscript;
@@ -705,7 +723,7 @@ namespace ReignBetaServer
             string naturalnessPrompt = ReadString(naturalness, "prompt", "");
             if (!string.IsNullOrWhiteSpace(naturalnessPrompt)) liveTurn += "\n\n" + naturalnessPrompt;
             PromptEnvelope envelope = CreatePromptEnvelope("social_event", variant, globalPrefix, characterPrefix, liveTurn);
-            FinalizeContinuityPromptBudget(envelope, eventPayload);
+            FinalizeContinuityPromptBudget(envelope, eventPayload, capacity);
             envelope.Diagnostics["conversationNaturalness"] = naturalness;
             promptPhaseTiming["finalizeEnvelopeMs"] = promptPhaseTimer.ElapsedMilliseconds;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
@@ -1211,6 +1229,7 @@ namespace ReignBetaServer
             else builder.Add("PRIVATE DECISION POLICY", "Deliberate privately before answering. Verify supplied facts, then decide what the current NPC wants, fears losing in public, is trying to impress or avoid, and what they should reveal, hide, test, refuse, bargain over, or act on. Do not print private reasoning. Return only the compact decisionBrief required by the output schema.");
             if (!eventMode) builder.Add("SOCIAL SIGNAL OUTPUT", SocialSignalPromptContract);
             builder.Add("MEMORY WRITE RULES", LoadPromptTemplate("memory_write_rules.txt"));
+            builder.Add("MEMORY PROVENANCE", "For a new memory assertion, include optional evidenceQuote copied exactly from this accepted reply, subjectId/predicate/objectId using supplied IDs, and an existing agreementId/episodeId/propertyId when known. Reuse factKey for a changed singular term and set cardinality=one; independent commitments are many. Keep conditions, negation, units and uncertainty in the claim. Mark reported, belief, interpretation, proposed or committed speech accurately. Never claim native confirmation from dialogue or invent missing IDs.");
             builder.Add("DYNAMIC CHARACTERISTICS POLICY", DynamicCharacteristicsPromptPolicy);
             builder.Add("CONVERSATION NATURALNESS", ConversationNaturalnessContract);
             builder.Add("PLAYER ACTION AND PRIVATE SPEECH BOUNDARY",
@@ -1223,7 +1242,7 @@ namespace ReignBetaServer
             builder.Add("SCENE STATE OUTPUT", roomAttireContext
                 ? "Return sceneStateUpdates only for explicit present location changes, using supplied heroStringId, location, and locationClass. Do not emit hourly clothing overrides in this castle/keep room session. The room's cultural scene prompt and explicit transcript actions determine attire; portrait outfits, travel equipment, and general hourly outfits do not. Preserve established actions on reopening; the arriving player's attire follows their own actions. Return an empty array when nothing changes."
                 : SceneStateOutputContract);
-            builder.Add("OUTPUT SCHEMA", LoadPromptTemplate(eventMode ? "event_output_schema.json" : "dialogue_output_schema.json"), eventMode ? "event_output_schema.json" : "dialogue_output_schema.json");
+            builder.Add("OUTPUT SCHEMA", CompactPrecisionSchema(LoadPromptTemplate(eventMode ? "event_output_schema.json" : "dialogue_output_schema.json")), eventMode ? "event_output_schema.json" : "dialogue_output_schema.json");
             builder.Add("DYNAMIC CHARACTERISTICS OUTPUT ADDENDUM", DynamicCharacteristicsOutputContract);
             builder.Add("NARRATED ACTIONS AND DRINKING OUTPUT ADDENDUM", DrinkingOutputContract);
             builder.Add("FINAL OUTPUT CONTRACT", "Deliberate privately, then return exactly one complete JSON object. Never include chain-of-thought, internalThoughts, reasoning, reasoning_content, or <think> blocks.");
@@ -1430,7 +1449,7 @@ namespace ReignBetaServer
             global.Add("HIDDEN ACTION PLANNER", LoadPromptTemplate("action_planner_system.txt"));
             global.Add("PLANNING RULES", "Return only JSON. Return {\"actions\":[]} unless the action gate is a final accepted or commanded commitment. Choose only from ALLOWED ACTIONS. Preserve transfer direction. Never invent IDs or declare success.");
             global.Add("NATIVE ACTION MEANING", DialogueActionExecutionRules);
-            global.Add("OUTPUT SCHEMA", LoadPromptTemplate("action_planner_output_schema.json"), "action_planner_output_schema.json");
+            global.Add("OUTPUT SCHEMA", CompactPrecisionSchema(LoadPromptTemplate("action_planner_output_schema.json")), "action_planner_output_schema.json");
             string candidates = "ALLOWED ACTIONS AND RESOLVER HINTS\n" + CanonicalActionCatalogJson(allowedActions) + "\n\nRESOLVER HINTS\n" + (values.TryGetValue("resolverHintsJson", out string hints) ? hints : "{}");
             if (values.TryGetValue("nativeSceneMovementJson", out string sceneMovement))
                 candidates += "\n\nNATIVE SCENE DESTINATIONS\n" + sceneMovement;

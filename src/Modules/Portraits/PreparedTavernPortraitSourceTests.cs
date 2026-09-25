@@ -65,6 +65,9 @@ namespace ReignBetaServer
                     byte[] reused = ResolvePreparedTavernSource(source.Request, store, out var provenance);
                     Require(reused.SequenceEqual(png) && ReadString(provenance, "renderContract", "") == ResidentOutfitRenderContract, "Imported bytes or full-outfit provenance changed.");
                     Require(NativePhysiqueUnit(ReadDictionary(provenance, "physique"), "weight") == cast.BodyWeight && PreserveResidentClothing(source.Request), "Imported native physique or clothing policy was lost.");
+                    Require(IsTavernHousePortrait(source.Request) && UsesAdultPortraitClothingEdit(source.Request)
+                        && ReadBool(ReadDictionary(ReadDictionary(source.Request, "nativeCharacterSnapshot"), "tavernHouse"), "madam", !cast.Madam) == cast.Madam,
+                        "Imported Tavern source did not retain its identity-bound adult clothing role.");
                     foreach (string field in new[] { "campaignId", "heroStringId", "promptPurpose" })
                     {
                         var bad = Copy(source.Request); bad[field] = "other";

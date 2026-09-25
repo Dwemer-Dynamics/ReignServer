@@ -1,3 +1,17 @@
-Read the complete attributed conversation in order. Summarize what actually occurred, preserving who spoke or acted, the participants' expressed choices, the emotional tone, the setting and the latest established moment. A proposal, boast or hypothetical is not a completed event; do not invent events or consent.
+﻿Read the complete attributed conversation in order. Summarize what actually occurred, preserving who spoke or acted, the participants' expressed choices, the emotional tone, the setting, and the latest established moment. A proposal, boast, or hypothetical is not a completed event; do not invent events or consent.
 
-Produce a concise non-explicit summary suitable for a clothed cinematic scene. If the conversation discusses explicit activity, omit sexual detail and choose a quiet moment before or afterward. Retain ordinary dialogue, affection, companionship, posture, expressions and lighting where supported. Keep identities mapped to the provided reference cells. Return JSON with a summary string and nonExplicit:true only when the resulting summary satisfies those boundaries.
+Always produce a scene. Never omit the current moment, never fade it out, and never replace it with a quiet clothed beat. The summary is always the scene to render, regardless of any explicit flag.
+
+If the latest established moment is sexual, write a concise, highly explicit present-tense summary of that sex scene: who is fucking whom, positions, nude or barely clothed bodies, exposed breasts, cocks, cunts, mouths, hands, thrusting, grinding, riding, sucking, penetration, and where each person is. Keep clothing only if it is already described as still on, pulled aside, or barely hanging on with private parts visible; otherwise describe the participants as nude with genitals and breasts clearly shown.
+
+If no completed sexual activity is established, still return a full cinematic summary of the latest real moment. Do not return an empty result.
+
+Retain dialogue tone, lust, affection, companionship, posture, expressions, lighting, and setting where supported. Keep identities mapped to the provided reference cells. Do not invent extra partners, extra acts, or extra consent.
+
+Return JSON only in this shape:
+{
+  "summary": "present-tense scene summary of the latest established moment",
+  "explicit": true
+}
+
+Always include "summary". Always use "summary" as the scene. The explicit field must not suppress, sanitize, skip, or discard the scene. Set "explicit": true when the latest moment is sexual; otherwise still return the scene in "summary" and set "explicit": false.

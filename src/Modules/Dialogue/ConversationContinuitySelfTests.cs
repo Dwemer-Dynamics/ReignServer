@@ -6,6 +6,121 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+
+        private static void RunConversationCapacitySelfTests(Action<string, bool, object> add)
+        {
+            add("capacity_lab_metadata_io_disabled", !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+                && FetchConversationModelCatalog() == null, null);
+            const string model = "z-ai/glm-5.2";
+            string metadata = Json.Serialize(TestDict("data", new[] {
+                TestDict("id", model, "context_length", 1048576, "max_output_tokens", 131072) }));
+            DateTimeOffset clock = DateTimeOffset.UtcNow;
+            int fetches = 0;
+            bool outage = false;
+            var catalog = new ConversationCapacityCatalog(() => { fetches++; if (outage) throw new System.Net.Http.HttpRequestException("fixture outage"); return metadata; }, () => clock);
+            var settings = TestDict("llmProvider", NanoGptProvider, "dialogueModel", model, "eventsModel", model);
+            var messages = new List<Dictionary<string, object>> { TestDict("role", "user", "content", "required_latest") };
+            var body = TestDict("model", model, "messages", messages, "max_tokens", 8000, "response_format", TestDict("type", "json_object"));
+            var payload = TestDict("promptEnvelope", TestDict("continuityPreflight", TestDict("requiredSourceIds", new[] { "required_latest" })));
+            var discovered = BuildContinuityProviderPreflight(settings, payload, body, NanoGptChatCompletionsUrl, model, catalog);
+            add("capacity_catalog_default_route_verified", ReadBool(discovered, "capacityVerified", false)
+                && ReadInt(discovered, "verifiedContextTokens", 0) == 1048576
+                && ReadInt(discovered, "inputAllowance", 0) == 64000
+                && ReadString(discovered, "capacitySourceHash", "").Length > 0, discovered);
+            foreach (int estimate in new[] { 48225, 50231, 50841, 50000, 49033 })
+            {
+                messages[0]["content"] = "required_latest";
+                int padding = (estimate - 128) * 3 - Json.Serialize(body).Length;
+                messages[0]["content"] = "required_latest" + new string('x', padding);
+                string before = Json.Serialize(body);
+                var result = BuildContinuityProviderPreflight(settings, payload, body, NanoGptChatCompletionsUrl, model, catalog);
+                add("capacity_reported_failure_size_" + estimate, ReadBool(result, "fits", false)
+                    && ReadInt(result, "inputTokenEstimate", 0) == estimate && ReadInt(result, "selectedInputAllowance", 0) == 56000
+                    && ReadBool(result, "requiredSourceCoverageComplete", false) && Json.Serialize(body) == before, result);
+            }
+            add("capacity_catalog_shared_across_speakers", fetches == 1, fetches);
+            foreach (var changed in new[] { TestDict("provider", "fixture"), TestDict("routing", TestDict("only", new[] { "fixture" })),
+                TestDict("stickyprovider", true), TestDict("models", new[] { "other" }) })
+            {
+                var routed = new Dictionary<string, object>(body);
+                foreach (var pair in changed) routed[pair.Key] = pair.Value;
+                var result = BuildContinuityProviderPreflight(settings, payload, routed, NanoGptChatCompletionsUrl, model, catalog);
+                add("capacity_catalog_refuses_override_" + changed.Keys.Single(), !ReadBool(result, "capacityVerified", true)
+                    && !ReadBool(result, "fits", true), result);
+            }
+            add("capacity_catalog_exact_model_required", !ReadBool(BuildContinuityProviderPreflight(settings, payload, body,
+                NanoGptChatCompletionsUrl, model + ":fixture", catalog), "capacityVerified", true), null);
+            add("capacity_catalog_exact_endpoint_required", !ReadBool(BuildContinuityProviderPreflight(settings, payload, body,
+                "https://different.invalid/chat", model, catalog), "capacityVerified", true), null);
+            add("capacity_catalog_provider_identity_required", !ReadBool(BuildContinuityProviderPreflight(TestDict("llmProvider", "openai_compatible"),
+                payload, body, NanoGptChatCompletionsUrl, model, catalog), "capacityVerified", true), null);
+            var changedOutput = new Dictionary<string, object>(body) { ["max_tokens"] = 131073 };
+            add("capacity_model_output_ceiling_retained", !ReadBool(BuildContinuityProviderPreflight(settings, payload, changedOutput,
+                NanoGptChatCompletionsUrl, model, catalog), "fits", true), null);
+            body["tools"] = new string('z', 60000);
+            add("capacity_expansion_still_checks_final_tools", !ReadBool(BuildContinuityProviderPreflight(settings, payload, body,
+                NanoGptChatCompletionsUrl, model, catalog), "fits", true), null);
+            body.Remove("tools");
+            var small = new ConversationCapacityCatalog(() => Json.Serialize(TestDict("data", new[] {
+                TestDict("id", model, "context_length", 150000, "max_output_tokens", 8000) })), () => DateTimeOffset.UtcNow);
+            add("capacity_byte_bound_includes_output_and_safety", !ReadBool(BuildContinuityProviderPreflight(settings, payload, body,
+                NanoGptChatCompletionsUrl, model, small), "fits", true), null);
+
+            int callsBeforeOverrides = fetches;
+            add("capacity_overrides_do_not_trigger_discovery", callsBeforeOverrides == 1, callsBeforeOverrides);
+            string required = RenderContinuityRecord("required_topical_capacity", "memory", "npc_a", "current", 20d, 200, true, new string('a', 24000));
+            string exchange = RenderContinuityRecord("required_latest", "accepted_exchange", "npc_a", "current", 20d, 300, true,
+                "Player: Has someone answered?\nNPC: Here is what actually happened.");
+            string foundation = "PROTECTED_RELATIONSHIP " + new string('b', 120000);
+            const string latestInput = "Keep my entire question and its meaning.";
+            var values = new Dictionary<string, string> { ["heroName"] = "Speaker", ["playerName"] = "Traveler",
+                ["contextPullText"] = required, ["eventHistoryText"] = exchange, ["playerText"] = latestInput };
+            var sharedCapacity = ResolveConversationPromptCapacity(TestDict(), "social_event", settings, catalog);
+            var selected = BuildBudgetedConversationLiveTurn("event_live_turn_template.txt", "eventHistoryText", values,
+                "SCENE", foundation, "RELATIONSHIP", "GLOBAL", "CHARACTER", capacity: sharedCapacity);
+            var envelope = CreatePromptEnvelope("social_event", "capacity_fixture", "GLOBAL", "CHARACTER", selected.LiveTurn);
+            var turn = TestDict("continuityEvidence", TestDict("sourceIds", new[] { "required_topical_capacity", "required_latest" }));
+            FinalizeContinuityPromptBudget(envelope, turn, sharedCapacity);
+            var finalBody = TestDict("model", model, "messages", envelope.Messages, "max_tokens", 8000,
+                "response_format", TestDict("type", "json_object"), "tools", new string('z', 3000));
+            var final = BuildContinuityProviderPreflight(settings, TestDict("promptEnvelope", envelope.Diagnostics), finalBody,
+                NanoGptChatCompletionsUrl, model, catalog);
+            add("capacity_assembly_and_final_agree_without_losing_roleplay", ReadBool(selected.Diagnostics, "targetMet", false)
+                && ReadInt(selected.Diagnostics, "targetInputTokens", 0) == 56000 && ReadBool(final, "fits", false)
+                && ReadInt(ReadDictionary(envelope.Diagnostics, "continuityPreflight"), "inputAllowance", 0) == ReadInt(final, "inputAllowance", -1)
+                && selected.LiveTurn.Contains(required) && selected.LiveTurn.Contains(exchange) && selected.LiveTurn.Contains(foundation)
+                && selected.LiveTurn.Contains(latestInput), final);
+            finalBody["messages"] = envelope.Messages.Concat(new[] { TestDict("role", "user", "content", new string('r', 65000)) }).ToList();
+            add("capacity_repair_append_rechecked", !ReadBool(BuildContinuityProviderPreflight(settings,
+                TestDict("promptEnvelope", envelope.Diagnostics), finalBody, NanoGptChatCompletionsUrl, model, catalog), "fits", true), null);
+
+            foreach (string invalid in new[] { "{", "{\"data\":[]}", Json.Serialize(TestDict("data", new[] {
+                TestDict("id", model, "context_length", "1 million", "max_output_tokens", 8000) })),
+                Json.Serialize(TestDict("data", new[] { TestDict("id", model, "context_length", -1000, "max_output_tokens", 8000) })),
+                Json.Serialize(TestDict("data", new[] { TestDict("id", model, "context_length", 1048576) })) })
+            {
+                var broken = new ConversationCapacityCatalog(() => invalid, () => DateTimeOffset.UtcNow);
+                add("capacity_invalid_catalog_" + PromptHash(invalid).Substring(0, 8), !ReadBool(BuildContinuityProviderPreflight(settings, payload,
+                    body, NanoGptChatCompletionsUrl, model, broken), "capacityVerified", true), null);
+            }
+            var duplicate = new ConversationCapacityCatalog(() => Json.Serialize(TestDict("data", new[] {
+                TestDict("id", model, "context_length", 1048576, "max_output_tokens", 8000),
+                TestDict("id", model, "context_length", 32768, "max_output_tokens", 8000) })), () => DateTimeOffset.UtcNow);
+            add("capacity_ambiguous_catalog_refused", duplicate.Read(model) == null, null);
+            outage = true;
+            clock = clock.AddHours(7);
+            add("capacity_expired_catalog_not_reused_on_outage", catalog.Read(model) == null && fetches == 2, fetches);
+            add("capacity_failed_refresh_has_bounded_cooldown", catalog.Read(model) == null && fetches == 2, fetches);
+            clock = clock.AddSeconds(31);
+            outage = false;
+            add("capacity_recovers_after_metadata_outage", catalog.Read(model) != null && fetches == 3, fetches);
+            var explicitSettings = TestDict("llmProvider", NanoGptProvider, "verifiedConversationContextWindows",
+                TestDict(ReadString(discovered, "routeKey", ""), TestDict("endpoint", NanoGptChatCompletionsUrl, "model", model,
+                "contextTokens", 1048576, "source", "fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o"))));
+            add("capacity_expired_explicit_certificate_not_overridden", !ReadBool(BuildContinuityProviderPreflight(explicitSettings, payload,
+                body, NanoGptChatCompletionsUrl, model, catalog), "capacityVerified", true), null);
+        }
+
         private static List<Dictionary<string, object>> RunConversationContinuitySelfTests()
         {
             var results = new List<Dictionary<string, object>>();
@@ -208,6 +323,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                     && QuerySql(connection,"SELECT record_id FROM conversation_continuity WHERE record_id='atomic_letter';").Count == 0,null);
             }
             RunContinuityPromptAndPresenceTests(campaign, add);
+            RunConversationCapacitySelfTests(add);
             RunContinuityProductionEnvelopeTests(campaign, add);
             return results;
         }
@@ -330,7 +446,13 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                 "relationshipSignal",empty,"relationshipAssessments",noLines,"decisionBrief",empty);
             var unresolved=RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),TestDict("requestType","dialogue","maxTokens",3000),payload,
                 PromptParityIdentity(),noLines,campaign,"continuity-absent","dialogue","npc_a","Speaker","Traveler","",request=>TestDict("ok",true,"content",Json.Serialize(response("My father is here."))));
-            add("production_repair_blocks_unresolved_presence_error",!ReadBool(unresolved,"ok",true),unresolved);
+            var unresolvedVisible=TryParseJsonObject(ReadString(unresolved,"content",""));
+            add("production_repair_marks_unresolved_presence_without_effects",ReadBool(unresolved,"ok",false)
+                && ReadBool(unresolved,"visibleRepairFailure",false)
+                && ReadString(unresolvedVisible,"reply","").EndsWith(".,",StringComparison.Ordinal)
+                && SanitizeVisibleReply(ReadString(unresolvedVisible,"reply","")).EndsWith(".,",StringComparison.Ordinal)
+                && ReadDictionaryList(unresolvedVisible,"continuityWrites").Count==0
+                && !ActionGateShouldPlan(ReadDictionary(unresolvedVisible,"actionGate")),unresolved);
             var repaired=RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),TestDict("requestType","dialogue","maxTokens",3000),payload,
                 PromptParityIdentity(),noLines,campaign,"continuity-corrected","dialogue","npc_a","Speaker","Traveler","",request=>TestDict("ok",true,"content",Json.Serialize(response("I need reliable news before deciding where to ride."))));
             add("production_repair_accepts_grounded_correction",ReadBool(repaired,"ok",false),repaired);

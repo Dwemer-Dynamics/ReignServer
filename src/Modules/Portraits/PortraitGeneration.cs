@@ -196,7 +196,9 @@ namespace ReignBetaServer
                     bool sharedRebuild = ReadString(sourceProvenance, "kind", "") == "shared_ai_portrait_reference";
                     if (PreserveResidentClothing(payload))
                     {
-                        adultClothingEdit = false;
+                        // Tavern staff retain their native outfit for the identity pass, then receive
+                        // the editable Tavern clothing edit through the configured adult portrait profile.
+                        if (!IsTavernHousePortrait(payload)) adultClothingEdit = false;
                         // Even custom negative prompts must not silently strip the encountered outfit.
                         imageProfile.AtlasWanNegativePrompt = "text, watermark, captions, border, cartoon, plastic skin, distorted anatomy";
                         sourceProvenance["clothingPolicy"] = ReignBeta.Shared.Characters.EncounteredResidentRules.EquippedOutfitPolicy;

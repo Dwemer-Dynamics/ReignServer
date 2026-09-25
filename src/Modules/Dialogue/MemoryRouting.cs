@@ -297,7 +297,9 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> matched = new List<Dictionary<string, object>>();
             List<string> terms = MemoryQueryTerms(topic).Where(term => !ExactRecallStopWords.Contains(term, StringComparer.OrdinalIgnoreCase)).Take(64).ToList();
             string fts = BuildFtsQuery(terms);
-            string excludeCurrent = string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND s.session_id<>$excluded_session";
+            string excludeCurrent = (string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND s.session_id<>$excluded_session")
+                + " AND t.world_day<=" + (knowledge?.WorldDay ?? double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
+                + (string.IsNullOrWhiteSpace(knowledge?.TimelineId) ? "" : " AND COALESCE(NULLIF(t.payload_json::jsonb->>'timelineId',''),'') IN ('','" + knowledge.TimelineId.Replace("'","''") + "')");
             Dictionary<string, object> searchParameters = new Dictionary<string, object> { ["query"] = fts, ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" };
             if (!string.IsNullOrWhiteSpace(fts))
             {
@@ -310,11 +312,11 @@ websearch_to_tsquery('simple',$query)) AS lexical_rank
 FROM conversation_turn_fts f
 JOIN conversation_turns t ON t.turn_id=f.turn_id JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE to_tsvector('simple',COALESCE(f.text,'')) @@ websearch_to_tsquery('simple',$query)
-AND s.npc_id=$npc AND t.status='active'" + excludeCurrent + @"
+AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY lexical_rank DESC,t.ts DESC LIMIT 8;"
                         : @"SELECT t.*,bm25(conversation_turn_fts) AS lexical_rank FROM conversation_turn_fts f
 JOIN conversation_turns t ON t.turn_id=f.turn_id JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE conversation_turn_fts MATCH $query AND s.npc_id=$npc AND t.status='active'" + excludeCurrent + @"
+WHERE conversation_turn_fts MATCH $query AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY bm25(conversation_turn_fts),t.ts DESC LIMIT 8;";
                     matched = QuerySql(connection, lexicalSql,
                         searchParameters);
@@ -336,7 +338,7 @@ ORDER BY bm25(conversation_turn_fts),t.ts DESC LIMIT 8;";
                 string turnId = ReadString(payload, "sourceId", "");
                 if (string.IsNullOrWhiteSpace(turnId) || matchedIds.Contains(turnId)) continue;
                 Dictionary<string, object> row = QuerySql(connection, @"SELECT t.* FROM conversation_turns t
-JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.turn_id=$id AND s.npc_id=$npc AND t.status='active'" + excludeCurrent + " LIMIT 1;",
+JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.turn_id=$id AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + " LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = turnId, ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" }).FirstOrDefault();
                 if (row == null) continue;
                 row["vectorSemanticScore"] = ReadDouble(hit, "score", 0d);
@@ -357,7 +359,7 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.turn_id=$id AN
             if (matched.Count == 0 && targetDay >= 0d)
             {
                 matched = QuerySql(connection, @"SELECT t.* FROM conversation_turns t
-JOIN conversation_sessions s ON s.session_id=t.session_id WHERE s.npc_id=$npc AND t.status='active'" + excludeCurrent + @"
+JOIN conversation_sessions s ON s.session_id=t.session_id WHERE " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY ABS(t.world_day-$day),t.ts DESC LIMIT 12;", new Dictionary<string, object> { ["npc"] = npcId, ["day"] = targetDay, ["excluded_session"] = excludedSessionId ?? "" })
                     .Where(row => ConversationSessionContainsSourceBearingPlayerTurn(connection,
                         ReadString(row, "session_id", ""), sourceBearingSessions)).Take(4).ToList();
@@ -365,7 +367,7 @@ ORDER BY ABS(t.world_day-$day),t.ts DESC LIMIT 12;", new Dictionary<string, obje
             if (matched.Count == 0)
             {
                 matched = QuerySql(connection, @"SELECT t.* FROM conversation_turns t
-JOIN conversation_sessions s ON s.session_id=t.session_id WHERE s.npc_id=$npc AND t.status='active'" + excludeCurrent + @"
+JOIN conversation_sessions s ON s.session_id=t.session_id WHERE " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" })
                     .Where(row => ConversationSessionContainsSourceBearingPlayerTurn(connection,
                         ReadString(row, "session_id", ""), sourceBearingSessions)).Take(2).ToList();
@@ -406,7 +408,7 @@ ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId,
             List<Dictionary<string, object>> expanded = QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active'
  AND turn_order BETWEEN $start AND $end ORDER BY turn_order;",
-                new Dictionary<string, object> { ["session"] = sessionId, ["start"] = Math.Max(0, ordinal - 4), ["end"] = ordinal + 4 });
+                new Dictionary<string, object> { ["session"] = sessionId, ["start"] = Math.Max(0, ordinal - 4), ["end"] = ordinal + 4 }).Where(t => PrecisionTurnVisible(t,npcId,knowledge)).ToList();
             StringBuilder builder = new StringBuilder();
             List<string> included = new List<string>();
             string anchorTurnId = ReadString(anchor, "turn_id", "");
@@ -763,8 +765,8 @@ WHERE session_id=$session AND status='active' AND role='player' ORDER BY turn_or
         {
             string exclusion = string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND session_id<>$excluded_session";
             List<Dictionary<string, object>> sessions = QuerySql(connection, @"SELECT * FROM conversation_sessions
-WHERE status='closed' AND (npc_id=$npc OR participants_json LIKE $participant)" + exclusion + @"
-ORDER BY end_ts DESC,start_ts DESC LIMIT 30;",
+WHERE status='closed' AND (npc_id=$npc OR " + MemoryJsonContainsSql("participants_json","$npc") + ")" + exclusion + @"
+ORDER BY end_ts DESC,start_ts DESC;",
                 new Dictionary<string, object>
                 {
                     ["npc"] = npcId, ["participant"] = "%\"" + (npcId ?? "") + "\"%", ["excluded_session"] = excludedSessionId ?? ""
@@ -778,7 +780,7 @@ ORDER BY end_ts DESC,start_ts DESC LIMIT 30;",
                 string candidateSessionId = ReadString(session, "session_id", "");
                 List<Dictionary<string, object>> sessionTurns = QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active'
-ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candidateSessionId });
+ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candidateSessionId }).Where(t => PrecisionTurnVisible(t,npcId,knowledge)).ToList();
                 // Recall probes are evidence that the probe occurred, but must not displace the
                 // source conversations they were trying to reconstruct. Keep every complete
                 // source-bearing session involving this NPC until the configured raw window is met.

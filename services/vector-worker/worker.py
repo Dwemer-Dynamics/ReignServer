@@ -12,6 +12,7 @@ import re
 import threading
 import time
 import sys
+import uuid
 from collections import OrderedDict, deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,7 +25,8 @@ import numpy as np
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 MODEL_DIMENSIONS = 384
-MODEL_VERSION = "bge-small-en-v1.5-384-v1"
+MODEL_VERSION = "bge-small-en-v1.5-384-precision-v2"
+CHUNK_VERSION = "token-window-v1"
 STOP_WORDS = {
     "about", "after", "again", "against", "also", "among", "because", "been", "before", "being",
     "between", "could", "does", "from", "have", "into", "just", "more", "most", "other", "over",
@@ -43,6 +45,7 @@ class WorkerState:
         self.model_dir = Path(configured_model).resolve() if configured_model else data_dir / "models" / "embeddings"
         self.local_vector_dir = data_dir / "vectors" / "local"
         self.model = None
+        self.tokenizer = None
         self.model_lock = threading.RLock()
         self.clients: dict[str, Any] = {}
         self.client_lock = threading.RLock()
@@ -142,7 +145,7 @@ class WorkerState:
             return self.model
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        clean = [limit_text(text, 4000) for text in texts]
+        clean = [str(text or "") for text in texts]
         started = time.perf_counter()
         try:
             with self.model_lock:
@@ -177,6 +180,31 @@ class WorkerState:
             self.last_operation = "embed_failed"
             raise
 
+    def get_tokenizer(self):
+        with self.model_lock:
+            if self.tokenizer is None:
+                self.get_model()
+                from tokenizers import Tokenizer
+                candidates = [self.model_dir / "tokenizer.json"] if self.bundled_model else [p for p in self.model_dir.rglob("tokenizer.json") if "bge-small-en-v1.5" in str(p)]
+                if len(candidates) != 1:
+                    raise RuntimeError("Embedding tokenizer is unavailable; refuse silent model-window truncation.")
+                self.tokenizer = Tokenizer.from_file(str(candidates[0]))
+                self.tokenizer.no_truncation()
+                self.tokenizer.no_padding()
+            return self.tokenizer
+
+    def remove_documents(self, client, collection: str, ids: list[str], local: bool) -> None:
+        from qdrant_client import models
+        if not ids or not client.collection_exists(collection):
+            return
+        client.delete(collection_name=collection, points_selector=models.FilterSelector(filter=models.Filter(must=[
+            models.FieldCondition(key="documentId", match=models.MatchAny(any=ids))])), wait=True)
+        client.delete(collection_name=collection, points_selector=models.PointIdsList(points=ids), wait=True)
+        if local:
+            index = self.local_indexes.get(collection)
+            child_ids = [] if index is None else [key for key, (_, payload) in index["points"].items() if payload.get("documentId") in ids]
+            self.delete_local_index(collection, ids + child_ids, False)
+
     def get_client(self, provider: str, qdrant_url: str, api_key: str):
         from qdrant_client import QdrantClient
 
@@ -202,7 +230,7 @@ class WorkerState:
                 vectors_config=models.VectorParams(size=MODEL_DIMENSIONS, distance=models.Distance.COSINE),
             )
         if external:
-            for field in ("campaignId", "timelineId", "sourceType", "memoryLane", "status", "ownerId"):
+            for field in ("campaignId", "timelineId", "sourceType", "memoryLane", "status", "ownerId", "knownBy", "hiddenFrom", "documentId", "restoreGeneration"):
                 try:
                     client.create_payload_index(collection, field, models.PayloadSchemaType.KEYWORD, wait=True)
                 except Exception:
@@ -330,6 +358,18 @@ def build_filter(filters: dict[str, Any]):
     for key, value in (filters or {}).items():
         if value is None or value == "" or value == []:
             continue
+        if key == "observerId":
+            conditions.append(models.FieldCondition(key="eligibilityVersion", match=models.MatchValue(value=2)))
+            conditions.append(models.Filter(must_not=[models.FieldCondition(key="hiddenFrom", match=models.MatchValue(value=value))]))
+            conditions.append(models.Filter(should=[
+                models.FieldCondition(key="ownerId", match=models.MatchValue(value=value)),
+                models.Filter(must=[models.FieldCondition(key="privateMental", match=models.MatchValue(value=False))], should=[
+                    models.FieldCondition(key="knownBy", match=models.MatchValue(value=value)),
+                    models.FieldCondition(key="publicUnscoped", match=models.MatchValue(value=True))])]))
+            continue
+        if key == "asOfWorldDay":
+            conditions.append(models.FieldCondition(key="worldDay", range=models.Range(lte=float(value))))
+            continue
         if isinstance(value, list):
             conditions.append(models.FieldCondition(key=key, match=models.MatchAny(any=value)))
         else:
@@ -340,6 +380,18 @@ def build_filter(filters: dict[str, Any]):
 def payload_matches_filters(payload: dict[str, Any], filters: dict[str, Any]) -> bool:
     for key, expected in (filters or {}).items():
         if expected is None or expected == "" or expected == []:
+            continue
+        if key == "observerId":
+            if payload.get("eligibilityVersion") != 2 or expected in payload.get("hiddenFrom", []):
+                return False
+            own = payload.get("ownerId") == expected
+            if not own and (payload.get("privateMental") is not False or not (
+                    expected in payload.get("knownBy", []) or payload.get("publicUnscoped") is True)):
+                return False
+            continue
+        if key == "asOfWorldDay":
+            if float(payload.get("worldDay", 0)) > float(expected):
+                return False
             continue
         actual = payload.get(key)
         if isinstance(expected, list):
@@ -354,6 +406,107 @@ def payload_matches_filters(payload: dict[str, Any], filters: dict[str, Any]) ->
         elif actual != expected:
             return False
     return True
+
+
+def contextual_chunks(document: dict[str, Any], tokenizer) -> list[dict[str, Any]]:
+    """Versioned, overlapping token windows retain the original character span."""
+    text = str(document.get("text") or "")
+    encoded = tokenizer.encode(text, add_special_tokens=False)
+    offsets = encoded.offsets
+    if not offsets:
+        return []
+    parent = str(document.get("id") or "")
+    chunks = []
+    # 448 body tokens leave room for model special tokens. No character cap or
+    # model-side truncation is permitted to discard a source's later outcome.
+    for start in range(0, len(offsets), 416):
+        end = min(start + 448, len(offsets))
+        begin_char, end_char = offsets[start][0], offsets[end - 1][1]
+        payload = dict(document.get("payload") or {})
+        context = " | ".join(str(payload.get(k) or "") for k in ("sourceType", "ownerId", "timelineId", "worldDay"))
+        # Context is metadata, never generated synopsis; keep it token bounded.
+        context_tokens = tokenizer.encode(context, add_special_tokens=False)
+        if len(context_tokens.ids) > 48:
+            context = context[:context_tokens.offsets[47][1]]
+        value = context + "\n" + text[begin_char:end_char]
+        if len(tokenizer.encode(value, add_special_tokens=True).ids) > 512:
+            raise ValueError("Embedding chunk exceeds the certified model window.")
+        payload = dict(document.get("payload") or {})
+        payload.update(documentId=parent, chunkVersion=CHUNK_VERSION, chunkOrdinal=len(chunks),
+                       sourceStart=begin_char, sourceEnd=end_char, chunkHash=hashlib.sha256(value.encode("utf-8")).hexdigest())
+        chunks.append({"id": str(uuid.uuid5(uuid.NAMESPACE_URL, parent + "|" + CHUNK_VERSION + "|" + str(start))),
+                       "text": value, "payload": payload})
+        if end == len(offsets):
+            break
+    return chunks
+
+
+def rerank_certificate_valid(certificate: dict[str, Any], model_hash: str, tokenizer_hash: str) -> bool:
+    try:
+        return (certificate.get("schema") == "reign-memory-rerank-certificate-v1"
+                and certificate.get("modelSha256") == model_hash
+                and certificate.get("tokenizerSha256") == tokenizer_hash
+                and len(certificate.get("heldOutCorpusSha256", "")) == 64
+                and certificate.get("heldOut") is True
+                and int(certificate.get("caseCount", 0)) >= 100
+                and int(certificate.get("criticalErrors", 1)) == 0
+                and float(certificate.get("requiredFactCoverage", 0)) >= .98
+                and float(certificate.get("quality", 0)) > float(certificate.get("baselineQuality", 1))
+                and 0 < float(certificate.get("rerankP95Ms", 0)) <= 1.2 * float(certificate.get("baselineP95Ms", 0)))
+    except (TypeError, ValueError):
+        return False
+
+
+def local_cross_encoder(query: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Opt-in local ONNX inference; no implicit downloads or cloud requests."""
+    directory = Path(os.environ.get("REIGN_MEMORY_RERANK_MODEL_DIR", ""))
+    certificate_path = os.environ.get("REIGN_MEMORY_RERANK_CERTIFICATE", "")
+    if not certificate_path or not str(directory) or not directory.is_dir():
+        raise ValueError("Cross-encoder requires a local model and held-out quality/latency certificate.")
+    model_path, tokenizer_path = directory / "model.onnx", directory / "tokenizer.json"
+    certificate = json.loads(Path(certificate_path).read_text(encoding="utf-8"))
+    model_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    tokenizer_hash = hashlib.sha256(tokenizer_path.read_bytes()).hexdigest()
+    if not rerank_certificate_valid(certificate, model_hash, tokenizer_hash):
+        raise ValueError("Cross-encoder certificate does not satisfy precision and latency gates.")
+    if len(candidates) > 32:
+        raise ValueError("Cross-encoder candidate limit is 32.")
+    import onnxruntime as ort
+    from tokenizers import Tokenizer
+    tokenizer = Tokenizer.from_file(str(tokenizer_path))
+    tokenizer.no_truncation()
+    tokenizer.no_padding()
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 2
+    session = ort.InferenceSession(str(model_path), sess_options=options, providers=["CPUExecutionProvider"])
+    results = []
+    for candidate in candidates:
+        tokens = tokenizer.encode(query, str(candidate.get("text") or ""))
+        # Long sources keep their existing rank; never score only their prefix.
+        if len(tokens.ids) > 512:
+            continue
+        values = {"input_ids": np.asarray([tokens.ids], dtype=np.int64),
+                  "attention_mask": np.asarray([tokens.attention_mask], dtype=np.int64),
+                  "token_type_ids": np.asarray([tokens.type_ids], dtype=np.int64)}
+        score = float(np.asarray(session.run(None, {i.name: values[i.name] for i in session.get_inputs()})[0]).reshape(-1)[0])
+        if math.isfinite(score):
+            results.append({"id": str(candidate.get("id") or ""), "score": score})
+    return sorted(results, key=lambda r: r["score"], reverse=True)
+
+
+def unique_document_hits(results: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    seen = set()
+    selected = []
+    for hit in sorted(results, key=lambda h: float(h.get("score", 0)), reverse=True):
+        payload = hit.get("payload") or {}
+        identity = payload.get("documentId") or hit.get("id")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        selected.append(hit)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def extract_topics(text: str, maximum: int) -> list[str]:
@@ -447,6 +600,11 @@ class Handler(BaseHTTPRequestHandler):
         started = time.perf_counter()
         query = limit_text(body.get("query"), 4000)
         candidates = [item for item in body.get("candidates", []) if isinstance(item, dict)]
+        if body.get("rankingModel") == "cross-encoder/ms-marco-MiniLM-L6-v2":
+            with STATE.operation_gate(True):
+                results = local_cross_encoder(query, candidates)
+            self.send_json(200, {"ok": True, "results": results, "model": body["rankingModel"]})
+            return
         foreground = str(body.get("priority") or "").strip().lower() in {"foreground", "interactive", "live"}
         aggregate_timing: dict[str, Any] = {"queueWaitMs": 0, "chunks": 0}
         if foreground:
@@ -490,19 +648,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True, "upserted": 0})
             return
         provider, url, key = provider_settings(body)
+        aggregate_timing = {"queueWaitMs": 0, "chunks": 0}
         with STATE.operation_gate(False) as gate_timing:
-            vectors = STATE.embed([limit_text(item.get("text"), 4000) for item in documents])
-            points = []
-            for item, vector in zip(documents, vectors):
-                payload = dict(item.get("payload") or {})
-                points.append(models.PointStruct(id=str(item.get("id") or ""), vector=vector, payload=payload))
-            collection = collection_name(body)
+            parents = [str(item.get("id") or "") for item in documents]
+            tokenizer = STATE.get_tokenizer()
+            documents = [chunk for item in documents for chunk in contextual_chunks(item, tokenizer)]
+            aggregate_timing["queueWaitMs"] += gate_timing["queueWaitMs"]
+        # Compute bounded batches before atomic index publication. A partial
+        # inference failure leaves the previous complete document index intact.
+        vectors = []
+        for offset in range(0, len(documents), 4):
+            with STATE.operation_gate(False) as gate_timing:
+                vectors.extend(STATE.embed([item["text"] for item in documents[offset:offset + 4]]))
+                aggregate_timing["queueWaitMs"] += gate_timing["queueWaitMs"]
+                aggregate_timing["chunks"] += 1
+        points = [models.PointStruct(id=item["id"], vector=vector, payload=item["payload"]) for item, vector in zip(documents, vectors)]
+        collection = collection_name(body)
+        with STATE.operation_gate(False) as gate_timing:
             with STATE.vector_lock:
                 client = STATE.get_client(provider, url, key)
                 STATE.ensure_collection(client, collection, provider == "qdrant")
-                client.upsert(collection_name=collection, points=points, wait=True)
+                STATE.remove_documents(client, collection, parents, provider != "qdrant")
+                if points:
+                    client.upsert(collection_name=collection, points=points, wait=True)
                 if provider != "qdrant":
                     STATE.update_local_index(collection, documents, vectors)
+        gate_timing = aggregate_timing
         timing = STATE.record_operation("upsert", False, started, gate_timing)
         self.send_json(200, {"ok": True, "upserted": len(points), "collection": collection, "provider": provider, "timing": timing})
 
@@ -531,7 +702,7 @@ class Handler(BaseHTTPRequestHandler):
                         query_vector = np.asarray(vector, dtype=np.float32)
                         query_vector = query_vector / max(float(np.linalg.norm(query_vector)), 1e-12)
                         candidate_scores = index["matrix"][matching] @ query_vector
-                        take = min(limit, len(matching))
+                        take = len(matching)
                         if take < len(matching):
                             selected = np.argpartition(candidate_scores, -take)[-take:]
                         else:
@@ -548,20 +719,24 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         results = []
                 else:
-                    response = client.query_points(
+                    response = client.query_points_groups(
                         collection_name=collection,
                         query=vector,
                         query_filter=build_filter(body.get("filters") or {}),
+                        group_by="documentId",
+                        group_size=1,
                         limit=limit,
                         with_payload=True,
                         with_vectors=False,
                     )
                     results = [
                         {"id": str(point.id), "score": float(point.score), "payload": point.payload or {}}
-                        for point in response.points
+                        for group in response.groups for point in group.hits
                     ]
+        results = unique_document_hits(results, limit)
         timing = STATE.record_operation("search", True, started, gate_timing)
-        self.send_json(200, {"ok": True, "results": results, "collection": collection, "provider": provider, "timing": timing})
+        self.send_json(200, {"ok": True, "results": results, "collection": collection, "provider": provider,
+                             "eligibilityApplied": bool((body.get("filters") or {}).get("observerId")), "timing": timing})
 
     def handle_delete(self, body: dict[str, Any]) -> None:
         from qdrant_client import models
@@ -584,9 +759,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(200, {"ok": True, "deletedCollection": deleted, "collection": collection, "timing": timing})
                     return
                 if ids and client.collection_exists(collection):
-                    client.delete(collection_name=collection, points_selector=models.PointIdsList(points=ids), wait=True)
-                    if provider != "qdrant":
-                        STATE.delete_local_index(collection, ids, False)
+                    STATE.remove_documents(client, collection, ids, provider != "qdrant")
         timing = STATE.record_operation("delete", False, started, gate_timing)
         self.send_json(200, {"ok": True, "deleted": len(ids), "collection": collection, "timing": timing})
 
