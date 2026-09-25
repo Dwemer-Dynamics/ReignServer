@@ -186,6 +186,7 @@ namespace ReignBetaServer
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
                 && remaining.Count == 0;
+            bool markedFailure = false;
             if (usableRepair)
             {
                 MarkRepairedVisibleResponse(
@@ -194,9 +195,13 @@ namespace ReignBetaServer
             }
             else
             {
-                repaired["ok"] = false;
-                repaired["errorCode"] = "roleplay_continuity_repair_unusable";
-                repaired["error"] = "The role-play continuity repair did not return a usable structured response; no deterministic dialogue fallback was substituted.";
+                markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode);
+                if (!markedFailure)
+                {
+                    repaired["ok"] = false;
+                    repaired["errorCode"] = "roleplay_continuity_repair_unusable";
+                    repaired["error"] = "The role-play continuity repair returned no usable visible reply.";
+                }
             }
             Dictionary<string, object> evidence = new Dictionary<string, object>
             {
@@ -204,11 +209,11 @@ namespace ReignBetaServer
                 ["remaining"] = remaining,
                 ["accepted"] = usableRepair,
                 ["revalidationCleared"] = revalidationCleared,
-                ["secondAttemptReturned"] = usableRepair,
+                ["secondAttemptReturned"] = usableRepair || markedFailure,
                 ["deterministicFallback"] = false,
                 ["visibleRepairMarker"] = usableRepair
                     ? (revalidationCleared ? ".." : ".,")
-                    : "",
+                    : markedFailure ? ".," : "",
                 ["method"] = repairMethod,
                 ["removedStageDirectionCount"] = removedRepairStageCount,
                 ["continuityHistoryLineCount"] = continuityLines.Count,
@@ -217,15 +222,15 @@ namespace ReignBetaServer
             };
             WriteAudit(campaignId, correlationId, "server", auditMode,
                 "llm.roleplay_continuity_repair", heroId, "", eventId,
-                !usableRepair ? "failed"
+                !usableRepair && !markedFailure ? "failed"
                     : revalidationCleared ? "completed"
                     : "completed_with_revalidation_override",
                 ReadLong(repaired, "durationMs", 0),
-                !usableRepair
-                    ? "The role-play continuity repair did not return usable structured dialogue; no fallback response was written."
+                !usableRepair && !markedFailure
+                    ? "The role-play continuity repair did not return usable visible dialogue."
                     : revalidationCleared
                         ? "An impossible or degrading role-play response was corrected before it entered the transcript or memory pipeline."
-                        : "The second role-play continuity repair remained validator-rejected but was returned without a canned fallback.",
+                        : "The role-play continuity repair remained validator-rejected; marked dialogue was returned without structured effects.",
                 evidence);
             repaired["roleplayContinuityRepair"] = evidence;
             return repaired;

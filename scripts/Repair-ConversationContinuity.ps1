@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Manifest,
-    [ValidateSet('Preview','Apply')][string]$Mode = 'Preview',
+    [ValidateSet('Stage','Preview','Apply')][string]$Mode = 'Preview',
     [string]$Distro = 'ReignServer',
     [Parameter(Mandatory)][string]$Executable,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExecutableSha256,
@@ -11,7 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
 $document = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-if ($document.schema -ne 'reign-continuity-repair-v1' -or $document.campaignId -notmatch '^[A-Za-z0-9_-]{1,128}$') {
+$expectedSchema = if ($Mode -eq 'Stage') { 'reign-memory-stage-request-v1' } else { 'reign-continuity-repair-v1' }
+if ($document.schema -ne $expectedSchema -or $document.campaignId -notmatch '^[A-Za-z0-9_-]{1,128}$') {
     throw 'A reviewed continuity repair manifest with an exact campaign id is required.'
 }
 $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -23,18 +24,20 @@ function Invoke-ReignWsl([string[]]$Arguments) {
     return $result
 }
 function Convert-ReignWslPath([string]$Path) {
-    return ((Invoke-ReignWsl @('wslpath','-a','-u',$Path)) -join '').Trim()
+    return ((Invoke-ReignWsl @('wslpath','-a','-u',$Path.Replace('\','/'))) -join '').Trim()
 }
 if ($Executable -notmatch '^/' -or $Executable -match '[\r\n]') { throw 'Executable must be the absolute Linux path of the validated server artifact.' }
 $actualExecutableHash = ((Invoke-ReignWsl @('sha256sum','--',$Executable)) -join ' ').Split(' ')[0]
 if ($actualExecutableHash -ne $ExecutableSha256.ToLowerInvariant()) { throw 'Server artifact hash differs from the reviewed validation artifact.' }
 $linuxManifest = Convert-ReignWslPath $manifestPath
+$linuxEvidence = Convert-ReignWslPath $evidencePath
 $report = Join-Path $evidencePath ($manifestHash + '-' + $Mode.ToLowerInvariant() + '.json')
 $linuxReport = Convert-ReignWslPath $report
 $arguments = @($Executable,'--continuity-repair','--manifest',$linuxManifest,'--report',$linuxReport)
+if ($Mode -eq 'Stage') { $arguments += '--stage' }
 if ($Mode -eq 'Apply') {
     if ($ConfirmedManifestSha256 -ne $manifestHash) { throw 'Apply requires the explicitly reviewed manifest SHA256.' }
-    if (Get-Process -Name 'Bannerlord','Bannerlord.Native' -ErrorAction SilentlyContinue) { throw 'Close Bannerlord before applying the reviewed repair.' }
+    if (Get-Process -Name 'Bannerlord','Bannerlord.Native','Bannerlord.BLSE.Standalone','Bannerlord.BLSE.Launcher','TaleWorlds.MountAndBlade.Launcher' -ErrorAction SilentlyContinue) { throw 'Close Bannerlord before applying the reviewed repair.' }
     & wsl.exe -d $Distro -- systemctl is-active --quiet reignserver.service
     if ($LASTEXITCODE -eq 0) { throw 'Stop ReignServer through its launcher before applying the repair.' }
     if ($LASTEXITCODE -ne 3) { throw 'Could not prove that reignserver.service is inactive.' }
@@ -51,5 +54,9 @@ if ($Mode -eq 'Apply') {
     [ordered]@{ schema='reign-continuity-repair-backup-v1'; campaignId=$campaign; databaseSchema=$schema; backup=$backup; sha256=$backupHash; manifestSha256=$manifestHash; executableSha256=$actualExecutableHash } |
         ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ($backup + '.receipt.json') -Encoding utf8NoBOM
 }
-Invoke-ReignWsl $arguments
+# Match the managed service's PostgreSQL peer identity. Keep incidental CLI files
+# in this run's evidence directory, never the installed runtime's private data.
+Invoke-ReignWsl (@('sudo','-n','-u','reign','--','env','REIGN_VALIDATION_MODE=0',
+    'REIGN_DB_NAME=reign','REIGN_DB_HOST=/var/run/postgresql','REIGN_DB_USER=reign',
+    "REIGN_DATA_ROOT=$linuxEvidence") + $arguments)
 Write-Output "Continuity repair $Mode report: $report"

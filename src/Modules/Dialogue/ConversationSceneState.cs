@@ -181,6 +181,7 @@ updated_ts INTEGER NOT NULL);");
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
                 && remaining.Count == 0;
+            bool markedFailure = false;
             if (usableRepair)
             {
                 MarkRepairedVisibleResponse(
@@ -189,9 +190,13 @@ updated_ts INTEGER NOT NULL);");
             }
             else
             {
-                repaired["ok"] = false;
-                repaired["errorCode"] = "kinship_repair_unusable";
-                repaired["error"] = "The kinship repair did not return a usable structured response; no deterministic dialogue fallback was substituted.";
+                markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode);
+                if (!markedFailure)
+                {
+                    repaired["ok"] = false;
+                    repaired["errorCode"] = "kinship_repair_unusable";
+                    repaired["error"] = "The kinship repair returned no usable visible reply.";
+                }
             }
             Dictionary<string, object> evidence = new Dictionary<string, object>
             {
@@ -199,24 +204,24 @@ updated_ts INTEGER NOT NULL);");
                 ["remaining"] = remaining,
                 ["accepted"] = usableRepair,
                 ["revalidationCleared"] = revalidationCleared,
-                ["secondAttemptReturned"] = usableRepair,
+                ["secondAttemptReturned"] = usableRepair || markedFailure,
                 ["deterministicFallback"] = false,
                 ["visibleRepairMarker"] = usableRepair
                     ? (revalidationCleared ? ".." : ".,")
-                    : "",
+                    : markedFailure ? ".," : "",
                 ["repairRequestChars"] = Json.Serialize(repairRequest).Length,
                 ["originalResponseChars"] = originalJson.Length
             };
             WriteAudit(campaignId, correlationId, "server", auditMode, "llm.kinship_repair", heroId, "", eventId,
-                !usableRepair ? "failed"
+                !usableRepair && !markedFailure ? "failed"
                     : revalidationCleared ? "completed"
                     : "completed_with_revalidation_override",
                 ReadLong(repaired, "durationMs", 0),
-                !usableRepair
-                    ? "The kinship repair did not return usable structured dialogue; no fallback response was written."
+                !usableRepair && !markedFailure
+                    ? "The kinship repair returned no usable visible reply."
                     : revalidationCleared
                         ? "Contradictory kinship claims were corrected using a compact fact-only repair."
-                        : "The second kinship repair remained validator-rejected but was returned without a canned fallback.", evidence);
+                        : "The kinship repair remained validator-rejected; marked dialogue was returned without structured effects.", evidence);
             repaired["kinshipRepair"] = evidence;
             return repaired;
         }

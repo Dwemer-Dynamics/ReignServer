@@ -225,6 +225,7 @@ namespace ReignBetaServer
                         "Injected Save Sync failure after installing campaign assets.");
 
                 ClearSaveSyncCaches(campaignId);
+                AdvanceMemoryRestoreGeneration(campaignId);
                 MarkSaveSyncActiveStateClean(campaignId, point);
                 timer.Stop();
                 result["result"] = "rolled_back";

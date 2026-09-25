@@ -387,6 +387,8 @@ namespace ReignBetaServer
                 RunPromptSizeContract(checks);
                 AddSubsystemListSummary(checks, "pipeline.prompt_caching", "prompt_efficiency", RunPromptCachingSelfTests());
             }
+            if (ShouldRunVerificationSuite(requestedSuite, "memory_precision"))
+                AddSubsystemListSummary(checks, "pipeline.memory_precision", "memory_precision", RunMemoryPrecisionSelfTests());
             if (string.Equals(requestedSuite, "conversation_intoxication", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", RunConversationIntoxicationSelfTests());
             if (string.Equals(requestedSuite, "wanderer_population", StringComparison.OrdinalIgnoreCase))
@@ -1157,8 +1159,8 @@ namespace ReignBetaServer
                 && catalogPrefabNames.SetEquals(reignPrefabNames)
                 && uiCatalogText.Contains("\"targetCount\": 22", StringComparison.Ordinal)
                 && uiCatalogText.Contains("\"uniqueRuntimeMovieCount\": 21", StringComparison.Ordinal)
-                && uiCatalogText.Contains("\"targetCount\": 15", StringComparison.Ordinal)
-                && uiCatalogText.Contains("\"patchApplicationCount\": 30", StringComparison.Ordinal)
+                && uiCatalogText.Contains("\"targetCount\": 7", StringComparison.Ordinal)
+                && uiCatalogText.Contains("\"patchApplicationCount\": 9", StringComparison.Ordinal)
                 && previewAuditText.Contains("getPreviewFixtureInventory", StringComparison.Ordinal)
                 && previewAuditText.Contains("discoverRuntimeMovies", StringComparison.Ordinal)
                 && previewAuditText.Contains("auditRuntimeContract", StringComparison.Ordinal)
@@ -2852,6 +2854,7 @@ namespace ReignBetaServer
 
         private static void RunPromptSizeContract(List<Dictionary<string, object>> checks)
         {
+            AddSubsystemListSummary(checks, "contracts.wilderness_variety", "prompt_efficiency", RunWildernessVarietySelfTests());
             int commoner = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>()).Length;
             int noble = BuildDialogueGlobalPrefix(false, true, new List<Dictionary<string, object>>()).Length;
             int maximum = Math.Max(commoner, noble);
@@ -3365,6 +3368,7 @@ namespace ReignBetaServer
             add("conversation.correspondence", "conversation_modes", new[] { "pipeline.canned_cases", "contracts.gui_xml" });
             add("events.social_wilderness_tournament", "conversation_modes", new[] { "pipeline.canned_cases", "contracts.gui_xml", "contracts.social_event_player_exclusion", "contracts.social_event_encyclopedia_handoff", "contracts.social_event_local_first_roster", "contracts.social_event_persistent_group", "contracts.social_event_group_turn" });
             add("prompts.efficiency_cache", "prompt_efficiency", new[] { "contracts.dialogue_prompt_budget", "pipeline.prompt_caching" });
+            add("memory.precision", "memory_precision", new[] { "pipeline.memory_precision" });
             add("portraits.images", "portraits_images", new[] { "contracts.gui_xml", "contracts.portrait_identity_metadata", "contracts.image_generation_profiles", "faults.corrupt_image" });
             add("actions.trade", "actions_trade", new[] { "pipeline.canned_cases", "pipeline.settlement_authority", "shadow_world.all_actions", "shadow_world.atomic_trade" });
             add("diplomacy.world", "world_diplomacy", new[] { "baseline.diplomacy", "contracts.random_diplomacy_popup_debug", "long_run.five_years" });

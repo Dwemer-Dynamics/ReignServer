@@ -15,6 +15,7 @@ namespace ReignBetaServer
 
         private static bool UsesAdultPortraitClothingEdit(Dictionary<string, object> payload)
         {
+            if (IsTavernHousePortrait(payload)) return true;
             return !PreserveResidentClothing(payload)
                 && ImageGenerationProfileName(ReadString(payload, "promptPurpose", "portrait")) == "portrait"
                 && IsFemalePortraitSubject(payload) && ReadInt(payload, "ageYears", 0) >= 18
@@ -23,7 +24,8 @@ namespace ReignBetaServer
 
         private static string BuildAdultPortraitClothingPrompt(Dictionary<string, object> payload)
         {
-            string layer = SelectPortraitPhysicalConfidencePromptFile(payload);
+            bool tavernHouse = IsTavernHousePortrait(payload);
+            string layer = tavernHouse ? "tavern_house_portrait_clothing.txt" : SelectPortraitPhysicalConfidencePromptFile(payload);
             if (!UsesAdultPortraitClothingEdit(payload) || string.IsNullOrWhiteSpace(layer))
                 throw new InvalidOperationException("This portrait is not eligible for an adult clothing edit.");
             return AppendPortraitPhysique("CLOTHING EDIT OF THE SUPPLIED FINISHED ADULT PORTRAIT. "
@@ -32,7 +34,8 @@ namespace ReignBetaServer
                 + "lighting, background, camera position, full-body framing and image dimensions. "
                 + "Do not redraw, beautify, replace or reinterpret the person. Do not add text, borders or other objects. "
                 + "Clothing guidance below applies only to garments; body size is governed exclusively by the native body layer, never by revealingness.\n\n"
-                + ExpandPortraitIdentityTokens(payload, LoadPromptTemplate(layer).Trim()), payload);
+                + ExpandPortraitIdentityTokens(payload, LoadPromptTemplate(layer).Trim())
+                    .Replace("[TAVERN ROLE]", TavernHousePortraitRole(payload)), payload);
         }
 
         private static PortraitImageCallResult CallImageProvider(Dictionary<string, object> settings,

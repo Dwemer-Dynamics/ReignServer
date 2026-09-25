@@ -707,7 +707,8 @@ WHERE acquaintances.identity_state<>'verified';",
             return "";
         }
 
-        private static Dictionary<string, object> IdentityEncounterApi(Dictionary<string, object> payload)
+        private static Dictionary<string, object> IdentityEncounterApi(Dictionary<string, object> payload,
+            ContextualSelfIntroductionDecision contextualIntroduction = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -779,10 +780,15 @@ WHERE acquaintances.identity_state<>'verified';",
                     playerText,
                     IdentityIntroductionAnswerExpected(payload),
                     ReadString(subject, "name", ""));
+                bool contextual = string.IsNullOrWhiteSpace(claimed)
+                    && !IdentityStateVerified(existing) && contextualIntroduction != null
+                    && AuthoritativeIntroductionSource(contextualIntroduction.Name, subject).Length > 0;
+                if (contextual) claimed = contextualIntroduction.Name;
                 if (!string.IsNullOrWhiteSpace(claimed))
                 {
                     string canonical = ReadString(subject, "name", "");
                     string introductionSource = AuthoritativeIntroductionSource(claimed, subject);
+                    if (contextual) introductionSource += "_contextual";
                     if (!string.IsNullOrWhiteSpace(introductionSource))
                     {
                         QuarantineAmbiguousStoredIdentityClaim(
@@ -798,6 +804,16 @@ WHERE acquaintances.identity_state<>'verified';",
                             connection, observer, subject,
                             introductionSource, subjectId,
                             worldDay, correlationId);
+                        if (contextual)
+                            AddIdentityEvidence(connection, observerId, subjectId,
+                                "contextual_self_introduction", claimed, canonical,
+                                introductionSource, subjectId, encounterId,
+                                contextualIntroduction.Confidence, worldDay,
+                                new Dictionary<string, object>
+                                {
+                                    ["correlationId"] = correlationId,
+                                    ["playerText"] = contextualIntroduction.EvidenceQuote
+                                });
                         recognition = new Dictionary<string, object>
                         {
                             ["status"] = "not_needed_after_introduction",
@@ -1251,7 +1267,10 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return resultPayload;
         }
 
-        private static Dictionary<string, object> ResolvePromptIdentity(Dictionary<string, object> payload, string observerId, string mode, string fallbackEncounterId)
+        private static Dictionary<string, object> ResolvePromptIdentity(Dictionary<string, object> payload,
+            string observerId, string mode, string fallbackEncounterId,
+            IEnumerable<Dictionary<string, object>> canonicalTranscript = null,
+            Func<Dictionary<string, object>, Dictionary<string, object>> introductionResponder = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             Dictionary<string, object> suppliedSubject =
@@ -1318,7 +1337,21 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             {
                 if (payload.ContainsKey(key)) encounter[key] = payload[key];
             }
+            // Dialogue/event adapters supply their already scoped, authoritative
+            // history. It replaces client transcript copies for introduction checks.
+            if (canonicalTranscript != null)
+            {
+                encounter["transcript"] = canonicalTranscript.ToList();
+                encounter.Remove("groupTranscript");
+            }
             Dictionary<string, object> response = IdentityEncounterApi(encounter);
+            ContextualSelfIntroductionDecision contextual = ResolveContextualSelfIntroduction(
+                encounter, response, canonicalTranscript, introductionResponder);
+            if (contextual != null)
+            {
+                ThrowIfCampaignRequestReplaced();
+                response = IdentityEncounterApi(encounter, contextual);
+            }
             return ReadDictionary(response, "identityView") ?? BuildIdentityView(null, encounter);
         }
 
@@ -3075,9 +3108,12 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             string campaignPath = CampaignDirectory(campaignId);
             string courtCampaignId = campaignId + "_court";
             string courtCampaignPath = CampaignDirectory(courtCampaignId);
+            string introductionCampaignId = campaignId + "_introduction";
+            string introductionCampaignPath = CampaignDirectory(introductionCampaignId);
             try
             {
                 Dictionary<string, object> player = IdentityTestHero("player", "Aeric", "player_clan", "south", true, false);
+                AddContextualSelfIntroductionTests(introductionCampaignId, add);
                 // The prompt adapter observes a court at day 50 and persists its own
                 // live roster context. Keep it separate from the day-10 roster fixture.
                 AddCourtAudienceIdentityTests(courtCampaignId, add);
@@ -4258,6 +4294,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             finally
             {
                 TryDeleteIdentitySelfTestCampaign(courtCampaignPath);
+                TryDeleteIdentitySelfTestCampaign(introductionCampaignPath);
                 TryDeleteIdentitySelfTestCampaign(campaignPath);
             }
             return results;

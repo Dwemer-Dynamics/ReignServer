@@ -252,6 +252,8 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
             }
             if (!official && !string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
             {
+                bool precision = ReadString(ReadDictionary(payload, "memoryPrecisionEvidence"), "mode", "") == "precision";
+                if (!precision)
                 using (var connection = OpenCampaignConnection(campaignId))
                 {
                     EnsureConversationContinuitySchema(connection);
@@ -668,36 +670,39 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             return string.Join("\n\n", retained.OrderBy(r => r.Order).Select(r => r.Text));
         }
 
-        private static void FinalizeContinuityPromptBudget(PromptEnvelope envelope, Dictionary<string, object> payload)
+        private static void FinalizeContinuityPromptBudget(PromptEnvelope envelope, Dictionary<string, object> payload,
+            Dictionary<string, object> capacityPolicy = null)
         {
-            var settings = LoadSettings();
-            int characters = envelope.Messages.Sum(m => ReadString(m, "content", "").Length);
             int bytes = envelope.Messages.Sum(m => Encoding.UTF8.GetByteCount(ReadString(m, "content", "")));
             // The estimate is disclosed, not represented as an exact tokenizer.
-            // The byte bound is retained for model-capacity certification. A verified
-            // per-model ceiling can be supplied by an offline provider profile.
+            // The final request is independently checked again after all adapters.
             int estimated = EstimateContinuityTokens(Json.Serialize(envelope.Messages));
             var expectedSources = ReadStringList(ReadDictionary(payload, "continuityEvidence"), "sourceIds").Distinct().ToList();
             string rendered = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
             var missingSources = expectedSources.Where(id => !rendered.Contains(id, StringComparison.Ordinal)).ToList();
+            var memoryEvidence = ReadDictionary(payload, "memoryPrecisionEvidence");
+            missingSources.AddRange(MissingPrecisionEvidence(rendered, memoryEvidence));
+            if (!PrecisionEvidenceGenerationCurrent(memoryEvidence)) missingSources.Add("memory_generation_changed");
             string mode = ReadString(envelope.Diagnostics, "requestType", ReadString(payload, "mode", "dialogue"));
-            string model = ModelForRequest(settings, mode);
-            string provider = ReadString(settings, "llmProvider", "");
-            var limits = ReadDictionary(settings, "verifiedConversationContextWindows");
-            int capacity = 0; // Actual endpoint/model/route verification occurs after all adapters serialize the request.
-            int outputReserve = ReadInt(payload, "continuityOutputReserve", StructuredDialogueResponseMaxTokens(settings));
-            int allowance = 64000;
-            int selected = estimated <= 32000 ? 32000 : estimated <= 48000 ? 48000 : (int)Math.Ceiling(estimated / 8000d) * 8000;
-            bool fits = estimated <= allowance && missingSources.Count == 0;
-            envelope.Diagnostics["continuityPreflight"] = new Dictionary<string, object>
+            capacityPolicy = capacityPolicy ?? ResolveConversationPromptCapacity(payload, mode);
+            int allowance = ReadInt(capacityPolicy, "inputAllowance", ConversationUnverifiedInputLimit);
+            int selected = SelectConversationInputStep(estimated);
+            bool fits = estimated <= allowance && ReadBool(capacityPolicy, "outputFits", false) && missingSources.Count == 0;
+            envelope.Diagnostics["continuityPreflight"] = new Dictionary<string, object>(capacityPolicy)
             {
                 ["schema"] = "reign-continuity-preflight-v1", ["finalSerializedMessageHash"] = PromptHash(Json.Serialize(envelope.Messages)),
                 ["inputTokenEstimate"] = estimated, ["estimator"] = "ascii_characters_divided_by_three_plus_non_ascii_utf8_bytes_and_overhead",
                 ["inputTokenByteUpperBound"] = bytes + envelope.Messages.Count * 12,
-                ["verifiedContextTokens"] = capacity, ["capacityVerified"] = capacity > 0,
-                ["selectedInputAllowance"] = Math.Min(selected, allowance), ["outputReserve"] = outputReserve,
+                ["selectedInputAllowance"] = Math.Min(selected, allowance),
                 ["fits"] = fits, ["provisionalUntilProviderSerialization"] = true,
                 ["continuityEvidence"] = ReadDictionary(payload, "continuityEvidence"),
+                ["memoryPrecisionEvidence"] = memoryEvidence,
+                ["tokenAccounting"] = new Dictionary<string, object> {
+                    ["fixedRules"] = EstimateContinuityTokens(ReadString(envelope.Messages.FirstOrDefault(), "content", "")),
+                    ["characterProfile"] = EstimateContinuityTokens(ReadString(envelope.Messages.Skip(1).FirstOrDefault(m => ReadString(m, "role", "") == "system"), "content", "")),
+                    ["dynamicMemory"] = ReadInt(memoryEvidence, "dynamicMemoryTokenEstimate", 0),
+                    ["totalSerializedInput"] = estimated,
+                    ["helperInput"] = ReadInt(memoryEvidence, "helperInputTokenEstimate", 0) },
                 ["requiredSourceIds"] = expectedSources, ["missingSourceIds"] = missingSources,
                 ["requiredSourceCoverageComplete"] = missingSources.Count == 0
             };
@@ -718,38 +723,33 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
         }
 
         private static Dictionary<string, object> BuildContinuityProviderPreflight(Dictionary<string, object> settings,
-            Dictionary<string, object> payload, Dictionary<string, object> body, string endpoint, string model)
+            Dictionary<string, object> payload, Dictionary<string, object> body, string endpoint, string model,
+            ConversationCapacityCatalog catalog = null)
         {
-            var routing = new Dictionary<string, object>();
-            foreach (string key in new[] { "provider", "routing", "stickyprovider" })
-                if (body.ContainsKey(key)) routing[key] = body[key];
-            string routeKey = NormalizeLlmProvider(ReadString(settings, "llmProvider", "")) + ":" + model + ":"
-                + PromptHash(endpoint + "|" + CanonicalJson(routing)).Substring(0, 20);
-            var certificate = ReadDictionary(ReadDictionary(settings, "verifiedConversationContextWindows"), routeKey);
-            bool verified = certificate != null && ReadString(certificate, "endpoint", "") == endpoint
-                && ReadString(certificate, "model", "") == model && !string.IsNullOrWhiteSpace(ReadString(certificate, "source", ""))
-                && DateTimeOffset.TryParse(ReadString(certificate, "validUntilUtc", ""), out var expiry) && expiry > DateTimeOffset.UtcNow;
-            int capacity = verified ? ReadInt(certificate, "contextTokens", 0) : 0;
-            verified = verified && capacity > 0;
+            var policy = ResolveConversationCapacity(settings, body, endpoint, model, catalog);
+            bool verified = ReadBool(policy, "capacityVerified", false);
+            int capacity = ReadInt(policy, "verifiedContextTokens", 0);
             string serialized = Json.Serialize(body);
             var expectedSources = ReadStringList(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "requiredSourceIds");
             var missingSources = expectedSources.Where(id => !serialized.Contains(id, StringComparison.Ordinal)).ToList();
+            missingSources.AddRange(MissingPrecisionEvidence(serialized,
+                ReadDictionary(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "memoryPrecisionEvidence"), true));
+            if (!PrecisionEvidenceGenerationCurrent(ReadDictionary(ReadDictionary(ReadDictionary(payload,"promptEnvelope"),"continuityPreflight"),"memoryPrecisionEvidence")))
+                missingSources.Add("memory_generation_changed");
             int estimate = EstimateContinuityTokens(serialized);
-            int output = ReadInt(body, "max_tokens", ReadInt(payload, "maxTokens", 8000));
-            int safety = 1024;
-            int allowance = verified ? Math.Min(64000, Math.Max(0, capacity - output - safety)) : 48000;
+            int output = ReadInt(policy, "outputReserve", 0);
+            int safety = ReadInt(policy, "safetyReserve", ConversationCapacitySafetyReserve);
+            int allowance = ReadInt(policy, "inputAllowance", ConversationUnverifiedInputLimit);
             // A byte ceiling is used for the physical capacity when no certified
             // tokenizer is available. The estimate only chooses our working budget.
             int byteBound = Encoding.UTF8.GetByteCount(serialized) + 128;
-            bool capacityFits = !verified || byteBound + output + safety <= capacity;
-            return new Dictionary<string, object> {
-                ["schema"] = "reign-continuity-provider-preflight-v1", ["routeKey"] = routeKey,
+            bool capacityFits = !verified || (long)byteBound + output + safety <= capacity;
+            return new Dictionary<string, object>(policy) {
+                ["schema"] = "reign-continuity-provider-preflight-v1",
                 ["finalSerializedRequestHash"] = PromptHash(serialized), ["requestCharacters"] = serialized.Length,
                 ["inputTokenEstimate"] = estimate, ["inputTokenByteUpperBound"] = byteBound,
-                ["capacityVerified"] = verified, ["verifiedContextTokens"] = capacity,
-                ["inputAllowance"] = allowance, ["selectedInputAllowance"] = Math.Min(allowance, estimate <= 32000 ? 32000 : estimate <= 48000 ? 48000 : (int)Math.Ceiling(estimate / 8000d) * 8000),
-                ["outputReserve"] = output, ["safetyReserve"] = safety,
-                ["fits"] = estimate <= allowance && capacityFits && missingSources.Count == 0,
+                ["selectedInputAllowance"] = Math.Min(allowance, SelectConversationInputStep(estimate)),
+                ["fits"] = estimate <= allowance && capacityFits && ReadBool(policy, "outputFits", false) && missingSources.Count == 0,
                 ["missingSourceIds"] = missingSources, ["requiredSourceCoverageComplete"] = missingSources.Count == 0,
                 ["estimator"] = "ascii_divided_by_three_plus_unicode_utf8_bytes_plus_128; not an exact tokenizer",
                 ["requiredSources"] = ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight")

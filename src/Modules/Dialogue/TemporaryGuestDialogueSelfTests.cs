@@ -233,7 +233,13 @@ namespace ReignBetaServer
             var unresolved = RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(original)), requestStub,
                 payload, PromptParityIdentity(), lines, campaign, "guest-unresolved", "dialogue", heroId, "Fixture Speaker", "Traveler", "",
                 request => TestDict("ok", true, "content", Json.Serialize(original)));
-            check("unresolved_mechanical_contradiction_cannot_persist", !ReadBool(unresolved, "ok", true), unresolved);
+            var unresolvedVisible = TryParseJsonObject(ReadString(unresolved, "content", ""));
+            check("unresolved_mechanical_contradiction_marked_without_departure", ReadBool(unresolved, "ok", false)
+                && ReadBool(unresolved, "visibleRepairFailure", false)
+                && ReadString(unresolvedVisible, "reply", "").EndsWith(".,", StringComparison.Ordinal)
+                && !ActionGateShouldPlan(ReadDictionary(unresolvedVisible, "actionGate"))
+                && ReadDictionaryList(unresolvedVisible, "continuityWrites").Count == 0
+                && !ReadBool(ReadDictionary(unresolvedVisible, "conversationAgencyReceipt"), "ok", true), unresolved);
             // The existing Lab owns this unique fixture campaign and isolated storage lifecycle.
             return results;
         }

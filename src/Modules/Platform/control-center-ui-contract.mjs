@@ -10,12 +10,12 @@ const { chromium } = require(process.env.REIGN_PLAYWRIGHT_MODULE || 'playwright'
 const [fixtureDirectory, outputDirectory] = process.argv.slice(2);
 if (!fixtureDirectory || !outputDirectory) throw new Error('Provide the Lab fixture directory and evidence output directory.');
 const html = await fs.readFile(path.join(fixtureDirectory, 'control-center.html'), 'utf8');
-const palette = JSON.parse(await fs.readFile(new URL('../../../../ReignBeta/artwork/ui-modern-style-kit/palette.json', import.meta.url), 'utf8')).tokens;
+const palette = JSON.parse(await fs.readFile(path.resolve(process.env.REIGN_WORKSPACE || process.cwd(), 'ReignBeta/artwork/ui-modern-style-kit/palette.json'), 'utf8')).tokens;
 const sourceHash = crypto.createHash('sha256').update(html).digest('hex');
-const main = ['general','campaigns','llm','models','router','images','characters','memory','prompting','castlechat','diagnostic-tools'];
-const diagnostics = ['diagnostics','logging','logs','audit','dialogueaudit','history','npclab','directorlab','worldtest','testlab','livebridge','verification'];
+const main = ['general','options','campaigns','llm','models','router','images','characters','memory','prompting','castlechat','diagnostic-tools'];
+const diagnostics = ['diagnostics','conversationdiagnostics','logging','logs','audit','dialogueaudit','history','npclab','directorlab','worldtest','testlab','livebridge','verification'];
 const loaders = {
-  general: [], models: [], router: [], logging: [],
+  general: [], options: [], models: [], router: [], logging: [], conversationdiagnostics: ['loadConversationDiagnostics'],
   prompting: ['loadPrompts'], castlechat: ['loadCastleChatPrompts'], campaigns: ['loadCampaignManager'],
   images: ['loadPrompts','loadPortraitDerivativeStatus','loadSharedPortraitCatalog','loadSharedPortraitGenerationStatus'],
   memory: ['loadEmbeddingStatus'], llm: ['loadPromptCacheStatus'], logs: ['loadCampaigns','loadLogs'],

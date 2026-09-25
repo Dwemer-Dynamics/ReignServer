@@ -16,6 +16,7 @@ namespace ReignBetaServer
 
         private sealed class CodexRpcWaiter
         {
+            public ConversationDiagnosticStep Diagnostic;
             public readonly ManualResetEventSlim Completed = new ManualResetEventSlim(false);
             public Dictionary<string, object> Result;
             public string Error = "";
@@ -687,17 +688,30 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CodexRpc(string method, Dictionary<string, object> parameters, int timeoutMs)
         {
+            using var diagnosticRpc = BeginDiagnosticCodexRpc(method, parameters);
             Func<string, Dictionary<string, object>, int, Dictionary<string, object>> transport = CodexRpcTransportOverride;
-            if (transport != null) return transport(method, parameters ?? new Dictionary<string, object>(), timeoutMs) ?? new Dictionary<string, object>();
+            if (transport != null)
+            {
+                var injectedResult = transport(method, parameters ?? new Dictionary<string, object>(), timeoutMs) ?? new Dictionary<string, object>();
+                if (diagnosticRpc?.CompletionDeferred != true) diagnosticRpc?.End("acknowledged", "Injected provider transport returned.", injectedResult);
+                return injectedResult;
+            }
             long id = Interlocked.Increment(ref CodexNextRequestId);
             CodexRpcWaiter waiter = new CodexRpcWaiter();
+            waiter.Diagnostic = diagnosticRpc;
             lock (CodexStateLock) CodexPending[id] = waiter;
             try
             {
                 WriteCodexMessage(new Dictionary<string, object> { ["id"] = id, ["method"] = method, ["params"] = parameters ?? new Dictionary<string, object>() });
                 if (!waiter.Completed.Wait(timeoutMs)) throw new TimeoutException("Codex app-server request '" + method + "' timed out after " + timeoutMs + " ms.");
                 if (!string.IsNullOrWhiteSpace(waiter.Error)) throw new CodexRpcException(method, waiter.ErrorCode, waiter.Error);
+                if (diagnosticRpc?.CompletionDeferred != true) diagnosticRpc?.End("acknowledged", "Provider acknowledged this protocol request.", waiter.Result);
                 return waiter.Result ?? new Dictionary<string, object>();
+            }
+            catch (Exception ex)
+            {
+                diagnosticRpc?.End("failed", ex.Message, new Dictionary<string, object> { ["error"] = ex.Message });
+                throw;
             }
             finally
             {
@@ -714,6 +728,9 @@ namespace ReignBetaServer
         {
             string frame = SerializeCodexTransportFrame(message);
             string method = ReadString(message, "method", "response");
+            if (method.StartsWith("turn/", StringComparison.Ordinal) || method.StartsWith("thread/", StringComparison.Ordinal))
+                DiagnosticTrace.Value?.Record("provider_request", "Original provider protocol request", "prepared",
+                    "Exact protocol frame before transmission.", 0, frame, DiagnosticStep.Value?.Id ?? "");
             lock (CodexWriteLock)
             {
                 StreamWriter input;
@@ -768,6 +785,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> message;
                     try { message = Json.Deserialize<Dictionary<string, object>>(line); }
                     catch { continue; }
+                    ObserveDiagnosticCodexFrame(line, message);
                     HandleCodexMessage(message);
                 }
             }
@@ -974,6 +992,8 @@ namespace ReignBetaServer
         private static void EndCodexTurnAttempt(string threadId)
         {
             if (string.IsNullOrWhiteSpace(threadId)) return;
+            if (DiagnosticCodexThreads.TryRemove(threadId, out var diagnosticAttempt))
+                diagnosticAttempt.End("interrupted", "Provider turn ended without a captured completion event. Inspect the model-call outcome.");
             lock (CodexStateLock) CodexPendingTurnThreads.Remove(threadId);
         }
 

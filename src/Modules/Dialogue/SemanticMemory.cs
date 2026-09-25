@@ -14,7 +14,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string SemanticModelVersion = "bge-small-en-v1.5-384-v1";
+        private const string SemanticModelVersion = "bge-small-en-v1.5-384-precision-v2";
         private const string SemanticCollection = "reign_memory_bge_small_en_v1_5_v1";
         private const string WorldHistoryEmbeddingFilterVersion = "2";
         private const string ConversationEmbeddingPolicyVersion = "2";
@@ -793,13 +793,23 @@ LIMIT $limit;",
                         continue;
                     }
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, sourceType, sourceId, row, text, settings);
+                    document.Payload["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                    document.ContentHash = SemanticSha256Hex(document.Text + CanonicalJson(document.Payload));
                     Dictionary<string, object> indexed = QuerySql(connection, @"SELECT content_hash,status FROM embedding_documents
 WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=$provider LIMIT 1;",
                         new Dictionary<string, object> { ["type"] = sourceType, ["id"] = sourceId, ["model"] = SemanticModelVersion, ["provider"] = document.Provider }).FirstOrDefault();
                     if (indexed != null && string.Equals(ReadString(indexed, "content_hash", ""), document.ContentHash, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(ReadString(indexed, "status", ""), "indexed", StringComparison.OrdinalIgnoreCase))
                     {
-                        CompleteEmbeddingJob(connection, sourceType, sourceId, "completed", "unchanged");
+                        using (var unchanged = connection.BeginTransaction())
+                        {
+                            AcquirePostgreSqlTransactionMutationLock(connection);
+                            var latest = LoadEmbeddingSourceRow(connection,sourceType,sourceId);
+                            if (latest != null && MemorySourceHash(new[] { latest }) == ReadString(document.Payload,"sourceHash","")
+                                && ReadString(document.Payload,"restoreGeneration","") == ReadString(ReadMemoryPrecisionState(connection),"restore_generation",""))
+                                CompleteEmbeddingJob(connection, sourceType, sourceId, "completed", "unchanged");
+                            unchanged.Commit();
+                        }
                         completedJobs++;
                         continue;
                     }
@@ -841,8 +851,19 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                             throw new InvalidOperationException(
                                 ReadString(response, "error", "Vector upsert failed."));
                         using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                        using (var publication = connection.BeginTransaction())
+                        {
+                            AcquirePostgreSqlTransactionMutationLock(connection);
                             foreach (EmbeddingSourceDocument document in chunk)
+                            {
+                                var current = LoadEmbeddingSourceRow(connection, document.SourceType, document.SourceId);
+                                if (current == null || MemorySourceHash(new[] { current }) != ReadString(document.Payload, "sourceHash", "")
+                                    || ReadString(document.Payload, "restoreGeneration", "") != ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""))
+                                    continue; // Outbox remains pending; a stale vector cannot pass source revalidation.
                                 MarkEmbeddingIndexed(connection, document, settings);
+                            }
+                            publication.Commit();
+                        }
                         completedJobs += chunk.Count;
                     }
                 }
@@ -863,15 +884,20 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                         PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000);
                     }
                     using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (var deletion = connection.BeginTransaction())
                     {
+                        AcquirePostgreSqlTransactionMutationLock(connection);
                         foreach (Dictionary<string, object> job in deletes)
                         {
                             string type = ReadString(job, "source_type", ""), id = ReadString(job, "source_id", "");
+                            var latest = LoadEmbeddingSourceRow(connection,type,id);
+                            if (latest != null && EmbeddingRowActive(type,latest)) continue;
                             ExecuteSql(connection, "UPDATE embedding_documents SET status='deleted',updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
                                 new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = type, ["id"] = id });
                             CompleteEmbeddingJob(connection, type, id, "deleted", "");
                             completedJobs++;
                         }
+                        deletion.Commit();
                     }
                 }
                 SemanticWorkerLastHealthyUtc = DateTime.UtcNow;
@@ -936,22 +962,35 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
             parts.Add(ReadString(row, "tags_json", ""));
             parts.Add(ReadString(row, "about_entities_json", ""));
             parts.Add(ReadString(row, "participants_json", ""));
-            return LimitText(string.Join(" ", parts.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray()), 4000);
+            return string.Join(" ", parts.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray());
         }
 
         private static EmbeddingSourceDocument BuildEmbeddingDocument(string campaignId, string sourceType, string sourceId,
             Dictionary<string, object> row, string text, Dictionary<string, object> settings)
         {
             string provider = ReadString(settings, "vectorProvider", "local").ToLowerInvariant();
+            var sourcePayload = KnowledgePayload(row);
+            string timeline = FirstNonEmpty(ReadString(row, "timeline_id", ""), ReadString(sourcePayload, "timelineId", ""));
+            bool mental = sourceType == "belief" || sourceType == "comprehension";
+            var knownBy = TextListFromJson(ReadString(row, "known_by_json", "[]"));
+            if (!mental) knownBy = knownBy.Concat(TextListFromJson(ReadString(row, "participants_json", "[]")))
+                .Concat(TextListFromJson(ReadString(row, "witnesses_json", "[]")))
+                .Concat(TextListFromJson(ReadString(row, "heard_as_rumor_by_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             string vectorId = DeterministicSemanticGuid(campaignId + "|" + ReadString(row, "timeline_id", "") + "|" + sourceType + "|" + sourceId + "|" + SemanticModelVersion);
             Dictionary<string, object> payload = new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
-                ["timelineId"] = ReadString(row, "timeline_id", ""),
+                ["timelineId"] = timeline,
                 ["sourceType"] = sourceType,
                 ["sourceId"] = sourceId,
                 ["memoryLane"] = FirstNonEmpty(ReadFirstString(row, "memory_lane", "memory_domain"), InferEmbeddingLane(sourceType, row)),
                 ["ownerId"] = ReadFirstString(row, "owner_id", "believer_id"),
+                ["knownBy"] = mental ? new List<string>() : knownBy,
+                ["hiddenFrom"] = TextListFromJson(ReadString(row, "hidden_from_json", "[]")),
+                ["privateMental"] = mental, ["eligibilityVersion"] = 2,
+                ["publicUnscoped"] = !mental && !KnowledgeHasExplicitScope(row, sourcePayload)
+                    && new[] { "public", "world", "global", "common" }.Contains(ReadString(row, "visibility", "private")),
+                ["sourceHash"] = MemorySourceHash(new[] { row }),
                 ["visibility"] = ReadString(row, "visibility", "private"),
                 ["status"] = "active",
                 ["worldDay"] = ReadDouble(row, "world_day", 0d),
@@ -961,8 +1000,8 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
             return new EmbeddingSourceDocument
             {
                 CampaignId = campaignId, SourceType = sourceType, SourceId = sourceId, Provider = provider,
-                TimelineId = ReadString(row, "timeline_id", ""), VectorId = vectorId, Text = text,
-                ContentHash = SemanticSha256Hex(text), Payload = payload
+                TimelineId = timeline, VectorId = vectorId, Text = text,
+                ContentHash = SemanticSha256Hex(text + CanonicalJson(payload)), Payload = payload
             };
         }
 
@@ -1043,7 +1082,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
         }
 
         private static Dictionary<string, object> TrySemanticMemorySearch(string campaignId, string query,
-            Dictionary<string, object> retrievalRoute, Dictionary<string, object> settings, IEnumerable<string> sourceTypes = null, string timelineId = "")
+            Dictionary<string, object> retrievalRoute, Dictionary<string, object> settings, IEnumerable<string> sourceTypes = null, string timelineId = "", string observerId = "", double asOfWorldDay = double.MaxValue)
         {
             Dictionary<string, object> status = new Dictionary<string, object>
             {
@@ -1084,12 +1123,26 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 if (types.Contains("world_history_event", StringComparer.OrdinalIgnoreCase)
                     && !selectedLanes.Contains("world_affairs", StringComparer.OrdinalIgnoreCase))
                     selectedLanes.Add("world_affairs");
-                if (selectedLanes.Count > 0) filters["memoryLane"] = selectedLanes;
+                // Lanes are ranking hints, never hard exclusions for a precise
+                // question whose answer happens to have another category.
+                if (string.IsNullOrWhiteSpace(observerId) && selectedLanes.Count > 0) filters["memoryLane"] = selectedLanes;
                 if (!string.IsNullOrWhiteSpace(timelineId)) filters["timelineId"] = timelineId;
+                if (!string.IsNullOrWhiteSpace(observerId))
+                {
+                    filters["observerId"] = observerId;
+                    if (asOfWorldDay < double.MaxValue) filters["asOfWorldDay"] = asOfWorldDay;
+                    using (var connection = OpenCampaignConnection(campaignId))
+                        filters["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                }
                 request["filters"] = filters;
                 Dictionary<string, object> response = TryParseJsonObject(PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/search"), Json.Serialize(request),
                     Math.Max(8000, Math.Min(30000, ReadInt(settings, "vectorQueryTimeoutMs", 10000))))) ?? new Dictionary<string, object>();
                 if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Semantic search failed."));
+                if (!string.IsNullOrWhiteSpace(observerId) && !ReadBool(response, "eligibilityApplied", false))
+                {
+                    status["reason"] = "observer_filter_unavailable_sql_fallback";
+                    return status;
+                }
                 List<Dictionary<string, object>> results = ReadDictionaryList(response, "results").Take(Math.Max(1, ReadInt(settings, "vectorSearchTopK", 96))).ToList();
                 timer.Stop();
                 SemanticLastQueryMs = timer.ElapsedMilliseconds;
@@ -1144,6 +1197,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 Dictionary<string, object> row = QuerySql(connection, "SELECT * FROM " + table + " WHERE " + idColumn + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
                 if (row == null || !EmbeddingRowActive(sourceType, row) || !KnowledgeRowVisibleToNpc(table, row, knowledge)) continue;
+                if (ReadString(payload, "sourceHash", "") != MemorySourceHash(new[] { row })) continue;
                 row["vectorSemanticScore"] = ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
                 rows.Add(row);
             }

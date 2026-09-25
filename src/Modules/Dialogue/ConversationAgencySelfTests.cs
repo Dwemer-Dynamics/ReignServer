@@ -201,12 +201,38 @@ namespace ReignBetaServer
             var llm = TestDict("ok", true, "content", Json.Serialize(unsafeReply));
             var enforced = EnforceConversationAgencyResponse(llm, TestDict("requestType", "dialogue"), TestDict("conversationAgency", context), TestDict(), campaign,
                 "invalid_repair", "dialogue", "npc", request => { calls++; return TestDict("ok", true, "content", Json.Serialize(unsafeReply)); }, false);
-            add("one_failed_repair_never_commits_or_executes", calls == 1 && !ReadBool(enforced, "ok", true), enforced);
+            var failedVisible = TryParseJsonObject(ReadString(enforced, "content", ""));
+            add("one_failed_repair_returns_marked_dialogue_without_effects", calls == 1 && ReadBool(enforced, "ok", false)
+                && ReadString(failedVisible, "reply", "").EndsWith(".,", StringComparison.Ordinal)
+                && ReadDictionaryList(failedVisible, "proposalDecisions").Count == 0
+                && ReadDictionaryList(failedVisible, "relationshipAssessments").Count == 0
+                && !ActionGateShouldPlan(ReadDictionary(failedVisible, "actionGate"))
+                && !ReadBool(ReadDictionary(failedVisible, "conversationAgencyReceipt"), "ok", true), enforced);
+            add("failed_repair_marker_survives_display_sanitizer",
+                SanitizeVisibleReply(ReadString(failedVisible, "reply", "")).EndsWith(".,", StringComparison.Ordinal), null);
+            var failedAuthorityErrors = new List<string>();
+            add("failed_visible_reply_cannot_authorize_voluntary_action",
+                !BindConversationAgencyAuthority(TestDict("conversationAgencyReceipt", ReadDictionary(failedVisible, "conversationAgencyReceipt")),
+                    "accept_temporary_party_guest", TestDict(), TestDict(), failedAuthorityErrors), failedAuthorityErrors);
             calls = 0;
             enforced = EnforceConversationAgencyResponse(TestDict("ok", true, "content", Json.Serialize(unsafeReply)), TestDict("requestType", "dialogue"),
                 TestDict("conversationAgency", context), TestDict(), campaign, "valid_repair", "dialogue", "npc",
                 request => { calls++; return TestDict("ok", true, "content", Json.Serialize(AgencyTestReply(AgencyTestProposal(context)))); }, false);
             add("valid_repair_preserves_firm_refusal", calls == 1 && ReadBool(enforced, "ok", false), enforced);
+            var incompleteRepair = AgencyTestReply(null);
+            incompleteRepair.Remove("relationshipAssessments");
+            var missingProposal = AgencyTestReply(null);
+            missingProposal.Remove("proposalDecisions");
+            calls = 0;
+            enforced = EnforceConversationAgencyResponse(TestDict("ok", true, "content", Json.Serialize(missingProposal)),
+                TestDict("requestType", "social_event"), TestDict("conversationAgency", context), TestDict(), campaign,
+                "incomplete_agency_repair", "party_chat", "npc",
+                request => { calls++; return TestDict("ok", true, "content", Json.Serialize(incompleteRepair)); }, false);
+            var completedRepair = TryParseJsonObject(ReadString(enforced, "content", ""));
+            add("agency_repair_completes_missing_private_metadata", calls == 1 && ReadBool(enforced, "ok", false)
+                && ReadBool(ReadDictionary(enforced, "conversationAgency"), "accepted", false)
+                && ReadDictionaryList(completedRepair, "relationshipAssessments").Count == 0
+                && ReadString(completedRepair, "reply", "").EndsWith("..", StringComparison.Ordinal), enforced);
             var pressureReceipt = TestDict("receiptId", "once", "updates", new List<Dictionary<string, object>> { TestDict("penalize", true, "pressure", 2, "playerQuote", "Please again.") });
             var assessmentPayload = TestDict("conversationAgencyReceipt", pressureReceipt, "playerText", "Please again.");
             var assessments = new List<Dictionary<string, object>> { TestDict("targetHeroStringId", "player", "valence", "positive"), TestDict("targetHeroStringId", "bystander", "valence", "positive") };
@@ -243,7 +269,10 @@ namespace ReignBetaServer
                 TestDict("conversationAgency", context), TestDict(), campaign, "conflicting_repair", "dialogue", "npc",
                 request => { calls++; return TestDict("ok", true, "content", Json.Serialize(AgencyTestReply(AgencyTestProposal(context)))); }, false,
                 candidate => false);
-            add("agency_repair_must_pass_other_response_guards", calls == 1 && !ReadBool(enforced, "ok", true), null);
+            var guardedVisible = TryParseJsonObject(ReadString(enforced, "content", ""));
+            add("agency_repair_failed_guard_does_not_authorize_effects", calls == 1 && ReadBool(enforced, "ok", false)
+                && ReadString(guardedVisible, "reply", "").EndsWith(".,", StringComparison.Ordinal)
+                && !ReadBool(ReadDictionary(guardedVisible, "conversationAgencyReceipt"), "ok", true), null);
 
             var warningPayload = TestDict("conversationAgencyReceipt", TestDict("updates", new List<Dictionary<string, object>> { TestDict("pressure", 1) }));
             var warningAssessments = new List<Dictionary<string, object>>();

@@ -116,6 +116,7 @@ namespace ReignBetaServer
             bool usable = ReadBool(repaired, "ok", false) && repairedParsed != null
                 && StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode);
             bool cleared = usable && remaining.Count == 0;
+            bool markedFailure = false;
             if (usable)
             {
                 MarkRepairedVisibleResponse(repairedParsed, cleared);
@@ -123,14 +124,22 @@ namespace ReignBetaServer
             }
             else
             {
-                repaired["ok"] = false;
-                repaired["errorCode"] = "dialogue_integrity_repair_unusable";
-                repaired["error"] = "The integrity repair did not return usable structured dialogue; no canned fallback was substituted.";
+                markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode);
+                if (!markedFailure)
+                {
+                    repaired["ok"] = false;
+                    repaired["errorCode"] = "dialogue_integrity_repair_unusable";
+                    repaired["error"] = "The integrity repair returned no usable visible reply.";
+                }
             }
             WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_integrity_repair",
-                heroId, "", eventId, usable ? (cleared ? "completed" : "completed_with_revalidation_override") : "failed",
-                ReadLong(repaired, "durationMs", 0), usable ? "Dialogue agency and role identity were repaired from the original response." : "Dialogue integrity repair failed without a fallback.",
-                new Dictionary<string, object> { ["detected"] = violations, ["remaining"] = remaining, ["accepted"] = usable, ["revalidationCleared"] = cleared, ["deterministicFallback"] = false });
+                heroId, "", eventId, usable ? (cleared ? "completed" : "completed_with_revalidation_override")
+                    : markedFailure ? "completed_with_revalidation_override" : "failed",
+                ReadLong(repaired, "durationMs", 0), usable ? "Dialogue agency and role identity were repaired from the original response."
+                    : markedFailure ? "The integrity repair remained rejected; marked dialogue was returned without structured effects."
+                    : "Dialogue integrity repair returned no usable visible reply.",
+                new Dictionary<string, object> { ["detected"] = violations, ["remaining"] = remaining, ["accepted"] = usable,
+                    ["revalidationCleared"] = cleared, ["markedVisibleFailure"] = markedFailure, ["deterministicFallback"] = false });
             return repaired;
         }
 

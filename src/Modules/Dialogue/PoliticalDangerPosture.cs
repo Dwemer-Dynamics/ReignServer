@@ -609,6 +609,7 @@ namespace ReignBetaServer
             string finalReply;
             string outcome;
             Dictionary<string, object> finalObserved;
+            bool markedFailure = false;
             if (usableRepair)
             {
                 finalReply = MarkRepairedVisibleText(
@@ -618,12 +619,18 @@ namespace ReignBetaServer
             }
             else
             {
-                finalReply = originalReply;
-                outcome = "repair_failed";
+                markedFailure = TryReturnMarkedVisibleFailure(llm, repairedJson, parsed, originalRequest, auditMode);
+                finalReply = markedFailure
+                    ? ReadFirstString(TryParseJsonObject(ReadString(llm, "content", "")), "reply", "response", "text", "content")
+                    : originalReply;
+                outcome = markedFailure ? "repair_failed_visible" : "repair_failed";
                 finalObserved = observed;
-                llm["ok"] = false;
-                llm["errorCode"] = "political_conduct_repair_unusable";
-                llm["error"] = "The political-conduct repair did not return a usable reply; no deterministic dialogue fallback was substituted.";
+                if (!markedFailure)
+                {
+                    llm["ok"] = false;
+                    llm["errorCode"] = "political_conduct_repair_unusable";
+                    llm["error"] = "The political-conduct repair returned no usable visible reply.";
+                }
             }
             if (usableRepair)
             {
@@ -637,10 +644,10 @@ namespace ReignBetaServer
             evidence["repairAttempted"] = true;
             evidence["repairAccepted"] = usableRepair;
             evidence["revalidationCleared"] = revalidationCleared;
-            evidence["secondAttemptReturned"] = usableRepair;
+            evidence["secondAttemptReturned"] = usableRepair || markedFailure;
             evidence["visibleRepairMarker"] = usableRepair
                 ? (revalidationCleared ? ".." : ".,")
-                : "";
+                : markedFailure ? ".," : "";
             evidence["repairRemainingViolations"] =
                 ReadStringList(repairedObserved, "violations");
             evidence["repairDurationMs"] = ReadLong(
@@ -651,15 +658,15 @@ namespace ReignBetaServer
             if (writeRepairAudit)
                 WriteAudit(campaignId, correlationId, "server", auditMode,
                     "llm.political_conduct_repair", heroId, "", eventId,
-                    !usableRepair ? "failed"
+                    !usableRepair && !markedFailure ? "failed"
                         : revalidationCleared ? "completed"
                         : "completed_with_revalidation_override",
                     ReadLong(repairedLlm, "durationMs", 0),
-                    !usableRepair
-                        ? "The political-conduct repair did not return a usable reply; no fallback response was written."
+                    !usableRepair && !markedFailure
+                        ? "The political-conduct repair returned no usable visible reply."
                         : revalidationCleared
                             ? "The compact political-conduct repair preserved the position while correcting address, tact, and defiance."
-                            : "The second political-conduct repair remained validator-rejected but was returned without a canned fallback.",
+                            : "The political-conduct repair remained validator-rejected; marked dialogue was returned without structured effects.",
                     evidence);
             return llm;
         }
