@@ -236,7 +236,8 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
                 "speakerHeroStringId", "heroStringId", "heroId", "speakerName", "speakerClanId",
                 "speakerKingdomId", "npcClanId", "npcKingdomId", "npcSettlementId", "npcPartyId",
                 "phaseId", "phaseIndex", "memoryGroupKey", "playerPromptLabel", "approachOpening",
-                "actualPlayerTurn", "courtLifePhase", "conversationMode"
+                "playerAttentionPresence", "approachRequestId", "authoritativeApproachBrief", "authoritativeApproachOpening", "authoritativeApproachKind", "rescueContext", "rescueOpening",
+                "actualPlayerTurn", "courtLifePhase", "conversationMode", "routeInputHash", "inputSourceId", "contributionId", "playerNarrationProjectionVersion"
             };
             foreach (string key in scalarKeys)
             {
@@ -285,6 +286,18 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
                 .ToList();
             if (socialSignals.Count > 0)
                 compact["socialSignals"] = socialSignals;
+
+            // Names only bind an explicit whisper recipient on later exact reads;
+            // full character profiles and private persona fields are not copied.
+            var attendees = ReadDictionaryList(source, "attendees").Take(16)
+                .Where(p => !string.IsNullOrWhiteSpace(CharacterIdFrom(p)))
+                .Select(p => TestDict("heroStringId", LimitText(CharacterIdFrom(p), 160),
+                    "name", LimitText(ReadString(p, "name", ""), 160))).ToList();
+            if (attendees.Count > 0) compact["attendees"] = attendees;
+            if (ReadDictionary(source, "conversationGrounding") is { } grounding)
+                compact["conversationGrounding"] = TestDict("schema", "reign-conversation-grounding-v1",
+                    "status", ReadString(grounding, "status", "unresolved"), "replyHash", ReadString(grounding, "replyHash", ""),
+                    "originalSourceId", ReadString(grounding, "originalSourceId", ""));
 
             Dictionary<string, object> identityView = ReadDictionary(source, "identityView");
             if (identityView != null)
@@ -346,11 +359,16 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             {
                 ["storageSchema"] = "conversation_turn_payload_v2",
                 ["payloadGuardTriggered"] = true,
+                ["timelineId"] = ReadString(compact, "timelineId", ""),
+                ["worldDay"] = ReadDouble(compact, "worldDay", 0d),
+                ["routeInputHash"] = ReadString(compact, "routeInputHash", ""),
                 ["correlationId"] = ReadString(compact, "correlationId", ""),
                 ["conversationSessionId"] = ReadFirstString(compact, "conversationSessionId", "sessionId", "conversationId"),
                 ["exchangeId"] = ReadString(compact, "exchangeId", ""),
                 ["turnId"] = ReadString(compact, "turnId", "")
             };
+            foreach (string key in new[] { "inputSourceId", "contributionId", "conversationGrounding", "playerNarrationProjectionVersion" })
+                if (compact.ContainsKey(key)) fallback[key] = compact[key];
             LogOperational("storage.conversation_turn_payload_guard", new Dictionary<string, object>
             {
                 ["characters"] = json.Length, ["hardLimitCharacters"] = hardLimitCharacters,
@@ -506,12 +524,22 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
             ExecuteSql(connection, "DELETE FROM conversation_turn_fts;");
             foreach (Dictionary<string, object> row in QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='active';"))
             {
-                InsertConversationTurnFts(connection, ReadString(row, "turn_id", ""), ReadString(row, "text", ""),
+                if (string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(row))) continue;
+                InsertConversationTurnFts(connection, ReadString(row, "turn_id", ""), ConversationTurnTextForRecall(row),
                     ReadString(row, "speaker_name", ""), ReadString(row, "participants_json", "[]"), ReadString(row, "channel", "in_person"));
             }
         }
 
         private static Dictionary<string, object> ConversationStartApi(Dictionary<string, object> payload)
+        {
+            // Serialize session-start retries before closing interrupted sessions.
+            // A retry must never replace or close the session it just created.
+            lock (ConversationStartGate) return ConversationStartCore(payload);
+        }
+
+        private static readonly object ConversationStartGate = new object();
+
+        private static Dictionary<string, object> ConversationStartCore(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -522,6 +550,12 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "npcId or heroStringId is required." };
             }
 
+            string id = FirstNonEmpty(ReadFirstString(payload, "sessionId", "conversationSessionId"), "conversation_" + Guid.NewGuid().ToString("N"));
+            using (var connection = OpenCampaignConnection(campaignId))
+            {
+                var logical = PrepareLogicalConversation(connection, payload, campaignId, npcId, playerId, id);
+                if (!ReadBool(logical, "ok", false) || ReadBool(logical, "idempotent", false)) return logical;
+            }
             List<string> interrupted;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
@@ -536,7 +570,6 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
                     ReadDouble(payload, "worldDay", 0d), ReadLong(payload, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
             }
 
-            string id = FirstNonEmpty(ReadFirstString(payload, "sessionId", "conversationSessionId"), "conversation_" + Guid.NewGuid().ToString("N"));
             long ts = ReadLong(payload, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             string channel = ReadString(payload, "channel", "in_person");
@@ -544,7 +577,7 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
             List<string> participants = MergeStringLists(ReadStringList(payload, "participants"), new[] { npcId, playerId });
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_sessions(
+                ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(
 session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,
 participants_json,close_reason,scene_summary_id,legacy_inferred,payload_json)
 VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$participants,'','',0,$payload);",
@@ -555,7 +588,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                         ["participants"] = Json.Serialize(participants), ["payload"] = Json.Serialize(payload)
                     });
             }
-            return new Dictionary<string, object> { ["ok"] = true, ["sessionId"] = id, ["interruptedSessionsClosed"] = interrupted };
+            return new Dictionary<string, object> { ["ok"] = true, ["sessionId"] = id, ["logicalConversationId"] = ReadString(payload, "logicalConversationId", ""), ["interruptedSessionsClosed"] = interrupted };
         }
 
         private static Dictionary<string, object> ConversationFinishApi(Dictionary<string, object> payload)
@@ -597,6 +630,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             Dictionary<string, object> session;
             List<Dictionary<string, object>> turns;
             string sceneJobId;
+            lock (ConversationStartGate)
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             using (var closure = connection.BeginTransaction())
             {
@@ -606,6 +640,11 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                 {
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Conversation session was not found.", ["sessionId"] = sessionId };
                 }
+                // A late teardown/transition receipt cannot replace an explicit
+                // ending and make a finished conversation eligible for resumption.
+                string existingReason = ReadString(session, "close_reason", "");
+                if (new[] { "closed_by_player", "conversation_ended", "goodbye" }.Contains(existingReason))
+                    reason = existingReason;
                 turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;",
                     new Dictionary<string, object> { ["id"] = sessionId });
                 var existingScene=QuerySql(connection,"SELECT payload_json FROM summaries WHERE summary_id=$id;",
@@ -716,7 +755,8 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
         }
 
         private static Dictionary<string, object> StoreConversationExchange(string campaignId, Dictionary<string, object> request,
-            string npcId, string playerId, string playerName, string npcName, string playerText, string reply, string eventId, long ts)
+            string npcId, string playerId, string playerName, string npcName, string playerText, string reply, string eventId, long ts,
+            Action<string> acceptanceBoundary = null, ConversationSourceAcceptance acceptance = null)
         {
             request = request ?? new Dictionary<string, object>();
             string sessionId = ReadFirstString(request, "conversationSessionId", "sessionId", "conversationId");
@@ -742,6 +782,8 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             int nextOrder;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
+                using var transaction = connection.BeginTransaction();
+                LockConversationSourcePublication(connection, sessionId);
                 Dictionary<string, object> max = QuerySql(connection,
                     "SELECT COALESCE(MAX(turn_order),-1)+1 AS next_order FROM conversation_turns WHERE session_id=$session;",
                     new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault();
@@ -749,17 +791,23 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 string exchangeId = eventId;
                 string playerTurnId = eventId + "_player";
                 string npcTurnId = eventId + "_npc";
+                PreservePlayerInputSource(connection, request, sessionId, eventId, exchangeId, playerId, playerName, worldDay, ts, locationId);
                 InsertConversationTurn(connection, playerTurnId, sessionId, eventId, nextOrder, exchangeId, "player", playerId,
                     playerName, playerText, channel, worldDay, ts, locationId, participants, request);
+                acceptanceBoundary?.Invoke("after_player_source");
                 InsertConversationTurn(connection, npcTurnId, sessionId, eventId, nextOrder + 1, exchangeId, "npc", npcId,
                     npcName, reply, channel, worldDay, ts, locationId, participants, request);
                 ExecuteSql(connection, "UPDATE conversation_sessions SET end_ts=$ts,end_world_day=$day,location_id=CASE WHEN $location<>'' THEN $location ELSE location_id END WHERE session_id=$id;",
                     new Dictionary<string, object> { ["ts"] = ts, ["day"] = worldDay, ["location"] = locationId, ["id"] = sessionId });
-                return new Dictionary<string, object>
+                var result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["sessionId"] = sessionId, ["exchangeId"] = exchangeId,
                     ["turnIds"] = new List<string> { playerTurnId, npcTurnId }, ["turnOrder"] = nextOrder
                 };
+                if (acceptance != null) result["acceptedUnit"] = acceptance(connection, result);
+                acceptanceBoundary?.Invoke("before_source_commit");
+                transaction.Commit();
+                return result;
             }
         }
 
@@ -773,10 +821,10 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             string playerText,
             string reply,
             string eventId,
-            long ts)
+            long ts, ConversationSourceAcceptance acceptance = null)
         {
             return StoreGroupedConversationExchange(campaignId, request, npcId, playerId, playerName, npcName,
-                playerText, reply, eventId, ts, "party_chat", "");
+                playerText, reply, eventId, ts, "party_chat", "", acceptance: acceptance);
         }
 
         private static Dictionary<string, object> StoreSocialEventConversationExchange(
@@ -790,13 +838,13 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             string reply,
             string sourceEventId,
             string socialEventId,
-            long ts)
+            long ts, ConversationSourceAcceptance acceptance = null)
         {
             string channel = string.Equals(ReadString(request, "templateId", ""), "generated_wilderness", StringComparison.OrdinalIgnoreCase)
                 ? "wilderness_event" : "social_event";
             string sessionId = string.IsNullOrWhiteSpace(socialEventId) ? "" : "social_event_" + SafeMemoryKey(socialEventId);
             return StoreGroupedConversationExchange(campaignId, request, npcId, playerId, playerName, npcName,
-                playerText, reply, sourceEventId, ts, channel, sessionId);
+                playerText, reply, sourceEventId, ts, channel, sessionId, acceptance: acceptance);
         }
 
         private static Dictionary<string, object> StoreGroupedConversationExchange(
@@ -811,7 +859,8 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             string eventId,
             long ts,
             string channel,
-            string fallbackSessionId)
+            string fallbackSessionId,
+            Action<string> acceptanceBoundary = null, ConversationSourceAcceptance acceptance = null, bool floorProjection = false)
         {
             request = request ?? new Dictionary<string, object>();
             channel = string.IsNullOrWhiteSpace(channel) ? "party_chat" : channel;
@@ -853,20 +902,44 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             string exchangeId = FirstNonEmpty(
                 ReadFirstString(request, "sceneTurnId", "turnId", "exchangeId"),
                 eventId);
-            string playerTurnId = exchangeId + "_player";
+            string playerTurnId = exchangeId + (floorProjection ? "_floor_player" : "_player");
             string npcTurnId = exchangeId + "_npc_" + SafeMemoryKey(npcId);
+            var result = TestDict("ok", true, "sessionId", sessionId, "exchangeId", exchangeId,
+                "turnIds", new List<string> { playerTurnId, npcTurnId });
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
+                using var transaction = connection.BeginTransaction();
+                LockConversationSourcePublication(connection, sessionId);
+                // Planning uses a conservative local projection and makes no model
+                // call. The interpreted writer projection must not collide with it.
+                // Keep its bytes, but retire that provisional view atomically when
+                // the same original receives its accepted observer projection.
+                if (floorProjection && QuerySql(connection, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id AND status='active';",
+                    TestDict("id", exchangeId + "_player")).Count > 0)
+                {
+                    transaction.Commit();
+                    return result;
+                }
                 Dictionary<string, object> session = QuerySql(connection,
                     "SELECT participants_json FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
-                participants = MergeStringLists(
+                var sessionParticipants = MergeStringLists(
                     TextListFromJson(ReadString(session, "participants_json", "[]")),
                     participants);
 
-                bool playerExists = QuerySql(connection,
-                    "SELECT turn_id FROM conversation_turns WHERE turn_id=$turn LIMIT 1;",
-                    new Dictionary<string, object> { ["turn"] = playerTurnId }).Count > 0;
+                var existingPlayer = QuerySql(connection,
+                    "SELECT * FROM conversation_turns WHERE turn_id=$turn LIMIT 1;",
+                    new Dictionary<string, object> { ["turn"] = playerTurnId }).FirstOrDefault();
+                bool playerExists = existingPlayer != null;
+                // The shared player turn belongs to the first NPC's event ID.
+                // Later speakers may reference it, but cannot change its words,
+                // speaker or branch, nor retroactively enlarge its audience.
+                if (existingPlayer != null && (ReadString(existingPlayer, "text", "") != (playerText ?? "")
+                    || ReadString(existingPlayer, "speaker_id", "") != playerId
+                    || ReadString(existingPlayer, "session_id", "") != sessionId
+                    || ContinuityTimeline(TryParseJsonObject(ReadString(existingPlayer, "payload_json", "{}"))) != ContinuityTimeline(request)))
+                    throw new InvalidOperationException("This group beat already has different accepted player words or source scope.");
+                PreservePlayerInputSource(connection, request, sessionId, eventId, exchangeId, playerId, playerName, worldDay, ts, locationId);
                 int nextOrder = ReadInt(QuerySql(connection,
                     "SELECT COALESCE(MAX(turn_order),-1)+1 AS next_order FROM conversation_turns WHERE session_id=$session;",
                     new Dictionary<string, object> { ["session"] = sessionId }).FirstOrDefault(), "next_order", 0);
@@ -875,6 +948,17 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                     InsertConversationTurn(connection, playerTurnId, sessionId, eventId, nextOrder++, exchangeId,
                         "player", playerId, playerName, playerText, channel, worldDay, ts, locationId, participants, request);
                 }
+                if (!floorProjection && ReadString(request, "inputSourceId", "").Length > 0)
+                {
+                    var provisional = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session AND speaker_id=$player AND status='active';",
+                        TestDict("id", exchangeId + "_floor_player", "session", sessionId, "player", playerId)).SingleOrDefault();
+                    if (ReadString(TryParseJsonObject(ReadString(provisional, "payload_json", "{}")), "inputSourceId", "") == ReadString(request, "inputSourceId", ""))
+                    {
+                        ExecuteSql(connection, "UPDATE conversation_turns SET status='superseded_projection' WHERE turn_id=$id;", TestDict("id", exchangeId + "_floor_player"));
+                        ExecuteSql(connection, "DELETE FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", exchangeId + "_floor_player"));
+                    }
+                }
+                acceptanceBoundary?.Invoke("after_player_source");
                 InsertConversationTurn(connection, npcTurnId, sessionId, eventId, nextOrder, exchangeId,
                     "npc", npcId, npcName, reply, channel, worldDay, ts, locationId, participants, request);
                 ExecuteSql(connection, @"UPDATE conversation_sessions SET end_ts=$ts,end_world_day=$day,
@@ -884,17 +968,14 @@ WHERE session_id=$id;", new Dictionary<string, object>
                     ["ts"] = ts,
                     ["day"] = worldDay,
                     ["location"] = locationId,
-                    ["participants"] = Json.Serialize(participants),
+                    ["participants"] = Json.Serialize(sessionParticipants),
                     ["id"] = sessionId
                 });
+                if (acceptance != null) result["acceptedUnit"] = acceptance(connection, result);
+                acceptanceBoundary?.Invoke("before_source_commit");
+                transaction.Commit();
             }
-            return new Dictionary<string, object>
-            {
-                ["ok"] = true,
-                ["sessionId"] = sessionId,
-                ["exchangeId"] = exchangeId,
-                ["turnIds"] = new List<string> { playerTurnId, npcTurnId }
-            };
+            return result;
         }
 
         private static List<Dictionary<string, object>> ReadCurrentSessionDialogueLines(string campaignId, string sessionId, int limit)
@@ -902,11 +983,26 @@ WHERE session_id=$id;", new Dictionary<string, object>
             if (string.IsNullOrWhiteSpace(sessionId)) return new List<Dictionary<string, object>>();
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                return QuerySql(connection, @"SELECT turn_id AS id,turn_order,ts,role,speaker_name AS speaker,channel,text,world_day AS worldDay,
-session_id AS sessionId,exchange_id AS exchangeId,location_id AS locationId FROM conversation_turns
-WHERE session_id=$session AND status='active' ORDER BY turn_order DESC LIMIT $limit;",
-                    new Dictionary<string, object> { ["session"] = sessionId, ["limit"] = Math.Max(1, limit) })
-                    .OrderBy(row => ReadInt(row, "turn_order", 0)).ToList();
+                return ReadLogicalConversationTurns(connection, sessionId, Math.Min(100, limit + 2))
+                    .Select(row => new Dictionary<string, object> {
+                        ["id"] = ReadString(row, "turn_id", ""), ["turn_order"] = ReadInt(row, "turn_order", 0),
+                        ["ts"] = ReadLong(row, "ts", 0), ["role"] = ReadString(row, "role", ""),
+                        ["speaker"] = ReadString(row, "speaker_name", ""), ["speakerHeroStringId"] = ReadString(row, "speaker_id", ""),
+                        ["channel"] = ReadString(row, "channel", ""), ["text"] = ReadString(row, "text", ""),
+                        ["worldDay"] = ReadDouble(row, "world_day", 0), ["sessionId"] = ReadString(row, "session_id", ""),
+                        ["exchangeId"] = ReadString(row, "exchange_id", ""), ["locationId"] = ReadString(row, "location_id", "")
+                    }).ToList();
+            }
+        }
+
+        private static void LockConversationSourcePublication(ReignDbConnection connection, string sessionId)
+        {
+            ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "conversation_source:" + sessionId));
+            if (!string.IsNullOrWhiteSpace(_playerActionGeneration))
+            {
+                var current = QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single();
+                if (ReadString(current, "restore_generation", "") != _playerActionGeneration)
+                    throw new InvalidOperationException("The campaign changed before conversation source publication.");
             }
         }
 
@@ -918,10 +1014,11 @@ WHERE session_id=$session AND status='active' ORDER BY turn_order DESC LIMIT $li
             {
                 return;
             }
+            bool technicalNotice = role == "npc" && !HasRecallableConversationSpeech(text);
             ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_turns(
 turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,location_id,
 participants_json,status,payload_json)
-VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,$text,$channel,$day,$ts,$location,$participants,'active',$payload);",
+VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,$text,$channel,$day,$ts,$location,$participants,$status,$payload);",
                 new Dictionary<string, object>
                 {
                     ["turn"] = turnId, ["session"] = sessionId, ["event"] = eventId ?? "", ["ordinal"] = turnOrder,
@@ -929,9 +1026,35 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
                     ["speaker_name"] = speakerName ?? "", ["text"] = text ?? "", ["channel"] = channel ?? "in_person",
                     ["day"] = worldDay, ["ts"] = ts, ["location"] = locationId ?? "",
                     ["participants"] = Json.Serialize(participants ?? new List<string>()),
+                    ["status"] = technicalNotice ? "technical_notice" : "active",
                     ["payload"] = SerializeConversationTurnStoragePayload(payload)
                 });
-            InsertConversationTurnFts(connection, turnId, text, speakerName, Json.Serialize(participants ?? new List<string>()), channel);
+            var stored = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", turnId)).Single();
+            var storedPayload = TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
+            var audience = new HashSet<string>(participants ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            if (ReadString(stored, "session_id", "") != sessionId || ReadString(stored, "exchange_id", "") != (exchangeId ?? "")
+                || ReadString(stored, "role", "") != (role ?? "") || ReadString(stored, "speaker_id", "") != (speakerId ?? "")
+                || ReadString(stored, "text", "") != (text ?? "") || ReadString(stored, "channel", "") != (channel ?? "in_person")
+                || !audience.SetEquals(TextListFromJson(ReadString(stored, "participants_json", "[]")))
+                || ReadString(storedPayload, "timelineId", "") != ReadString(payload, "timelineId", ""))
+                throw new InvalidOperationException("A conversation source ID already belongs to different words, identity, audience or timeline.");
+            // Replays may repair a missing derived index, but must only index the
+            // immutable winner. Never mix an old source with a new draft's words.
+            if (!technicalNotice)
+                InsertConversationTurnFts(connection, turnId, ConversationTurnTextForRecall(stored), ReadString(stored, "speaker_name", ""),
+                    ReadString(stored, "participants_json", "[]"), ReadString(stored, "channel", "in_person"));
+        }
+
+        private static bool IsTechnicalConversationNotice(string text)
+        {
+            string reply = text ?? "";
+            foreach (string notice in new[] { "[The NPC's decision could not be verified.",
+                "[Dialogue continuity evidence could not be verified.",
+                "[Dialogue memory correction could not be verified.",
+                "[Dialogue validation could not be completed." })
+                if (reply.StartsWith(notice, StringComparison.Ordinal)
+                    || reply.Contains("\n\n" + notice, StringComparison.Ordinal)) return true;
+            return false;
         }
 
         private static void InsertConversationTurnFts(ReignDbConnection connection, string turnId, string text, string speaker, string participants, string channel)
@@ -953,6 +1076,8 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
             List<string> participants = MergeStringLists(new[] { senderId, recipientId, npcId, playerId }, new List<string>());
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
+                using var transaction = connection.BeginTransaction();
+                LockConversationSourcePublication(connection, sessionId);
                 ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(
 session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,
 participants_json,close_reason,scene_summary_id,legacy_inferred,payload_json)
@@ -965,6 +1090,7 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
                 InsertConversationTurn(connection, "turn_" + SafeMemoryKey(letterId), sessionId, "mail_delivery_" + letterId, 0, letterId,
                     senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", senderId,
                     ReadString(letter, "sender_name", senderId), text, "correspondence", worldDay, ts, "", participants, letter);
+                transaction.Commit();
             }
         }
 
@@ -973,6 +1099,7 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
             bool retrievalEligible = true)
         {
             turns = turns ?? new List<Dictionary<string, object>>();
+            turns = turns.Where(t => ReadString(t, "status", "active") == "active").ToList();
             if (turns.Count == 0)
             {
                 return new Dictionary<string, object> { ["ok"] = true, ["summaryId"] = "", ["reason"] = "empty_session" };
@@ -1006,9 +1133,12 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
                 string provenance = role.Equals("player", StringComparison.OrdinalIgnoreCase)
                     ? "PLAYER LINE (authoritative only that the player said or requested this; factual claims remain claims)"
                     : "NPC LINE (authoritative only that this NPC said it; autobiography, alibis, eyewitness claims, actions, and world facts remain unverified reported speech)";
-                string renderedTurn = identityKnowledge.PlayerIdentityUnknown
-                    ? RenderExactHistoryTurn(turn, identityKnowledge)
-                    : ReadString(turn, "speaker_name", role) + ": " + ReadString(turn, "text", "");
+                // A shared scene summary must contain only the shared observation.
+                // The author's complete literary narration remains in the original
+                // turn and is available through that author's own exact recall.
+                var sharedTurn = new Dictionary<string, object>(turn);
+                sharedTurn["text"] = ObserverConversationText(ReadString(turn, "text", ""), ReadString(turn, "speaker_id", ""), "", role == "player");
+                string renderedTurn = RenderExactHistoryTurn(sharedTurn, identityKnowledge);
                 return new Dictionary<string, object>
                 {
                     ["summary"] = provenance + " — " + renderedTurn,
@@ -1112,6 +1242,13 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
                             ["sessionId"] = sessionId, ["method"] = ReadString(compact, "method", "deterministic"),
                             ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
                             ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                            ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
+                            ["selectedSourceIndices"] = compact.TryGetValue("selectedSourceIndices", out object selectedIndices) ? selectedIndices : Array.Empty<int>(),
+                            ["retryable"] = ReadBool(compact, "retryable", true),
+                            ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
+                            ["candidatePublication"] = ReadString(compact, "candidatePublication", ""),
+                            ["candidateHash"] = ReadString(compact, "candidateHash", ""),
+                            ["uncoveredSourceHashes"] = ReadStringList(compact, "uncoveredSourceHashes"),
                             ["sourceHash"] = MemorySourceHash(turns), ["processingVersion"] = MemoryPrecisionVersion,
                             ["retrievalRoute"] = sceneRoute, ["retrievalEligible"] = retrievalEligible,
                             ["recallReconstruction"] = !retrievalEligible,
@@ -1156,6 +1293,9 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
             }
             return new Dictionary<string, object> { ["ok"] = true, ["summaryId"] = summaryId, ["summary"] = summaryText, ["memoryLane"] = memoryLane,
                 ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
+                ["retryable"] = ReadBool(compact, "retryable", true),
+                ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                 ["sourceTurnIds"] = turns.Select(turn => ReadString(turn, "turn_id", "")).ToList(), ["retrievalEligible"] = retrievalEligible,
                 ["sourceEventIds"] = sourceEventIds,
                 ["knowledgeBoundary"] = new Dictionary<string, object>
@@ -1343,6 +1483,10 @@ VALUES($id,$scope,$owner,'arc',$summary,'[]',$start,$end,$count,'',$participants
                             ["sourceSummaryIds"] = scenes.Select(row => ReadString(row, "summary_id", "")).ToList(),
                             ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
                             ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                            ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
+                            ["selectedSourceIndices"] = compact.TryGetValue("selectedSourceIndices", out object selectedIndices) ? selectedIndices : Array.Empty<int>(),
+                            ["retryable"] = ReadBool(compact, "retryable", false),
+                            ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                             ["sourceHash"] = MemorySourceHash(scenes), ["processingVersion"] = MemoryPrecisionVersion,
                             ["correlationId"] = arcCorrelationId,
                             ["roleplayContinuityNormalized"] = continuityNormalized,

@@ -1,7 +1,73 @@
 {
   "repository": "qdrant/bge-small-en-v1.5-onnx-q",
   "revision": "52398278842ec682c6f32300af41344b1c0b0bb2",
+  "additionalModels": [
+    {
+      "repository": "cross-encoder/nli-deberta-v3-xsmall",
+      "revision": "a150876415327c80daeff35ca6f68f5ed8cf5c24",
+      "purpose": "bounded local claim/source comparisons; advisory scores, exact actors and receipts remain authoritative",
+      "license": "Apache-2.0"
+    },
+    {
+      "repository": "colbert-ir/colbertv2.0",
+      "revision": "c1e84128e85ef755c096a95bdb06b47793b13acf",
+      "purpose": "source-bound original-dialogue discovery; shadow until qualified",
+      "indexSchema": "reign-colbert-source-v1"
+    },
+    {
+      "repository": "Qwen/Qwen3-Reranker-0.6B",
+      "revision": "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+      "purpose": "complete eligible conversation bundle relevance; held-out qualification required"
+    },
+    {
+      "repository": "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+      "revision": "5f0c82792b7ea14c6484e015b6a072009496b7f2",
+      "purpose": "optional older narration salience; protected exact source spans remain verbatim"
+    }
+  ],
   "files": [
+    {
+      "file": "dialogue-nli.onnx",
+      "bytes": 284200859,
+      "sha256": "7105da41f625c42eca24e9465ec99150d02a80e644659d7a1daa93a6357155d4",
+      "url": "https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall/resolve/a150876415327c80daeff35ca6f68f5ed8cf5c24/onnx/model.onnx"
+    },
+    {
+      "file": "dialogue-nli-tokenizer.json",
+      "bytes": 8656624,
+      "sha256": "5124ef2ead1a10a717703bc436de7f353da76d6340e4587719b42b1693707964",
+      "url": "https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall/resolve/a150876415327c80daeff35ca6f68f5ed8cf5c24/tokenizer.json"
+    },
+    {
+      "file": "dialogue-nli-config.json",
+      "bytes": 1053,
+      "sha256": "8d9f07bf7ba54a6fc3b1962483056f94c39dcf188db4cf61843e1c88f94b2342",
+      "url": "https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall/resolve/a150876415327c80daeff35ca6f68f5ed8cf5c24/config.json"
+    },
+    {
+      "file": "colbert-model.onnx",
+      "bytes": 436194949,
+      "sha256": "bfe81fa313c4c2a12319ec9ef0cdf1c995daad051e9c5a1fcabcb90feb3c8286",
+      "url": "https://huggingface.co/colbert-ir/colbertv2.0/resolve/c1e84128e85ef755c096a95bdb06b47793b13acf/model.onnx"
+    },
+    {
+      "file": "colbert-tokenizer.json",
+      "bytes": 466081,
+      "sha256": "5fd1c882abbd30517dced455a2c9768945ec726b96727927e4959348d9de550b",
+      "url": "https://huggingface.co/colbert-ir/colbertv2.0/resolve/c1e84128e85ef755c096a95bdb06b47793b13acf/tokenizer.json"
+    },
+    {
+      "file": "colbert-config.json",
+      "bytes": 743,
+      "sha256": "cbdcc01dc7772fd0e5e1d85d5de695faf8c4935ae3c7ea3fdb6c24397b284f3c",
+      "url": "https://huggingface.co/colbert-ir/colbertv2.0/resolve/c1e84128e85ef755c096a95bdb06b47793b13acf/config.json"
+    },
+    {
+      "file": "colbert-artifact.metadata",
+      "bytes": 1633,
+      "sha256": "0ddc5a54234cff6d13bc9411250a5479d9d96f3ffbace76d8a1884144377e434",
+      "url": "https://huggingface.co/colbert-ir/colbertv2.0/resolve/c1e84128e85ef755c096a95bdb06b47793b13acf/artifact.metadata"
+    },
     {
       "file": "README.md",
       "bytes": 907,
@@ -49,6 +115,38 @@
       "bytes": 231508,
       "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
       "url": "https://huggingface.co/qdrant/bge-small-en-v1.5-onnx-q/resolve/52398278842ec682c6f32300af41344b1c0b0bb2/vocab.txt"
+    },
+    {
+      "file": "qwen-reranker.onnx",
+      "bytes": 995235866,
+      "sha256": "787193952a9aa58374381ec7647b160ac6c200a386dbfc3bc998a3c458081330",
+      "url": "https://huggingface.co/onnx-community/Qwen3-Reranker-0.6B-ONNX/resolve/9995c50e2310679108a55f5ccd16ba8be9f17c20/onnx/model_q4.onnx"
+    },
+    {
+      "file": "qwen-reranker-tokenizer.json",
+      "bytes": 11422654,
+      "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+      "url": "https://huggingface.co/onnx-community/Qwen3-Reranker-0.6B-ONNX/resolve/9995c50e2310679108a55f5ccd16ba8be9f17c20/tokenizer.json"
+    },
+    {
+      "file": "llmlingua2.onnx",
+      "bytes": 178566832,
+      "sha256": "6745c7aff5cb5c2c3c96b8e72ab8a65ce42157058f9221f6c340f0c37e760f5d",
+      "url": "https://huggingface.co/ldenoue/llmlingua-2-bert-base-multilingual-cased-meetingbank/resolve/d7070a9b381ca5297dd7bd5cf7704dde81470518/onnx/model_quantized.onnx"
+    },
+    {
+      "file": "llmlingua2-tokenizer.json",
+      "bytes": 2919362,
+      "sha256": "bf1b59b7b11c95f194f51708d918eea378e09d05f84c0e1656dc5180e8117088",
+      "url": "https://huggingface.co/ldenoue/llmlingua-2-bert-base-multilingual-cased-meetingbank/resolve/d7070a9b381ca5297dd7bd5cf7704dde81470518/tokenizer.json"
+    }
+  ],
+  "derivedModels": [
+    {
+      "file": "qwen-reranker-binary.onnx",
+      "sha256": "91541a53f5faa6796553aa0d29fea3b24abceccfd45ccfeb78a267d4ea34908a",
+      "source": "qwen-reranker.onnx",
+      "recipe": "scripts/Prepare-MemorySelection.py"
     }
   ]
 }

@@ -36,6 +36,11 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
             {
                 string kind = ReadString(operation, "kind", ""), id = ReadString(operation, "id", "");
                 if (id.Length == 0 || string.IsNullOrWhiteSpace(ReadString(operation, "reviewReason", ""))) throw new InvalidOperationException("Every repair needs an exact source id and review reason.");
+                if (kind == "restore_original_input")
+                {
+                    changes.Add(RestoreReviewedOriginalInput(connection, manifest, operation));
+                    continue;
+                }
                 if (kind == "rebuild_scene_memory")
                 {
                     changes.Add(ApplyStagedSceneMemory(connection, manifest, operation));
@@ -165,8 +170,9 @@ manifest_hash TEXT PRIMARY KEY, campaign_id TEXT NOT NULL,timeline_id TEXT NOT N
                     if (active.Count != 1 || ReadString(active[0], "timeline_id", "") != timeline) throw new InvalidOperationException("Active timeline changed; refresh the reviewed manifest.");
                     bool stage = HasArg(args, "--stage");
                     if (stage && apply) throw new InvalidOperationException("Staging and applying are separate operations.");
-                    if (stage && ReadString(manifest, "schema", "") != "reign-memory-stage-request-v1") throw new InvalidOperationException("A memory staging request is required.");
-                    var result = stage ? BuildMemoryStagingManifest(connection, manifest) : RepairConversationContinuity(connection, manifest);
+                    bool originalsAudit = ReadString(manifest, "schema", "") == "reign-conversation-original-audit-v1";
+                    if (stage && !originalsAudit && ReadString(manifest, "schema", "") != "reign-memory-stage-request-v1") throw new InvalidOperationException("A memory or original-input staging request is required.");
+                    var result = stage ? originalsAudit ? BuildConversationOriginalAudit(connection, manifest) : BuildMemoryStagingManifest(connection, manifest) : RepairConversationContinuity(connection, manifest);
                     result["mode"] = stage ? "staged_read_only" : apply ? "applied" : "preview_rolled_back";
                     result["manifestFileSha256"] = hash;
                     string output = Path.GetFullPath(ArgValue(args, "--report", path + ".receipt.json"));

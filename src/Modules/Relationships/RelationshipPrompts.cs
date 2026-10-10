@@ -228,7 +228,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                         ReadDouble(eventPayload, "worldDay", 0d));
                     builder.AppendLine(BuildKnownSocialStandingPromptBlock(socialStanding));
                     string historyBlock = BuildSharedRelationshipHistoryPromptBlock(
-                        connection, speakerHeroId, targetId, out List<string> historyIds);
+                        connection, speakerHeroId, targetId, out List<string> historyIds, eventPayload);
                     if (!string.IsNullOrWhiteSpace(historyBlock))
                     {
                         builder.AppendLine(historyBlock);

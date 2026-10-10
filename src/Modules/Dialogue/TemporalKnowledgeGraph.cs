@@ -62,6 +62,8 @@ payload_json TEXT NOT NULL DEFAULT '{}');" );
             string predicate = NormalizeLookup(ReadFirstString(item, "predicate", "relation", "property", "factType", "type"));
             string objectId = ReadFirstString(item, "objectId", "object_id", "object", "targetId", "target_id");
             string owner = ReadFirstString(item, "believer", "believerId", "believer_id", "ownerId", "owner_id", "heroStringId");
+            if (IsPrivateMentalLayer(kind) && IsUnsupportedRecallAbsenceState(claim)
+                && !HasStoredRecallLossSupport(connection, BuildKnowledgeAccessContext(owner, "", "", item), claim)) return "";
             string explicitFactKey = ReadFirstString(item, "factKey", "fact_key", "propositionId", "proposition_id");
             if (string.IsNullOrWhiteSpace(claim) && string.IsNullOrWhiteSpace(subject)) return "";
             AcquirePostgreSqlTransactionMutationLock(connection);
@@ -165,38 +167,60 @@ VALUES($id,$from,$to,$type,$assertion,$ts,NULL,'{}');", new Dictionary<string, o
         private static List<Dictionary<string, object>> LoadTemporalKnowledgeForPrompt(ReignDbConnection connection, string campaignId,
             KnowledgeAccessContext knowledge, List<string> queryTerms, int limit)
         {
-            var result = new List<Dictionary<string,object>>();
-            string npc=knowledge?.NpcId ?? "";
-            const int batch=128;
-            for(int offset=0;result.Count<Math.Max(1,limit);offset+=batch)
-            {
-            var rows = QuerySql(connection, @"SELECT * FROM temporal_knowledge_assertions
-WHERE campaign_id=$campaign AND ($timeline='' OR timeline_id=$timeline)
-AND event_day<=$day AND learned_day<=$day AND (valid_to_day IS NULL OR valid_to_day>$day)
-AND (valid_to_ts IS NULL OR valid_to_day IS NOT NULL)
+            knowledge ??= new KnowledgeAccessContext();
+            var result = new List<Dictionary<string, object>>();
+            var resolved = new HashSet<string>(StringComparer.Ordinal);
+            const int batch = 128;
+            // Search historical wording to discover the fact, then resolve its
+            // latest eligible revision independently of the search terms. A child
+            // correction must win over a restored parent without modifying that
+            // parent's snapshot hash or hiding it from an earlier as-of read.
+            string eligible = @"
+WHERE campaign_id=$campaign AND ($timeline='' OR " + MemorySourceTimelineSql("temporal_knowledge_assertions") + @")
+AND event_day<=$day AND learned_day<=$day
+AND COALESCE(NULLIF(recorded_ts,0),observed_ts)<=$asOfTimestamp
+AND (valid_to_ts IS NULL OR valid_to_day IS NOT NULL OR valid_to_ts>$asOfTimestamp)
 AND (assertion_kind NOT IN ('belief','comprehension','interpretation') OR perspective_owner_id=$observer)
 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(hidden_from_json::jsonb) h(value) WHERE lower(h.value)=lower($observer))
-AND (perspective_owner_id=$observer OR lower(visibility) IN ('world','global','common','public','local','nearby','kingdom','clan','settlement','party','army') OR lower(visibility) LIKE 'public_%' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(known_by_json::jsonb) k(value) WHERE lower(k.value)=lower($observer)))
+AND (perspective_owner_id=$observer OR lower(visibility) IN ('world','global','common','public','local','nearby','kingdom','clan','settlement','party','army') OR lower(visibility) LIKE 'public_%' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(known_by_json::jsonb) k(value) WHERE lower(k.value)=lower($observer)))";
+            var parameters = TestDict("campaign", campaignId ?? "", "observer", knowledge.NpcId,
+                "timeline", knowledge.TimelineId, "day", knowledge.WorldDay, "asOfTimestamp", knowledge.AsOfTimestamp,
+                "query", BuildFtsQuery(queryTerms ?? new()), "batch", batch);
+            bool Visible(Dictionary<string, object> row) => MemoryTimeVisible(row, knowledge, connection)
+                && !KnowledgeListContains(row, "hidden_from_json", knowledge.NpcId)
+                && (!IsPrivateMentalLayer(ReadString(row, "assertion_kind", ""))
+                    || KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), knowledge.NpcId))
+                && (KnowledgeVisibilityAllows(row, knowledge)
+                    || KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), knowledge.NpcId)
+                    || KnowledgeListContains(row, "known_by_json", knowledge.NpcId));
+            for (int offset = 0; result.Count < Math.Max(1, limit); offset += batch)
+            {
+                parameters["offset"] = offset;
+                var rows = QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions " + eligible + @"
 AND ($query='' OR to_tsvector('simple',claim || ' ' || subject_id || ' ' || predicate || ' ' || object_id) @@ websearch_to_tsquery('simple',$query))
-ORDER BY ts_rank(to_tsvector('simple',claim),websearch_to_tsquery('simple',$query)) DESC,learned_day DESC,revision DESC,assertion_id LIMIT $batch OFFSET $offset;",
-                new Dictionary<string, object> { ["campaign"] = campaignId ?? "", ["observer"] = knowledge == null ? "" : knowledge.NpcId,
-                    ["timeline"] = knowledge?.TimelineId ?? "", ["day"] = knowledge?.WorldDay ?? double.MaxValue,
-                    ["query"] = BuildFtsQuery(queryTerms ?? new List<string>()), ["batch"] = batch, ["offset"] = offset });
-            result.AddRange(rows.Where(row =>
+ORDER BY ts_rank(to_tsvector('simple',claim),websearch_to_tsquery('simple',$query)) DESC,learned_day DESC,revision DESC,assertion_id LIMIT $batch OFFSET $offset;", parameters);
+                foreach (var hit in rows)
                 {
-                    if (KnowledgeListContains(row, "hidden_from_json", npc)) return false;
-                    if (IsPrivateMentalLayer(ReadString(row, "assertion_kind", ""))
-                        && !KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), npc)) return false;
-                    bool visible = KnowledgeVisibilityAllows(row, knowledge ?? new KnowledgeAccessContext())
-                        || KnowledgeIdEquals(ReadString(row, "perspective_owner_id", ""), npc)
-                        || KnowledgeListContains(row, "known_by_json", npc);
-                    if (!visible) return false;
-                    if (queryTerms == null || queryTerms.Count == 0) return true;
-                    string haystack = NormalizeLookup(ReadString(row, "claim", "") + " " + ReadString(row, "subject_id", "") + " "
-                        + ReadString(row, "predicate", "") + " " + ReadString(row, "object_id", ""));
-                    return queryTerms.Any(term => haystack.Contains(NormalizeLookup(term)));
-                }).Take(Math.Max(1,limit)-result.Count));
-            if(rows.Count<batch) break;
+                    if (!Visible(hit)) continue;
+                    string fact = ReadString(hit, "fact_key", ""), owner = ReadString(hit, "perspective_owner_id", "");
+                    string key = CanonicalJson(new[] { owner, fact.Length > 0 ? fact : ReadString(hit, "assertion_id", "") });
+                    if (!resolved.Add(key)) continue;
+                    Dictionary<string, object> latest = fact.Length == 0 ? hit : null;
+                    var revisionParameters = new Dictionary<string, object>(parameters) { ["fact"] = fact, ["owner"] = owner };
+                    for (int revisionOffset = 0; latest == null; revisionOffset += batch)
+                    {
+                        revisionParameters["offset"] = revisionOffset;
+                        var revisions = QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions " + eligible + @"
+AND fact_key=$fact AND perspective_owner_id=$owner
+ORDER BY learned_day DESC,COALESCE(NULLIF(recorded_ts,0),observed_ts) DESC,
+CASE WHEN timeline_id=$timeline THEN 1 ELSE 0 END DESC,revision DESC,assertion_id LIMIT $batch OFFSET $offset;", revisionParameters);
+                        latest = revisions.FirstOrDefault(Visible);
+                        if (revisions.Count < batch) break;
+                    }
+                    if (latest != null) result.Add(latest);
+                    if (result.Count >= Math.Max(1, limit)) break;
+                }
+                if (rows.Count < batch) break;
             }
             return result;
         }

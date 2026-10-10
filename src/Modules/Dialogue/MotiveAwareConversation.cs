@@ -1653,6 +1653,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
         {
             string text = (value ?? string.Empty).TrimEnd();
             if (text.Length == 0) return text;
+            revalidationCleared = revalidationCleared && !text.EndsWith(".,", StringComparison.Ordinal);
             if (text.EndsWith("..", StringComparison.Ordinal)
                 || text.EndsWith(".,", StringComparison.Ordinal))
                 text = text.Substring(0, text.Length - 2);
@@ -1662,9 +1663,23 @@ UNIQUE(subject_id,target_id,kind,session_id));");
         }
 
         private static bool MarkRepairedVisibleResponse(
-            Dictionary<string, object> parsed, bool revalidationCleared)
+            Dictionary<string, object> parsed, bool revalidationCleared, string category = "validation_correction")
         {
             if (parsed == null) return false;
+            var priorStatus = ReadDictionary(parsed, "repairStatus");
+            // Structured status is authoritative. Only older replies lack it.
+            revalidationCleared = revalidationCleared && (priorStatus != null
+                ? ReadBool(priorStatus, "allChecksCleared", true)
+                : !ReadFirstString(parsed, "reply", "response", "text", "content", "body").TrimEnd().EndsWith(".,", StringComparison.Ordinal));
+            var stages = ReadDictionaryList(priorStatus, "stages");
+            stages.Add(new Dictionary<string, object> { ["category"] = category,
+                ["outcome"] = revalidationCleared ? "resolved" : "unresolved_failure" });
+            parsed["repairStatus"] = new Dictionary<string, object>
+            {
+                ["schema"] = "reign-repair-status-v1", ["category"] = revalidationCleared ? category : "unresolved_failure", ["stages"] = stages,
+                ["allChecksCleared"] = revalidationCleared,
+                ["stageCount"] = ReadInt(priorStatus, "stageCount", 0) + 1
+            };
             foreach (string key in new[]
             {
                 "reply", "response", "text", "content", "body"
@@ -1728,8 +1743,10 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             if (VerifiedIdentityGroundingContradiction(
                     parsed, context))
             {
-                problems.Add(
-                    "The response reused a conflicting old claimed name, denied a verified canonical identity, or contradicted current public political authority.");
+                string expectedPlace = ReadString(ReadDictionary(ReadDictionary(context, "identityView"), "authorityView"), "currentSettlementName", "");
+                problems.Add(TryGetConversationSettlementContradiction(visibleReply, expectedPlace, out string claimedPlace)
+                    ? "scene_location_mismatch: The exact location claim '" + claimedPlace + "' conflicts with currentSettlementName '" + expectedPlace + "'. Correct the location, not the character's identity or attitude."
+                    : "identity_or_authority_mismatch: The response reused a conflicting old claimed name, denied a verified canonical identity, or contradicted current public political authority.");
             }
             if (problems.Count == 0) return llm;
 
@@ -1795,6 +1812,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             bool markedFailure = false;
             if (usableRepair)
             {
+                CarryConversationRepairState(parsed, retryParsed);
                 MarkRepairedVisibleResponse(
                     retryParsed, revalidationCleared);
                 retry["content"] = Json.Serialize(retryParsed);
@@ -2180,7 +2198,12 @@ UNIQUE(subject_id,target_id,kind,session_id));");
         private static bool CurrentConversationSettlementContradiction(
             string visibleReply,
             string expectedSettlementName)
+            => TryGetConversationSettlementContradiction(visibleReply, expectedSettlementName, out _);
+
+        private static bool TryGetConversationSettlementContradiction(
+            string visibleReply, string expectedSettlementName, out string claimedPlace)
         {
+            claimedPlace = "";
             if (string.IsNullOrWhiteSpace(visibleReply)
                 || string.IsNullOrWhiteSpace(expectedSettlementName))
                 return false;
@@ -2211,12 +2234,12 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                         + @"(?<place>[\p{L}][\p{L}'\-\s]{1,60})"
                         + @"\s*(?:\r?\n|$)",
                     RegexOptions.CultureInvariant);
-                if (heading.Success)
+                if (heading.Success && !IsDescriptiveConversationVenue(heading.Groups["place"].Value))
                     claims.Add(heading);
             }
             claims.AddRange(Regex.Matches(
                     visibleReply,
-                    @"\b(?:this\s+is|we\s+are\s+in|we're\s+in|"
+                    @"\b(?i:this\s+is|we\s+are\s+in|we're\s+in|"
                         + @"you\s+are\s+in|you're\s+in|welcome\s+to)\s+"
                         + @"(?<place>[\p{Lu}][\p{L}'\-]*(?:\s+"
                         + @"[\p{Lu}][\p{L}'\-]*){0,4})"
@@ -2235,7 +2258,10 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                     && !claimed.EndsWith(
                         " " + expected,
                         StringComparison.OrdinalIgnoreCase))
+                {
+                    claimedPlace = claim.Groups["place"].Value.Trim();
                     return true;
+                }
             }
             return false;
         }

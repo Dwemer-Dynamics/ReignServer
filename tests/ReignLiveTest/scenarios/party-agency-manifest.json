@@ -11,7 +11,7 @@
     "reviews", "returns", "save_roundtrip", "hostility", "recovery_regression", "evaluate"
   ],
   "policy": {
-    "openEndedReviewDays": 5,
+    "openEndedReviewDays": 30,
     "fixedTermMinimumDays": 1,
     "fixedTermMaximumDays": 30,
     "minimumReturnHours": 1,
@@ -102,16 +102,16 @@
     "open_ended": {
       "dialogueMode": "individual_chat",
       "turns": [
-        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party while we investigate? There is no fixed end date; we will review whether you stay every five days.",
-        "I accept the conditions you have named, and your permanent standing remains your own. There is no fixed end date, and we will review every five days. With that settled, do you explicitly agree to join my party?"
+        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party while we investigate? There is no fixed end date; we will review whether you stay every thirty days.",
+        "I accept the conditions you have named, and your permanent standing remains your own. There is no fixed end date, and we will review every thirty days. With that settled, do you explicitly agree to join my party?"
       ],
       "contextualTurnIndexes": [1]
     },
     "remaining_native_open_ended": {
       "dialogueMode": "individual_chat",
       "turns": [
-        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party while we investigate? There is no fixed end date; we will review whether you stay every five days.",
-        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going because these attacks threaten people under my protection. My party presently fields seventy-two fighting men and women. We will inspect the scouts' reports together, keep provisions and an escorted supply route, locate each camp before committing, offer surrender where safe, and withdraw rather than endanger villages. You will receive ten thousand denars for each five-day period and a fair share of captured equipment. You remain an independent ally and your permanent standing remains your own. There is no fixed end date and either of us may end the arrangement at each five-day review. With the force strength and all other terms clear, do you explicitly agree to join my party?"
+        "Armed deserters are threatening travelers outside Zeonica, and confronting them may end in a fight. I need your judgment, but this is a request rather than an order. Will you agree to travel with my party while we investigate? There is no fixed end date; we will review whether you stay every thirty days.",
+        "My name is Egan, sovereign of fen Niabar and lord of Zeonica. I am going because these attacks threaten people under my protection. My party presently fields seventy-two fighting men and women. We will inspect the scouts' reports together, keep provisions and an escorted supply route, locate each camp before committing, offer surrender where safe, and withdraw rather than endanger villages. You will receive ten thousand denars for each five-day period and a fair share of captured equipment. You remain an independent ally and your permanent standing remains your own. There is no fixed end date and either of us may end the arrangement at each thirty-day review. With the force strength and all other terms clear, do you explicitly agree to join my party?"
       ],
       "contextualTurnIndexes": [1]
     },
@@ -165,12 +165,12 @@
       "id": "PA-LANG-002", "profile": "language_contract", "required": true,
       "dialogueMode": "individual_chat", "requiresTarget": true,
       "turns": [
-        "Someone inside the customs office is diverting relief wagons, and exposing them may bring hired blades after us. I need your knowledge of merchants and court dealings. I cannot promise when the matter will end, and I am asking rather than commanding you. Will you agree to travel with my party while I investigate? There is no fixed end date; we will review whether you stay every five days.",
-        "I accept the terms and boundaries you have named. You remain an independent ally. There is no fixed end date, and we will review every five days. With that understood, do you explicitly agree to join my party for this investigation?"
+        "Someone inside the customs office is diverting relief wagons, and exposing them may bring hired blades after us. I need your knowledge of merchants and court dealings. I cannot promise when the matter will end, and I am asking rather than commanding you. Will you agree to travel with my party while I investigate? There is no fixed end date; we will review whether you stay every thirty days.",
+        "I accept the terms and boundaries you have named. You remain an independent ally. There is no fixed end date, and we will review every thirty days. With that understood, do you explicitly agree to join my party for this investigation?"
       ],
       "contextualTurnIndexes": [1],
       "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
-      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 5, "identityPreserved": true }
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 30, "identityPreserved": true }
     },
     {
       "id": "PA-LANG-003", "profile": "language_contract", "required": true,
@@ -187,12 +187,12 @@
       "id": "PA-LANG-004", "profile": "language_contract", "required": true,
       "dialogueMode": "individual_chat", "requiresTarget": true,
       "turns": [
-        "Two village headmen are close to bloodshed over an irrigation boundary, and both will bring armed retainers to the talks. I need your independent counsel to keep the meeting from becoming a battle. I am asking freely, not ordering you. Will you agree to travel with my party until the dispute is settled? There is no fixed end date; we will review whether you stay every five days.",
-        "I accept the limits and conditions you have named. You remain an independent ally. There is no fixed end date, and we will review every five days. Do you now explicitly agree to join my party for these talks?"
+        "Two village headmen are close to bloodshed over an irrigation boundary, and both will bring armed retainers to the talks. I need your independent counsel to keep the meeting from becoming a battle. I am asking freely, not ordering you. Will you agree to travel with my party until the dispute is settled? There is no fixed end date; we will review whether you stay every thirty days.",
+        "I accept the limits and conditions you have named. You remain an independent ally. There is no fixed end date, and we will review every thirty days. Do you now explicitly agree to join my party for these talks?"
       ],
       "contextualTurnIndexes": [1],
       "consentContract": { "purposeStated": true, "knownRiskStated": true, "npcRelevanceStated": true, "termOrReviewStated": true, "askedNotOrdered": true, "explicitAgreementRequested": true },
-      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 5, "identityPreserved": true }
+      "expected": { "recordDelta": 1, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 30, "identityPreserved": true }
     },
     {
       "id": "PA-LANG-005", "profile": "language_contract", "required": true,
@@ -289,13 +289,13 @@
     {
       "id": "PA-LANG-015", "profile": "language_contract", "required": true,
       "dialogueMode": "targeted_review", "requiresTarget": true,
-      "reviewContext": "The open-ended five-day review is due. The guest is speaking first.",
+      "reviewContext": "The open-ended thirty-day review is due. The guest is speaking first.",
       "turns": [
-        "Stay with us while this remains unresolved. There is no fixed end date; we will review whether you stay every five days. Are you willing?",
-        "I accept the conditions you have named. There is no fixed end date, and we will review every five days. With those understood, do you explicitly agree to remain with us?"
+        "Stay with us while this remains unresolved. There is no fixed end date; we will review whether you stay every thirty days. Are you willing?",
+        "I accept the conditions you have named. There is no fixed end date, and we will review every thirty days. With those understood, do you explicitly agree to remain with us?"
       ],
       "contextualTurnIndexes": [1],
-      "expected": { "recordDelta": 0, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 5, "identityPreserved": true }
+      "expected": { "recordDelta": 0, "phase": "Active", "termKind": "OpenEnded", "reviewIntervalDays": 30, "identityPreserved": true }
     },
     {
       "id": "PA-LANG-016", "profile": "language_contract", "required": true,

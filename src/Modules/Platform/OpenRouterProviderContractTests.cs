@@ -20,7 +20,33 @@ namespace ReignBetaServer
             var legacyModels = ChatModelProfile(settings, "");
             MergeProviderSettings(settings, new Dictionary<string, object> { ["llmProvider"] = "openrouter", ["openRouterApiKey"] = "fixture-router" });
             check("switch_endpoint_key_models", LlmApiUrl(settings) == OpenRouterChatUrl && LlmApiKey(settings) == "fixture-router"
-                && LlmProviderConfigured(settings) && ChatModelKeys.All(k => ReadString(settings, k, "") == "openai/gpt-5.5"));
+                && LlmProviderConfigured(settings) && ChatModelKeys.All(k => ReadString(settings, k, "")
+                    == "openai/gpt-5.5"));
+            settings["enableMinimeMemoryWorker"] = true; settings["minimeRerankUrl"] = "http://fixture-local.invalid/rerank";
+            var activeModels = ChatModelProfile(settings, "");
+            var oldFields = RetiredMemorySettings.ToDictionary(k => k, k => (object)(k.EndsWith("Model") ? "obsolete-model" : "obsolete-setting"));
+            oldFields["highMemoryMode"] = true;
+            oldFields["memoryFinalCheckEnabled"] = true;
+            MergeProviderSettings(settings, oldFields);
+            check("retired_memory_settings_removed_without_model_changes", RetiredMemorySettings.All(k => !settings.ContainsKey(k))
+                && CanonicalJson(activeModels) == CanonicalJson(ChatModelProfile(settings, "")));
+            check("active_local_background_config_preserved", ReadBool(settings, "enableMinimeMemoryWorker", false)
+                && ReadString(settings, "minimeRerankUrl", "") == "http://fixture-local.invalid/rerank"
+                && !ChatModelKeys.Contains("selectorModel"));
+            foreach (var profile in ReadDictionary(settings, "llmModelProfiles").Values.OfType<Dictionary<string, object>>())
+            {
+                profile["memoryEvidenceModel"] = "obsolete-analyst";
+                profile["memoryCheckerModel"] = "obsolete-checker"; profile["selectorModel"] = "obsolete-selector";
+            }
+            settings["highMemoryMode"] = true;
+            check("saved_profile_retirement_is_idempotent", NormalizeLlmProviderSettings(settings)
+                && !RetiredMemorySettings.Any(settings.ContainsKey)
+                && ReadDictionary(settings, "llmModelProfiles").Values.OfType<Dictionary<string, object>>()
+                    .All(p => !p.ContainsKey("memoryEvidenceModel") && !p.ContainsKey("memoryCheckerModel") && !p.ContainsKey("selectorModel"))
+                && !NormalizeLlmProviderSettings(settings));
+            check("normal_memory_summary_model_remains_independent", ChatModelKeys.Contains("memoryModel")
+                && !ChatModelKeys.Contains("memoryCheckerModel") && !ChatModelKeys.Contains("memoryEvidenceModel")
+                && ReadString(settings, "memoryModel", "") == "openai/gpt-5.5");
             var edits = ChatModelKeys.ToDictionary(k => k, k => (object)("openai/fixture-" + k));
             MergeProviderSettings(settings, edits);
             settings = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings));
@@ -60,7 +86,7 @@ namespace ReignBetaServer
                 && !ReadBool(body, "stream", true) && ReadDictionary(body, "response_format") != null
                 && ReadString(ReadDictionaryList(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(body)), "messages")[0], "content", "") == "Unicode 雪 😀");
             settings["reasoningMode"] = "selective"; settings["reasoningEffort"] = "medium";
-            foreach (string type in new[] { "dialogue", "context_selector", "action_router" })
+            foreach (string type in new[] { "dialogue", "action_router" })
             {
                 var b = new Dictionary<string, object>();
                 var route = ConfigureReasoningRouting(settings, new Dictionary<string, object>(), b, OpenRouterChatUrl, "openai/gpt-5.5", type);

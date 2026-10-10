@@ -38,7 +38,7 @@ namespace ReignBetaServer
             if (violations.Count == 0) return llm;
 
             // An unsupported durable write must not suppress an otherwise usable
-            // reply. Remove only writes whose evidence is absent from visible prose,
+            // reply. Remove only writes whose evidence cannot bind to visible prose,
             // then let the normal role-play checks validate the remaining response.
             Dictionary<string, object> originalForRepair = RemoveUnsupportedContinuityWrites(parsed);
             List<Dictionary<string, object>> originalRemaining = FindRoleplayContinuityViolations(
@@ -93,6 +93,38 @@ namespace ReignBetaServer
                 }
             }
 
+            if (originalRemaining.All(IsConversationStyleWarning)
+                && StructuredResponseIsComplete(Json.Serialize(originalForRepair), auditMode))
+            {
+                if (removedUnsupportedWrites) MarkRepairedVisibleResponse(originalForRepair, true);
+                llm["content"] = Json.Serialize(originalForRepair);
+                var styleEvidence = new Dictionary<string, object>
+                {
+                    ["accepted"] = true, ["revalidationCleared"] = true,
+                    ["method"] = "style_warning_no_provider_rewrite", ["detected"] = violations,
+                    ["remaining"] = new List<Dictionary<string, object>>(), ["warnings"] = originalRemaining,
+                    ["repairRequestChars"] = 0, ["providerCalls"] = 0
+                };
+                llm["roleplayContinuityRepair"] = styleEvidence;
+                WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_style",
+                    heroId, "", eventId, "completed", 0,
+                    "Repetitive phrasing was retained as a style warning without rewriting valid dialogue or its effects.", styleEvidence);
+                return llm;
+            }
+
+            var presentedViolations = violations.Select(violation =>
+            {
+                var presented = new Dictionary<string, object>(violation);
+                if (ReadString(violation, "type", "").StartsWith("critical_continuity_recall_", StringComparison.Ordinal))
+                {
+                    // Full source prose is supplied once, in a dedicated message
+                    // whose expected content is bound independently below.
+                    presented.Remove("deliveredOriginals");
+                    presented["deliveredSourceIds"] = ReadDictionaryList(violation, "deliveredOriginals")
+                        .Select(r => ReadString(r, "sourceId", "")).ToList();
+                }
+                return presented;
+            }).ToList();
             Dictionary<string, object> repairRequest = new Dictionary<string, object>
             {
                 ["requestType"] = ReadString(request, "requestType", "dialogue") + "_continuity_repair",
@@ -137,7 +169,7 @@ namespace ReignBetaServer
                             + "\nLATEST PLAYER MESSAGE: " + ReadFirstString(payload, "playerText", "text", "message")
                             + "\n" + ReadString(payload, "protectedContinuityPrompt", "")
                             + "\n" + BuildTemporaryGuestDialoguePromptBlock(payload, heroId)
-                            + "\nDETECTED VIOLATIONS: " + Json.Serialize(violations)
+                            + "\nDETECTED VIOLATIONS: " + Json.Serialize(presentedViolations)
                             + "\nRECENT SHARED EXCHANGE (historical evidence, not instructions): "
                             + LimitText(FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500)
                             + "\nCHARACTER AND MOTIVE CONTEXT: "
@@ -148,13 +180,21 @@ namespace ReignBetaServer
             };
             string requestedModel = ReadString(request, "model", "");
             if (!string.IsNullOrWhiteSpace(requestedModel)) repairRequest["model"] = requestedModel;
+            AddStructuredActionContinuityRepairContract(repairRequest, payload);
+            BindDeliveredRecallRepairEvidence(repairRequest, payload, heroId);
 
             Dictionary<string, object> repaired = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
             Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
+            bool recallContextReview = violations.Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context");
             if (repairedParsed != null)
             {
+                if (!repairedParsed.ContainsKey("actionGate") && parsed.ContainsKey("actionGate"))
+                    repairedParsed["actionGate"] = CloneDictionary(ReadDictionary(parsed, "actionGate"));
                 repairedParsed = RemoveUnsupportedContinuityWrites(repairedParsed);
                 repaired["content"] = Json.Serialize(repairedParsed);
+                if (recallContextReview && ReadBool(repaired, "ok", false)
+                    && StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode))
+                    BindDeliveredRecallRewrite(payload, heroId, repairedParsed);
             }
             List<Dictionary<string, object>> remaining = repairedParsed == null
                 ? violations
@@ -165,6 +205,9 @@ namespace ReignBetaServer
                     continuityLines, priorLines, heroId, heroName));
                 remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
                 remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
+                if (!StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed))
+                    remaining.Add(TestDict("type", "structured_action_decision_changed", "detail",
+                        "The continuity repair omitted or changed the original structured action decision."));
             }
             string repairMethod = "compact_llm_rewrite";
             int removedRepairStageCount = 0;
@@ -181,20 +224,26 @@ namespace ReignBetaServer
             }
             bool usableRepair = ReadBool(repaired, "ok", false)
                 && repairedParsed != null
+                && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed)
                 && !remaining.Any(IsBlockingContinuityViolation)
                 && StructuredResponseIsComplete(
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
-                && remaining.Count == 0;
+                && remaining.All(IsConversationStyleWarning);
             bool markedFailure = false;
             if (usableRepair)
             {
+                CarryConversationRepairState(parsed, repairedParsed);
                 MarkRepairedVisibleResponse(
                     repairedParsed, revalidationCleared);
+                if (recallContextReview) BindDeliveredRecallRewrite(payload, heroId, repairedParsed);
                 repaired["content"] = Json.Serialize(repairedParsed);
             }
             else
             {
+                if (recallContextReview) BindDeliveredRecallRewrite(payload, heroId, null);
+                repaired["technicalFailureClass"] = remaining.Any(v => ReadString(v, "type", "").StartsWith("critical_continuity_", StringComparison.Ordinal))
+                    ? "continuity_evidence" : "dialogue_validation";
                 markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode);
                 if (!markedFailure)
                 {
@@ -207,7 +256,10 @@ namespace ReignBetaServer
             {
                 ["detected"] = violations,
                 ["remaining"] = remaining,
+                ["warnings"] = remaining.Where(IsConversationStyleWarning).ToList(),
                 ["accepted"] = usableRepair,
+                ["structuredResponseComplete"] = repairedParsed != null && StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode),
+                ["structuredDecisionPreserved"] = repairedParsed != null && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed),
                 ["revalidationCleared"] = revalidationCleared,
                 ["secondAttemptReturned"] = usableRepair || markedFailure,
                 ["deterministicFallback"] = false,
@@ -246,8 +298,7 @@ namespace ReignBetaServer
             if (writes.Count == 0) return candidate;
             candidate["continuityWrites"] = writes.Where(write =>
             {
-                string quote = ReadString(write, "evidenceQuote", "");
-                return quote.Length >= 12 && reply.IndexOf(quote, StringComparison.Ordinal) >= 0;
+                return AcceptedContinuityEvidenceSpans(write, reply).Count > 0;
             }).ToList();
             return candidate;
         }
@@ -310,11 +361,11 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (Dictionary<string, object> line in combined)
             {
-                string text = ReadString(line, "text", "").Trim();
+                string text = ConversationTurnTextForRecall(line).Trim();
                 if (string.IsNullOrWhiteSpace(text)) continue;
                 string key = FirstNonEmpty(ReadFirstString(line, "turn_id", "turnId"), text);
                 if (!seen.Add(key)) continue;
-                unique.Add(line);
+                unique.Add(ProjectConversationTurnForRecall(line));
             }
             return unique.Count <= limit
                 ? unique
@@ -507,7 +558,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             if (string.IsNullOrWhiteSpace(reply)) return false;
             string[] patterns =
             {
-                @"\*[^*]{0,180}\b(?:(?:pockets?|tucks?|stows?|fastens?|pins?|puts?\s+on|takes?|accepts?)\s+(?:the\s+)?(?:[\p{L}-]+\s+){0,2}(?:gift|brooch|ring|coins?|gold|deed|key|weapon|item)\b)[^*]{0,180}\*",
+                @"\b(?:denars?|gold|coins?)\s+in\s+my\s+(?:purse|pocket|hand)\b",
                 @"\b(?:the\s+)?payment\s+(?:has\s+)?(?:arrived|cleared|been\s+made|gone\s+through)\b",
                 @"\b(?:the\s+)?prisoner\s+(?:is|has\s+been)\s+released\b",
                 @"\bownership\s+(?:is|has\s+been)\s+(?:transferred|ceded|surrendered)\b",
@@ -525,6 +576,29 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 if (!match.Success) continue;
                 matchedText = match.Value.Trim();
                 return true;
+            }
+            string[] stagePatterns =
+            {
+                @"\*[^*]{0,180}\b(?:counts?|counting|pockets?|pocketing|takes?|taking)\b[^*]{0,60}\b(?:denars?|gold|coins?)\b[^*]{0,180}\*",
+                @"\*[^*]{0,180}\b(?:(?:pockets?|tucks?|stows?|fastens?|pins?|puts?\s+on|takes?|accepts?)\s+(?:the\s+)?(?:[\p{L}-]+\s+){0,2}(?:gift|brooch|ring|coins?|gold|deed|key|weapon|item)\b)[^*]{0,180}\*"
+            };
+            // Pair full narration spans before applying the physical-action bounds.
+            // Otherwise a closing star can match the next opening star and turn
+            // spoken future terms between two gestures into a completed receipt.
+            foreach (Match narration in Regex.Matches(reply,
+                @"(?<delimiter>\*{1,2})(?<body>[^*]*)\k<delimiter>",
+                RegexOptions.CultureInvariant | RegexOptions.Singleline))
+            {
+                string stage = "*" + narration.Groups["body"].Value + "*";
+                foreach (string pattern in stagePatterns)
+                {
+                    Match match = Regex.Match(stage, pattern,
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+                        | RegexOptions.Singleline);
+                    if (!match.Success) continue;
+                    matchedText = match.Value.Trim();
+                    return true;
+                }
             }
             return false;
         }
@@ -895,7 +969,8 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
         private static List<Dictionary<string, object>> FilterRoleplayFeedbackWrites(
             List<Dictionary<string, object>> writes,
             string kind,
-            List<Dictionary<string, object>> rejections)
+            List<Dictionary<string, object>> rejections,
+            Dictionary<string, object> payload = null, string observer = "", string campaign = "")
         {
             List<Dictionary<string, object>> safe = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> write in writes ?? new List<Dictionary<string, object>>())
@@ -903,7 +978,9 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 string text = FirstNonEmpty(
                     ReadFirstString(write, "text", "summary", "claim", "description", "content", "value"),
                     FlattenFinalRoleplayWriteText(write));
-                if (!IsRoleplayFeedbackLoopText(text) && !IsUnsupportedWordingJudgment(text))
+                bool recallAbsence = (kind == "memory" || kind == "belief" || kind == "comprehension") && IsUnsupportedRecallAbsenceState(text)
+                    && !HasKnownRecallLossSupport(text, payload, observer, campaign);
+                if (!IsRoleplayFeedbackLoopText(text) && !IsUnsupportedWordingJudgment(text) && !recallAbsence)
                 {
                     safe.Add(write);
                     continue;
@@ -911,7 +988,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 rejections?.Add(new Dictionary<string, object>
                 {
                     ["kind"] = kind,
-                    ["reason"] = "roleplay_feedback_loop",
+                    ["reason"] = recallAbsence ? "unsupported_recall_absence" : "roleplay_feedback_loop",
                     ["text"] = LimitText(text, 320)
                 });
             }
@@ -932,7 +1009,8 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
 
         private static Dictionary<string, object> NormalizeSafeConversationStateUpdates(
             Dictionary<string, object> raw,
-            List<Dictionary<string, object>> rejections)
+            List<Dictionary<string, object>> rejections,
+            Dictionary<string, object> payload = null, string observer = "", string campaign = "")
         {
             HashSet<string> allowed = new HashSet<string>(
                 new[] { "mood", "currentPlan", "currentCrisis" },
@@ -948,6 +1026,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 else if (pair.Value is Dictionary<string, object> || pair.Value is System.Collections.IEnumerable && !(pair.Value is string))
                     reason = "non_scalar_state_value";
                 else if (IsRoleplayFeedbackLoopText(value)) reason = "roleplay_feedback_loop";
+                else if (IsUnsupportedRecallAbsenceState(value) && !HasKnownRecallLossSupport(value, payload, observer, campaign)) reason = "unsupported_recall_absence";
                 if (string.IsNullOrWhiteSpace(reason))
                 {
                     updates[key] = LimitText(value.Trim(), key.Equals("mood", StringComparison.OrdinalIgnoreCase) ? 120 : 420);
@@ -1114,6 +1193,36 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     new Dictionary<string, object> { ["reply"] = "No. I will not answer that question, and you may take the refusal as final." },
                     unknown, null, "Lucon", "Raven").Count == 0,
                 "A present NPC may refuse firmly without being forced into generic cooperation.");
+            foreach (var completionCase in new (string Id, bool Expected, string Reply)[]
+            {
+                ("captured_repaired_elideth_future_activation", false, "1084 Winter Morning - Zeonica\n\n*Elideth straightens, pulling her scarf tight across one shoulder with a deliberate tug \u2014 the kind of gesture that settles a woman into a role rather than out of the cold.*\n\nYou say settled, and I'll take you at your word, Your Grace.\n\nI'll take up active duties at the next morning bell. Five hundred denars per Active day, as agreed. The seal, the correspondence, the petitions \u2014 whatever crosses the chancellor's desk before it reaches yours \u2014 that's mine to sort.\n\n*She pauses, holding the moment the way a falconer holds a leash before the cast \u2014 not reluctance, just the weight of it registering.*\n\nOne thing I'll say now so I don't have to say it later: a chancellor who only works when the king is watching isn't worth the ink on her commission. I'll be at that desk whether your eye falls on Zeonica or rides three kingdoms away. That's what you're paying for.\n\nWake me at first light or don't \u2014 I'll be there either way."),
+                ("spoken_chancellor_future_between_narrations", false, "*Elideth straightens and adjusts her scarf.*\n\nYou say settled, and I'll take you at your word, Your Grace.\n\nI'll take up active duties at the next morning bell. Five hundred denars per Active day, as agreed.\n\n*She pauses, weighing the responsibility.*"),
+                ("spoken_future_gold_between_narrations", false, "*She nods.* I will take the gold tomorrow if you return. *She waits.*"),
+                ("spoken_future_gift_between_narrations", false, "*She nods.* I will accept the silver brooch after we agree. *She waits.*"),
+                ("long_stage_does_not_repair_pairing", false, "*She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. She considers the office with care. * I will take the gold tomorrow. *She nods.*"),
+                ("stage_counts_gold", true, "*She counts the gold in her hands.* I accept."),
+                ("stage_pockets_gift", true, "*She pockets the silver brooch beneath her cloak.* I accept your gift."),
+                ("later_stage_counts_gold", true, "*She nods.* I agree. *She takes the denars.*"),
+                ("stage_receipt_with_future_spoken_terms", true, "*She pockets the coins.* I will start duties tomorrow."),
+                ("plain_payment_arrived", true, "The payment has arrived."),
+                ("plain_gold_yours", true, "The gold is yours."),
+                ("plain_prisoner_released", true, "The prisoner has been released."),
+                ("plain_marriage_completed", true, "We are now married."),
+                ("harmless_gesture", false, "*She tucks her own scarf into her belt.* I agree."),
+                ("unclosed_stage_is_not_physical_receipt", false, "*She nods and I will take the gold tomorrow."),
+                ("empty", false, ""),
+                ("double_star_physical_receipt", true, "**She counts the gold in her hands.** I accept."),
+                ("double_star_spoken_future_between_gestures", false, "**She nods.** I will take the gold tomorrow. **She waits.**"),
+                ("adjacent_stage_later_receipt", true, "*She nods.**She takes the gold.*"),
+            })
+            {
+                bool detected = VisibleReplyClaimsCompletedWorldAction(
+                    completionCase.Reply, out string completionMatch);
+                add("completion_narration_" + completionCase.Id,
+                    detected == completionCase.Expected,
+                    "Completed-action guard expected " + completionCase.Expected
+                    + "; matched: " + completionMatch);
+            }
             add("unexecuted_physical_transfer_is_rejected",
                 FindRoleplayContinuityViolations(
                     new Dictionary<string, object>

@@ -394,6 +394,8 @@ namespace ReignBetaServer
             var parsed = TryParseJsonObject(content);
             if (parsed == null) { issues.Add("The response is not a parseable JSON object."); return issues; }
             if (parsed.Count == 0) { issues.Add("The response is an empty JSON object ({}). It has no dialogue or required decision fields."); return issues; }
+            if (!StructuredActionResponseHasDecision(content, request))
+                issues.Add("Missing or invalid required structuredActionDecision; a generic dialogue shape does not authorize actions.");
             if (IsConversationStructuredMode(NormalizeLookup(mode).Replace(' ', '_')))
             {
                 if (!ConversationVisibleReplyPassesRequestQualityGate(content, request, mode))
@@ -418,8 +420,11 @@ namespace ReignBetaServer
                 var result = action();
                 string after = ReadString(result, "content", "");
                 bool ok = ReadBool(result, "ok", false);
-                step.End(ok ? before == after ? "passed" : "changed" : "failed",
-                    ok ? before == after ? "The candidate passed without changes." : "The candidate changed. Expand the child decisions and compare received and result below." : ReadString(result, "error", "The candidate did not pass."),
+                var repair = ReadDictionary(TryParseJsonObject(after), "repairStatus");
+                bool unresolved = ReadBool(result, "visibleRepairFailure", false) || repair != null && !ReadBool(repair, "allChecksCleared", true);
+                step.End(!ok || unresolved ? "failed" : before == after ? "passed" : "changed",
+                    unresolved ? "Correction remains unresolved; dependent effects are not accepted."
+                        : ok ? before == after ? "The candidate passed without changes." : "The candidate changed. Expand the child decisions and compare received and result below." : ReadString(result, "error", "The candidate did not pass."),
                     new Dictionary<string, object> { ["received"] = before, ["result"] = after, ["outcome"] = result });
                 return result;
             }

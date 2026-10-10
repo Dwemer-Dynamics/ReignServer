@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reign Control Center</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#070808FF;color:#C5BDAFFF;font-family:Segoe UI,Arial,sans-serif;font-size:14px}main{max-width:720px;margin:10vh auto;padding:32px;background:#171717FF;border:1px solid #352C20FF}h1{font-family:Georgia,serif;font-size:26px;color:#A88A54FF}p{line-height:1.6}button{font:inherit;color:#C5BDAFFF;background:#1A1917FF;border:1px solid #7E6A4DFF;padding:12px 20px;cursor:pointer}button:hover{background:#232323FF}button:disabled{color:#706F6AFF;border-color:#4A4945FF;cursor:default}button:focus-visible{outline:2px solid #C5AC83FF;outline-offset:3px}.hint{color:#8A8883FF;display:block;margin-top:16px}@media(max-width:600px){main{margin:24px 12px;padding:20px}}
+</style></head>
+<body data-server-offline="true"><main><h1>Bannerlord Reign Control Center</h1><p>The server is off or starting. Turn it on here to return to your settings and prompts.</p><button id="serverPowerButton" type="button" role="switch" aria-checked="false" disabled onclick="toggleServerPower()">Checking Server...</button><span id="serverPowerStatus" class="hint" role="status" aria-live="polite"></span></main>
+<script>@SERVER_CONTROL_SCRIPT@</script></body></html>

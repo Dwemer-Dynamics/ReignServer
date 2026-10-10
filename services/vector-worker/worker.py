@@ -21,6 +21,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
+from specialists import MemoryExtractor
+from late_interaction import LateInteractionIndex
+from selection import MemorySelection
+from claim_validation import ClaimValidator
+
+MEMORY_EXTRACTOR = MemoryExtractor()
 
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
@@ -80,6 +86,12 @@ class WorkerState:
         self.local_index_building: set[str] = set()
         self.local_index_last_error = ""
         self.local_index_last_build_ms = 0
+        # Qdrant's local archive open/delete can hold its operation gate for
+        # minutes. ColBERT has independent state and its own bounded CPU model;
+        # its foreground queries must not wait for unrelated store maintenance.
+        self.late_interaction = LateInteractionIndex(data_dir, self.model_dir)
+        self.memory_selection = MemorySelection(self.model_dir)
+        self.claim_validator = ClaimValidator(self.model_dir)
 
     @contextmanager
     def operation_gate(self, foreground: bool):
@@ -133,6 +145,7 @@ class WorkerState:
                 self.last_operation = "loading_model"
                 self.model = TextEmbedding(
                     model_name=MODEL_NAME,
+                    providers=["CPUExecutionProvider"],
                     cache_dir=str(self.model_dir),
                     threads=max(1, min(int(os.environ.get("REIGN_VECTOR_THREADS", "4")), os.cpu_count() or 1)),
                     lazy_load=True,
@@ -197,6 +210,16 @@ class WorkerState:
         from qdrant_client import models
         if not ids or not client.collection_exists(collection):
             return
+        index = self.local_indexes.get(collection) if local else None
+        if index is not None and index.get("compact"):
+            # The complete document-to-chunk map replaces two archive-wide
+            # native filter scans for every background replacement.
+            child_ids = {point_id for document_id in ids for point_id in index["documents"].get(document_id, ())}
+            resolved = list(client.existing_point_ids(collection, set(ids) | child_ids))
+            if resolved:
+                client.delete(collection_name=collection, points_selector=models.PointIdsList(points=resolved), wait=True)
+            self.delete_local_index(collection, ids + list(child_ids), False)
+            return
         client.delete(collection_name=collection, points_selector=models.FilterSelector(filter=models.Filter(must=[
             models.FieldCondition(key="documentId", match=models.MatchAny(any=ids))])), wait=True)
         client.delete(collection_name=collection, points_selector=models.PointIdsList(points=ids), wait=True)
@@ -217,8 +240,9 @@ class WorkerState:
                         raise ValueError("qdrantUrl is required for the qdrant provider.")
                     self.clients[key] = QdrantClient(url=qdrant_url.strip(), api_key=api_key or None, timeout=10)
                 else:
+                    from compact_store import CompactQdrantLocal
                     self.local_vector_dir.mkdir(parents=True, exist_ok=True)
-                    self.clients[key] = QdrantClient(path=str(self.local_vector_dir))
+                    self.clients[key] = CompactQdrantLocal(self.local_vector_dir)
             return self.clients[key]
 
     def ensure_collection(self, client, collection: str, external: bool) -> None:
@@ -230,7 +254,7 @@ class WorkerState:
                 vectors_config=models.VectorParams(size=MODEL_DIMENSIONS, distance=models.Distance.COSINE),
             )
         if external:
-            for field in ("campaignId", "timelineId", "sourceType", "memoryLane", "status", "ownerId", "knownBy", "hiddenFrom", "documentId", "restoreGeneration"):
+            for field in ("campaignId", "timelineId", "sourceType", "memoryLane", "status", "ownerId", "knownBy", "hiddenFrom", "documentId", "restoreGeneration", "restoredSavePointId"):
                 try:
                     client.create_payload_index(collection, field, models.PayloadSchemaType.KEYWORD, wait=True)
                 except Exception:
@@ -242,6 +266,34 @@ class WorkerState:
             return cached
 
         started = time.perf_counter()
+        from compact_store import CompactQdrantLocal
+        if isinstance(client, CompactQdrantLocal):
+            capacity = client.resident_count(collection) if client.collection_exists(collection) else 0
+            matrix = np.empty((capacity + min(8192, max(256, capacity // 8)), MODEL_DIMENSIONS), dtype=np.float32)
+            points, ids, payloads, positions, documents = OrderedDict(), [], [], {}, {}
+            records = client.reference_records(collection) if client.collection_exists(collection) else ()
+            for point_id, vector, payload in records:
+                if vector.shape != (MODEL_DIMENSIONS,):
+                    raise ValueError("Compact archive embedding dimension mismatch")
+                position = len(ids)
+                matrix[position] = vector
+                ids.append(point_id); payloads.append(payload); positions[point_id] = position
+                # Raw vectors live in Qdrant; the search matrix owns normalized
+                # rows. No per-point vector copy or view pins an old matrix.
+                points[point_id] = (None, payload)
+                documents.setdefault(str(payload.get("documentId") or point_id), set()).add(point_id)
+            # Match the original full-matrix float32 row reduction exactly,
+            # with bounded transient storage instead of a whole-archive square.
+            for offset in range(0, len(ids), 2048):
+                rows = matrix[offset:min(offset + 2048, len(ids))]
+                rows /= np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), np.float32(1e-12))
+            index = {"points": points, "ids": ids, "payloads": payloads,
+                     "matrix": matrix, "positions": positions, "free_positions": [],
+                     "compact": True, "documents": documents, "matrix_rebuild_count": 1, "loadedUtc": time.time()}
+            self.local_indexes[collection] = index
+            self.local_index_last_build_ms = int((time.perf_counter() - started) * 1000)
+            self.local_index_last_error = ""
+            return index
         points: OrderedDict[str, tuple[np.ndarray, dict[str, Any]]] = OrderedDict()
         if client.collection_exists(collection):
             offset = None
@@ -276,6 +328,9 @@ class WorkerState:
         return index
 
     def rebuild_local_matrix(self, index: dict[str, Any]) -> None:
+        if index.get("compact"):
+            # Incremental rows already are the authoritative normalized matrix.
+            return
         points = index["points"]
         ids = list(points.keys())
         payloads = [points[point_id][1] for point_id in ids]
@@ -285,9 +340,37 @@ class WorkerState:
             matrix = matrix / np.maximum(norms, np.float32(1e-12))
         else:
             matrix = np.empty((0, MODEL_DIMENSIONS), dtype=np.float32)
+        # Spare rows amortize growth without copying the entire archive for each
+        # background document. Only positions in ids/payloads may be searched.
+        capacity = len(ids) + min(8192, max(256, len(ids) // 8))
+        reserved = np.empty((capacity, MODEL_DIMENSIONS), dtype=np.float32)
+        reserved[:len(ids)] = matrix
         index["ids"] = ids
         index["payloads"] = payloads
-        index["matrix"] = matrix
+        index["matrix"] = reserved
+        index["positions"] = {point_id: position for position, point_id in enumerate(ids)}
+        index["free_positions"] = []
+        index["matrix_rebuild_count"] = index.get("matrix_rebuild_count", 0) + 1
+
+    def write_local_matrix_row(self, index: dict[str, Any], point_id: str,
+                               vector: np.ndarray, payload: dict[str, Any]) -> None:
+        position = index["positions"].get(point_id)
+        if position is None:
+            if index["free_positions"]:
+                position = index["free_positions"].pop()
+            else:
+                position = len(index["ids"])
+                if position == index["matrix"].shape[0]:
+                    capacity = position + min(8192, max(256, position // 8))
+                    expanded = np.empty((capacity, MODEL_DIMENSIONS), dtype=np.float32)
+                    expanded[:position] = index["matrix"]
+                    index["matrix"] = expanded
+                index["ids"].append(None)
+                index["payloads"].append(None)
+            index["positions"][point_id] = position
+        index["ids"][position] = point_id
+        index["payloads"][position] = payload
+        index["matrix"][position] = vector / max(float(np.linalg.norm(vector)), 1e-12)
 
     def update_local_index(self, collection: str, documents: list[dict[str, Any]],
                            vectors: list[list[float]]) -> None:
@@ -298,11 +381,21 @@ class WorkerState:
             point_id = str(document.get("id") or "")
             if not point_id:
                 continue
-            index["points"][point_id] = (
-                np.asarray(vector, dtype=np.float32),
-                dict(document.get("payload") or {}),
-            )
-        index["matrix"] = None
+            raw_vector = np.asarray(vector, dtype=np.float32)
+            payload = dict(document.get("payload") or {})
+            if index.get("compact"):
+                old = index["points"].get(point_id)
+                if old is not None:
+                    document_id = str(old[1].get("documentId") or point_id)
+                    children = index["documents"].get(document_id)
+                    if children is not None:
+                        children.discard(point_id)
+                        if not children:
+                            index["documents"].pop(document_id, None)
+                index["documents"].setdefault(str(payload.get("documentId") or point_id), set()).add(point_id)
+            index["points"][point_id] = (None if index.get("compact") else raw_vector, payload)
+            if index["matrix"] is not None:
+                self.write_local_matrix_row(index, point_id, raw_vector, payload)
 
     def delete_local_index(self, collection: str, ids: list[str], delete_collection: bool) -> None:
         if delete_collection:
@@ -312,8 +405,52 @@ class WorkerState:
         if index is None:
             return
         for point_id in ids:
-            index["points"].pop(str(point_id), None)
-        index["matrix"] = None
+            point_id = str(point_id)
+            removed = index["points"].pop(point_id, None)
+            if removed is not None and index.get("compact"):
+                document_id = str(removed[1].get("documentId") or point_id)
+                children = index["documents"].get(document_id)
+                if children is not None:
+                    children.discard(point_id)
+                    if not children:
+                        index["documents"].pop(document_id, None)
+            if index["matrix"] is not None:
+                position = index["positions"].pop(point_id, None)
+                if position is not None:
+                    # Keep stable slots and reuse them for replacement chunks.
+                    # A deleted payload can never survive an eligibility scan.
+                    index["ids"][position] = None
+                    index["payloads"][position] = None
+                    index["matrix"][position].fill(0)
+                    index["free_positions"].append(position)
+
+    def search_local_index(self, index: dict[str, Any], vector: list[float],
+                           filters: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        started = time.perf_counter()
+        if index["matrix"] is None:
+            self.rebuild_local_matrix(index)
+        rebuilt = time.perf_counter()
+        matching = [position for position, payload in enumerate(index["payloads"])
+                    if payload is not None and payload_matches_filters(payload, filters)]
+        filtered = time.perf_counter()
+        results = []
+        if matching:
+            query_vector = np.asarray(vector, dtype=np.float32)
+            query_vector = query_vector / max(float(np.linalg.norm(query_vector)), 1e-12)
+            candidate_scores = index["matrix"][matching] @ query_vector
+            # Inspect every eligible chunk before document deduplication. A long
+            # document must not displace another document's later answer.
+            selected = np.argsort(candidate_scores)[::-1]
+            results = [{"id": index["ids"][matching[int(position)]],
+                        "score": float(candidate_scores[int(position)]),
+                        "payload": index["payloads"][matching[int(position)]]}
+                       for position in selected]
+        return results, {"localMatrixRebuildMs": int((rebuilt - started) * 1000),
+                         "localFilterMs": int((filtered - rebuilt) * 1000),
+                         "localScoreAndSortMs": int((time.perf_counter() - filtered) * 1000),
+                         "localCandidatePoints": len(matching),
+                         "localResidentPoints": len(index["points"]),
+                         "localMatrixRebuildCount": index["matrix_rebuild_count"]}
 
     def warm_default_local_index(self) -> None:
         collection = "reign_memory_bge_small_en_v1_5_v1"
@@ -358,6 +495,13 @@ def build_filter(filters: dict[str, Any]):
     for key, value in (filters or {}).items():
         if value is None or value == "" or value == []:
             continue
+        if key == "restoredSavePointId":
+            continue  # An alternate timeline witness, never an independent AND.
+        if key == "timelineId" and filters.get("restoredSavePointId") and filters.get("restoreGeneration"):
+            conditions.append(models.Filter(should=[
+                models.FieldCondition(key="timelineId", match=models.MatchValue(value=value)),
+                models.FieldCondition(key="restoredSavePointId", match=models.MatchValue(value=filters["restoredSavePointId"]))]))
+            continue
         if key == "observerId":
             conditions.append(models.FieldCondition(key="eligibilityVersion", match=models.MatchValue(value=2)))
             conditions.append(models.Filter(must_not=[models.FieldCondition(key="hiddenFrom", match=models.MatchValue(value=value))]))
@@ -380,6 +524,12 @@ def build_filter(filters: dict[str, Any]):
 def payload_matches_filters(payload: dict[str, Any], filters: dict[str, Any]) -> bool:
     for key, expected in (filters or {}).items():
         if expected is None or expected == "" or expected == []:
+            continue
+        if key == "restoredSavePointId":
+            continue
+        if key == "timelineId" and filters.get("restoredSavePointId") and filters.get("restoreGeneration"):
+            if payload.get("timelineId") != expected and payload.get("restoredSavePointId") != filters["restoredSavePointId"]:
+                return False
             continue
         if key == "observerId":
             if payload.get("eligibilityVersion") != 2 or expected in payload.get("hiddenFrom", []):
@@ -577,7 +727,21 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             body = self.read_json()
-            if parsed.path == "/rerank":
+            if parsed.path == "/memory/extract":
+                self.send_json(200, MEMORY_EXTRACTOR.extract(body))
+            elif parsed.path == "/dialogue/claims/compare":
+                self.send_json(200, STATE.claim_validator.evaluate(body))
+            elif parsed.path == "/dialogue/claims/extract":
+                self.send_json(200, MEMORY_EXTRACTOR.extract_claims(body))
+            elif parsed.path == "/memory/selection":
+                self.send_json(200, STATE.memory_selection.evaluate(body))
+            elif parsed.path == "/memory/late/index":
+                self.send_json(200, STATE.late_interaction.index(body))
+            elif parsed.path == "/memory/late/search":
+                self.send_json(200, STATE.late_interaction.search(body))
+            elif parsed.path == "/memory/late/status":
+                self.send_json(200, STATE.late_interaction.status())
+            elif parsed.path == "/rerank":
                 self.handle_rerank(body)
             elif parsed.path == "/vectors/upsert":
                 self.handle_upsert(body)
@@ -692,32 +856,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if provider != "qdrant":
                     index = STATE.load_local_index(client, collection)
-                    if index["matrix"] is None:
-                        STATE.rebuild_local_matrix(index)
-                    matching = [
-                        position for position, payload in enumerate(index["payloads"])
-                        if payload_matches_filters(payload, body.get("filters") or {})
-                    ]
-                    if matching:
-                        query_vector = np.asarray(vector, dtype=np.float32)
-                        query_vector = query_vector / max(float(np.linalg.norm(query_vector)), 1e-12)
-                        candidate_scores = index["matrix"][matching] @ query_vector
-                        take = len(matching)
-                        if take < len(matching):
-                            selected = np.argpartition(candidate_scores, -take)[-take:]
-                        else:
-                            selected = np.arange(len(matching))
-                        selected = selected[np.argsort(candidate_scores[selected])[::-1]]
-                        results = [
-                            {
-                                "id": index["ids"][matching[int(position)]],
-                                "score": float(candidate_scores[int(position)]),
-                                "payload": index["payloads"][matching[int(position)]],
-                            }
-                            for position in selected
-                        ]
-                    else:
-                        results = []
+                    results, local_timing = STATE.search_local_index(index, vector, body.get("filters") or {})
+                    gate_timing.update(local_timing)
                 else:
                     response = client.query_points_groups(
                         collection_name=collection,
@@ -736,7 +876,8 @@ class Handler(BaseHTTPRequestHandler):
         results = unique_document_hits(results, limit)
         timing = STATE.record_operation("search", True, started, gate_timing)
         self.send_json(200, {"ok": True, "results": results, "collection": collection, "provider": provider,
-                             "eligibilityApplied": bool((body.get("filters") or {}).get("observerId")), "timing": timing})
+                             "eligibilityApplied": bool((body.get("filters") or {}).get("observerId")),
+                             "restoredSourceEligibilityApplied": True, "timing": timing})
 
     def handle_delete(self, body: dict[str, Any]) -> None:
         from qdrant_client import models
@@ -772,6 +913,10 @@ def status_payload() -> dict[str, Any]:
         "modelVersion": MODEL_VERSION,
         "dimensions": MODEL_DIMENSIONS,
         "modelLoaded": STATE.model is not None,
+        "memoryExtractor": MEMORY_EXTRACTOR.status(),
+        "memorySelection": STATE.memory_selection.status(),
+        "dialogueClaimValidator": STATE.claim_validator.status(),
+        "lateInteraction": STATE.late_interaction.status(),
         "modelDirectory": str(STATE.model_dir),
         "localVectorDirectory": str(STATE.local_vector_dir),
         "uptimeSeconds": int(time.time() - STATE.started),
@@ -787,6 +932,10 @@ def status_payload() -> dict[str, Any]:
             for name, index in STATE.local_indexes.items()
         },
         "localIndexLastBuildMs": STATE.local_index_last_build_ms,
+        "localArchiveLoader": "streaming-float32-qdrant-v1",
+        "localIndexCompactCollections": [name for name, index in STATE.local_indexes.items() if index.get("compact")],
+        "localArchiveCollections": {name: receipt for client in tuple(STATE.clients.values())
+                                    if hasattr(client, "archive_status") for name, receipt in client.archive_status().items()},
         "localIndexLastError": STATE.local_index_last_error,
         "recentOperations": list(STATE.recent_operations),
         "lastError": STATE.last_error,
@@ -811,6 +960,8 @@ def main() -> None:
     SERVER = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=STATE.warm_default_local_index, daemon=True,
                      name="reign-vector-index-warmup").start()
+    threading.Thread(target=STATE.claim_validator.warmup, daemon=True,
+                     name="reign-dialogue-claim-warmup").start()
     SERVER.serve_forever(poll_interval=0.25)
     SERVER.server_close()
 
@@ -843,9 +994,40 @@ def release_self_test(data_dir: Path) -> dict[str, Any]:
     if len(result) != 1 or result[0].id != 2 or result[0].score < 0.99:
         raise ValueError("Persistent local semantic search failed after reopening storage.")
     reopened.close()
+    from test_specialists import run_contracts
+    specialist_contracts = run_contracts()
+    from test_late_interaction import run_contracts as run_late_contracts
+    from late_interaction import SCHEMA as LATE_SCHEMA, MODEL_HASH as LATE_MODEL_HASH, text_hash
+    late_contracts = run_late_contracts()
+    late_base = {"schema": LATE_SCHEMA, "modelHash": LATE_MODEL_HASH, "campaignId": "release_proof"}
+    late_sources = [
+        {"sourceId": "botany", "view": "public", "sourceHash": "A"*64,
+         "text": "Ira: We found the rare flower beside the northern stream."},
+        {"sourceId": "trade", "view": "public", "sourceHash": "b"*64,
+         "text": "Michael: The merchant sold his iron ore in the southern town."},
+        {"sourceId": "private", "view": "self", "sourceHash": "c"*64,
+         "text": "Ira: I secretly remember the rare flower and our hidden kiss."},
+    ]
+    for source in late_sources:
+        source["textHash"] = text_hash(source["text"])
+    indexed = state.late_interaction.index({**late_base, "sources": late_sources})
+    if not indexed["ok"]:
+        raise ValueError("Bundled ColBERT inference failed: " + indexed["status"])
+    late_query = {**late_base, "query": "Where did we find the rare flower?", "limit": 2,
+                  "eligible": [{k:s[k] for k in ("sourceId", "sourceHash", "textHash", "view")} for s in late_sources[:2]]}
+    first = state.late_interaction.search(late_query)
+    reopened_late = LateInteractionIndex(data_dir, state.model_dir, state.operation_gate)
+    second = reopened_late.search(late_query)
+    if (not first["ok"] or not second["ok"] or first["results"] != second["results"]
+            or [r["sourceId"] for r in second["results"]] != ["botany", "trade"]):
+        raise ValueError("Bundled ColBERT reopen, ranking or private-source exclusion failed.")
+    late_proof = {"schema": LATE_SCHEMA, "modelHash": LATE_MODEL_HASH, "contracts": late_contracts,
+                  "persistenceReopened": True, "privateSourceExcluded": True, "inference": True,
+                  "qualified": False, "timing": second["timing"]}
     proof = {"schema": "reign-vector-release-proof-v1", "ok": True, "model": MODEL_NAME,
              "dimensions": 384, "networkBlocked": True, "listenerStarted": False,
-             "persistenceReopened": True, "bundledExecutable": bool(getattr(sys, "frozen", False))}
+             "persistenceReopened": True, "specialistContracts": specialist_contracts, "lateInteraction": late_proof,
+             "bundledExecutable": bool(getattr(sys, "frozen", False))}
     (data_dir / "release-proof.json").write_text(json.dumps(proof, indent=2), encoding="utf-8")
     return proof
 

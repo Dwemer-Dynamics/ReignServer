@@ -28,7 +28,7 @@ Valid locationClass values are formal or travel.
 Use only supplied heroStringId values.";
 
         private const string SceneStateOutputContract =
-@"Return sceneStateUpdates as an array in the same JSON response. Each entry may contain heroStringId, location, locationClass (formal or travel), and clothing. Include an entry only when the visible action in this response actually changes that present character's current location or worn clothing. Use only supplied participant IDs. Do not copy unchanged values, infer past changes, apply hypotheticals, or invent garments. Return an empty array when nothing changes.";
+@"sceneStateUpdates: changes in location or clothing from your visible reply or the player's current completed *action*. Fields: heroStringId, location, locationClass (formal/travel), clothing, supportingQuote. Player updates require an exact quote of that narrated action. Other NPCs need their own accepted turn. Omit unchanged, historical, intended or hypothetical changes; invent no garments. Otherwise return [].";
 
         private static void EnsureConversationSceneStateSchema(ReignDbConnection connection)
         {
@@ -485,15 +485,29 @@ updated_ts INTEGER NOT NULL);");
                 }
             }
 
-            // The dialogue model now returns validated sceneStateUpdates in the same
-            // response as visible dialogue. The former propose/adjudicate helper made
-            // two extra blocking LLM calls per turn.
-            List<Dictionary<string, object>> proposals = new List<Dictionary<string, object>>();
+            // Reuse the contribution's single source-bound interpretation. No second
+            // propose/adjudicate model, and no durable scene write before acceptance.
+            List<Dictionary<string, object>> proposals = NarratedSceneProposals(payload);
             string conversationVenue = ResolveSharedConversationVenue(
                 payload, participants, current);
+            // An NPC who stayed behind keeps their own established venue even
+            // when the player subsequently leaves alone.
+            if (current.TryGetValue(speakerId, out var speakerState) && ReadBool(speakerState, "hasNarrativeLocation", false))
+                conversationVenue = ReadString(speakerState, "location", conversationVenue);
+            string priorConversationVenue = conversationVenue;
+            if (!string.IsNullOrWhiteSpace(priorConversationVenue))
+                foreach (var state in current.Values.Where(s => !ReadBool(s, "hasNarrativeLocation", false)))
+                {
+                    // Keep the pre-move scene for a later refusal. Raw native
+                    // positions remain on participants as background/anchor data.
+                    state["location"] = priorConversationVenue;
+                    state["locationClass"] = InferLocationClass(priorConversationVenue);
+                }
+            var speakerProposal = proposals.LastOrDefault(p => ReadString(p, "subject_id", "") == speakerId);
+            if (speakerProposal != null) conversationVenue = ReadString(speakerProposal, "location_value", conversationVenue);
             string prompt = BuildConversationScenePrompt(
                 participants, current, proposals, speakerId,
-                detailedParticipantIds, conversationVenue, UsesCastleRoomAttireContext(payload));
+                detailedParticipantIds, conversationVenue, UsesCastleRoomAttireContext(payload), priorConversationVenue);
             Dictionary<string, object> result = new Dictionary<string, object>
             {
                 ["sceneTurnId"] = sceneTurnId,
@@ -665,6 +679,16 @@ updated_ts INTEGER NOT NULL);");
                 clothing = "";
             }
             string clothingSource = "hourly_override";
+            if (!roomAttireContext && includeDetailedAppearance)
+            {
+                string confirmedOutfit = ConfirmedOutfitDescription(campaignId, id,
+                    string.IsNullOrWhiteSpace(clothing) ? 0 : ReadLong(stored, "updated_ts", 0));
+                if (!string.IsNullOrWhiteSpace(confirmedOutfit))
+                {
+                    clothing = confirmedOutfit;
+                    clothingSource = "confirmed_outfit_change";
+                }
+            }
             if (!roomAttireContext && string.IsNullOrWhiteSpace(clothing) && includeDetailedAppearance)
             {
                 if (locationClass == "formal")
@@ -686,7 +710,8 @@ updated_ts INTEGER NOT NULL);");
                 ["role"] = ReadString(participant, "role", "npc"),
                 ["location"] = LimitText(location, 500),
                 ["locationClass"] = locationClass,
-                ["clothing"] = LimitText(clothing, 900),
+                ["hasNarrativeLocation"] = !string.IsNullOrWhiteSpace(ReadString(stored, "location_override", "")),
+                ["clothing"] = LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
                 ["clothingSource"] = clothingSource,
                 ["revision"] = ReadLong(stored, "revision", 0)
             };
@@ -903,7 +928,7 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
             List<Dictionary<string, object>> proposals,
             string speakerId,
             HashSet<string> detailedParticipantIds,
-            string conversationVenue, bool roomAttireContext = false)
+            string conversationVenue, bool roomAttireContext = false, string priorConversationVenue = null)
         {
             StringBuilder locations = new StringBuilder();
             StringBuilder clothing = new StringBuilder();
@@ -928,13 +953,18 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
                     witnesses.AppendLine();
                     continue;
                 }
-                Dictionary<string, object> proposal = proposals.FirstOrDefault(x => string.Equals(ReadString(x, "subject_id", ""), id, StringComparison.OrdinalIgnoreCase));
+                Dictionary<string, object> proposal = proposals.LastOrDefault(x => string.Equals(ReadString(x, "subject_id", ""), id, StringComparison.OrdinalIgnoreCase));
                 string proposedLocation = ReadString(proposal, "location_value", "");
                 string proposedClothing = ReadString(proposal, "clothing_value", "");
-                string activeLocation = string.IsNullOrWhiteSpace(
-                        conversationVenue)
-                    ? ReadString(state, "location", "unknown")
-                    : conversationVenue;
+                string activeLocation = ReadString(state, "location", "unknown");
+                // A native/home fallback must not contradict the shared venue.
+                // Preserve an independently accepted location (including someone
+                // who stayed behind); a clothing-only revision is not movement.
+                string fallbackLocation = priorConversationVenue ?? conversationVenue;
+                if (!string.IsNullOrWhiteSpace(fallbackLocation) && !ReadBool(state, "hasNarrativeLocation", false))
+                    activeLocation = fallbackLocation;
+                if (ReadString(proposal, "kind", "") == "establish" && !string.IsNullOrWhiteSpace(proposedLocation))
+                    activeLocation = proposedLocation;
                 locations.Append("- ").Append(name).Append(": ").Append(activeLocation);
                 if (!string.IsNullOrWhiteSpace(proposedLocation)) locations.Append(" | PROPOSED NOW: ").Append(proposedLocation);
                 locations.AppendLine();
@@ -964,7 +994,7 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
             return "ACTIVE LOCATION — AUTHORITATIVE\n"
                 + (string.IsNullOrWhiteSpace(conversationVenue)
                     ? "Use these current facts. A PROPOSED NOW change takes effect in this response unless the affected NPC explicitly refuses it.\n"
-                    : "All speaking participants are physically present together at the shared conversation venue below. "
+                    : "The current speaker's narrative venue is below. Other participants retain their individually accepted locations and choices. "
                         + "A participant's home, clan seat, or native map position elsewhere is background only and must never relocate this scene. "
                         + "A PROPOSED NOW change takes effect in this response unless the affected NPC explicitly refuses it.\n"
                         + "SHARED CONVERSATION VENUE: " + conversationVenue + "\n")
@@ -985,20 +1015,16 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
 
         private static Dictionary<string, object> FinalizeConversationSceneState(
             string campaignId, Dictionary<string, object> payload, string speakerId, string playerText, string reply, string mode,
-            Dictionary<string, object> parsedResponse)
+            Dictionary<string, object> parsedResponse, ReignDbConnection existingConnection = null,
+            IEnumerable<string> hearingAudience = null)
         {
             Dictionary<string, object> prepared = ReadDictionary(payload, "conversationSceneState") ?? new Dictionary<string, object>();
             string sceneTurnId = ReadString(prepared, "sceneTurnId", ReadString(payload, "sceneTurnId", ""));
             long hour = ConversationWorldHour(payload);
             List<Dictionary<string, object>> participants = ReadDictionaryList(prepared, "participants");
-            List<Dictionary<string, object>> proposals;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            {
-                EnsureConversationSceneStateSchema(connection);
-                proposals = QuerySql(connection,
-                    "SELECT * FROM conversation_scene_proposals WHERE scene_turn_id=$turn AND world_hour=$hour AND status='pending';",
-                    new Dictionary<string, object> { ["turn"] = sceneTurnId, ["hour"] = hour });
-            }
+            List<Dictionary<string, object>> proposals = ReadDictionaryList(prepared, "proposals");
+            if (ReadBool(payload, "conversationGroundingFailed", false))
+                return TestDict("status", "unresolved_grounding", "applied", new List<Dictionary<string, object>>());
             List<Dictionary<string, object>> denied = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> npcUpdates = ReadDictionaryList(parsedResponse, "sceneStateUpdates")
                 .Concat(ReadDictionaryList(parsedResponse, "scene_state_updates"))
@@ -1008,9 +1034,10 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
             HashSet<string> allowed = new HashSet<string>(participants.Select(x => ReadString(x, "heroStringId", "")), StringComparer.OrdinalIgnoreCase);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             List<Dictionary<string, object>> applied = new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            using (ReignDbTransaction transaction = connection.BeginTransaction())
+            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
+            using (ReignDbTransaction transaction = existingConnection == null ? ownedConnection.BeginTransaction() : null)
             {
+                ReignDbConnection connection = existingConnection ?? ownedConnection;
                 EnsureConversationSceneStateSchema(connection);
                 foreach (Dictionary<string, object> proposal in proposals)
                 {
@@ -1018,8 +1045,16 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
                     bool isSpeaker = string.Equals(subject, speakerId, StringComparison.OrdinalIgnoreCase);
                     bool isPlayer = string.Equals(ReadString(participants.FirstOrDefault(x => ReadString(x, "role", "") == "player"), "heroStringId", ""), subject, StringComparison.OrdinalIgnoreCase);
                     if (!isSpeaker && !isPlayer) continue;
+                    var before = ReadDictionaryList(prepared, "current").FirstOrDefault(s => ReadString(s, "heroStringId", "") == subject);
+                    var latest = QuerySql(connection, "SELECT revision,source_turn_id FROM conversation_scene_state WHERE hero_id=$id FOR UPDATE;", TestDict("id", subject)).SingleOrDefault();
+                    if (latest != null && ReadString(latest, "source_turn_id", "") != sceneTurnId
+                        && ReadLong(latest, "revision", 0) != ReadLong(before, "revision", 0))
+                        throw new InvalidOperationException("The scene changed while this response was being written; the submitted original remains saved.");
                     Dictionary<string, object> denial = denied.FirstOrDefault(x => string.Equals(ReadFirstString(x, "proposalId", "proposal_id"), ReadString(proposal, "proposal_id", ""), StringComparison.OrdinalIgnoreCase));
-                    bool locationDenied = ReadBool(denial, "locationDenied", false);
+                    bool locationDenied = ReadBool(denial, "locationDenied", false) || SceneProposalRefused(proposal, parsedResponse, reply);
+                    if (isPlayer && ReadInt(proposal, "linked_player", 0) == 1)
+                        locationDenied |= proposals.Any(p => ReadString(p, "groupId", "") == ReadString(proposal, "groupId", "")
+                            && ReadString(p, "subject_id", "") == speakerId && SceneProposalRefused(p, parsedResponse, reply));
                     bool clothingDenied = ReadBool(denial, "clothingDenied", false);
                     string location = locationDenied ? "" : ReadString(proposal, "location_value", "");
                     string locationClass = locationDenied ? "" : ReadString(proposal, "location_class", "");
@@ -1036,16 +1071,35 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
                 foreach (Dictionary<string, object> update in npcUpdates)
                 {
                     string subject = ReadString(update, "heroStringId", "");
-                    if (!allowed.Contains(subject)) continue;
+                    string playerId = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
+                    string quote = ReadString(update, "supportingQuote", "");
+                    bool explicitPlayerAction = subject == playerId && quote.Length >= 8 && quote.Length <= 1000
+                        && Regex.Matches(playerText ?? "", @"\*([^*]+)\*", RegexOptions.Singleline).Cast<Match>()
+                            .Any(action => action.Groups[1].Value.Contains(quote, StringComparison.Ordinal))
+                        && !HasPrivateNarrativeMeaning(quote) && !HasUncertainty(quote)
+                        && !Regex.IsMatch(quote, @"\b(?:will|would|could|might|if|yesterday|tomorrow|had|used to|plan|wish)\b", RegexOptions.IgnoreCase);
+                    if (!allowed.Contains(subject) || (!string.Equals(subject, speakerId, StringComparison.OrdinalIgnoreCase) && !explicitPlayerAction)
+                        || string.IsNullOrWhiteSpace(reply))
+                    {
+                        denied.Add(TestDict("heroStringId", subject, "reason", "unaccepted_or_other_speaker_scene_update"));
+                        continue;
+                    }
                     string location = LimitText(ReadString(update, "location", ""), 500);
+                    // A writer-authored location is not movement authority. Only the
+                    // source-bound proposal above can replace a narrative venue.
+                    if (location.Length > 0 && !AcceptedSpeakerMovement(update, speakerId, reply)
+                        && !(explicitPlayerAction && quote.Contains(location, StringComparison.OrdinalIgnoreCase)) && !proposals.Any(p => ReadString(p, "subject_id", "") == subject
+                        && ReadString(p, "location_value", "").Equals(location, StringComparison.OrdinalIgnoreCase)
+                        && !SceneProposalRefused(p, parsedResponse, reply)))
+                    { denied.Add(TestDict("heroStringId", subject, "reason", "location_without_source_bound_transition")); location = ""; }
                     string locationClass = string.IsNullOrWhiteSpace(location) ? "" : FirstNonEmpty(ReadString(update, "locationClass", ""), InferLocationClass(location));
                     string clothing = UsesCastleRoomAttireContext(payload) ? "" : LimitText(ReadString(update, "clothing", ""), 900);
                     if (string.IsNullOrWhiteSpace(location) && string.IsNullOrWhiteSpace(clothing)) continue;
                     UpsertConversationSceneOverride(connection, subject, location, locationClass, clothing, sceneTurnId, mode, hour, ts);
                     applied.Add(new Dictionary<string, object> { ["heroStringId"] = subject, ["location"] = location, ["clothing"] = clothing, ["source"] = "npc_reply" });
                 }
-                SaveSceneContinuityHandoffs(connection, payload, participants, sceneTurnId, speakerId, playerText, reply);
-                transaction.Commit();
+                SaveSceneContinuityHandoffs(connection, payload, participants, sceneTurnId, speakerId, playerText, reply, hearingAudience);
+                transaction?.Commit();
             }
             return new Dictionary<string, object> { ["sceneTurnId"] = sceneTurnId, ["worldHour"] = hour, ["denied"] = denied, ["applied"] = applied };
         }
@@ -1320,6 +1374,26 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                 && sharedVenuePrompt.Contains("- NPC: in Zeonica")
                 && !sharedVenuePrompt.Contains("- NPC: in Amitatys"),
                 sharedVenuePrompt);
+            var separateParticipants = new List<Dictionary<string, object>>
+            {
+                TestDict("heroStringId", "npc", "name", "NPC"),
+                TestDict("heroStringId", "player", "name", "Player")
+            };
+            var separateLocations = new Dictionary<string, Dictionary<string, object>>
+            {
+                ["npc"] = TestDict("heroStringId", "npc", "name", "NPC", "location", "camp stables", "hasNarrativeLocation", true),
+                ["player"] = TestDict("heroStringId", "player", "name", "Player", "location", "courtyard", "hasNarrativeLocation", true)
+            };
+            var separateDetailed = new HashSet<string>(new[] { "npc", "player" });
+            string separatePrompt = BuildConversationScenePrompt(separateParticipants, separateLocations, new(), "npc", separateDetailed, "camp stables");
+            add("shared_venue_preserves_independently_accepted_locations",
+                separatePrompt.Contains("- NPC: camp stables") && separatePrompt.Contains("- Player: courtyard"), separatePrompt);
+            separateLocations["npc"] = TestDict("heroStringId", "npc", "name", "NPC", "location", "in Amitatys");
+            separateLocations["player"] = TestDict("heroStringId", "player", "name", "Player", "location", "in Zeonica");
+            string remotePrompt = BuildConversationScenePrompt(separateParticipants, separateLocations, new(), "npc", separateDetailed, "");
+            add("no_shared_venue_preserves_remote_native_locations",
+                remotePrompt.Contains("- NPC: in Amitatys") && remotePrompt.Contains("- Player: in Zeonica")
+                    && !remotePrompt.Contains("SHARED CONVERSATION VENUE"), remotePrompt);
             add("authoritative_sections", prompt.Contains("ACTIVE LOCATION — AUTHORITATIVE") && prompt.Contains("ACTIVE CLOTHING — AUTHORITATIVE"), prompt);
             manyParticipants[0]["mbtiProfile"] = new Dictionary<string, object> { ["type"] = "ISTJ", ["title"] = "Careful", ["description"] = "Considers duty." };
             string roomPrompt = BuildConversationScenePrompt(manyParticipants, manyCurrent,

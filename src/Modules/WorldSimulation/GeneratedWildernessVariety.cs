@@ -95,6 +95,14 @@ namespace ReignBetaServer
                 ["background"] = LimitText(FirstNonEmpty(ReadString(background, "summary", ""), ReadString(stack, "nativeBiography", "")), 900),
                 ["scope"] = "Selected character facts for a new opening, not a transcript or a complete biography. Missing facts are unknown."
             };
+            // Missing native identity is unknown, never the false/male default.
+            if (TryReadWildernessGender(participant, out bool female))
+            {
+                brief["isFemale"] = female;
+                brief["gender"] = female ? "female" : "male";
+                brief["pronouns"] = female ? "she/her" : "he/him";
+            }
+            else brief["pronouns"] = "they/them (gender unknown)";
             // Whole bounded structural projections, never a serialized full stack.
             // Dynamic characteristics, constructed copies, archives and repeated
             // narrative projections previously made three people exceed 312k chars.
@@ -160,6 +168,7 @@ namespace ReignBetaServer
                 || string.IsNullOrWhiteSpace(ReadString(response, "playerHook", ""))) return "incomplete_opening";
             string[] allowedIds = participants.Select(CharacterIdFrom).ToArray();
             if (!ReadStringList(response, "participantHeroIds").Any(id => allowedIds.Contains(id, StringComparer.Ordinal))) return "no_eligible_participants";
+            if (WildernessOpeningIdentityConflict(response, participants)) return "participant_gender_conflict";
             foreach (var recent in WildernessRecentEvents(payload))
             {
                 string priorApproach = ReadString(recent, "approachDescription", "");
@@ -175,6 +184,37 @@ namespace ReignBetaServer
                 if (shared >= 12 && union > 0 && (double)shared / union >= 0.62) return "repeated_premise_words";
             }
             return "";
+        }
+
+        private static bool WildernessOpeningIdentityConflict(Dictionary<string, object> response, List<Dictionary<string, object>> participants)
+        {
+            // A conservative check for an explicitly named subject's own physical
+            // action. Do not guess the owner of arbitrary pronouns or quoted speech.
+            foreach (var person in participants)
+            {
+                if (!TryReadWildernessGender(person, out bool female)) continue;
+                string name = ReadString(person, "name", "");
+                if (name.Length == 0) continue;
+                string wrong = female ? "his" : "her";
+                string pattern = @"(?<![\p{L}\p{N}])" + Regex.Escape(name)
+                    + @"\s+(?:(?:has|had|is|was)\s+)?(?:reined|reins|mounted|mounts|raises|raised|lowers|lowered|folds|folded|turns|turned|rests|rested|closes|closed|opens|opened|rubs|rubbed|shakes|shook|nods|nodded)\s+"
+                    + wrong + @"\s+(?:own\s+)?(?:horse|head|hand|hands|arms|eyes|shoulders|chin|face|fingers)\b";
+                foreach (string key in new[] { "approachDescription", "openingText", "playerHook", "emotionalPressure", "surfaceClues", "hiddenContext", "discoveryRoutes" })
+                {
+                    string text = ReadString(response, key, "");
+                    // A quote can describe someone else; it is not narration proof.
+                    text = Regex.Replace(text, "[\"“][^\"”]*[\"”]", " ");
+                    if (Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase)) return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool TryReadWildernessGender(Dictionary<string, object> person, out bool female)
+        {
+            female = false;
+            return person != null && person.TryGetValue("isFemale", out var value) && value != null
+                && bool.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), out female);
         }
 
         private static string WildernessNormalizedText(string text)

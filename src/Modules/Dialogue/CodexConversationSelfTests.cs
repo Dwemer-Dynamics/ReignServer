@@ -206,6 +206,10 @@ namespace ReignBetaServer
                 ?? new Dictionary<string, object>();
             Dictionary<string, object> development = ReadDictionary(dynamicProperties, "narrativeDevelopment")
                 ?? new Dictionary<string, object>();
+            Dictionary<string, object> continuityItem = ReadDictionary(ReadDictionary(properties, "continuityWrites"), "items")
+                ?? new Dictionary<string, object>();
+            Dictionary<string, object> questionState = ReadDictionary(ReadDictionary(continuityItem, "properties"), "questionState")
+                ?? new Dictionary<string, object>();
             var chancellorPayload = new Dictionary<string, object>
             {
                 ["chancellorOfficeContext"] = new Dictionary<string, object> { ["enabled"] = true }
@@ -223,17 +227,18 @@ namespace ReignBetaServer
             string[] expectedSchemaNulls =
             {
                 "stateUpdates.mood", "stateUpdates.currentPlan", "stateUpdates.currentCrisis",
-                "dynamicCharacteristicWrites[].narrativeDevelopment"
+                "dynamicCharacteristicWrites[].narrativeDevelopment", "continuityWrites[].questionState"
             };
             bool stateNullable = new[] { "mood", "currentPlan", "currentCrisis" }
                 .All(key => IsNullableSchema(ReadDictionary(stateProperties, key)));
             bool developmentNullable = IsNullableSchema(development);
+            bool questionNullable = IsNullableSchema(questionState);
             bool salaryNullable = IsNullableSchema(salary);
             bool pathsMatch = expectedSchemaNulls.SequenceEqual(
                 selection.SchemaIntroducedNullPaths ?? new List<string>());
             bool contractPath = (chancellorSelection.ContractDefinedNullPaths ?? new List<string>())
                 .SequenceEqual(new[] { "chancellorDecision.activeDailySalary" });
-            bool ok = stateNullable && developmentNullable && salaryNullable && pathsMatch && contractPath;
+            bool ok = stateNullable && developmentNullable && questionNullable && salaryNullable && pathsMatch && contractPath;
             return SelfTest(ok,
                 ok ? "optional omission semantics use explicit nullable paths without fabricating durable values" : "nullable schema paths do not match the legacy contract",
                 new Dictionary<string, object>
@@ -242,6 +247,7 @@ namespace ReignBetaServer
                     ["contractDefinedNullPaths"] = chancellorSelection.ContractDefinedNullPaths,
                     ["stateNullable"] = stateNullable,
                     ["narrativeDevelopmentNullable"] = developmentNullable,
+                    ["questionStateNullable"] = questionNullable,
                     ["salaryNullable"] = salaryNullable
                 });
         }

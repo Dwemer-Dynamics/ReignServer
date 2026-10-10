@@ -34,10 +34,15 @@ namespace ReignBetaServer
             + "CURRENT facts override historical here/today/tomorrow and old scene plans. Distinguish a suggestion, an accepted intention, a completed narrated action and a confirmed native game effect. "
             + "A family home proves neither current presence nor witnessing. Use local presence evidence at its stated scope; unknown is not absent, town is not room, room is not witness. "
             + "Retain major unresolved concerns privately through unrelated talk. Bring them up naturally when a relevant person, place, news or time creates an opportunity; don't recite a checklist each turn.\n"
-            + "Return continuityWrites: [] unless this accepted reply establishes or changes a durable concern, relationship milestone or important episode. "
-            + "Each write has id (empty for new), kind (agenda/relationship/episode), subject, peerId, status (open/active/waiting/blocked/deferred/resolved/abandoned/invalidated), "
+            + "Return continuityWrites for substantive questions raised or answered, acknowledged corrections to an active plan, durable concerns and important episodes; use [] for unchanged state or ordinary small talk. "
+            + "Each write has id (empty for new), kind (agenda/relationship/episode/question), subject, peerId, status (open/active/waiting/blocked/deferred/resolved/abandoned/invalidated), "
             + "meaning, nextStep, completionCriterion, triggerPeople, triggerPlaces, parentId (empty unless this is a step of an existing concern), dueWorldDay (0 when unset), importance (0..1), evidenceQuote (exact nonempty excerpt of your visible reply), "
-            + "transitionReason, expectedRevision (0 for new). Use the existing id and revision for updates. Omission preserves a record. "
+            + "transitionReason, expectedRevision (0 for new). Use the existing id for updates; the server binds the read revision. Omission preserves a record. "
+            + "If evidence spans separate spoken passages, supply evidenceSpans: [{quote, start}] in source order, with exact excerpts and optional zero-based offsets. Never join passages across narration into a fabricated contiguous quote. "
+            + "For an accepted purely mechanical agenda step, optionally add activityStep: {kind, targetId, occurrenceId, requiredOutcome: finished/success/win, mechanicalCompletion:true, eventType, requiredPlayerRole, itemId, requiredQuantity, requiredCount}. "
+            + "For commerce, gifts, recruitment or crafting require an exact native eventType, player role, item/troop ID and quantity; never reduce compound promises to a generic arrival or transaction. requiredCount greater than one remains unresolved until separately proven. "
+            + "Use exact supplied native target IDs, an empty occurrenceId only for the next occurrence after acceptance, and kinds arrival/tournament/battle/quest/trade/action or another supplied activity kind. "
+            + "Never attach mechanicalCompletion to an emotional concern, a broad hunt/clearing objective, a scouting promise, or an unsupported target. Create a separate child step where needed. "
             + "Only your own accepted intention can create your agenda; a player's suggestion alone cannot. Do not resolve an emotional concern merely because travel ended. "
             + "A relationship milestone records only the participants who actually shared that experience, not everyone who later heard about it. "
             + "Completing a step never closes its parent concern. A blocked or deferred concern stays active; update its next step only with accepted new intent. Use episode records for completed narrated activities or settled discussions that must not be proposed again as if new. "
@@ -70,7 +75,12 @@ version_id TEXT PRIMARY KEY, record_id TEXT NOT NULL, source_event_id TEXT NOT N
 revision INTEGER NOT NULL, payload_json TEXT NOT NULL, created_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS conversation_scene_handoffs (
 handoff_id TEXT PRIMARY KEY, timeline_id TEXT NOT NULL, owner_id TEXT NOT NULL, anchor TEXT NOT NULL,
-source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NULL);");
+source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS conversation_continuity_pending (
+pending_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,
+source_event_id TEXT NOT NULL,source_turn_id TEXT NOT NULL,source_hash TEXT NOT NULL,world_day REAL NOT NULL,
+status TEXT NOT NULL,payload_json TEXT NOT NULL,created_ts BIGINT NOT NULL,resolved_event_id TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continuity_pending(timeline_id,owner_id,status);");
         }
 
         private static string ContinuityTimeline(Dictionary<string, object> payload) =>
@@ -111,7 +121,8 @@ source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NUL
             string timeline = ContinuityTimeline(payload);
             var row = QuerySql(connection, "SELECT * FROM conversation_scene_handoffs WHERE handoff_id=$id;",
                 new Dictionary<string, object> { ["id"] = timeline + ":" + owner }).FirstOrDefault();
-            if (row == null) return null;
+            if (row == null) return QuerySql(connection, "SELECT handoff_id FROM conversation_scene_handoffs WHERE owner_id=$owner LIMIT 1;",
+                TestDict("owner", owner)).Count > 0 ? new Dictionary<string, object>() : null;
             if (ReadString(row, "anchor", "") != ContinuitySceneAnchor(payload, participant)
                 || ReadDouble(payload, "worldDay", 0d) < ReadDouble(row, "world_day", 0d))
             {
@@ -119,16 +130,64 @@ source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NUL
                     new Dictionary<string, object> { ["id"] = owner });
                 return new Dictionary<string, object>();
             }
-            return TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+            var result = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+            // Only the narrative venue is durable across the hourly clothing cache.
+            if (ReadLong(result, "expires_world_hour", 0) <= ConversationWorldHour(payload)) result.Remove("clothing_override");
+            result["acceptedExchanges"] = ProjectSceneHandoffExchanges(connection, result, owner, payload);
+            return result;
+        }
+
+        private static List<Dictionary<string, object>> ProjectSceneHandoffExchanges(ReignDbConnection connection,
+            Dictionary<string, object> handoff, string observer, Dictionary<string, object> payload)
+        {
+            var result = new List<Dictionary<string, object>>();
+            foreach (var original in ReadDictionaryList(handoff, "acceptedExchanges").TakeLast(2))
+            {
+                var exchange = CloneDictionary(original);
+                string speaker = ReadString(exchange, "speakerId", "");
+                if (ReadString(exchange, "observerId", "") != observer && speaker != observer)
+                {
+                    // Legacy handoffs copied raw words to every present character.
+                    // For another speaker's record, recover observer-eligible source
+                    // content; absence of that proof must not disclose a whisper.
+                    string turn = ReadString(exchange, "turnId", ""), session = ReadString(exchange, "sessionId", "");
+                    var access = BuildKnowledgeAccessContext(observer,
+                        ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), "", payload);
+                    var rows = QuerySql(connection, @"SELECT * FROM conversation_turns
+WHERE session_id=$session AND (exchange_id=$turn OR event_id=$turn OR turn_id=$turn)
+AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session, "turn", turn))
+                        .Where(row => PrecisionTurnVisible(row, observer, access, connection)).ToList();
+                    var npc = rows.LastOrDefault(row => ReadString(row, "speaker_id", "") == speaker);
+                    if (npc == null) continue;
+                    var player = rows.FirstOrDefault(row => ReadString(row, "role", "") == "player");
+                    exchange["reply"] = ReadString(npc, "text", "");
+                    exchange["playerText"] = ReadString(player, "text", "");
+                    exchange["playerId"] = ReadString(player, "speaker_id", "");
+                    exchange["sourceIds"] = new[] { ReadString(player, "turn_id", ""), ReadString(npc, "turn_id", "") }.Where(id => id.Length > 0).ToArray();
+                    var metadata = TryParseJsonObject(ReadString(player, "payload_json", "{}"));
+                    exchange["validatedPlayerProjection"] = ReadInt(metadata, "playerNarrationProjectionVersion", 0) == 2
+                        && ReadString(metadata, "inputSourceId", "").Length > 0;
+                }
+                if (!ReadBool(exchange, "validatedPlayerProjection", false)) exchange["playerText"] = ObserverConversationText(ReadString(exchange, "playerText", ""),
+                    FirstNonEmpty(ReadString(exchange, "playerId", ""), ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId")), observer, true);
+                string speech = ConversationSpeechForRecall(ReadString(exchange, "reply", ""));
+                if (string.IsNullOrWhiteSpace(speech)) continue;
+                exchange["reply"] = ObserverConversationText(speech, speaker, observer);
+                result.Add(exchange);
+            }
+            return result;
         }
 
         private static void SaveSceneContinuityHandoffs(ReignDbConnection connection, Dictionary<string, object> payload,
-            List<Dictionary<string, object>> participants, string turnId, string speakerId, string playerText, string reply)
+            List<Dictionary<string, object>> participants, string turnId, string speakerId, string playerText, string reply,
+            IEnumerable<string> hearingAudience = null)
         {
             EnsureConversationContinuitySchema(connection);
+            MarkSharedActivitiesDelivered(connection, payload, speakerId, turnId, reply);
             foreach (var participant in participants)
             {
                 string owner = ReadString(participant, "heroStringId", "");
+                if (hearingAudience != null && !hearingAudience.Contains(owner, StringComparer.OrdinalIgnoreCase)) continue;
                 var row = QuerySql(connection, "SELECT * FROM conversation_scene_state WHERE hero_id=$id;",
                     new Dictionary<string, object> { ["id"] = owner }).FirstOrDefault();
                 string timeline = ContinuityTimeline(payload);
@@ -137,9 +196,14 @@ source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NUL
                 var previous = TryParseJsonObject(ReadString(old, "payload_json", "{}"));
                 row = row ?? (ReadString(old, "anchor", "") == ContinuitySceneAnchor(payload, participant)
                     ? new Dictionary<string, object>(previous ?? new Dictionary<string, object>()) : new Dictionary<string, object>());
-                var exchanges = ReadDictionaryList(previous, "acceptedExchanges").Where(e => ReadString(e, "turnId", "") != turnId).ToList();
+                var exchanges = ProjectSceneHandoffExchanges(connection, previous, owner, payload)
+                    .Where(e => ReadString(e, "turnId", "") != turnId || ReadString(e, "speakerId", "") != speakerId).ToList();
+                string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
                 exchanges.Add(new Dictionary<string, object> { ["turnId"] = turnId, ["speakerId"] = speakerId,
-                    ["playerText"] = playerText ?? "", ["reply"] = reply ?? "", ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
+                    ["playerId"] = player, ["observerId"] = owner,
+                    ["playerText"] = ProjectCurrentPlayerPromptText(playerText, owner, payload),
+                    ["validatedPlayerProjection"] = ReadInt(payload, "playerNarrationProjectionVersion", 0) == 2 && ReadString(payload, "inputSourceId", "").Length > 0,
+                    ["reply"] = ObserverConversationText(reply, speakerId, owner), ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
                     ["sessionId"] = ReadFirstString(payload, "conversationSessionId", "sessionId", "eventId") });
                 row["acceptedExchanges"] = exchanges.Skip(Math.Max(0, exchanges.Count - 2)).ToList();
                 ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_handoffs
@@ -162,50 +226,84 @@ source_turn_id TEXT NOT NULL, world_day REAL NOT NULL, payload_json TEXT NOT NUL
             string timeline = ContinuityTimeline(payload);
             var applied = new List<string>();
             var rejected = new List<Dictionary<string, object>>();
+            var receipts = new List<Dictionary<string, object>>();
+            var snapshot = GetContinuityReadSnapshot(payload, ownerId);
             foreach (var write in writes ?? new List<Dictionary<string, object>>())
             {
                 string kind = ReadString(write, "kind", "").ToLowerInvariant();
+                string questionError = kind == "question" ? PrepareQuestionContinuityWrite(connection, write, payload, ownerId, peerId, eventId, acceptedReply) : "";
                 string quote = ReadString(write, "evidenceQuote", "").Trim();
+                var spans = AcceptedContinuityEvidenceSpans(write, acceptedReply);
                 string subject = ReadString(write, "subject", "").Trim();
                 string status = ReadString(write, "status", "open").ToLowerInvariant();
                 string id = ReadString(write, "id", "").Trim();
                 string pair = ReadString(write, "peerId", "");
-                string reason = "";
-                if (!new[] { "agenda", "relationship", "episode" }.Contains(kind)) reason = "invalid_kind";
-                else if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(quote)
-                    || quote.Length < 12 || (acceptedReply ?? "").IndexOf(quote, StringComparison.Ordinal) < 0) reason = "missing_accepted_source_quote";
+                string reason = questionError;
+                if (questionError.Length > 0) { /* Preserve the precise source/state rejection. */ }
+                else if (!new[] { "agenda", "relationship", "episode", "question" }.Contains(kind)) reason = "invalid_kind";
+                else if (string.IsNullOrWhiteSpace(subject) || spans.Count == 0) reason = "missing_accepted_source_quote";
                 else if (!new[] { "open", "active", "waiting", "blocked", "deferred", "resolved", "abandoned", "invalidated" }.Contains(status)) reason = "invalid_status";
                 else if (kind == "relationship" && (string.IsNullOrWhiteSpace(peerId) || !KnowledgeIdEquals(pair, peerId))) reason = "unverified_relationship_participant";
                 else if (ContinuityClosed(status) && string.IsNullOrWhiteSpace(ReadString(write, "transitionReason", ""))) reason = "transition_requires_reason";
                 else if (IsUnsupportedWordingJudgment(subject + " " + ReadString(write, "meaning", ""))) reason = "generated_wording_judgment";
-                string parentId = ReadString(write, "parentId", "");
+                if (reason.Length == 0) reason = ConversationContinuityLinkError(connection, write, ownerId, timeline, ReadDouble(payload, "worldDay", 0d));
+                string parentId = CurrentContinuityRecordId(connection, timeline, ownerId, ReadString(write, "parentId", ""));
                 if (!string.IsNullOrWhiteSpace(parentId)
-                    && QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND timeline_id=$timeline AND kind='agenda';",
+                    && QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity") + " AND kind='agenda';",
                         new Dictionary<string, object> { ["id"] = parentId, ["owner"] = ownerId, ["timeline"] = timeline }).Count == 0) reason = "unverified_parent_concern";
                 if (string.IsNullOrWhiteSpace(id)) id = "continuity_" + PromptHash(timeline + "|" + ownerId + "|" + kind + "|" + pair + "|" + NormalizeLookup(subject)).Substring(0, 32);
+                id = CurrentContinuityRecordId(connection, timeline, ownerId, id);
                 var previous = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;",
                     new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
-                if (previous != null && (ReadString(previous, "owner_id", "") != ownerId || ReadString(previous, "timeline_id", "") != timeline)) reason = "ownership_mismatch";
-                if (previous != null && reason.Length == 0 && ReadString(previous, "source_event_id", "") == eventId) { applied.Add(id); continue; }
+                bool inherited = previous != null && ReadString(previous, "timeline_id", "") != timeline;
+                if (previous != null && (ReadString(previous, "owner_id", "") != ownerId
+                    || (inherited && (snapshot == null || !snapshot.Records.ContainsKey(id)
+                        || !IsVerifiedRestoredMemorySource(connection, previous, timeline))))) reason = "ownership_mismatch";
+                if (previous != null && reason.Length == 0 && ReadString(previous, "source_event_id", "") == eventId)
+                {
+                    applied.Add(id);
+                    receipts.Add(new Dictionary<string, object> { ["id"] = id, ["status"] = "already_applied",
+                        ["revision"] = ReadInt(previous, "revision", 0), ["sourceEventId"] = eventId });
+                    continue;
+                }
                 int revision = ReadInt(previous, "revision", 0);
-                if (ReadInt(write, "expectedRevision", 0) != revision) reason = "stale_revision";
+                Dictionary<string, object> readRecord = null;
+                snapshot?.Records.TryGetValue(id, out readRecord);
+                int expected = snapshot == null ? ReadInt(write, "expectedRevision", 0) : ReadInt(readRecord, "revision", 0);
+                if (reason.Length == 0 && (expected != revision || (readRecord != null
+                    && ReadString(readRecord, "sourceHash", "") != PromptHash(ReadString(previous, "payload_json", "{}")))))
+                    reason = snapshot == null ? "stale_revision" : "concurrent_revision_changed";
                 if (previous != null && (kind != ReadString(previous, "kind", "") || pair != ReadString(previous, "peer_id", ""))) reason = "record_identity_changed";
                 if (previous != null && ContinuityClosed(ReadString(previous, "status", "")) && !ContinuityClosed(status)
                     && string.IsNullOrWhiteSpace(ReadString(write, "transitionReason", ""))) reason = "reopening_requires_new_evidence";
+                if (previous != null && ContinuityClosed(ReadString(previous, "status", "")) && !ContinuityClosed(status)
+                    && !HasExplicitConversationReopening(quote, ReadString(payload, "playerText", "")))
+                    reason = "reopening_requires_explicit_new_exchange";
                 if (!string.IsNullOrWhiteSpace(reason))
                 {
-                    rejected.Add(new Dictionary<string, object> { ["id"] = id, ["reason"] = reason });
+                    var rejection = new Dictionary<string, object> { ["id"] = id, ["reason"] = reason,
+                        ["expectedRevision"] = expected, ["currentRevision"] = revision,
+                        ["modelExpectedRevision"] = ReadInt(write, "expectedRevision", 0) };
+                    if (reason == "concurrent_revision_changed")
+                        rejection["recovery"] = RetainPendingContinuityWrite(connection, payload, ownerId, peerId,
+                            eventId, acceptedReply, id, write, spans, expected, revision, ts);
+                    rejected.Add(rejection);
                     continue;
                 }
+                var source = BindAcceptedContinuityEvidence(connection, eventId, ownerId, acceptedReply, spans);
+                string inheritedId = inherited ? id : "";
+                if (inherited) id = "continuity_branch_" + PromptHash(timeline + "|" + ownerId + "|" + inheritedId).Substring(0, 32);
                 var value = new Dictionary<string, object>(TryParseJsonObject(ReadString(previous, "payload_json", "{}"))
                     ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
                 foreach (var field in write) if (field.Value != null) value[field.Key] = field.Value;
                 foreach (var field in new Dictionary<string, object>
                 {
                     ["id"] = id, ["ownerId"] = ownerId, ["timelineId"] = timeline,
-                    ["sourceEventId"] = eventId, ["sourceTurnId"] = ReadString(payload, "sceneTurnId", ""),
+                    ["sourceEventId"] = eventId, ["sourceTurnId"] = ReadString(source, "turnId", ""),
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d), ["revision"] = revision + 1,
-                    ["evidenceQuote"] = quote, ["status"] = status
+                    ["evidenceQuote"] = string.Join(" […] ", spans.Select(s => ReadString(s, "quote", ""))),
+                    ["evidenceSpans"] = spans, ["status"] = status, ["expectedRevision"] = expected,
+                    ["sourceEvidence"] = source
                 }) value[field.Key] = field.Value;
                 string json = Json.Serialize(value);
                 var changed = QuerySql(connection, @"INSERT INTO conversation_continuity
@@ -218,18 +316,30 @@ WHERE conversation_continuity.revision=$expected AND conversation_continuity.own
 AND conversation_continuity.timeline_id=$timeline RETURNING record_id;",
                     new Dictionary<string, object> { ["id"] = id, ["timeline"] = timeline, ["owner"] = ownerId, ["peer"] = pair,
                         ["kind"] = kind, ["status"] = status, ["importance"] = ClampDouble(ReadDouble(write, "importance", 0.5d), 0d, 1d),
-                        ["revision"] = revision + 1, ["expected"] = revision, ["event"] = eventId, ["turn"] = ReadString(payload, "sceneTurnId", ""), ["ts"] = ts, ["payload"] = json });
+                        ["revision"] = revision + 1, ["expected"] = inherited ? 0 : expected, ["event"] = eventId,
+                        ["turn"] = ReadString(source, "turnId", ""), ["ts"] = ts, ["payload"] = json });
                 if (changed.Count == 0)
                 {
-                    rejected.Add(new Dictionary<string, object> { ["id"] = id, ["reason"] = "concurrent_revision_changed" });
+                    rejected.Add(new Dictionary<string, object> { ["id"] = id, ["reason"] = "concurrent_revision_changed",
+                        ["recovery"] = RetainPendingContinuityWrite(connection, payload, ownerId, peerId,
+                            eventId, acceptedReply, id, write, spans, expected, revision, ts) });
                     continue;
                 }
+                if (inherited) LinkBranchedContinuityRecord(connection, timeline, ownerId, inheritedId, id);
                 ExecuteSql(connection, @"INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts)
 VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, object> { ["id"] = id + "_" + (revision + 1),
                     ["record"] = id, ["event"] = eventId, ["revision"] = revision + 1, ["payload"] = json, ["ts"] = ts });
                 applied.Add(id);
+                SupersedeReadPendingContinuity(connection, snapshot, id, eventId);
+                receipts.Add(new Dictionary<string, object> { ["id"] = id, ["status"] = "applied",
+                    ["previousRevision"] = revision, ["revision"] = revision + 1,
+                    ["revisionBinding"] = snapshot == null ? "explicit_legacy_revision" : "server_read_snapshot",
+                    ["modelExpectedRevision"] = ReadInt(write, "expectedRevision", 0),
+                    ["sourceEventId"] = eventId, ["sourceTurnId"] = ReadString(source, "turnId", ""),
+                    ["acceptedReplyHash"] = PromptHash(acceptedReply ?? "") });
             }
-            return new Dictionary<string, object> { ["applied"] = applied, ["rejected"] = rejected };
+            return new Dictionary<string, object> { ["applied"] = applied, ["rejected"] = rejected,
+                ["writeReceipts"] = receipts, ["status"] = rejected.Count == 0 ? "complete" : "incomplete" };
         }
 
         private static bool IsUnsupportedWordingJudgment(string text) => Regex.IsMatch(text ?? "",
@@ -239,12 +349,23 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
         private static string BuildProtectedConversationContinuity(string campaignId, string heroId,
             Dictionary<string, object> payload, Dictionary<string, object> state)
         {
-            var text = new StringBuilder(ConversationContinuityContract);
+            state = WithoutRecallAbsenceState(state, campaignId, heroId, payload);
+            var text = new StringBuilder(ConversationContinuityContract).AppendLine(ConversationSourceContract).AppendLine(ConversationQuestionContract).AppendLine(CharacterCommitmentContract);
+            text.AppendLine("A previous failed recall is not evidence that an earlier conversation never happened. When supplied original dialogue answers the current question, use it to resolve prior uncertainty instead of asking for the available story again.");
             bool official = ReadBool(payload, "officialMemoryFirewall", false);
             string peer = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string timeline = ContinuityTimeline(payload);
             var sourceIds = new List<string>();
+            if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
+                text.AppendLine(TryBuildCharacterLifeStatePrompt(campaignId, heroId, peer, payload, sourceIds));
             var agency = ReadDictionary(payload, "conversationAgencyContext");
+            if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
+            using (var persistentConnection = OpenCampaignConnection(campaignId))
+            {
+                CaptureContinuityReadSnapshot(persistentConnection, payload, heroId);
+                text.AppendLine(BuildCharacterCommitmentPrompt(persistentConnection, heroId, peer, payload, sourceIds));
+                text.AppendLine(BuildPlayerPerformancePrompt(persistentConnection, heroId, payload, sourceIds));
+            }
             if (agency != null)
             {
                 text.AppendLine().Append(ConversationAgencyPrompt(agency));
@@ -252,14 +373,35 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
             }
             if (!official && !string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
             {
+                using (var activityConnection = OpenCampaignConnection(campaignId))
+                {
+                    CaptureContinuityReadSnapshot(activityConnection, payload, heroId);
+                    text.Append(BuildPendingContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
+                    var mailAccess = BuildKnowledgeAccessContext(heroId, peer, "", payload);
+                    foreach (var letter in LoadCorrespondenceMemory(activityConnection, heroId, peer,
+                        ReadFirstString(payload, "playerText", "text", "message"), payload, mailAccess))
+                    {
+                        sourceIds.Add(letter.SourceId);
+                        text.AppendLine(RenderContinuityRecord(letter.SourceId, letter.Kind, letter.Owner, letter.Session, letter.Day, 119, true, letter.Text));
+                    }
+                    text.AppendLine().Append(BuildQuestionContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
+                    text.AppendLine().Append(BuildSharedActivityContinuity(activityConnection, timeline, peer, heroId, payload, state, sourceIds));
+                }
+                text.AppendLine().Append(BuildPersonalGossipPrompt(campaignId, heroId, payload, sourceIds));
                 bool precision = ReadString(ReadDictionary(payload, "memoryPrecisionEvidence"), "mode", "") == "precision";
                 if (!precision)
                 using (var connection = OpenCampaignConnection(campaignId))
                 {
                     EnsureConversationContinuitySchema(connection);
+                    var linkAccess = BuildKnowledgeAccessContext(heroId, peer, "", payload);
+                    foreach (var evidence in LinkedConversationEvidence(connection, heroId, peer, timeline, ReadString(payload, "playerText", ""), linkAccess))
+                    {
+                        sourceIds.Add(evidence.SourceId);
+                        text.AppendLine(RenderContinuityRecord(evidence.SourceId, evidence.Kind, heroId, evidence.Session, evidence.Day, 105, true, evidence.Text));
+                    }
                     text.Append(BuildEstablishedRelationshipContinuity(connection, campaignId, timeline, heroId, peer, sourceIds, ReadDouble(payload,"worldDay",0d)));
-                    var records = QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner
-AND status<>'invalidated' AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) AND (kind<>'relationship' OR peer_id=$peer)
+                    var records = QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: linkAccess) + @"
+AND status<>'invalidated' AND kind<>'question' AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) AND (kind<>'relationship' OR peer_id=$peer)
 ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 END,importance DESC,updated_ts DESC;",
                         new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = heroId, ["peer"] = peer });
                     string section = "";
@@ -288,13 +430,16 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
                             .Append("; places: ").Append(string.Join(", ", ReadStringList(record, "triggerPlaces")))
                             .Append("; source=").Append(ReadString(row, "source_event_id", ""))
                             .Append("; accepted evidence: ").AppendLine(ReadString(record, "evidenceQuote", ""));
+                        if (ReadString(ReadDictionary(record, "activityStep"), "status", "") == "completed")
+                            text.AppendLine("  The mechanical activity step is already complete (source=" + ReadString(record, "completionEventId", "")
+                                + "). Do not restart it; only the separate unresolved concern remains.");
                     }
                     var handoff = QuerySql(connection, "SELECT * FROM conversation_scene_handoffs WHERE handoff_id=$id;",
                         new Dictionary<string, object> { ["id"] = timeline + ":" + heroId }).FirstOrDefault();
                     if (handoff != null && ReadDouble(handoff, "world_day", 0d) <= ReadDouble(payload, "worldDay", 0d))
                     {
                         var handoffValue = TryParseJsonObject(ReadString(handoff, "payload_json", "{}"));
-                        var exchanges = ReadDictionaryList(handoffValue, "acceptedExchanges");
+                        var exchanges = ProjectSceneHandoffExchanges(connection, handoffValue, heroId, payload);
                         if (exchanges.Count > 0) text.AppendLine("LAST ACCEPTED SCENE HANDOFF — historical source, not a fresh proposal. Preserve completed discussion; interpret yesterday/tomorrow relative to the source day. Native movement and the current day remain authoritative.");
                         foreach (var exchange in exchanges)
                         {
@@ -319,8 +464,13 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
                 .Append("; world day=").Append(ReadDouble(payload, "worldDay", 0d).ToString("0.#####", CultureInfo.InvariantCulture))
                 .Append("; location=").AppendLine(ReadFirstString(payload, "locationId", "settlementId"));
             text.Append(BuildLocalPresenceContinuityPrompt(payload));
+            text.AppendLine().Append(BuildCurrentConversationGrounding(payload, heroId));
+            var requiredContent = CapturedRequiredPromptEvidence(payload);
+            requiredContent.Add(TestDict("id", "protected_continuity_content", "text", NormalizePromptSegment(text.ToString()),
+                "hash", PromptHash(text.ToString())));
             payload["continuityEvidence"] = new Dictionary<string, object> { ["sourceIds"] = sourceIds,
-                ["timelineId"] = timeline, ["ownerId"] = heroId, ["peerId"] = peer, ["projectionHash"] = PromptHash(text.ToString()) };
+                ["timelineId"] = timeline, ["ownerId"] = heroId, ["peerId"] = peer, ["projectionHash"] = PromptHash(text.ToString()),
+                ["requiredContent"] = requiredContent };
             payload["protectedContinuityPrompt"] = text.ToString();
             return text.ToString();
         }
@@ -333,7 +483,7 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
                 ["observer"] = observer, ["peer"] = peer, ["day"] = worldDay };
             var text = new StringBuilder();
             var intimacy = TableExists(connection, "court_social_signal_evidence") ? QuerySql(connection, @"SELECT * FROM court_social_signal_evidence
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND accepted=1 AND signal_type='sexual_intimacy_completed'
+WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("court_social_signal_evidence") + @" AND accepted=1 AND signal_type='sexual_intimacy_completed'
 AND ((speaker_id=$observer AND target_id=$peer) OR (speaker_id=$peer AND target_id=$observer))
 ORDER BY created_ts ASC;", parameters) : new List<Dictionary<string, object>>();
             // The underlying accepted signal store remains authoritative. This is
@@ -363,7 +513,7 @@ WHERE subject_id=$observer AND target_id=$peer AND status='active' ORDER BY stab
                     .Append("; latest source=").AppendLine(ReadString(row, "last_event_id", ""));
             }
             var receipts = TableExists(connection, "conversation_relationship_receipts") ? QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
-WHERE campaign_id=$campaign AND timeline_id=$timeline AND observer_id=$observer AND target_id=$peer
+WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @" AND observer_id=$observer AND target_id=$peer
 AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", parameters) : new List<Dictionary<string, object>>();
             foreach (var row in receipts.Where(r => !IsUnsupportedWordingJudgment(ReadString(r, "summary", "")))
                 .GroupBy(r => ReadString(r, "act_kind", "") + ":" + ReadString(r, "valence", ""))
@@ -416,8 +566,8 @@ WHERE t.speaker_id=$observer AND t.role='npc' AND t.status='active' AND s.player
 AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.text) LIKE '%slept together%'
  OR lower(t.text) LIKE '%our night%' OR lower(t.text) LIKE '%trust you%' OR lower(t.text) LIKE '%betrayed me%'
  OR lower(t.text) LIKE '%our partnership%' OR lower(t.text) LIKE '%shared a bed%') ORDER BY t.ts,t.turn_order;", parameters) : new List<Dictionary<string, object>>();
-            var dimensions = prior.GroupBy(r => Regex.IsMatch(ReadString(r, "text", ""), @"\b(kiss\w*|intima\w*|slept together|our night|shared a bed)\b", RegexOptions.IgnoreCase)
-                ? "physical affection and boundaries" : "trust, boundaries and partnership");
+            var dimensions = prior.Where(r => PairHistoryDimension(ReadString(r, "text", "")).Length > 0)
+                .GroupBy(r => PairHistoryDimension(ReadString(r, "text", "")));
             foreach (var dimension in dimensions)
             {
                 // First and latest complete exchanges show foundation and evolution.
@@ -434,7 +584,8 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                         TestDict("session", ReadString(row,"session_id",""), "exchange", exchange));
                     text.Append("HISTORICAL session=").Append(ReadString(row,"session_id", "")).Append("; source day=")
                         .Append(ReadDouble(row,"world_day",0d).ToString("0.#####",CultureInfo.InvariantCulture)).AppendLine(". Listed speakers heard this exchange; that is not evidence they witnessed events being described.");
-                    foreach (var turn in turns) text.AppendLine(RenderExactHistoryTurn(turn, new KnowledgeAccessContext { NpcId = observer }));
+                    var access = new KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = worldDay };
+                    foreach (var turn in ExpandConversationSequence(connection, turns, access)) text.AppendLine(RenderExactHistoryTurn(turn, access));
                 }
             }
             return text.ToString();
@@ -488,10 +639,13 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
         {
             var found = new List<Dictionary<string, object>>();
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
+            found.AddRange(FindConversationGroundingViolations(parsed, payload, heroId));
+            found.AddRange(SharedActivityReplyContradictions(reply, payload));
+            found.AddRange(StructuredActionReceiptContradictions(reply, payload));
             foreach (var write in ReadDictionaryList(parsed, "continuityWrites"))
             {
                 string quote = ReadString(write, "evidenceQuote", "");
-                if (quote.Length < 12 || reply.IndexOf(quote, StringComparison.Ordinal) < 0)
+                if (AcceptedContinuityEvidenceSpans(write, reply).Count == 0)
                     found.Add(new Dictionary<string, object> { ["type"] = "critical_continuity_metadata",
                         ["detail"] = "A durable continuity write is not supported by an exact quote of the accepted reply. Regenerate or remove that write and every dependent assertion." });
             }
@@ -521,7 +675,8 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                     ["match"] = match.Value, ["heroStringId"] = id,
                     ["detail"] = "Current native evidence excludes this person's local presence. Remove this claim without inventing their remote location or disclosing engine-only knowledge." });
             }
-            string venue = ReadString(ReadDictionary(payload, "conversationSceneState"), "conversationVenue", "");
+            string venue = ResolvedNarrativeVenue(payload, heroId, parsed, reply);
+            found.AddRange(CurrentSceneBodyContradictions(venue, reply));
             string expectedSite = Regex.IsMatch(venue, @"\btent\b", RegexOptions.IgnoreCase) ? "tent"
                 : Regex.IsMatch(venue, @"\btavern\b", RegexOptions.IgnoreCase) ? "tavern" : "";
             if (!string.IsNullOrEmpty(expectedSite))
@@ -570,15 +725,17 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             public string Text;
             public int Priority;
             public int Order;
+            public int? SelectionRank;
         }
 
         private static string RenderContinuityRecord(string id, string kind, string observer, string session,
-            double day, int priority, bool required, string body)
+            double day, int priority, bool required, string body, int? selectionRank = null)
         {
             Func<string, string> key = s => Regex.Replace(s ?? "", @"[^\p{L}\p{Nd}_:.,-]", "_");
             return "[[continuity source=" + key(id) + " kind=" + key(kind) + " observer=" + key(observer)
                 + " session=" + key(session) + " day=" + day.ToString("0.#####", CultureInfo.InvariantCulture)
-                + " priority=" + priority + " required=" + (required ? "true" : "false") + "]]\n"
+                + " priority=" + priority + " required=" + (required ? "true" : "false")
+                + (selectionRank.HasValue && selectionRank.Value >= 0 ? " selectionRank=" + selectionRank.Value.ToString(CultureInfo.InvariantCulture) : "") + "]]\n"
                 + (body ?? "").Replace("[[continuity ", "[quoted continuity ").Replace("[[/continuity]]", "[quoted end continuity]")
                 + "\n[[/continuity]]";
         }
@@ -596,14 +753,20 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                     groups.Add(new List<Dictionary<string, object>>());
                 groups.Last().Add(line);
             }
+            // Keep the most recent 30 individual messages, including the complete
+            // exchange that crosses the boundary. Memory deduplication relies on
+            // this content remaining in the actual provider request.
+            int protectedStart = Math.Max(0, groups.Sum(group => group.Count) - 30);
+            int groupEnd = 0;
             return string.Join("\n\n", groups.Select((group, index) =>
             {
+                groupEnd += group.Count;
                 string body = render(group);
                 if (string.IsNullOrWhiteSpace(body) || body == "none") return "";
                 var first = group.First();
                 string ids = string.Join(",", group.Select(l => FirstNonEmpty(ReadFirstString(l, "id", "turnId", "turn_id"), PromptHash(ReadString(l, "text", "")).Substring(0, 20))));
                 return RenderContinuityRecord(ids, "accepted_exchange", "current_observer", ReadFirstString(first, "sessionId", "session_id"),
-                    ReadDouble(first, "worldDay", ReadDouble(first, "world_day", 0d)), 80 + index, index == groups.Count - 1, body);
+                    ReadDouble(first, "worldDay", ReadDouble(first, "world_day", 0d)), Math.Max(65, 85 - (groups.Count - 1 - index)), groupEnd > protectedStart, body);
             }).Where(s => s.Length > 0));
         }
 
@@ -611,7 +774,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
         {
             string normalized = (text ?? "").Replace("\r\n", "\n").Trim();
             if (normalized.Length == 0) return new List<ContinuityPromptRecord>();
-            var structured = Regex.Matches(normalized, @"\[\[continuity source=([^ ]*) kind=([^ ]*) observer=([^ ]*) session=([^ ]*) day=([^ ]*) priority=(\d+) required=(true|false)\]\]\n[\s\S]*?\[\[/continuity\]\]").Cast<Match>().ToList();
+            var structured = Regex.Matches(normalized, @"\[\[continuity source=([^ ]*) kind=([^ ]*) observer=([^ ]*) session=([^ ]*) day=([^ ]*) priority=(\d+) required=(true|false)(?: selectionRank=(\d+))?\]\]\n[\s\S]*?\[\[/continuity\]\]").Cast<Match>().ToList();
             if (structured.Count > 0)
             {
                 var result = new List<ContinuityPromptRecord>();
@@ -622,7 +785,8 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                     result.Add(new ContinuityPromptRecord { SourceId = match.Groups[1].Value, Kind = match.Groups[2].Value,
                         Observer = match.Groups[3].Value, Session = match.Groups[4].Value,
                         WorldDay = double.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture),
-                        Priority = int.Parse(match.Groups[6].Value, CultureInfo.InvariantCulture), Required = match.Groups[7].Value == "true", Text = match.Value });
+                        Priority = int.Parse(match.Groups[6].Value, CultureInfo.InvariantCulture), Required = match.Groups[7].Value == "true", Text = match.Value,
+                        SelectionRank = int.TryParse(match.Groups[8].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int rank) ? rank : null });
                     cursor = match.Index + match.Length;
                 }
                 if (cursor < normalized.Length) result.AddRange(ContinuityPromptRecords(normalized.Substring(cursor), newest));
@@ -656,14 +820,14 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             var records = ContinuityPromptRecords(text, newest);
             var retained = new List<ContinuityPromptRecord>();
             int available = Math.Max(0, charAllowance);
-            foreach (var record in records.OrderByDescending(r => r.Required).ThenByDescending(r => r.Priority))
+            foreach (var record in OrderPromptEvidenceRecords(records.Select(r => (Record: r, Section: section))).Select(item => item.Record))
             {
                 bool fits = record.Required || record.Text.Length + 2 <= available;
                 diagnostics.Add(new Dictionary<string, object> { ["section"] = section, ["sourceId"] = record.SourceId,
                     ["kind"] = record.Kind, ["observer"] = record.Observer, ["sessionId"] = record.Session,
                     ["worldDay"] = record.WorldDay, ["required"] = record.Required, ["contentHash"] = PromptHash(record.Text),
                     ["retained"] = fits, ["reason"] = fits ? "selected_whole_record" : "lower_priority_record_exceeds_allowance",
-                    ["characters"] = record.Text.Length });
+                    ["characters"] = record.Text.Length, ["priority"] = record.Priority, ["selectionRank"] = record.SelectionRank });
                 if (!fits) continue;
                 retained.Add(record); available -= record.Text.Length + 2;
             }
@@ -673,6 +837,8 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
         private static void FinalizeContinuityPromptBudget(PromptEnvelope envelope, Dictionary<string, object> payload,
             Dictionary<string, object> capacityPolicy = null)
         {
+            if (ReadDictionary(payload, "sharedActivityEvidence") is { } activityEvidence)
+                envelope.Diagnostics["sharedActivityEvidence"] = activityEvidence;
             int bytes = envelope.Messages.Sum(m => Encoding.UTF8.GetByteCount(ReadString(m, "content", "")));
             // The estimate is disclosed, not represented as an exact tokenizer.
             // The final request is independently checked again after all adapters.
@@ -680,6 +846,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             var expectedSources = ReadStringList(ReadDictionary(payload, "continuityEvidence"), "sourceIds").Distinct().ToList();
             string rendered = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
             var missingSources = expectedSources.Where(id => !rendered.Contains(id, StringComparison.Ordinal)).ToList();
+            missingSources.AddRange(MissingContinuityContent(rendered, ReadDictionary(payload, "continuityEvidence")));
             var memoryEvidence = ReadDictionary(payload, "memoryPrecisionEvidence");
             missingSources.AddRange(MissingPrecisionEvidence(rendered, memoryEvidence));
             if (!PrecisionEvidenceGenerationCurrent(memoryEvidence)) missingSources.Add("memory_generation_changed");
@@ -695,20 +862,62 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 ["inputTokenByteUpperBound"] = bytes + envelope.Messages.Count * 12,
                 ["selectedInputAllowance"] = Math.Min(selected, allowance),
                 ["fits"] = fits, ["provisionalUntilProviderSerialization"] = true,
+                ["capacityRejectionDeferredToProviderPreflight"] = !fits && missingSources.Count == 0,
                 ["continuityEvidence"] = ReadDictionary(payload, "continuityEvidence"),
                 ["memoryPrecisionEvidence"] = memoryEvidence,
                 ["tokenAccounting"] = new Dictionary<string, object> {
                     ["fixedRules"] = EstimateContinuityTokens(ReadString(envelope.Messages.FirstOrDefault(), "content", "")),
                     ["characterProfile"] = EstimateContinuityTokens(ReadString(envelope.Messages.Skip(1).FirstOrDefault(m => ReadString(m, "role", "") == "system"), "content", "")),
                     ["dynamicMemory"] = ReadInt(memoryEvidence, "dynamicMemoryTokenEstimate", 0),
+                    ["drinkSubsystem"] = ReadInt(ReadDictionary(envelope.Diagnostics, "drinkPromptBudget"), "inputTokenEstimate", 0),
+                    ["coreSerializedInput"] = ReadInt(ReadDictionary(envelope.Diagnostics, "drinkPromptBudget"), "coreInputTokenEstimate", estimated),
                     ["totalSerializedInput"] = estimated,
                     ["helperInput"] = ReadInt(memoryEvidence, "helperInputTokenEstimate", 0) },
                 ["requiredSourceIds"] = expectedSources, ["missingSourceIds"] = missingSources,
                 ["requiredSourceCoverageComplete"] = missingSources.Count == 0
             };
             if (missingSources.Count > 0) throw new InvalidOperationException("Required continuity evidence was lost during prompt assembly: " + string.Join(",", missingSources));
-            if (!fits) throw new InvalidOperationException("The complete conversation context exceeds its input allowance. "
-                + "The player message and protected relationship/agenda evidence were preserved; configure a verified larger model context before retrying.");
+            // Keep the complete envelope and its diagnostics. The final provider
+            // preflight returns the normal recoverable failure without dispatching;
+            // throwing here bypassed input recovery and left an empty HTTP 500.
+        }
+
+        private static List<string> MissingContinuityContent(string rendered, Dictionary<string, object> evidence, bool serialized = false)
+        {
+            var missing = new List<string>();
+            foreach (var record in ReadDictionaryList(evidence, "requiredContent"))
+            {
+                string content = NormalizePromptSegment(ReadString(record, "text", ""));
+                bool verified = content.Length > 0 && PromptHash(content) == ReadString(record, "hash", "");
+                string quoted = serialized ? Json.Serialize(content) : content;
+                string expected = serialized && quoted.Length >= 2 ? quoted.Substring(1, quoted.Length - 2) : quoted;
+                if (!verified || !(rendered ?? "").Contains(expected, StringComparison.Ordinal))
+                    missing.Add(ReadString(record, "id", "invalid_continuity_content"));
+            }
+            return missing;
+        }
+
+        private static void ProjectConversationEvidenceForIdentity(Dictionary<string, object> payload,
+            string playerText, string canonicalName, Dictionary<string, object> identityView)
+        {
+            // Apply the same trusted observer projection as the actual prompt. Do not
+            // derive expected content from the rendered request: that would bless a
+            // lost answer or an adapter's arbitrary alteration as valid evidence.
+            void Project(Dictionary<string, object> record, string textKey, string hashKey)
+            {
+                string source = ReadString(record, textKey, "");
+                string originalHash = ReadString(record, hashKey, "");
+                if (source.Length == 0 || PromptHash(source) != originalHash) return;
+                string projected = NormalizePromptSegment(SanitizePromptForIdentity(source, playerText, canonicalName, identityView));
+                record["identityProjectionSourceHash"] = originalHash;
+                record["identityProjection"] = "observer_identity_and_prompt_whitespace";
+                record[textKey] = projected;
+                record[hashKey] = PromptHash(projected);
+            }
+            foreach (var record in ReadDictionaryList(ReadDictionary(payload, "continuityEvidence"), "requiredContent"))
+                Project(record, "text", "hash");
+            foreach (var record in ReadDictionaryList(ReadDictionary(payload, "memoryPrecisionEvidence"), "records"))
+                Project(record, "rendered", "textHash");
         }
 
         private static int EstimateContinuityTokens(string serialized)
@@ -732,7 +941,11 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             string serialized = Json.Serialize(body);
             var expectedSources = ReadStringList(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "requiredSourceIds");
             var missingSources = expectedSources.Where(id => !serialized.Contains(id, StringComparison.Ordinal)).ToList();
-            missingSources.AddRange(MissingPrecisionEvidence(serialized,
+            // Diagnostics, source IDs or tool metadata cannot stand in for actual
+            // speaker-labeled evidence in the provider's messages.
+            missingSources.AddRange(MissingContinuityContent(Json.Serialize(ReadDictionaryList(body, "messages")),
+                ReadDictionary(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "continuityEvidence"), true));
+            missingSources.AddRange(MissingPrecisionEvidence(Json.Serialize(ReadDictionaryList(body, "messages")),
                 ReadDictionary(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "memoryPrecisionEvidence"), true));
             if (!PrecisionEvidenceGenerationCurrent(ReadDictionary(ReadDictionary(ReadDictionary(payload,"promptEnvelope"),"continuityPreflight"),"memoryPrecisionEvidence")))
                 missingSources.Add("memory_generation_changed");
@@ -750,6 +963,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 ["inputTokenEstimate"] = estimate, ["inputTokenByteUpperBound"] = byteBound,
                 ["selectedInputAllowance"] = Math.Min(allowance, SelectConversationInputStep(estimate)),
                 ["fits"] = estimate <= allowance && capacityFits && ReadBool(policy, "outputFits", false) && missingSources.Count == 0,
+                ["physicalCapacityFits"] = capacityFits,
                 ["missingSourceIds"] = missingSources, ["requiredSourceCoverageComplete"] = missingSources.Count == 0,
                 ["estimator"] = "ascii_divided_by_three_plus_unicode_utf8_bytes_plus_128; not an exact tokenizer",
                 ["requiredSources"] = ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight")

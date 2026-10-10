@@ -135,6 +135,7 @@ namespace ReignBetaServer
         {
             payload = payload ?? new Dictionary<string, object>();
             payload.Remove("resolvedPortraitPhysique");
+            payload.Remove("resolvedPortraitVision");
             Dictionary<string, object> settings = LoadSettings();
             Stopwatch total = Stopwatch.StartNew();
 
@@ -148,6 +149,8 @@ namespace ReignBetaServer
             string promptPurpose = ReadString(payload, "promptPurpose", "portrait");
             if (string.IsNullOrWhiteSpace(promptPurpose)) promptPurpose = "portrait";
             bool adultClothingEdit = UsesAdultPortraitClothingEdit(payload);
+            string refreshMode = "";
+            bool reflectYears = false;
             string clientPrompt = ReadString(payload, "prompt", "");
             string prompt = ExpandPortraitIdentityTokens(payload, clientPrompt);
             Dictionary<string, object> physicalConfidence = ReadDictionary(payload, "physicalConfidence") ?? new Dictionary<string, object>();
@@ -158,6 +161,7 @@ namespace ReignBetaServer
                 promptPurpose,
                 ReadString(payload, "provider", ""));
             Dictionary<string, object> timing = new Dictionary<string, object>();
+            Dictionary<string, object> visionEvidence = null;
 
             if (IsCharacterPortraitProfile(imageProfile.Name))
             {
@@ -174,6 +178,14 @@ namespace ReignBetaServer
 
             try
             {
+                refreshMode = PortraitRefreshMode(payload);
+                reflectYears = refreshMode == "reflect_years";
+                if (reflectYears)
+                {
+                    imageProfile = ResolveImageGenerationProfile(settings, "adultPortrait");
+                    imageProfile.AtlasWanNegativePrompt = "text, watermark, captions, border, distorted anatomy";
+                    adultClothingEdit = false;
+                }
                 Stopwatch phase = Stopwatch.StartNew();
                 byte[] sourceImage = IsCharacterPortraitProfile(imageProfile.Name) && !ReadBool(payload, "sharedCacheOutput", false)
                     ? null : DecodeImageBase64(sourceBase64);
@@ -182,9 +194,16 @@ namespace ReignBetaServer
 
                 Dictionary<string, object> sourceProvenance = new Dictionary<string, object>();
                 phase.Restart();
-                sourceImage = ResolveImageRequestSource(imageProfile.Name, sourceImage,
-                    () => ResolvePortraitGenerationSource(settings, payload, sourceImage, out sourceProvenance));
-                if (IsCharacterPortraitProfile(imageProfile.Name))
+                sourceImage = reflectYears
+                    ? PortraitReflectionSource(payload, out sourceProvenance)
+                    : ResolveImageRequestSource(imageProfile.Name, sourceImage,
+                        () => ResolvePortraitGenerationSource(settings, payload, sourceImage, out sourceProvenance));
+                if (reflectYears)
+                {
+                    prompt = PortraitReflectionPrompt(ReadInt(sourceProvenance, "currentAgeYears", 0));
+                    outputSizeOverride = ReadInt(sourceProvenance, "width", 0) + "x" + ReadInt(sourceProvenance, "height", 0);
+                }
+                else if (IsCharacterPortraitProfile(imageProfile.Name))
                 {
                     phase.Stop();
                     timing["nativeSourceMs"] = phase.ElapsedMilliseconds;
@@ -208,6 +227,15 @@ namespace ReignBetaServer
                         if (imageProfile.AtlasWanNegativePrompt == DefaultAtlasWan25NegativePrompt)
                             imageProfile.AtlasWanNegativePrompt = DefaultAtlasWan25NegativePrompt.Replace(", armor, weapons, helmets, chainmail, modern clothing", "");
                     }
+                    if (!sharedRebuild && imageProfile.Name == "portrait" && PortraitGenerationMethod(settings) == "text")
+                    {
+                        phase.Restart();
+                        visionEvidence = DescribePortraitSource(settings, sourceImage);
+                        phase.Stop();
+                        timing["visionMs"] = phase.ElapsedMilliseconds;
+                        payload["resolvedPortraitVision"] = visionEvidence;
+                        sourceProvenance["vision"] = visionEvidence;
+                    }
                     prompt = sharedRebuild
                         ? ApplyPortraitProductPromptContract(BuildSharedPortraitRebuildPrompt(payload))
                         : ApplyPortraitProductPromptContract(BuildPortraitPrompt(payload, clientPrompt, !adultClothingEdit));
@@ -221,7 +249,8 @@ namespace ReignBetaServer
                 }
 
                 phase.Restart();
-                PortraitImageCallResult call = CallImageProvider(settings, imageProfile, prompt, sourceImage, outputSizeOverride);
+                PortraitImageCallResult call = CallImageProvider(settings, imageProfile, prompt,
+                    visionEvidence == null ? sourceImage : null, outputSizeOverride);
                 phase.Stop();
                 timing["providerCallMs"] = phase.ElapsedMilliseconds;
 
@@ -239,9 +268,10 @@ namespace ReignBetaServer
                     phase.Restart();
                     try
                     {
-                        productValidation = NormalizeAndValidateGeneratedPortraitProduct(
-                            call.ImageBytes,
-                            out byte[] normalizedPortrait);
+                        byte[] normalizedPortrait;
+                        productValidation = reflectYears
+                            ? ValidatePortraitReflectionProduct(sourceImage, call.ImageBytes, out normalizedPortrait)
+                            : NormalizeAndValidateGeneratedPortraitProduct(call.ImageBytes, out normalizedPortrait);
                         call.ImageBytes = normalizedPortrait;
                     }
                     catch (Exception validationError)
@@ -268,6 +298,8 @@ namespace ReignBetaServer
                         ["model"] = call.Model, ["outcome"] = "completed", ["durationMs"] = timing["providerCallMs"],
                         ["sourceSha256"] = Sha256Hex(sourceImage), ["outputSha256"] = Sha256Hex(call.ImageBytes) }
                 };
+                generationStages[0]["generationMethod"] = visionEvidence == null ? "image" : "text";
+                if (visionEvidence != null) generationStages[0]["vision"] = visionEvidence;
                 string generationWarning = "";
                 if (ReadDictionary(payload, "resolvedPortraitPhysique") != null)
                     generationStages[0]["physique"] = ReadDictionary(payload, "resolvedPortraitPhysique");
@@ -310,6 +342,7 @@ namespace ReignBetaServer
 
                 if (productReceipt != null)
                 {
+                    productReceipt["portraitRefreshMode"] = refreshMode;
                     productReceipt["generationStages"] = generationStages;
                     productReceipt["warning"] = generationWarning;
                     productReceipt["physique"] = ReadDictionary(payload, "resolvedPortraitPhysique");
@@ -392,6 +425,9 @@ namespace ReignBetaServer
                     };
                 }
 
+                if (refreshMode.Length != 0)
+                    ReplaceRefreshedCharacterOverride(campaignId, heroId, call.ImageBytes, productReceipt);
+                response["portraitRefreshMode"] = refreshMode;
                 response["characterName"] = ReadString(payload, "characterName", "");
                 response["ageYears"] = ReadInt(payload, "ageYears", 0);
 				response["clanTier"] = ReadInt(payload, "clanTier", 0);
@@ -666,7 +702,10 @@ namespace ReignBetaServer
 
         private static string BuildPortraitPrompt(Dictionary<string, object> payload, string clientPrompt, bool includePhysicalConfidence = true)
         {
-            if (PreserveResidentClothing(payload)) return BuildResidentPortraitPrompt(payload);
+            if (PreserveResidentClothing(payload)) return ReadDictionary(payload, "resolvedPortraitVision") == null ? BuildResidentPortraitPrompt(payload)
+                : PortraitVisionIdentityPrompt(payload) + "\n" + BuildResidentPortraitPrompt(payload)
+                    .Replace("supplied native source image", "written identity and outfit description")
+                    .Replace("in the source", "in the outfit description");
 			List<string> layers = new List<string>
             {
                 "portrait_identity.txt",
@@ -687,7 +726,8 @@ namespace ReignBetaServer
             List<string> parts = new List<string>();
             foreach (string layer in layers)
             {
-                string text = LoadPromptTemplate(layer).Trim();
+                string text = layer == "portrait_identity.txt" && ReadDictionary(payload, "resolvedPortraitVision") != null
+                    ? PortraitVisionIdentityPrompt(payload) : LoadPromptTemplate(layer).Trim();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
                     parts.Add(text);
@@ -760,6 +800,10 @@ namespace ReignBetaServer
                 return GenerateNanoGptGeminiChatImage(settings, apiKey, model, prompt, sourceImagePng);
             }
 
+            if (sourceImagePng == null) return PostImageJson(
+                ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl), apiKey,
+                BuildNanoPortraitTextPayload(model, prompt, outputSizeOverride), settings, "NanoGPT", model, "text image generation");
+
             if (UsesImageReferenceAdapter(model))
             {
                 return GenerateNanoGptImageReference(settings, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
@@ -830,9 +874,10 @@ namespace ReignBetaServer
                 new Dictionary<string, object>
                 {
                     ["type"] = "image_url",
-                    ["image_url"] = new Dictionary<string, object> { ["url"] = "data:image/png;base64," + Convert.ToBase64String(sourceImagePng) }
+                    ["image_url"] = new Dictionary<string, object> { ["url"] = sourceImagePng == null ? "" : "data:image/png;base64," + Convert.ToBase64String(sourceImagePng) }
                 }
             };
+            if (sourceImagePng == null) content.RemoveAt(1);
             Dictionary<string, object> body = new Dictionary<string, object>
             {
                 ["model"] = model,
@@ -865,20 +910,22 @@ namespace ReignBetaServer
             try
             {
                 string uploadUrl = ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl);
-                string sourceUrl = UploadAtlasMedia(uploadUrl, apiKey, sourceImagePng, out int uploadResponseChars);
+                int uploadResponseChars = 0;
+                string sourceUrl = sourceImagePng == null ? "" : UploadAtlasMedia(uploadUrl, apiKey, sourceImagePng, out uploadResponseChars);
                 responseChars += uploadResponseChars;
-                if (string.IsNullOrWhiteSpace(sourceUrl))
+                if (sourceImagePng != null && string.IsNullOrWhiteSpace(sourceUrl))
                 {
                     return PortraitImageCallResult.Fail("AtlasCloud", model, "AtlasCloud upload returned no source URL.");
                 }
 
                 string outputSize = AtlasPresetSourceSize(outputSizeOverride);
-                Dictionary<string, object> body = BuildAtlasImagePayload(
+                Dictionary<string, object> body = sourceImagePng == null ? BuildAtlasPortraitTextPayload(model, prompt, outputSize, imageProfile.AtlasWanNegativePrompt) : BuildAtlasImagePayload(
                     model,
                     prompt,
                     sourceUrl,
                     outputSize,
                     imageProfile.AtlasWanNegativePrompt);
+                model = ReadString(body, "model", model);
                 string json = Json.Serialize(body);
                 requestChars += json.Length;
                 string generateUrl = ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl);

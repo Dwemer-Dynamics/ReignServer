@@ -612,8 +612,10 @@ namespace ReignBetaServer
             bool markedFailure = false;
             if (usableRepair)
             {
-                finalReply = MarkRepairedVisibleText(
-                    repairedReply, revalidationCleared);
+                CarryConversationRepairState(parsed, repairedJson);
+                MarkRepairedVisibleResponse(repairedJson, revalidationCleared);
+                finalReply = ReadFirstString(repairedJson, "reply", "response", "text", "content");
+                parsed["repairStatus"] = ReadDictionary(repairedJson, "repairStatus");
                 outcome = "llm_repair";
                 finalObserved = repairedObserved;
             }
@@ -791,8 +793,6 @@ namespace ReignBetaServer
                 .Equals("explicit_player_permission", StringComparison.OrdinalIgnoreCase);
             if (newPermission && !PoliticalFirstNameDirectAddressUsed(reply, allowedFirstName))
                 violations.Add("new_informal_permission_ignored");
-            if (repeatedFormula)
-                violations.Add("group_rhetorical_convergence");
             if (string.IsNullOrWhiteSpace(reply))
                 violations.Add("empty_visible_reply");
             string addressMode = firstNameUsed ? "first_name"
@@ -805,6 +805,7 @@ namespace ReignBetaServer
                 ["evidenceKeys"] = evidence,
                 ["violations"] = violations.Distinct(
                     StringComparer.OrdinalIgnoreCase).ToList(),
+                ["warnings"] = repeatedFormula ? new List<string> { "group_rhetorical_convergence" } : new List<string>(),
                 ["rhetoricalConvergence"] = repeatedFormula
             };
         }
@@ -1209,7 +1210,7 @@ namespace ReignBetaServer
                 DetectPoliticalRhetoricalConvergence(
                     "Your Grace, with respect, I object; the realm will remember this choice.",
                     ledger),
-                "Repeated openings, closings, or multi-action stage formulas are rejected in group turns.");
+                "Repeated openings, closings, or multi-action stage formulas remain observable as style warnings.");
 
             string[] authorityClasses =
             {

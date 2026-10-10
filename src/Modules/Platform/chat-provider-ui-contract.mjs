@@ -9,7 +9,7 @@ const [htmlPath, output] = process.argv.slice(2);
 const html = await fs.readFile(htmlPath, 'utf8');
 await fs.mkdir(output, { recursive: true });
 const keys = ['dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel','memoryModel',
-  'relationshipModel','correspondenceModel','strategyModel','selectorModel','actionPlannerModel','actionRouterModel'];
+  'relationshipModel','correspondenceModel','strategyModel','actionPlannerModel','actionRouterModel'];
 const providers = ['nanogpt','openrouter','openai_compatible','codex_subscription'];
 let settings = { llmProvider:'nanogpt', nanoGptApiKeyPresent:true, nanoGptApiKeyLength:20,
   openRouterApiKeyPresent:true, openRouterApiKeyLength:24, apiUrl:'https://fixture.invalid/chat',
@@ -152,6 +152,28 @@ try {
   assert.equal(saved.nanoGptApiKey,'');
   assert.equal(saved.codexOptions.fastMode,true,'Non-Codex save must preserve the Codex bank');
   assert.equal(saved.codexOptions.stablePromptMapping,true,'Non-Codex save must preserve independent Codex experiments');
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('models').classList.add('active'); });
+  const retired = ['highMemoryMode','memoryCheckerModel','memoryCheckerTimeoutMs','memoryEvidenceModel',
+    'memoryEvidenceTimeoutMs','memoryEvidenceReasoningEffort','memoryEvidencePlanningReasoningEffort',
+    'memoryEvidenceInputTokenBudget','memoryEvidenceAdaptiveRetrieval','memoryFinalCheckEnabled',
+    'selectorModel','enableMinimeMemoryWorker','minimeTopicUrl','minimeMaxTopics','minimeTimeoutMs','minimeRetryCooldownSeconds','enableMinimeMemoryReranking','minimeRerankUrl','minimeRerankCandidateCount','minimeRerankTimeoutMs','minimeRerankWeight'];
+  for (const key of retired) assert.equal(await page.locator('#' + key).count(),0,'Retired memory control must be absent: ' + key);
+  await page.fill('#memoryModel','fixture/summary-writer');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.memoryModel,'fixture/summary-writer');
+  assert.equal(saved.dialogueModel,'openai/router-draft');
+  assert.equal(saved.llmModelProfiles.openrouter.memoryModel,'fixture/summary-writer');
+  for (const key of retired) {
+    assert.equal(Object.hasOwn(saved,key),false,'Settings save must not send retired key: ' + key);
+    assert.ok(Object.values(saved.llmModelProfiles).every(bank => !Object.hasOwn(bank,key)));
+  }
+  for (const width of [1672,1024,600]) {
+    await page.setViewportSize({width,height:941});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth>innerWidth+1),false);
+    const screenshot=path.join(output,`${width}-local-memory.png`);
+    await page.locator('#models').screenshot({path:screenshot});
+    results.push({width,retiredControlsAbsent:true,screenshot,passed:true});
+  }
   assert.deepEqual(errors,[]);
   const report=path.join(output,'ui-report.json');
   await fs.writeFile(report,JSON.stringify({ok:true,isolated:true,htmlPath,results,errors,saveReload:true,maskedKeysPreserved:true},null,2));

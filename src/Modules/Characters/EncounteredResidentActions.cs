@@ -13,15 +13,24 @@ namespace ReignBetaServer
             if (text.Length == 0 || text.Length > 6000) return false;
             // Stage directions and unrelated self-description are not a decision about joining.
             text = Regex.Replace(text, @"\*[^*]*\*", " ");
-            if (DialogueActionBlockingPhrases().Where(p => p != "i will not" && p != "i won't" && p != "prove")
-                    .Any(p => Regex.IsMatch(text, @"\b" + Regex.Escape(p) + @"\b"))
-                || Regex.IsMatch(text, @"\b(if|unless|perhaps|maybe|might|would|could|hypothetically|provided|assuming)\b")
-                || Regex.IsMatch(text, @"\b(refuse|decline|not ready|changed my mind|let me think)\b")
+            if (Regex.IsMatch(text, @"\b(refuse|decline|not ready|changed my mind|let me think)\b")
                 || Regex.IsMatch(text, @"\bi (?:will not|shall not|do not|don't|can't|cannot|won't)\s+(?:(?:ever|now|yet|freely)\s+)*(?:join|travel|ride|serve|come|accompany|leave|accept|agree|consent|become|commit)\b")
                 || Regex.IsMatch(text, @"\bi (?:will not|won't|can't|cannot)\s*(?:[.!?;]|$)")) return false;
-            return ContainsAnyPhrase(text, DialogueActionAcceptancePhrases())
-                || Regex.IsMatch(text, @"\bi(?: (?:will|shall|agree to)|'ll)? (?:join|travel|ride|serve|come|accompany|become)\b")
-                || text.Contains("i'm joining you") || text.Contains("i am joining you");
+            // Conditions attach to the decision clause. Optional arrangements for someone else do not veto consent.
+            var clauses = Regex.Split(text, @"[.!?;\r\n]+");
+            bool accepted = false;
+            foreach (string clause in clauses)
+            {
+                bool decision = ContainsAnyPhrase(clause, DialogueActionAcceptancePhrases())
+                    || Regex.IsMatch(clause, @"\bi(?: (?:will|shall|agree to)|'ll)? (?:join|travel|ride|serve|come|accompany|become)\b")
+                    || clause.Contains("i'm joining you") || clause.Contains("i am joining you");
+                bool blocked = Regex.IsMatch(clause, @"\b(if|unless|perhaps|maybe|might|would|could|hypothetically|provided|assuming|tomorrow|later|after|once|first)\b");
+                if ((decision || Regex.IsMatch(clause, @"\bi (?:could|might|would) (?:join|travel|serve|come)\b")) && blocked) return false;
+                if (Regex.IsMatch(clause, @"\b(?:but only|on condition|provided that|before i (?:join|leave)|not until)\b")) return false;
+                if (Regex.IsMatch(clause, @"\b(?:if|unless|once|after|before)\s+(?:you (?!wish\b|want\b|like\b)|i (?:am|have|get)|(?:my|the) (?:payment|release|permission))")) return false;
+                accepted |= decision;
+            }
+            return accepted;
         }
 
         private static Dictionary<string, object> BindResidentActionProfile(Dictionary<string, object> payload,
@@ -51,6 +60,8 @@ namespace ReignBetaServer
         {
             var hero = ReadDictionary(payload, "hero");
             bool resident = IsEncounteredResidentProfile(hero);
+            if (resident && command == "join_clan")
+            { errors.Add("A resident must use recruit_encountered_resident to become a native companion and party member."); return; }
             bool recruit = command == "recruit_encountered_resident";
             bool release = command == "release_resident_from_duty";
             bool guest = resident && (command == "accept_temporary_party_guest" || command == "renew_temporary_party_guest");
@@ -72,6 +83,13 @@ namespace ReignBetaServer
                 return;
             }
             if (recruit && !resident) errors.Add("Permanent resident recruitment requires encountered-resident metadata.");
+            if (recruit)
+            {
+                string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload));
+                terms["paymentDependencies"] = CurrentPlayerTransfers(payload).Select((i, slot) => new { i, slot })
+                    .Where(x => x.i.Error.Length == 0 && x.i.Command == "transfer_gold" && x.i.Purpose == "recruitment_advance")
+                    .Select(x => ReignBeta.Shared.Dialogue.PlayerActionRules.ActionId(ReadString(payload, "campaignId", "default"), ContinuityTimeline(payload), turn, x.slot)).ToList();
+            }
             if (!ResidentHasUnconditionalConsent(reply)) errors.Add("The current visible reply does not unconditionally agree to join.");
             terms["consentConfirmed"] = errors.Count == 0;
             terms["verifiedConsentQuote"] = LimitText(reply, 1200);
@@ -89,10 +107,43 @@ namespace ReignBetaServer
                         Math.Max(0, resolution.LastIndexOf("npc:", StringComparison.OrdinalIgnoreCase)))) + "\n" + reply).Replace(",", "");
                     var prices = Regex.Matches(accepted, @"(?i)\b(\d+)\s*(?:denars?|gold|coins?)\b")
                         .Cast<Match>().Select(m => int.TryParse(m.Groups[1].Value, out int n) ? n : -1).ToList();
-                    if ((gold > 0 && !prices.Contains(gold)) || (gold == 0 && prices.Any(n => n > 0)))
+                    var agency = ReadDictionary(payload, "conversationAgencyReceipt");
+                    bool exactAgreement = ReadBool(agency, "ok", false) && ReadDictionaryList(agency, "updates")
+                        .Any(r => ReadString(r, "topic", "") == "allegiance" && AgencyAccepted(ReadString(r, "disposition", ""))
+                            && ReadDouble(ReadDictionary(r, "terms"), "gold", -1) == gold);
+                    if ((gold > 0 && !prices.Contains(gold) && !(prices.Count == 0 && exactAgreement)) || (gold == 0 && prices.Any(n => n > 0)))
                         errors.Add("The recruitment payment does not match the visible accepted price; confirm the exact price first.");
                 }
             }
+        }
+
+        private static Dictionary<string, object> QueueExplicitResidentCompanion(Dictionary<string, object> payload, Dictionary<string, object> response)
+        {
+            var hero = ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker");
+            var receipt = ReadDictionary(payload, "conversationAgencyReceipt");
+            string reply = ReadString(response, "reply", "");
+            if (!ReadBool(response, "ok", false) || !IsEncounteredResidentProfile(hero) || !ReadBool(receipt, "ok", false) || ReadBool(receipt, "replayed", false)
+                || !ResidentHasUnconditionalConsent(reply) || !Regex.IsMatch(reply, @"\b(?:companion|retainer|join your clan)\b", RegexOptions.IgnoreCase)) return null;
+            if ((_stagedTurnActions ?? new List<Dictionary<string, object>>()).Any(r => ReadString(r, "command", "") == "recruit_encountered_resident")) return null;
+            var decisions = ReadDictionaryList(receipt, "updates").Where(r => ReadString(r, "topic", "") == "allegiance"
+                && AgencyAccepted(ReadString(r, "disposition", ""))).ToList();
+            if (decisions.Count != 1) return null;
+            double total = ReadDouble(ReadDictionary(decisions[0], "terms"), "gold", -1);
+            if (double.IsNaN(total) || double.IsInfinity(total) || total < 0 || total > int.MaxValue || total != Math.Truncate(total)) return null;
+            string campaign = ReadString(payload, "campaignId", "default");
+            var candidate = TestDict("command", "recruit_encountered_resident", "source", "dialogue_resident_companion",
+                "FromHero", FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), CharacterIdFrom(hero)),
+                "requiresAcceptance", false, "reason", "The resident explicitly accepted permanent companionship under the verified agreement.",
+                "terms", TestDict("agreementKind", "permanent", "agreedGold", (int)total));
+            var bound = BindResidentActionProfile(payload, hero);
+            var normalized = NormalizeActionCommand(candidate, campaign, out var errors, bound,
+                BuildRouterResolutionText(ReadFirstString(payload, "playerText", "text", "message"), reply));
+            if (normalized == null || errors.Count > 0)
+            {
+                response["reply"] = reply + "\n\n[Recruitment not queued: " + string.Join(" ", errors) + "]";
+                return null;
+            }
+            return QueueAction(campaign, normalized);
         }
 
         private static string ResidentRecruitmentCandidate(Dictionary<string, object> hero, string text)

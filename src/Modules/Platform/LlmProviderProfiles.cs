@@ -11,8 +11,21 @@ namespace ReignBetaServer
         private const string OpenRouterChatUrl = "https://openrouter.ai/api/v1/chat/completions";
         private static readonly string[] ChatModelKeys = { "dialogueModel", "characterConstructionModel", "diplomacyModel",
             "eventsModel", "fastModel", "memoryModel", "relationshipModel", "correspondenceModel", "strategyModel",
-            "selectorModel", "actionPlannerModel", "actionRouterModel" };
+            "actionPlannerModel", "actionRouterModel" };
         private static readonly string[] ChatProviders = { NanoGptProvider, OpenRouterProvider, OpenAiCompatibleProvider, CodexSubscriptionProvider };
+
+        // Compatibility only: old settings must not resurrect retired remote memory stages.
+        private static readonly string[] RetiredMemorySettings = { "highMemoryMode", "memoryCheckerModel", "memoryCheckerTimeoutMs", "memoryEvidenceModel", "memoryEvidenceTimeoutMs", "memoryEvidenceReasoningEffort", "memoryEvidencePlanningReasoningEffort", "memoryEvidenceInputTokenBudget", "memoryEvidenceAdaptiveRetrieval", "memoryFinalCheckEnabled", "enableMemoryPrecisionHelper", "selectorModel" };
+
+        private static bool RemoveRetiredMemorySettings(Dictionary<string, object> settings)
+        {
+            bool changed = false;
+            if (settings != null) foreach (string key in RetiredMemorySettings) changed |= settings.Remove(key);
+            return changed;
+        }
+
+        private static bool IsRetiredMemoryRequest(string purpose) =>
+            purpose == "dialogue_evidence" || purpose == "dialogue_verification" || purpose == "dialogue_memory_repair" || purpose == "context_selector";
 
         private static List<string> MergeProviderSettings(Dictionary<string, object> settings, Dictionary<string, object> incoming)
         {
@@ -78,7 +91,8 @@ namespace ReignBetaServer
         // Flat active model fields remain the runtime contract. The bank contains only model IDs, never credentials.
         private static Dictionary<string, object> ChatModelProfile(Dictionary<string, object> source, string fallback)
         {
-            return ChatModelKeys.ToDictionary(key => key, key => (object)ReadString(source, key, fallback).Trim());
+            return ChatModelKeys.ToDictionary(key => key, key => (object)ReadString(source, key,
+                fallback).Trim());
         }
 
         private static bool NormalizeChatProviderProfiles(Dictionary<string, object> settings)

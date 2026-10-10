@@ -96,7 +96,8 @@ namespace ReignBetaServer
                 check("introduction_recognizes_without_keyword_or_vectors", has(sameDay, "dialogue_win"));
                 check("legacy_float_precision_does_not_hide_immediate_result", has(sameDay, "dialogue_legacy_precision"));
                 check("documented_total_exceeds_sample", sameDay.Any(row => ReadInt(row, "documentedPlayerTournamentWins", 0) == 4)
-                    && FormatKnownWorldHistoryForDialogue(sameDay, 6000).Contains("4 player tournament victories"));
+                    && FormatKnownWorldHistoryForDialogue(sameDay, 6000).Contains("a few tournament victories")
+                    && !FormatKnownWorldHistoryForDialogue(sameDay, 6000).Contains("4 player tournament victories"));
                 check("noncompetitor_secondhand", ReadString(sameDay.FirstOrDefault(r => ReadString(r, "event_id", "") == "dialogue_win"), "knowledgeBasis", "") == "secondhand");
                 KnowledgeAccessContext teammate = BuildKnowledgeAccessContext("ulagara_fixture", "main_hero", "town_phycaon", context);
                 var teammateHistory = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110d, teammate,
@@ -166,8 +167,11 @@ namespace ReignBetaServer
             var packet = BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
                 "Lady Itaria, I was disappointed I did not see you compete in the last tournament here. I am Michael of Howarton.", 2500, context, offlineSettings);
             string prompt = ReadString(packet, "memoryPacket", "");
+            // The protected recall policy precedes the authoritative history;
+            // history must still lead the evidence after that policy wrapper.
             check("production_packet_injects_recorded_result", prompt.Contains("Michael won the tournament at Phycaon.")
-                && prompt.StartsWith("KNOWN NATIVE WORLD HISTORY", StringComparison.Ordinal));
+                && prompt.StartsWith(ProtectMemoryRecallSourcePolicy("itaria_fixture")
+                    + "\n\nKNOWN NATIVE WORLD HISTORY", StringComparison.Ordinal));
             check("production_packet_provenance_and_budget", prompt.Contains("public tournament news; secondhand")
                 && ReadStringList(packet, "sourceEventIds").Contains("dialogue_win") && prompt.Length <= 10000);
             return checks;

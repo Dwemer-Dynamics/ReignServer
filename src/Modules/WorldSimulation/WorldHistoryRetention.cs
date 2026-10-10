@@ -50,7 +50,7 @@ namespace ReignBetaServer
                 "prisoners_sold", "mobile_party_created", "mobile_party_destroyed",
                 "party_leader_changed", "ship_created", "ship_destroyed",
                 "ship_repaired", "ship_owner_changed",
-                "issue_updated"
+                "issue_updated", "party_contact_interval"
             }, StringComparer.OrdinalIgnoreCase);
 
         private const string ShortRoutineWorldHistorySqlTypes =

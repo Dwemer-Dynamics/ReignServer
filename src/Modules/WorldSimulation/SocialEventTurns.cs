@@ -10,7 +10,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const int SocialEventMaximumActive = 5;
-        private const int SocialEventIgnoredTurnLimit = 3;
         // Bounded stripes serialize retries of the same turn without retaining a
         // lock object for every conversation ever seen by the process.
         private static readonly object[] SocialEventTurnLocks =
@@ -19,6 +18,33 @@ namespace ReignBetaServer
         private static Dictionary<string, object> SocialEventTurnApi(Dictionary<string, object> payload)
         {
             return SocialEventTurnWithResponder(payload, SocialEventRespond);
+        }
+
+        private static Dictionary<string, object> SocialEventTurnPlanApi(Dictionary<string, object> payload)
+        {
+            PrepareSocialConversationInput(payload);
+            var floorPayload = CloneDictionary(payload);
+            CopyPlayerInputSource(payload, floorPayload);
+            string eventId = ReadFirstString(payload, "eventId", "socialEventId");
+            floorPayload["campaignId"] = ReadString(payload, "campaignId", LatestCampaignId());
+            floorPayload["activeHeroIds"] = ReadStringList(payload, "activeHeroIds").Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Take(SocialEventMaximumActive).ToList();
+            floorPayload["mode"] = ReadString(payload, "templateId", "") == "generated_wilderness" ? "wilderness_event" : "social_event";
+            floorPayload["conversationSessionId"] = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), "social_event_" + SafeMemoryKey(eventId));
+            var result = GroupConversationFloorApi(floorPayload);
+            if (payload.TryGetValue("inputReceipt", out var receipt)) result["inputReceipt"] = receipt;
+            return result;
+        }
+
+        private static void PrepareSocialConversationInput(Dictionary<string, object> payload)
+        {
+            string campaign = ReadString(payload, "campaignId", LatestCampaignId());
+            payload["conversationSessionId"] = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId"),
+                "social_event_" + SafeMemoryKey(ReadFirstString(payload, "eventId", "socialEventId")));
+            string generation;
+            using (var connection = OpenCampaignConnection(campaign))
+                generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+            AdmitConversationInput(campaign, payload, generation);
         }
 
         private static Dictionary<string, object> SocialEventTurnWithResponder(
@@ -48,7 +74,9 @@ namespace ReignBetaServer
             string eventId = ReadFirstString(payload, "eventId", "socialEventId");
             string turnId = ReadString(payload, "turnId", "");
             bool progressive = ReadBool(payload, "progressiveReplies", false);
+            PrepareSocialConversationInput(payload);
             Dictionary<string, object> cached = ReadJsonObject(cachePath);
+            if (payload.TryGetValue("inputReceipt", out var inputReceipt)) cached["inputReceipt"] = inputReceipt;
             List<Dictionary<string, object>> results = ReadDictionaryList(cached, "participantResults")
                 .Where(row => ReadBool(row, "ok", false)).ToList();
             int cursor = ReadInt(payload, "replyCursor", 0);
@@ -88,23 +116,21 @@ namespace ReignBetaServer
                 .Select(id => attendeeById[id])
                 .ToList();
 
-            bool hasPlan = ReadStringList(cached, "responseOrder").Count > 0;
+            bool hasPlan = cached.ContainsKey("responseOrder");
+            var floor = hasPlan ? ReadDictionary(cached, "speakingFloor") : SocialEventTurnPlanApi(payload);
+            if (!hasPlan && !ReadBool(floor, "ok", false)) return floor;
             List<string> addressedIds = hasPlan ? ReadStringList(cached, "addressedHeroStringIds")
-                : ResolveSocialEventAddressedHeroes(payload, activeProfiles);
+                : ReadStringList(floor, "addressedHeroStringIds");
             List<string> responseOrder = hasPlan ? ReadStringList(cached, "responseOrder")
-                : BuildSocialEventResponseOrder(payload, activeProfiles, addressedIds);
-            Dictionary<string, object> incomingIdle = ReadDictionary(payload, "idleCounters") ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                : ReadStringList(floor, "responseOrder");
             Dictionary<string, object> nextIdle = hasPlan ? ReadDictionary(cached, "nextIdleCounters")
                 : new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             List<string> wanderedIds = hasPlan ? ReadStringList(cached, "wanderedHeroStringIds") : new List<string>();
-            foreach (string heroId in hasPlan ? new List<string>() : responseOrder)
+            foreach (string heroId in hasPlan ? new List<string>() : activeIds)
             {
-                int idle = addressedIds.Contains(heroId, StringComparer.OrdinalIgnoreCase) ? 0 : ReadInt(incomingIdle, heroId, 0) + 1;
-                nextIdle[heroId] = idle;
-                if (idle >= SocialEventIgnoredTurnLimit)
-                {
-                    wanderedIds.Add(heroId);
-                }
+                // Listening to the active group is participation. Model-chosen
+                // silence must not count as being ignored and expel a listener.
+                nextIdle[heroId] = 0;
             }
 
             EnsureSocialTurnPlayerTranscript(campaignId, eventId, turnId, payload, activeProfiles);
@@ -114,9 +140,11 @@ namespace ReignBetaServer
                 ["status"] = "in_progress", ["campaignId"] = campaignId,
                 ["eventId"] = eventId, ["turnId"] = turnId,
                 ["responseOrder"] = responseOrder, ["addressedHeroStringIds"] = addressedIds,
+                ["speakingFloor"] = floor,
                 ["nextIdleCounters"] = nextIdle, ["wanderedHeroStringIds"] = wanderedIds,
                 ["participantResults"] = results
             };
+            if (inputReceipt != null) cached["inputReceipt"] = inputReceipt;
             WriteJsonObject(cachePath, cached);
             List<Dictionary<string, object>> requests = ReadDictionaryList(payload, "participantRequests");
             // Generate in resolved address order, not merely the roster order. Later
@@ -136,24 +164,34 @@ namespace ReignBetaServer
                     return SocialEventTurnFailure(cachePath, campaignId, eventId, turnId, addressedIds, nextIdle, results, "Missing participant request for " + heroId + ".", cached);
                 }
 
+                var spokenResults = results.Where(r => ReadBool(r, "ok", false)
+                    && ReadString(r, "participation", "speak") != "quiet"
+                    && !string.IsNullOrWhiteSpace(ReadString(r, "reply", ""))).ToList();
                 Dictionary<string, object> speakerPayload = new Dictionary<string, object>(request, StringComparer.OrdinalIgnoreCase)
                 {
                     ["turnId"] = turnId,
+                    ["contributionId"] = ReadString(payload, "contributionId", turnId),
+                    ["conversationSessionId"] = ReadString(payload, "conversationSessionId", ""),
+                    ["playerText"] = OriginalPlayerInput(payload),
                     ["suppressPlayerTranscript"] = true,
                     ["activeHeroIds"] = activeIds,
-                    ["groupTurnResponses"] = results.Select(CompactSocialEventTurnResult).ToList(),
+                    ["groupTurnPlan"] = floor,
+                    ["groupTurnResponses"] = spokenResults.Select(CompactSocialEventTurnResult).ToList(),
                     ["groupSpeakerIndex"] = results.Count,
-                    ["mustAccountForPriorSpeaker"] = results.Count > 0,
+                    ["mustAccountForPriorSpeaker"] = spokenResults.Count > 0,
                     ["isDancePhase"] = IsSocialEventDancePhase(payload),
                     ["canInvitePlayerToDance"] = CanSocialEventSpeakerInviteToDance(payload, request)
                 };
-                if (results.Count > 0)
+                speakerPayload["sceneContext"] = ReadString(speakerPayload, "sceneContext", "")
+                    + "\n" + GroupConversationParticipationGuidance;
+                if (spokenResults.Count > 0)
                 {
                     speakerPayload["sceneContext"] =
                         ReadString(speakerPayload, "sceneContext", "")
                         + "\nCURRENT GROUP BEAT: One or more attributed NPC contributions are already supplied in groupTurnResponses. "
-                        + "Account for at least one relevant earlier contribution while still answering the player. "
-                        + "If you engage it, identify that prior speaker in reactionTargetHeroStringId; never transfer another speaker's words or private knowledge to yourself.";
+                        + "Use an earlier contribution when relevant; do not invent a new point or repeat an answer merely to take a turn. Quiet is valid. "
+                        + "If you engage it, identify that prior speaker in reactionTargetHeroStringId; never transfer another speaker's words or private knowledge to yourself. "
+                        + "A contribution with groundingStatus=unresolved is an attributed statement only; do not adopt its unverified scene, membership or action claims as facts.";
                 }
                 Dictionary<string, object> response = respond(speakerPayload);
                 Dictionary<string, object> participant = CompactSocialEventParticipantResponse(heroId, response);
@@ -185,6 +223,7 @@ namespace ReignBetaServer
                 ["eventId"] = eventId,
                 ["turnId"] = turnId,
                 ["addressedHeroStringIds"] = addressedIds,
+                ["speakingFloor"] = floor,
                 ["participantResults"] = results,
                 ["joinedHeroStringIds"] = joinedIds,
                 ["wanderedHeroStringIds"] = wanderedIds,
@@ -192,6 +231,7 @@ namespace ReignBetaServer
                 ["relationshipReceipts"] = relationshipReceipts,
                 ["completedExchange"] = true
             };
+            if (inputReceipt != null) completed["inputReceipt"] = inputReceipt;
             WriteJsonObject(cachePath, completed);
             WriteAudit(campaignId, EnsureCorrelationId(payload), "server", "social_event", "social_event.group_turn", "", "", eventId,
                 "completed", 0, "Persistent social-event group turn completed.", completed);
@@ -267,148 +307,32 @@ namespace ReignBetaServer
             AppendEventLineForAttendees(campaignId, activeProfiles, row);
         }
 
+        private static List<Reign.Core.Contracts.Dialogue.GroupTurnParticipant> SocialTurnParticipants(List<Dictionary<string, object>> profiles) =>
+            (profiles ?? new List<Dictionary<string, object>>()).Select(profile => new Reign.Core.Contracts.Dialogue.GroupTurnParticipant
+            { Id = CharacterIdFrom(profile), Name = ReadString(profile, "name", "") }).ToList();
+
         private static List<string> ResolveSocialEventAddressedHeroes(Dictionary<string, object> payload, List<Dictionary<string, object>> activeProfiles)
         {
-            List<string> allIds = activeProfiles.Select(CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            if (allIds.Count <= 1)
-            {
-                return allIds;
-            }
-
-            string playerText = ReadString(payload, "playerText", "");
-            string lower = playerText.ToLowerInvariant();
-            string[] groupPhrases = { "everyone", "all of you", "you all", "each of you", "each person", "my lords", "my ladies", "ladies and gentlemen", "friends", "all here", "the whole group" };
-            bool groupAddressed = groupPhrases.Any(lower.Contains);
-
-            List<KeyValuePair<string, int>> named = new List<KeyValuePair<string, int>>();
-            Dictionary<string, int> firstNameCounts = activeProfiles
-                .Select(x => FirstName(ReadString(x, "name", "")))
-                .Where(x => x.Length >= 3)
-                .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
-            foreach (Dictionary<string, object> profile in activeProfiles)
-            {
-                string id = CharacterIdFrom(profile);
-                string name = ReadString(profile, "name", "").Trim();
-                string first = FirstName(name);
-                bool fullMatch = ContainsWholePhrase(playerText, name);
-                bool uniqueFirstMatch = first.Length >= 3 && firstNameCounts.ContainsKey(first) && firstNameCounts[first] == 1 && ContainsWholePhrase(playerText, first);
-                if (fullMatch || uniqueFirstMatch)
-                {
-                    int fullIndex = fullMatch ? playerText.IndexOf(name, StringComparison.OrdinalIgnoreCase) : int.MaxValue;
-                    int firstIndex = uniqueFirstMatch ? playerText.IndexOf(first, StringComparison.OrdinalIgnoreCase) : int.MaxValue;
-                    named.Add(new KeyValuePair<string, int>(id, Math.Min(fullIndex < 0 ? int.MaxValue : fullIndex, firstIndex < 0 ? int.MaxValue : firstIndex)));
-                }
-            }
-            if (named.Count > 0)
-            {
-                List<string> orderedNamed = named.OrderBy(match => match.Value)
-                    .ThenBy(match => match.Key, StringComparer.OrdinalIgnoreCase)
-                    .Select(match => match.Key)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                return groupAddressed
-                    ? orderedNamed.Concat(allIds).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
-                    : orderedNamed;
-            }
-
-            if (groupAddressed) return allIds;
-
-            foreach (string line in ReadStringList(payload, "transcript").AsEnumerable().Reverse())
-            {
-                if (!line.Contains("?"))
-                {
-                    continue;
-                }
-                Dictionary<string, object> asker = activeProfiles.FirstOrDefault(x => line.StartsWith(ReadString(x, "name", "") + ":", StringComparison.OrdinalIgnoreCase));
-                if (asker != null)
-                {
-                    return new List<string> { CharacterIdFrom(asker) };
-                }
-            }
-
-            Dictionary<string, object> semantic = ResolveSocialEventSemanticFocus(playerText, payload, activeProfiles);
-            double confidence = ReadDouble(semantic, "confidence", 0d);
-            if (ReadBool(semantic, "groupAddressed", false) || confidence < 0.65d)
-            {
-                return allIds;
-            }
-            HashSet<string> allowed = new HashSet<string>(allIds, StringComparer.OrdinalIgnoreCase);
-            List<string> semanticIds = ReadStringList(semantic, "addressedHeroStringIds").Where(allowed.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            return semanticIds.Count == 0 ? allIds : semanticIds;
+            var participants = SocialTurnParticipants(activeProfiles);
+            var lines = ReadStringList(payload, "transcript").Select(text => {
+                var speaker = participants.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Name)
+                    && text.StartsWith(p.Name + ":", StringComparison.OrdinalIgnoreCase));
+                int colon = text.IndexOf(':');
+                return new Reign.Core.Contracts.Dialogue.GroupTurnLine {
+                    SpeakerId = speaker?.Id ?? "", Role = speaker == null ? "player" : "npc",
+                    Text = colon < 0 ? text : text.Substring(colon + 1).Trim() };
+            });
+            return Reign.Core.Contracts.Dialogue.GroupConversationTurnOrder.ResolveAddressed(participants,
+                ReadString(payload, "playerText", ""), lines);
         }
 
         private static List<string> BuildSocialEventResponseOrder(
             Dictionary<string, object> payload, List<Dictionary<string, object>> activeProfiles,
             List<string> resolvedAddressed = null)
         {
-            activeProfiles = activeProfiles ?? new List<Dictionary<string, object>>();
-            List<string> allIds = activeProfiles.Select(CharacterIdFrom)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            List<string> addressed = (resolvedAddressed ?? ResolveSocialEventAddressedHeroes(payload, activeProfiles))
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            string playerText = ReadString(payload, "playerText", "");
-            Dictionary<string, int> firstNameCounts = activeProfiles
-                .Select(profile => FirstName(ReadString(profile, "name", "")))
-                .Where(name => name.Length >= 3)
-                .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-            string explicitlyNamedFirst = activeProfiles
-                .Select(profile =>
-                {
-                    string id = CharacterIdFrom(profile);
-                    string name = ReadString(profile, "name", "").Trim();
-                    string first = FirstName(name);
-                    int fullIndex = ContainsWholePhrase(playerText, name)
-                        ? playerText.IndexOf(name, StringComparison.OrdinalIgnoreCase)
-                        : int.MaxValue;
-                    int firstIndex = first.Length >= 3
-                        && firstNameCounts.TryGetValue(first, out int count)
-                        && count == 1
-                        && ContainsWholePhrase(playerText, first)
-                            ? playerText.IndexOf(first, StringComparison.OrdinalIgnoreCase)
-                            : int.MaxValue;
-                    return new { Id = id, Index = Math.Min(fullIndex < 0 ? int.MaxValue : fullIndex, firstIndex < 0 ? int.MaxValue : firstIndex) };
-                })
-                .Where(match => !string.IsNullOrWhiteSpace(match.Id) && match.Index != int.MaxValue)
-                .OrderBy(match => match.Index)
-                .ThenBy(match => match.Id, StringComparer.OrdinalIgnoreCase)
-                .Select(match => match.Id)
-                .FirstOrDefault();
-            string direct = !string.IsNullOrWhiteSpace(explicitlyNamedFirst)
-                ? explicitlyNamedFirst
-                : addressed.Count < allIds.Count ? addressed.FirstOrDefault() : null;
-            string seed = ReadString(payload, "turnId", ReadString(payload, "sceneTurnId", "social_event_turn"));
-            List<string> shuffled = allIds
-                .Where(id => string.IsNullOrWhiteSpace(direct) || !id.Equals(direct, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(id => PromptHash(seed + "|response-order|" + id), StringComparer.Ordinal)
-                .ThenBy(id => id, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (!string.IsNullOrWhiteSpace(direct)) shuffled.Insert(0, direct);
-            return shuffled;
-        }
-
-        private static Dictionary<string, object> ResolveSocialEventSemanticFocus(string playerText, Dictionary<string, object> payload, List<Dictionary<string, object>> activeProfiles)
-        {
-            Dictionary<string, object> llm = ChatWithLlm(new Dictionary<string, object>
-            {
-                ["requestType"] = "social_event_focus",
-                ["maxTokens"] = 300,
-                ["temperature"] = 0d,
-                ["messages"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object> { ["role"] = "system", ["content"] = "Resolve who the player directly addresses in a group conversation. Return strict JSON only. Do not infer focus from status or preference." },
-                    new Dictionary<string, object> { ["role"] = "user", ["content"] = "Active participants: " + Json.Serialize(activeProfiles.Select(x => new Dictionary<string, object> { ["heroStringId"] = CharacterIdFrom(x), ["name"] = ReadString(x, "name", "") }).ToList()) + "\nRecent transcript: " + Json.Serialize(ReadStringList(payload, "transcript").Skip(Math.Max(0, ReadStringList(payload, "transcript").Count - 12)).ToList()) + "\nPlayer message: " + playerText + "\nReturn {addressedHeroStringIds:[],groupAddressed:false,confidence:0.0}. A semantic reply to one person's statement or question addresses that person. General remarks address the group." }
-                },
-                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
-            });
-            return ReadBool(llm, "ok", false)
-                ? TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>()
-                : new Dictionary<string, object>();
+            return Reign.Core.Contracts.Dialogue.GroupConversationTurnOrder.Order(SocialTurnParticipants(activeProfiles),
+                ReadString(payload, "playerText", ""), ReadString(payload, "turnId", ReadString(payload, "sceneTurnId", "social_event_turn")),
+                resolvedAddressed ?? ResolveSocialEventAddressedHeroes(payload, activeProfiles));
         }
 
         private static bool ContainsWholePhrase(string text, string phrase)
@@ -457,7 +381,7 @@ namespace ReignBetaServer
                 "conversationSceneState", "conversationSceneResolution",
                 "suggestedActions", "queuedActions", "actionErrors",
                 "identityIntroductionResults", "conversationExchange",
-                "construction"
+                "construction", "structuredActionDecision", "repairStatus", "conversationGrounding", "inputReceipt"
             })
             {
                 if (response.ContainsKey(key))
@@ -474,9 +398,15 @@ namespace ReignBetaServer
                 ["heroName"] = ReadString(result, "heroName", ""),
                 ["participation"] = ReadString(result, "participation", ""),
                 ["reactionTargetHeroStringId"] = ReadString(result, "reactionTargetHeroStringId", ""),
+                ["groundingStatus"] = ReadString(ReadDictionary(result, "conversationGrounding"), "status", "unknown"),
                 ["reply"] = LimitText(ReadString(result, "reply", ""), 1000)
             };
         }
+
+        private static bool SocialConversationResultAllowsEffects(Dictionary<string, object> result) =>
+            !ReadBool(result, "conversationGroundingFailed", false)
+            && ReadString(ReadDictionary(result, "conversationGrounding"), "status", "") != "unresolved"
+            && ReadBool(ReadDictionary(result, "repairStatus"), "allChecksCleared", true);
 
         private static List<string> ResolveSocialEventMidTurnJoins(
             string campaignId,
@@ -490,7 +420,8 @@ namespace ReignBetaServer
             HashSet<string> blocked = new HashSet<string>(ReadStringList(payload, "automaticApproachBlockedHeroIds"), StringComparer.OrdinalIgnoreCase);
             blocked.UnionWith(wanderedIds ?? new List<string>());
             List<string> joined = new List<string>();
-            foreach (Dictionary<string, object> result in results.Where(x => ReadBool(x, "ok", false) && !string.IsNullOrWhiteSpace(ReadString(x, "reply", ""))))
+            foreach (Dictionary<string, object> result in results.Where(x => ReadBool(x, "ok", false) && SocialConversationResultAllowsEffects(x)
+                && !string.IsNullOrWhiteSpace(ReadString(x, "reply", ""))))
             {
                 if (active.Count >= SocialEventMaximumActive) break;
                 List<Dictionary<string, object>> top = attendees
@@ -579,7 +510,7 @@ namespace ReignBetaServer
                 .ToDictionary(group => group.Key, group => ReadString(group.First(), "name", ""), StringComparer.OrdinalIgnoreCase);
             Dictionary<string, string> contributionText = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (!string.IsNullOrWhiteSpace(playerId)) contributionText[playerId] = ReadFirstString(payload, "playerText", "text", "message");
-            foreach (Dictionary<string, object> result in results.Where(x => ReadBool(x, "ok", false)))
+            foreach (Dictionary<string, object> result in results.Where(x => ReadBool(x, "ok", false) && SocialConversationResultAllowsEffects(x)))
             {
                 string speakerId = ReadFirstString(result, "heroStringId", "heroId", "speakerHeroStringId");
                 List<Dictionary<string, object>> speakerAssessments = ReadDictionaryList(result, "relationshipAssessments");
@@ -602,8 +533,8 @@ namespace ReignBetaServer
                     && !speakerAssessments.Any(x => ReadFirstString(x, "targetHeroStringId", "targetId").Equals(playerId, StringComparison.OrdinalIgnoreCase)))
                 {
                     speakerAssessments.Add(routineFallback(playerId,
-                        ConversationValenceFromSignal(ReadString(result, "relationshipSignal", ""), "positive"),
-                        "Routine reaction toward the player was required but omitted from the model's private classifications."));
+                        "neutral",
+                        "The player assessment was omitted; no relationship change is inferred."));
                 }
                 string reactionTargetId = ReadFirstString(result, "reactionTargetHeroStringId", "reactionTargetId");
                 if (!string.IsNullOrWhiteSpace(reactionTargetId)
@@ -611,10 +542,8 @@ namespace ReignBetaServer
                     && priorSpeakers.Contains(reactionTargetId)
                     && !speakerAssessments.Any(x => ReadFirstString(x, "targetHeroStringId", "targetId").Equals(reactionTargetId, StringComparison.OrdinalIgnoreCase)))
                 {
-                    string participation = ReadString(result, "participation", "speak").ToLowerInvariant();
-                    string reactionValence = participation == "disagree" ? "negative" : "positive";
-                    speakerAssessments.Add(routineFallback(reactionTargetId, reactionValence,
-                        "The speaker directly engaged this prior participant; a routine directional classification was supplied because the model omitted it."));
+                    speakerAssessments.Add(routineFallback(reactionTargetId, "neutral",
+                        "The speaker engaged this participant but omitted an assessment; no personal reaction is inferred."));
                 }
                 string replyText = ReadString(result, "reply", "");
                 foreach (string namedPriorSpeaker in priorSpeakers.Where(id => !id.Equals(playerId, StringComparison.OrdinalIgnoreCase)).ToList())
@@ -630,8 +559,8 @@ namespace ReignBetaServer
                         || (uniqueFirstName && ContainsWholePhrase(replyText, priorFirstName));
                     if (!explicitlyNamed) continue;
                     speakerAssessments.Add(routineFallback(namedPriorSpeaker,
-                        InferNamedNpcReactionValence(result, replyText),
-                        "The speaker explicitly named and engaged this prior participant; a routine directional classification was supplied because the model omitted it."));
+                        "neutral",
+                        "Naming a participant does not establish a positive or negative relationship assessment."));
                 }
                 foreach (Dictionary<string, object> assessment in speakerAssessments)
                 {
@@ -657,6 +586,7 @@ namespace ReignBetaServer
                 ["playerHeroStringId"] = playerId, ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
                 ["participants"] = MergeStringLists(activeIds, new[] { playerId }), ["assessments"] = assessments,
                 ["relationshipPairs"] = ReadDictionaryList(payload, "relationshipPairs"),
+                ["nativeReceiptProtocol"] = ReadString(payload, "nativeReceiptProtocol", ""),
                 ["correlationId"] = ReadString(payload, "correlationId", "")
             });
             return ReadDictionaryList(evaluation, "nativeChanges").Select(change => new Dictionary<string, object>
@@ -667,20 +597,6 @@ namespace ReignBetaServer
                 ["nativeRelationDelta"] = ReadInt(change, "delta", 0), ["idempotent"] = ReadInt(evaluation, "idempotentCount", 0) > 0,
                 ["ok"] = ReadBool(evaluation, "ok", false), ["showNotification"] = ReadBool(change, "showNotification", false)
             }).ToList();
-        }
-
-        private static string InferNamedNpcReactionValence(Dictionary<string, object> result, string replyText)
-        {
-            string participation = ReadString(result, "participation", "speak").ToLowerInvariant();
-            if (participation == "disagree" || participation == "oppose" || participation == "reject") return "negative";
-            if (participation == "agree" || participation == "support") return "positive";
-            if (ContainsAny(replyText ?? "", "left out", "is wrong", "was wrong", "mistaken", "I disagree", "do not agree",
-                "doesn't understand", "does not understand", "fails to", "failed to", "not enough"))
-                return "negative";
-            if (ContainsAny(replyText ?? "", "is right", "was right", "I agree", "fair point", "good point", "sound point",
-                "correctly", "is correct", "was correct"))
-                return "positive";
-            return "positive";
         }
 
         private static string NormalizeSocialEventParticipation(Dictionary<string, object> parsed)

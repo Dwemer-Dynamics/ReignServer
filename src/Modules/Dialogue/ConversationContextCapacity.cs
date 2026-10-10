@@ -9,7 +9,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const int ConversationUnverifiedInputLimit = 48000;
-        private const int ConversationVerifiedInputLimit = 64000;
         private const int ConversationCapacitySafetyReserve = 1024;
         private const string NanoConversationModelsUrl = "https://nano-gpt.com/api/v1/models?detailed=true";
         private static readonly HttpClient ConversationCapacityHttp = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
@@ -109,7 +108,20 @@ namespace ReignBetaServer
 
         private static int SelectConversationInputStep(int estimate) =>
             estimate <= 32000 ? 32000 : estimate <= 48000 ? 48000 :
-                estimate <= 56000 ? 56000 : ConversationVerifiedInputLimit;
+                (int)Math.Min(int.MaxValue / 3, ((long)estimate + 7999) / 8000 * 8000);
+
+        private static int ConversationPromptHardCharacterLimit(Dictionary<string, object> settings,
+            Dictionary<string, object> preflight)
+        {
+            int configured = ReadInt(settings, "promptHardCharacterLimit", 240000);
+            // The legacy character limit is a fallback, not a second model capacity.
+            // Expansion is allowed only after the actual serialized request passed
+            // exact-route, output, byte-bound and required-content validation.
+            if (!ReadBool(preflight, "capacityVerified", false) || !ReadBool(preflight, "fits", false)) return configured;
+            long available = (long)ReadInt(preflight, "verifiedContextTokens", 0)
+                - ReadInt(preflight, "outputReserve", 0) - ReadInt(preflight, "safetyReserve", ConversationCapacitySafetyReserve) - 128;
+            return (int)Math.Min(int.MaxValue, Math.Max(configured, available));
+        }
 
         private static Dictionary<string, object> ResolveConversationCapacity(Dictionary<string, object> settings,
             Dictionary<string, object> body, string endpoint, string model, ConversationCapacityCatalog catalog = null)
@@ -132,7 +144,7 @@ namespace ReignBetaServer
             int output = PositiveCapacityInteger(body, "max_tokens");
             int maxOutput = verified ? PositiveCapacityInteger(certificate, "maxOutputTokens") : 0;
             int allowance = verified
-                ? (int)Math.Min(ConversationVerifiedInputLimit, Math.Max(0L, (long)context - output - ConversationCapacitySafetyReserve))
+                ? (int)Math.Min(int.MaxValue / 3, Math.Max(0L, (long)context - output - ConversationCapacitySafetyReserve))
                 : ConversationUnverifiedInputLimit;
             return new Dictionary<string, object>
             {

@@ -10,29 +10,24 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private static string BuildDialogueAgencyLedger(
-            string speakerId, List<Dictionary<string, object>> priorLines)
+            string speakerId, List<Dictionary<string, object>> priorLines,
+            List<Dictionary<string, object>> violations)
         {
-            List<Dictionary<string, object>> entries = new List<Dictionary<string, object>>();
-            List<Dictionary<string, object>> sourceLines = priorLines ?? new List<Dictionary<string, object>>();
-            foreach (Dictionary<string, object> line in sourceLines.Skip(Math.Max(0, sourceLines.Count - 18)))
-            {
-                string text = ReadFirstString(line, "text", "reply", "content");
-                string lineSpeaker = ReadFirstString(line, "speakerId", "speakerHeroStringId", "heroStringId");
-                if (string.IsNullOrWhiteSpace(text)) continue;
-                if (!Regex.IsMatch(text,
-                    @"\b(?:ask|asked|request|requested|invite|invited|offer|offered|want|wanted|wish|wished|would\s+like|take\s+me|bring\s+me|show\s+me|meet\s+me)\b",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) continue;
-                entries.Add(new Dictionary<string, object>
-                {
-                    ["speakerHeroStringId"] = lineSpeaker,
-                    ["speakerRole"] = string.Equals(lineSpeaker, speakerId, StringComparison.OrdinalIgnoreCase) ? "current_npc" : "other",
-                    ["exactLine"] = LimitText(text, 420)
-                });
-            }
+            var entries = (violations ?? new List<Dictionary<string, object>>())
+                .Where(v => new[] { "request_agency_inverted", "recalled_speaker_inverted", "source_proven_meeting_order_reversed", "source_proven_native_spouse_conflict" }.Contains(ReadString(v, "type", "")))
+                .Select(v => new Dictionary<string, object> {
+                    ["speakerHeroStringId"] = ReadString(v, "sourceSpeakerId", ReadString(v, "originalRequestOwner", speakerId)),
+                    ["speakerRole"] = ReadString(v, "sourceSpeakerId", ReadString(v, "originalRequestOwner", speakerId)) == speakerId ? "current_npc" : "original_source",
+                    ["evidenceKind"] = ReadString(v, "evidenceKind", "original_spoken_statement"),
+                    ["exactLine"] = ReadString(v, "originatingNpcLine", ""),
+                    ["sourceId"] = ReadString(v, "sourceId", ""), ["sourceHash"] = ReadString(v, "sourceHash", ""),
+                    ["start"] = ReadInt(v, "sourceStart", 0), ["length"] = ReadInt(v, "sourceLength", 0),
+                    ["requestOwner"] = ReadString(v, "originalRequestOwner", ""),
+                    ["performer"] = ReadString(v, "performer", ""), ["observer"] = ReadString(v, "observer", "") }).ToList();
             if (entries.Count == 0) return string.Empty;
-            return "AUTHORITATIVE RECENT REQUEST AND OFFER LEDGER\n"
+            return "AUTHORITATIVE SOURCE AND REQUEST LEDGER\n"
                 + Json.Serialize(entries)
-                + "\nPreserve who originated each request, invitation, offer, or plan. Acceptance by another person does not transfer authorship. Never say the player asked for an experience that the NPC requested, or the reverse.";
+                + "\nPreserve who originated each statement, request, invitation, offer, or plan and the supplied evidence kind. Native state is not spoken dialogue. Acceptance by another person does not transfer authorship. Never say the player asked for an experience that the NPC requested, or the reverse.";
         }
 
         private static string BuildRoleEquivalenceLedger(Dictionary<string, object> payload)
@@ -68,13 +63,35 @@ namespace ReignBetaServer
         private static Dictionary<string, object> RetryDialogueIntegrityViolation(
             Dictionary<string, object> llm, Dictionary<string, object> request,
             Dictionary<string, object> payload, List<Dictionary<string, object>> priorLines,
-            string campaignId, string correlationId, string auditMode, string heroId, string eventId)
+            string campaignId, string correlationId, string auditMode, string heroId, string eventId,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null, bool persist = true)
         {
             if (!ReadBool(llm, "ok", false)) return llm;
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             if (parsed == null) return llm;
             List<Dictionary<string, object>> violations = FindDialogueIntegrityViolations(parsed, payload, priorLines, heroId);
+            var claimReceipt = CompareDialogueRecallClaims(parsed, payload, priorLines, heroId);
+            claimReceipt["withheldEffects"] = QuarantineDialogueClaimEffects(parsed, payload, priorLines, heroId);
+            claimReceipt["withheldIncompleteFacts"] = QuarantineUncoveredDialogueFacts(parsed, payload, priorLines, heroId);
+            claimReceipt["exactSourceViolations"] = violations.Where(v => new[] { "recalled_speaker_inverted", "source_proven_meeting_order_reversed", "source_proven_native_spouse_conflict" }.Contains(ReadString(v, "type", ""))).ToList();
+            parsed["dialogueClaimValidation"] = claimReceipt;
+            llm["dialogueClaimValidation"] = claimReceipt;
+            llm["content"] = Json.Serialize(parsed);
             if (violations.Count == 0) return llm;
+            if (TryCorrectExactDialogueOwnership(parsed, payload, priorLines, heroId, violations, out var localCorrection))
+            {
+                claimReceipt["correction"] = "exact_source_speaker_only";
+                claimReceipt["changedFields"] = new[] { new[] { "reply", "body", "response", "text" }.FirstOrDefault(parsed.ContainsKey) ?? "reply" };
+                claimReceipt["remainingExactSourceViolations"] = 0;
+                claimReceipt["acceptedSemanticCoverage"] = "not_rechecked_after_prose_correction";
+                MarkRepairedVisibleResponse(localCorrection, true, "visible_prose_correction");
+                claimReceipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(localCorrection, "reply", "body", "response", "text")).ToLowerInvariant();
+                localCorrection["dialogueClaimValidation"] = claimReceipt;
+                llm["content"] = Json.Serialize(localCorrection);
+                if (persist) WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
+                    heroId, "", eventId, "completed", 0, "Recalled speaker corrected from the exclusive exact original clause.", claimReceipt);
+                return llm;
+            }
 
             string originalJson = Json.Serialize(parsed);
             Dictionary<string, object> repairRequest = new Dictionary<string, object>
@@ -94,37 +111,80 @@ namespace ReignBetaServer
                     new Dictionary<string, object>
                     {
                         ["role"] = "system",
-                        ["content"] = "Return exactly one complete JSON object. Preserve the response's useful content, tone, personality, decisions, and scene progression. Correct only the supplied agency or cumulative-role errors. An accepted invitation remains authored by the person who proposed it. Two simultaneous roles with the same hero id refer to one person. A sovereign's spouse is their royal consort; queen or queen consort is a valid non-ruling style for a female consort, but consort status does not make her the reigning sovereign or grant independent authority. Apply the correction to every visible and private field. Do not invent new actions, relationships, or memories."
+                        ["content"] = "Return one JSON object containing only the corrected reply string. Preserve useful content, tone, personality, decisions, and scene progression. Correct only the supplied source-proven attribution, chronology, current native family-state or cumulative-role errors using the pinned original clauses and actors. An accepted invitation remains authored by the person who proposed it. Two simultaneous roles with the same hero id refer to one person. A sovereign's spouse is their royal consort; queen or queen consort is a valid non-ruling style for a female consort, but consort status does not make her the reigning sovereign or grant independent authority. Do not return or change relationship numbers, consent, actions or memory metadata; the server retains independent valid fields and invalidates changed source citations."
                     },
                     new Dictionary<string, object>
                     {
                         ["role"] = "user",
                         ["content"] = BuildRoleEquivalenceLedger(payload) + "\n\n"
-                            + BuildDialogueAgencyLedger(heroId, priorLines) + "\n\nDETECTED ERRORS\n"
+                            + BuildDialogueAgencyLedger(heroId, priorLines, violations) + "\n\nDETECTED ERRORS\n"
                             + Json.Serialize(violations) + "\n\nCHARACTER CONTEXT\n"
                             + Json.Serialize(DialogueValidationRepairCharacterContext(request))
+                            + BuildDialogueClaimRepairGuidance(claimReceipt, violations)
                             + "\n\nORIGINAL JSON TO REPAIR\n" + originalJson
                     }
                 }
             };
             string requestedModel = ReadString(request, "model", "");
             if (!string.IsNullOrWhiteSpace(requestedModel)) repairRequest["model"] = requestedModel;
-            Dictionary<string, object> repaired = ChatWithLlm(repairRequest);
-            Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
+            Dictionary<string, object> repaired = (responder ?? ChatWithLlm)(repairRequest);
+            Dictionary<string, object> repairedParsed = MergeDialogueIntegrityProse(parsed,
+                TryParseJsonObject(ReadString(repaired, "content", "")), violations);
             List<Dictionary<string, object>> remaining = repairedParsed == null
                 ? violations : FindDialogueIntegrityViolations(repairedParsed, payload, priorLines, heroId);
             bool usable = ReadBool(repaired, "ok", false) && repairedParsed != null
-                && StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode);
+                && StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode);
             bool cleared = usable && remaining.Count == 0;
             bool markedFailure = false;
-            if (usable)
+            if (cleared)
             {
+                claimReceipt["remainingExactSourceViolations"] = 0;
+                claimReceipt["acceptedSemanticCoverage"] = "not_rechecked_after_prose_correction";
+                claimReceipt["withheldRevisedEffects"] = QuarantineDialogueClaimEffects(repairedParsed, payload, priorLines, heroId);
+                claimReceipt["withheldRevisedIncompleteFacts"] = QuarantineUncoveredDialogueFacts(repairedParsed, payload, priorLines, heroId);
+                CarryConversationRepairState(parsed, repairedParsed);
                 MarkRepairedVisibleResponse(repairedParsed, cleared);
+                claimReceipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(repairedParsed, "reply", "body", "response", "text")).ToLowerInvariant();
+                repairedParsed["dialogueClaimValidation"] = claimReceipt;
+                repaired["dialogueClaimValidation"] = claimReceipt;
                 repaired["content"] = Json.Serialize(repairedParsed);
             }
             else
             {
-                markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode);
+                if (violations.All(v => new[] { "recalled_speaker_inverted", "source_proven_meeting_order_reversed", "source_proven_native_spouse_conflict" }.Contains(ReadString(v, "type", ""))))
+                {
+                    // An unusable semantic repair must not replace useful speech
+                    // with a negotiation failure or strand the conversation. Remove
+                    // only the source-proven false attribution and its dependents.
+                    string visible = ReadFirstString(parsed, "reply", "body", "response", "text");
+                    foreach (var v in violations.OrderByDescending(v => ReadInt(v, "currentStart", -1)))
+                    {
+                        int start = ReadInt(v, "currentStart", -1), length = ReadInt(v, "currentLength", 0);
+                        if (start >= 0 && start + length <= visible.Length) visible = visible.Remove(start, length);
+                    }
+                    if (string.IsNullOrWhiteSpace(visible.Trim(' ', '\r', '\n', '.', ',', '!', '?')))
+                        visible = "I need a moment to put that properly.";
+                    var recovered = MergeDialogueIntegrityProse(parsed, TestDict("reply", visible), violations);
+                    if (recovered != null && FindDialogueIntegrityViolations(recovered, payload, priorLines, heroId).Count == 0)
+                    {
+                        claimReceipt["correction"] = "unsupported_attribution_withheld_after_rewrite_failure";
+                        claimReceipt["semanticRewriteFailed"] = true;
+                        claimReceipt["remainingExactSourceViolations"] = 0;
+                        claimReceipt["acceptedSemanticCoverage"] = "not_rechecked_after_false_clause_withholding";
+                        MarkRepairedVisibleResponse(recovered, true, "visible_prose_correction");
+                        claimReceipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(recovered, "reply", "body", "response", "text")).ToLowerInvariant();
+                        recovered["dialogueClaimValidation"] = claimReceipt;
+                        llm["content"] = Json.Serialize(recovered);
+                        llm["dialogueClaimValidation"] = claimReceipt;
+                        if (persist) WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
+                            heroId, "", eventId, "partial", 0, "Useful dialogue retained; source-proven false attribution withheld after writer repair failure.", claimReceipt);
+                        return llm;
+                    }
+                }
+                markedFailure = TryReturnMarkedVisibleFailure(repaired, repairedParsed, parsed, request, auditMode,
+                    remaining.Where(v => ReadString(v, "field", "") == "reply")
+                        .Select(v => ReadString(v, "currentText", ""))
+                        .Where(t => t.Length > 0).ToList());
                 if (!markedFailure)
                 {
                     repaired["ok"] = false;
@@ -132,14 +192,13 @@ namespace ReignBetaServer
                     repaired["error"] = "The integrity repair returned no usable visible reply.";
                 }
             }
-            WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_integrity_repair",
-                heroId, "", eventId, usable ? (cleared ? "completed" : "completed_with_revalidation_override")
-                    : markedFailure ? "completed_with_revalidation_override" : "failed",
-                ReadLong(repaired, "durationMs", 0), usable ? "Dialogue agency and role identity were repaired from the original response."
+            if (persist) WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_integrity_repair",
+                heroId, "", eventId, cleared ? "completed" : "failed",
+                ReadLong(repaired, "durationMs", 0), cleared ? "Dialogue agency and role identity were repaired from pinned source clauses."
                     : markedFailure ? "The integrity repair remained rejected; marked dialogue was returned without structured effects."
                     : "Dialogue integrity repair returned no usable visible reply.",
-                new Dictionary<string, object> { ["detected"] = violations, ["remaining"] = remaining, ["accepted"] = usable,
-                    ["revalidationCleared"] = cleared, ["markedVisibleFailure"] = markedFailure, ["deterministicFallback"] = false });
+                new Dictionary<string, object> { ["detected"] = violations, ["remaining"] = remaining, ["accepted"] = cleared,
+                    ["revalidationCleared"] = cleared, ["markedVisibleFailure"] = markedFailure, ["deterministicFallback"] = markedFailure });
             return repaired;
         }
 
@@ -178,31 +237,10 @@ namespace ReignBetaServer
                 }
             }
 
-            List<Dictionary<string, object>> authored = (priorLines ?? new List<Dictionary<string, object>>())
-                .Where(x => ReadFirstString(x, "speakerId", "speakerHeroStringId", "heroStringId")
-                    .Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase))
-                .Where(x => Regex.IsMatch(ReadFirstString(x, "text", "reply", "content"),
-                    @"\b(?:ask|asked|request|requested|invite|invited|want|wanted|would\s+like|take\s+me|bring\s+me|show\s+me)\b", RegexOptions.IgnoreCase))
-                .ToList();
-            foreach (string text in texts.Where(x => Regex.IsMatch(x ?? "", @"\byou\s+(?:asked|requested|wanted|invited|wished)\b", RegexOptions.IgnoreCase)))
-            {
-                foreach (Dictionary<string, object> line in authored)
-                {
-                    string earlier = ReadFirstString(line, "text", "reply", "content");
-                    List<string> shared = SignificantDialogueWords(text).Intersect(SignificantDialogueWords(earlier), StringComparer.OrdinalIgnoreCase).ToList();
-                    if (shared.Count < 1) continue;
-                    result.Add(new Dictionary<string, object> { ["type"] = "request_agency_inverted", ["currentText"] = LimitText(text, 360), ["originatingNpcLine"] = LimitText(earlier, 360), ["sharedTopicWords"] = shared });
-                    break;
-                }
-            }
+            result.AddRange(FindAttributedRequestInversions(ReadFirstString(parsed, "reply", "body", "response", "text"), payload, priorLines, speakerId));
+            result.AddRange(FindRecalledSpeakerInversions(parsed, payload, priorLines, speakerId));
+            result.AddRange(FindDialogueFactualContradictions(parsed, payload, priorLines, speakerId));
             return result;
-        }
-
-        private static List<string> SignificantDialogueWords(string text)
-        {
-            HashSet<string> stop = new HashSet<string>(new[] { "that", "this", "with", "from", "your", "have", "were", "what", "when", "then", "there", "would", "could", "should", "asked", "wanted", "requested", "invited" }, StringComparer.OrdinalIgnoreCase);
-            return Regex.Matches(text ?? "", @"[\p{L}]{4,}").Cast<Match>().Select(x => x.Value.ToLowerInvariant())
-                .Where(x => !stop.Contains(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         private static List<Dictionary<string, object>> RunDialogueIntegrityAssertions()
@@ -239,6 +277,8 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> history = new List<Dictionary<string, object>> { new Dictionary<string, object> { ["speakerId"] = "asta", ["text"] = "I would like you to take me to the waterfall." } };
             parsed["reply"] = "You asked for the waterfall.";
             add("request_agency_is_preserved", FindDialogueIntegrityViolations(parsed, payload, history, "asta").Any(x => ReadString(x, "type", "") == "request_agency_inverted"), "The NPC-originated waterfall request must not be attributed to the player.");
+            rows.AddRange(RunDialogueAgencyEvidenceAssertions());
+            rows.AddRange(RunDialogueClaimValidationAssertions());
             return rows;
         }
     }

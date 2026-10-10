@@ -23,7 +23,8 @@ namespace ReignBetaServer
                 "stateUpdates.mood",
                 "stateUpdates.currentPlan",
                 "stateUpdates.currentCrisis",
-                "dynamicCharacteristicWrites[].narrativeDevelopment"
+                "dynamicCharacteristicWrites[].narrativeDevelopment",
+                "continuityWrites[].questionState"
             };
 
         // This null is part of the existing office response contract and is
@@ -33,13 +34,13 @@ namespace ReignBetaServer
 
         private static readonly string[] CommonFields =
         {
-            "reply", "participation", "reactionTargetHeroStringId", "decisionBrief",
+            "reply", "participation", "reactionTargetHeroStringId", "addressedHeroStringIds", "decisionBrief",
             "politicalConduct", "emotion", "intent", "relationshipSignal",
             "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals",
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
             "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites",
-            "courtKnowledgeWrites", "sceneStateUpdates", "drinkingEvents", "stateUpdates", "continuityWrites",
-            "suggestedActions", "chancellorDecision", "rebellionDecision", "campaignOrder"
+            "courtKnowledgeWrites", "sceneStateUpdates", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
+            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "raisedGossip"
         };
 
         internal static IReadOnlyList<string> TemplateNames(CodexConversationContractKind kind)
@@ -114,7 +115,7 @@ namespace ReignBetaServer
                 : new List<string>();
             selection.SchemaId = "reign-codex-" + mode + "-v1";
             selection.Schema = kind == CodexConversationContractKind.Correspondence
-                ? BuildCorrespondenceSchema()
+                ? BuildCorrespondenceSchema(payload)
                 : BuildConversationSchema(kind, payload);
             Strictify(selection.Schema);
             selection.Schema["$schema"] = Draft;
@@ -216,6 +217,7 @@ namespace ReignBetaServer
         {
             var properties = CommonConversationProperties(kind, payload);
             var required = new List<string> { "reply", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions" };
+            if (HasStructuredActions(payload)) required.Add("structuredActionDecision");
             if (kind != CodexConversationContractKind.Individual)
             {
                 required.Add("participation");
@@ -231,6 +233,7 @@ namespace ReignBetaServer
             var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 ["reply"] = String(),
+                ["addressedHeroStringIds"] = Array(String()),
                 ["decisionBrief"] = DecisionBrief(),
                 ["politicalConduct"] = PoliticalConduct(),
                 ["emotion"] = String(),
@@ -247,7 +250,13 @@ namespace ReignBetaServer
                 ["comprehensionWrites"] = Array(ComprehensionWrite()),
                 ["dynamicCharacteristicWrites"] = Array(DynamicCharacteristicWrite()),
                 ["sceneStateUpdates"] = Array(SceneStateUpdate()),
+                ["drinkActions"] = Array(DrinkAction()),
                 ["drinkingEvents"] = Array(DrinkingEvent()),
+                ["drinkConsumptions"] = Array(DrinkConsumption()),
+                ["drinkSceneUpdates"] = Array(DrinkSceneUpdate()),
+                ["gossipSignals"] = Array(GossipSignal()),
+                ["raisedGossip"] = Array(Object(new Dictionary<string, object> {
+                    ["receiptId"] = String(), ["evidenceQuote"] = String() }, null, false)),
                 ["continuityWrites"] = Array(ContinuityWrite()),
                 ["stateUpdates"] = Object(new Dictionary<string, object>
                 {
@@ -258,6 +267,7 @@ namespace ReignBetaServer
                 }, null, true),
                 ["suggestedActions"] = Array(SuggestedAction())
             };
+            if (HasStructuredActions(payload)) properties["structuredActionDecision"] = StructuredActionDecision();
 
             if (kind == CodexConversationContractKind.Individual)
             {
@@ -275,20 +285,50 @@ namespace ReignBetaServer
             return properties;
         }
 
+        private static Dictionary<string, object> GossipSignal()
+        {
+            return Object(new Dictionary<string, object> {
+                ["topic"] = String(new[] { "family", "relationship", "intimacy", "politics", "shared_activity", "gift", "question", "conversation" }),
+                ["subjectId"] = String(), ["evidenceQuote"] = String(), ["confidence"] = Number(0, 1),
+                ["excitement"] = Integer(), ["curiosity"] = Integer(), ["hurt"] = Integer(),
+                ["privacy"] = String(new[] { "public", "personal", "intimate", "secret" }),
+                ["existencePrivacy"] = String(new[] { "public", "personal", "intimate", "secret" }),
+                ["confidenceOwnerIds"] = Array(String()), ["promisedSecrecy"] = Boolean(),
+                ["ownCompromising"] = Boolean(), ["question"] = Boolean(),
+                ["targets"] = Array(Object(new Dictionary<string, object> {
+                    ["heroId"] = String(), ["evidenceQuote"] = String(), ["relevant"] = Boolean(),
+                    ["hurt"] = Integer(), ["grievance"] = Integer(), ["knownJealousy"] = Boolean(), ["knownEnvy"] = Boolean()
+                }, null, false))
+            }, null, false);
+        }
+
         private static Dictionary<string, object> ContinuityWrite()
         {
             return Object(new Dictionary<string, object>
             {
-                ["id"] = String(), ["kind"] = String(new[] { "agenda", "relationship", "episode" }),
+                ["id"] = String(), ["kind"] = String(new[] { "agenda", "relationship", "episode", "question" }),
                 ["subject"] = String(), ["peerId"] = String(),
                 ["status"] = String(new[] { "open", "active", "waiting", "blocked", "deferred", "resolved", "abandoned", "invalidated" }),
                 ["meaning"] = String(), ["nextStep"] = String(), ["completionCriterion"] = String(),
                 ["triggerPeople"] = Array(String()), ["triggerPlaces"] = Array(String()),
                 ["parentId"] = String(), ["dueWorldDay"] = Number(0, null),
                 ["importance"] = Number(0, 1), ["evidenceQuote"] = String(),
-                ["transitionReason"] = String(), ["expectedRevision"] = Integer()
+                ["transitionReason"] = String(), ["expectedRevision"] = Integer(),
+                ["relatedTurnId"] = String(), ["relationKind"] = String(), ["relatedQuote"] = String(),
+                ["sourceEvidence"] = SourceEvidence(),
+                ["sourceEvidenceSpans"] = Array(SourceEvidence()),
+                ["questionState"] = NullableObject(new Dictionary<string, object> {
+                    ["question"] = QuestionSource(), ["addresseeIds"] = Array(String()),
+                    ["answerState"] = String(new[] { "unanswered", "answered", "partial", "deferred", "refused", "uncertain" }),
+                    ["answers"] = Array(QuestionSource()), ["evaluation"] = String(new[] { "unassessed", "convincing", "unconvincing" }),
+                    ["followUpTo"] = String()
+                }, null, false)
             }, null, false);
         }
+
+        private static Dictionary<string, object> QuestionSource() => Object(new Dictionary<string, object> {
+            ["turnId"] = String(), ["speakerId"] = String(), ["quote"] = String()
+        }, null, false);
 
         private static bool HasChancellorContract(Dictionary<string, object> payload)
         {
@@ -316,7 +356,25 @@ namespace ReignBetaServer
             return payload != null && payload.TryGetValue(key, out object value) && value != null;
         }
 
-        private static Dictionary<string, object> BuildCorrespondenceSchema()
+        private static bool HasStructuredActions(Dictionary<string, object> payload) => payload != null
+            && payload.TryGetValue("structuredActionProtocolVersion", out object value)
+            && string.Equals(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), "1", StringComparison.Ordinal);
+
+        private static Dictionary<string, object> StructuredActionDecision() => Object(new Dictionary<string, object>
+        {
+            ["kind"] = String(new[] { "none", "accept", "reject", "counter", "propose" }),
+            ["proposalId"] = String(), ["revision"] = Integer(), ["termsHash"] = String(), ["reason"] = String(),
+            ["clauses"] = Array(Object(new Dictionary<string, object>
+            {
+                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible).Select(d => d.Id)),
+                ["actorId"] = String(), ["recipientId"] = String(),
+                ["arguments"] = Array(Object(new Dictionary<string, object> { ["key"] = String(), ["value"] = String() }, null, false)),
+                ["dueDay"] = Number(0, null), ["durationDays"] = Number(0, null), ["installments"] = Integer(), ["intervalDays"] = Number(0, null),
+                ["conditionKind"] = String(new[] { "", "day", "arrival", "release", "ownership", "peace", "war" }), ["conditionTargetId"] = String()
+            }, null, false))
+        }, null, false);
+
+        private static Dictionary<string, object> BuildCorrespondenceSchema(Dictionary<string, object> payload)
         {
             var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
@@ -329,7 +387,8 @@ namespace ReignBetaServer
                 ["campaignOrder"] = CampaignOrder(),
                 ["continuityWrites"] = Array(ContinuityWrite())
             };
-            return Object(properties, new[] { "shouldReply", "body", "reason", "actionGate", "proposalDecisions", "rebellionDecision", "campaignOrder", "continuityWrites" }, false,
+            if (HasStructuredActions(payload)) properties["structuredActionDecision"] = StructuredActionDecision();
+            return Object(properties, properties.Keys, false,
                 "Reign's complete structured contract for written correspondence.");
         }
 
@@ -381,7 +440,7 @@ namespace ReignBetaServer
             return Object(new Dictionary<string, object>
             {
                 ["observerHeroStringId"] = String(), ["targetHeroStringId"] = String(),
-                ["valence"] = String(new[] { "positive", "negative" }), ["actKind"] = String(), ["severityTier"] = String(),
+                ["valence"] = String(new[] { "positive", "negative", "neutral" }), ["actKind"] = String(), ["severityTier"] = String(),
                 ["confidence"] = Number(0, 1), ["sourceTurnIds"] = Array(String()), ["evidenceSourceIds"] = Array(String()),
                 ["currentConductQuote"] = String(), ["lieCheckId"] = String(), ["benefitEventId"] = String(),
                 ["giftRecipientHeroStringId"] = String(), ["importance"] = Number(0, 1),
@@ -421,14 +480,23 @@ namespace ReignBetaServer
             return Object(new Dictionary<string, object>
             {
                 ["observerHeroStringId"] = String(), ["subjectHeroStringId"] = String(),
-                ["introducerHeroStringId"] = String(), ["claimedName"] = String()
-            }, new[] { "observerHeroStringId", "subjectHeroStringId", "introducerHeroStringId", "claimedName" }, true);
+                ["introducerHeroStringId"] = String(), ["claimedName"] = String(), ["supportingQuote"] = String()
+            }, new[] { "observerHeroStringId", "subjectHeroStringId", "introducerHeroStringId", "claimedName", "supportingQuote" }, true);
         }
+
+        private static Dictionary<string, object> SourceEvidence() => NullableObject(new Dictionary<string, object>
+        {
+            ["turnId"] = String(), ["speakerId"] = String(), ["actorIds"] = Array(String()),
+            ["evidenceType"] = String(new[] { "spoken_statement", "observation", "subjective_belief", "hypothesis", "future_intention", "narrated_action" }),
+            ["quote"] = String()
+        }, null, false);
 
         private static Dictionary<string, object> MemoryWrite()
         {
             return Object(new Dictionary<string, object>
             {
+                ["sourceEvidence"] = SourceEvidence(),
+                ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["text"] = String(), ["importance"] = Number(1, 5), ["tags"] = Array(String()),
                 ["evidenceSourceIds"] = Array(String()), ["sourceTurnIds"] = Array(String()), ["uncertainty"] = Number(0, 1)
             }, new[] { "text", "importance", "tags" }, true);
@@ -438,6 +506,8 @@ namespace ReignBetaServer
         {
             return Object(new Dictionary<string, object>
             {
+                ["sourceEvidence"] = SourceEvidence(),
+                ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["claim"] = String(), ["confidence"] = Number(0, 1), ["about_entities"] = Array(String()),
                 ["visibility"] = String(), ["evidenceSourceIds"] = Array(String()), ["uncertainty"] = Number(0, 1)
             }, new[] { "claim", "confidence", "about_entities", "visibility" }, true);
@@ -456,6 +526,8 @@ namespace ReignBetaServer
         {
             return Object(new Dictionary<string, object>
             {
+                ["sourceEvidence"] = SourceEvidence(),
+                ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["description"] = String(), ["owed_by"] = String(), ["owed_to"] = String(),
                 ["status"] = String(), ["importance"] = Number(0, 1), ["evidenceSourceIds"] = Array(String()), ["uncertainty"] = Number(0, 1)
             }, new[] { "description", "owed_by", "owed_to", "status", "importance" }, true);
@@ -465,6 +537,8 @@ namespace ReignBetaServer
         {
             return Object(new Dictionary<string, object>
             {
+                ["sourceEvidence"] = SourceEvidence(),
+                ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["text"] = String(), ["stance"] = String(), ["confidence"] = Number(0, 1),
                 ["evidenceSourceIds"] = Array(String()), ["uncertainty"] = Number(0, 1)
             }, new[] { "text", "stance", "confidence" }, true);
@@ -474,6 +548,8 @@ namespace ReignBetaServer
         {
             return Object(new Dictionary<string, object>
             {
+                ["sourceEvidence"] = SourceEvidence(),
+                ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["text"] = String(), ["category"] = String(new[] { "personal_history", "formative_experience", "habit", "preference", "aversion", "local_connection", "skill_practice", "personal_value", "social_tendency", "aspiration" }),
                 ["topicKey"] = String(), ["confidence"] = Number(0, 1), ["importance"] = Number(0, 1),
                 ["sourceBasis"] = String(new[] { "npc_generated_personal_history" }), ["evidenceSourceIds"] = Array(String()), ["uncertainty"] = Number(0, 1),
@@ -490,9 +566,18 @@ namespace ReignBetaServer
             return Object(new Dictionary<string, object>
             {
                 ["heroStringId"] = String(), ["location"] = String(),
-                ["locationClass"] = String(new[] { "formal", "travel" }), ["clothing"] = String()
+                ["locationClass"] = String(new[] { "formal", "travel" }), ["clothing"] = String(), ["supportingQuote"] = String()
             }, new[] { "heroStringId" }, true);
         }
+
+        private static Dictionary<string, object> DrinkAction() => Object(new Dictionary<string, object>
+        {
+            ["id"] = String(), ["operation"] = String(new[] { "consume", "establish", "refill", "transfer", "discard" }),
+            ["holderHeroId"] = String(), ["vesselId"] = String(), ["contentsVersion"] = Integer(),
+            ["beverage"] = String(), ["kind"] = String(),
+            ["quantity"] = String(new[] { "", "unknown", "full", "half", "quarter", "empty" }),
+            ["serving"] = String(new[] { "", "sip", "half", "drink", "finish" }), ["count"] = Integer(), ["completed"] = Boolean()
+        }, null, false, "Private completed drink/cup actions accompanying freely authored prose; engine-classified accounting with no drink-specific repair.");
 
         private static Dictionary<string, object> DrinkingEvent()
         {
@@ -502,6 +587,20 @@ namespace ReignBetaServer
                 ["count"] = Integer(), ["completed"] = Boolean(), ["alcohol"] = Boolean()
             }, new[] { "actionIndex", "serving", "count", "completed", "alcohol" }, true);
         }
+
+        private static Dictionary<string, object> DrinkConsumption() => Object(new Dictionary<string, object>
+        {
+            ["vesselId"] = String(), ["contentsVersion"] = Integer(),
+            ["serving"] = String(new[] { "sip", "half", "drink" }), ["count"] = Integer(), ["completed"] = Boolean()
+        }, new[] { "vesselId", "contentsVersion", "serving", "count", "completed" }, false);
+
+        private static Dictionary<string, object> DrinkSceneUpdate() => Object(new Dictionary<string, object>
+        {
+            ["operation"] = String(new[] { "establish", "refill", "transfer", "discard" }), ["vesselId"] = String(),
+            ["holderHeroId"] = String(), ["contentsVersion"] = Integer(), ["beverage"] = String(), ["kind"] = String(),
+            ["quantity"] = String(new[] { "unknown", "full", "half", "quarter", "empty" }),
+            ["source"] = String(new[] { "reply", "player" }), ["supportingQuote"] = String()
+        }, new[] { "operation", "vesselId", "holderHeroId", "contentsVersion", "beverage", "kind", "quantity", "source", "supportingQuote" }, false);
 
         private static Dictionary<string, object> SuggestedAction()
         {

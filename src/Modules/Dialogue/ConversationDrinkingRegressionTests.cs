@@ -28,11 +28,22 @@ namespace ReignBetaServer
             DrinkVesselState WineCup(double? remaining = 1) => new DrinkVesselState
             { Scope = "fixture", Kind = "cup", Remaining = remaining, Beverage = ResolveDrinkBeverage("wine") };
 
-            // The 77 language examples are the approved review corpus, with fixed,
+            // Language examples use fixed,
             // independently authored expected values (not calculated by the recognizer).
             var cases = new (string Id, string Action, double Expected)[]
             {
                 ("DRINK-001", "She takes a slow pull of kumis.", 0.25d),
+                ("DRINK-101", "She pulls a drink of whiskey, then hands the skin back.", 0.25d),
+                ("DRINK-102", "She picks up the whiskey skin. A pull, short, then sets it down.", 0.25d),
+                ("DRINK-103", "She takes the skin of whiskey when he hands it back. A pull, short, handed over.", 0.25d),
+                ("DRINK-104", "She swallows it before it becomes an answer.", 0d),
+                ("DRINK-105", "He picks up the whiskey skin. A pull, short, handed over.", 0d),
+                ("DRINK-106", "She considers taking the whiskey skin. A pull would help.", 0d),
+                ("DRINK-107", "She picks up the reins. A pull, short and firm.", 0d),
+                ("DRINK-108", "She does not pick up the whiskey skin. A pull, imagined only.", 0d),
+                ("DRINK-109", "She picks up the whiskey skin and hands it to him. He takes a pull.", 0d),
+                ("DRINK-110", "She picks up the whiskey skin and hands it to him. A pull, short, then handed back.", 0d),
+                ("DRINK-111", "She picks up the whiskey skin then puts it down. A pull, only imagined.", 0d),
                 ("DRINK-002", "She slowly takes a pull of kumis.", 0.25d),
                 ("DRINK-003", "She takes another measured swig of koumiss.", 0.25d),
                 ("DRINK-004", "She sips hippocras.", 0.25d),
@@ -109,6 +120,16 @@ namespace ReignBetaServer
                 ("DRINK-075", "She drinks a mug of kvass.", 0d),
                 ("DRINK-076", "She sips non-alcoholic kvass.", 0d),
                 ("DRINK-077", "She sips the explicitly alcoholic kvass.", 0.25d),
+                ("DRINK-091", "She picks up the wine again, this time taking a measured sip.", 0.25d),
+                ("DRINK-092", "She smiles, taking a measured sip of wine.", 0.25d),
+                ("DRINK-093", "She took a measured sip of wine.", 0.25d),
+                ("DRINK-094", "She smiles without taking a sip of wine.", 0d),
+                ("DRINK-095", "She considers taking a sip of wine.", 0d),
+                ("DRINK-096", "She watches him taking a sip of wine.", 0d),
+                ("DRINK-097", "She drinks wine, taking another small sip.", 0.5d),
+                ("DRINK-098", "She recalls that she took a sip of wine yesterday.", 0d),
+                ("DRINK-099", "She says, \"I took a sip of wine.\"", 0d),
+                ("DRINK-100", "She is planning on taking a sip of wine.", 0d),
             };
             foreach (var test in cases)
             {
@@ -184,6 +205,73 @@ namespace ReignBetaServer
                 && offeredEvidence.Any(x => ReadString(x, "beverageSource", "") == "accepted_player_offer"), offeredEvidence);
             Check("ambiguous_player_offer_rejected", CurrentPlayerOfferedBeverage(new Dictionary<string, object>
             { ["playerText"] = "I offer her a skin of whiskey and wine." }).Alcohol == DrinkAlcohol.Unknown);
+            var compoundHandoffs = new[] {
+                "*I take a seat and wait for her to sit also, pulling my skin of whiskey out and taking a drink before passing it to her.*",
+                "*I take a drink from my whiskey skin and hand it to her*",
+                "*I smile as I grab the whiskey skin and take a drink before passing it to her*"
+            };
+            var ellipticalActions = new[] {
+                "She takes the skin. Drinks. Her thumb wipes the mouth of it before passing it back.",
+                "She takes the skin. Drinks — a real one, not the measured sip. She hands it back.",
+                "She takes the skin. Drinks — shorter this time, the kind of pull that's more about holding something warm than needing it. She hands it back."
+            };
+            for (int i = 0; i < compoundHandoffs.Length; i++)
+            {
+                var contents = CurrentPlayerOfferedBeverage(TestDict("playerText", compoundHandoffs[i]));
+                var evidence = new List<Dictionary<string, object>>();
+                double amount = ValidatedDrinkAmount(DrinkingFixture(ellipticalActions[i]), "*" + ellipticalActions[i] + "*",
+                    evidence, "Corein", true, null, contents);
+                var accounting = BindAcceptedDrinkEvents(evidence, "lord_5_10", "corein-handoff-" + i, false, false, amount);
+                Check("corein_compound_handoff_and_elliptical_drink_" + i, amount == .25
+                    && ReadInt(accounting, "consumptionEvents", 0) == 1
+                    && ReadInt(accounting, "alcoholConsumptionEvents", 0) == 1, evidence, .25);
+            }
+            Check("corein_bare_drink_with_local_whiskey", ReadAmount(
+                "She takes the skin. Drinks. The whiskey burns, and she hands it back.") == .25);
+            Check("generic_drink_uses_known_held_vessel", ReadAmount("She takes a drink.", WineCup()) == .25);
+            Check("generic_named_unknown_drink_never_borrows_wine", ReadAmount("She takes a drink of an unknown preparation.", WineCup()) == 0);
+            foreach (string negative in new[] {
+                "He takes the whiskey skin. Drinks.", "She considers taking the whiskey skin. Drinks.",
+                "She takes the whiskey skin and hands it to him. Drinks.", "She takes the reins. Drinks.",
+                "She takes the whiskey skin. He nods. Drinks.", "She takes the whiskey skin. Drinks only in her imagination.",
+                "She takes the whiskey skin. Never drinks.", "She takes the whiskey skin. She says, \"Drinks.\""
+            })
+                Check("elliptical_drink_negative_" + PromptHash(negative).Substring(0, 8), ReadAmount(negative) == 0);
+            foreach (string negative in new[] {
+                "*I watch him take my whiskey skin and pass it to her.*",
+                "*I ask him to take my whiskey skin and pass it to her.*",
+                "*I take my whiskey skin while he passes it to her.*",
+                "*I take my whiskey skin and hand it to her tomorrow.*",
+                "*I take my whiskey skin and do not hand it to her.*",
+                "*I take a skin of whiskey and wine and pass it to her.*",
+                "I say, \"I take my whiskey skin and pass it to her.\""
+            })
+                Check("compound_handoff_negative_" + PromptHash(negative).Substring(0, 8),
+                    CurrentPlayerOfferedBeverage(TestDict("playerText", negative)).Alcohol == DrinkAlcohol.Unknown);
+            const string mixedPlanAndOffer = "I would accept a stated fee, but I would refuse an open-ended favor. No fee has been agreed. "
+                + "*I swallow my annoyance. I slide my wine cup within your reach without taking another drink.* You may have the wine if you want it.";
+            var slidWine = CurrentPlayerOfferedBeverage(TestDict("playerText", mixedPlanAndOffer));
+            var slidEvidence = new List<Dictionary<string, object>>();
+            const string acceptedSlide = "She pulls the cup the last inch toward her and takes a short pull, setting it down with a quiet click against the table.";
+            double slidAmount = ValidatedDrinkAmount(DrinkingFixture(acceptedSlide), "*" + acceptedSlide + "*", slidEvidence, "Mira", true, null, slidWine);
+            var slidEvents = BindAcceptedDrinkEvents(slidEvidence, "mira", "slid-cup", false, false, slidAmount);
+            Check("native_present_handoff_survives_unrelated_modal_plan", slidAmount == .25
+                && ReadInt(slidEvents, "consumptionEvents", 0) == 1
+                && ReadInt(slidEvents, "alcoholConsumptionEvents", 0) == 1
+                && slidEvidence.Any(x => ReadString(x, "beverageSource", "") == "accepted_player_offer"), slidEvidence);
+            foreach (string noOffer in new[] { "I would slide my wine cup within your reach.", "Yesterday I handed her my wine cup.",
+                "*I do not offer her my wine cup.*", "*He passes her a wine cup.*", "I say, \"I offer her my wine cup.\"",
+                "*I slide my wine cup away from the map.*", "*I set my wine cup down without drinking.*",
+                "*I offer her my wine cup. I offer her my whiskey flask.*" })
+                Check("handoff_negative_" + PromptHash(noOffer).Substring(0, 8),
+                    CurrentPlayerOfferedBeverage(TestDict("playerText", noOffer)).Alcohol == DrinkAlcohol.Unknown);
+            foreach (string gesture in new[] { "She lifts the cup slightly, a gesture more of acknowledgment than drinking, and sets it back.",
+                "She raises her wine cup in salute instead of drinking.", "She nods rather than taking a sip of wine." })
+                Check("native_gesture_not_consumption_" + PromptHash(gesture).Substring(0, 8),
+                    ReadNarratedDrinks(gesture, "Mira", true).Count == 0);
+            const string gestureThenSip = "She raises the wine cup in acknowledgment rather than drinking, then takes a small sip of wine.";
+            Check("comparison_does_not_hide_later_actual_sip", ReadNarratedDrinks(gestureThenSip, "Mira", true).Count == 1
+                && ReadAmount(gestureThenSip) == .25);
             Check("adjacent_sentence_beverage_context",
                 ReadAmount("Whiskey glints in the open skin. She takes a drink from it.") == .25);
             var flexible = DrinkingFixture("She takes a sip of wine.", "sip");
@@ -266,10 +354,139 @@ namespace ReignBetaServer
             Check("old_state_migration", RecoverIntoxication(new Dictionary<string, object> { ["drinks"] = 2d }, 2, 12).Vessel.Beverage.Name == "");
             Check("unknown_volume_roundtrip", !ReadDrinkVessel(TryParseJsonObject(Json.Serialize(DrinkVesselRecord(WineCup(null))))).Remaining.HasValue);
             Check("known_volume_roundtrip", ReadDrinkVessel(TryParseJsonObject(Json.Serialize(DrinkVesselRecord(WineCup(.5))))).Remaining == .5);
-            Check("prompt_contract_occurrences", DrinkingOutputContract.Contains("occurrenceIndex") && DrinkingOutputContract.Contains("remaining contents"));
+            Check("prompt_contract_private_actions", DrinkingOutputContract.Contains("drinkActions is the sole drinking record") && DrinkingOutputContract.Contains("no drinking judge, repair or extra provider call"));
             Check("prompt_unknown_volume", IntoxicationPrompt(new IntoxicationState { Threshold = 5, Vessel = WineCup(null) }).Contains("unknown, not a full cup"));
+            Dictionary<string, object> Accounting(string action, DrinkVesselState vessel = null, bool stale = false, bool suppressed = false)
+            {
+                var parsed = DrinkingFixture(action);
+                var evidence = new List<Dictionary<string, object>>();
+                double amount = ValidatedDrinkAmount(parsed, ReadString(parsed, "reply", ""), evidence, "Mira", true, vessel);
+                var receipt = BindAcceptedDrinkEvents(evidence, "mira", "main:counts", stale, suppressed, stale ? 0 : amount);
+                receipt["evidence"] = evidence;
+                return receipt;
+            }
+            var pulls = Accounting("She takes two small pulls of wine.");
+            Check("drink_events_are_not_whole_drinks", ReadInt(pulls, "consumptionEvents", -1) == 2
+                && ReadInt(pulls, "alcoholConsumptionEvents", -1) == 2
+                && ReadDouble(pulls, "estimatedAlcoholServings", -1) == .5
+                && pulls["alcoholVolumeMl"] == null && pulls["standardDrinkCount"] == null, pulls);
+            var twoOccurrences = Accounting(two);
+            var occurrences = ReadDictionaryList(twoOccurrences, "evidence").Where(e => ReadInt(e, "acceptedConsumptionEvents", 0) > 0).ToList();
+            Check("drink_event_identity_per_occurrence", occurrences.Count == 2
+                && occurrences.Select(e => ReadString(e, "eventId", "")).Distinct().Count() == 2
+                && occurrences.All(e => ReadString(e, "drinkerId", "") == "mira"), twoOccurrences);
+            Check("drink_event_identity_repeatable", Json.Serialize(twoOccurrences) == Json.Serialize(Accounting(two)));
+            var unknownBulk = Accounting("She finishes the jug of wine.");
+            Check("drink_unknown_volume_keeps_event", ReadInt(unknownBulk, "consumptionEvents", -1) == 1
+                && ReadDouble(unknownBulk, "estimatedAlcoholServings", -1) == 0
+                && unknownBulk["standardDrinkCount"] == null, unknownBulk);
+            var water = Accounting("She takes a sip of water.");
+            Check("drink_water_event_without_alcohol", ReadInt(water, "consumptionEvents", -1) == 1
+                && ReadInt(water, "alcoholConsumptionEvents", -1) == 0
+                && ReadDouble(water, "estimatedAlcoholServings", -1) == 0, water);
+            var emptyWaterVessel = WineCup(0); emptyWaterVessel.Beverage = ResolveDrinkBeverage("water");
+            var emptyWater = Accounting("She sips from her cup.", emptyWaterVessel);
+            Check("drink_empty_water_is_not_event", ReadInt(emptyWater, "consumptionEvents", -1) == 0, emptyWater);
+            foreach (string action in new[] { "She swallows hard.", "She handles the cup of wine.", "She considers taking a sip of wine.", "He takes a sip of wine." })
+                Check("drink_event_negative_" + action, ReadInt(Accounting(action), "consumptionEvents", -1) == 0);
+            var staleCount = Accounting("She takes a sip of wine.", stale: true);
+            Check("drink_stale_event_not_applied", ReadInt(staleCount, "consumptionEvents", -1) == 0
+                && ReadDouble(staleCount, "estimatedAlcoholServings", -1) == 0, staleCount);
+            var replacement = Accounting("She takes two sips of wine.", suppressed: true);
+            Check("drink_replacement_does_not_invent_count", ReadInt(replacement, "consumptionEvents", -1) == 0
+                && !ReadBool(replacement, "eventCountComplete", true), replacement);
+            var migratedCounts = RecoverIntoxication(new Dictionary<string, object> { ["drinks"] = 2d }, 2, 12);
+            Check("drink_old_state_count_starts_at_observation", migratedCounts.ConsumptionEvents == 0
+                && migratedCounts.AlcoholConsumptionEvents == 0 && migratedCounts.EventCountSinceHour == 12);
             RunDrinkingVesselStorageContracts(Check);
+            RunQuietDrinkingContracts(Check);
             return rows;
+        }
+
+        private static Dictionary<string, object> QuietDrinkFixture(DrinkVesselState vessel, string serving = "sip", string reply = "Tell me more about your clan.")
+            => TestDict("reply", reply, "drinkConsumptions", new List<Dictionary<string, object>> {
+                TestDict("vesselId", vessel.Id, "contentsVersion", vessel.ContentsVersion, "serving", serving, "count", 1, "completed", true) });
+
+        private static void RunQuietDrinkingContracts(Action<string, bool, object, object> check)
+        {
+            var original = new DrinkVesselState { Scope = "quiet-fixture", Hour = 12, Kind = "cup", Remaining = .75,
+                Beverage = ResolveDrinkBeverage("wine"), ContentsVersion = 3, IdentitySeed = "quiet-test" };
+            IdentifyDrinkVessel(original, "known_cup");
+            double Quiet(Dictionary<string, object> parsed, DrinkVesselState vessel, List<Dictionary<string, object>> evidence = null) =>
+                ValidateQuietDrinkConsumption(parsed, ReadString(parsed, "reply", ""), "mira", vessel, null, evidence ?? new List<Dictionary<string, object>>());
+            var plain = QuietDrinkFixture(original);
+            var sip = original.Copy();
+            var details = new List<Dictionary<string, object>>();
+            check("quiet_drink_plain_speech_without_actions", Quiet(plain, sip, details) == .25 && sip.Remaining == .5
+                && !ReadString(plain, "reply", "").Contains('*') && ReadInt(details[0], "consumptionEvents", 0) == 1, details, .25);
+            foreach (var portion in new[] { ("sip", .25), ("half", .5), ("drink", .75) })
+                check("quiet_drink_known_remainder_" + portion.Item1, Quiet(QuietDrinkFixture(original, portion.Item1), original.Copy()) == portion.Item2, null, portion.Item2);
+            foreach (string invalid in new[] { "unknown_id", "wrong_version", "fractional_version", "wrong_actor", "not_completed", "zero_count", "many_count", "fractional_count", "invalid_serving" })
+            {
+                var parsed = QuietDrinkFixture(original);
+                var item = ReadDictionaryList(parsed, "drinkConsumptions")[0];
+                if (invalid == "unknown_id") item["vesselId"] = "invented";
+                if (invalid == "wrong_version") item["contentsVersion"] = 2;
+                if (invalid == "fractional_version") item["contentsVersion"] = 3.1;
+                if (invalid == "wrong_actor") item["drinkerId"] = "player";
+                if (invalid == "not_completed") item["completed"] = false;
+                if (invalid == "zero_count") item["count"] = 0;
+                if (invalid == "many_count") item["count"] = 20;
+                if (invalid == "fractional_count") item["count"] = .5;
+                if (invalid == "invalid_serving") item["serving"] = "jug";
+                var copy = original.Copy();
+                check("quiet_drink_reject_" + invalid, Quiet(parsed, copy) == 0 && copy.Remaining == .75, null, 0);
+            }
+            foreach (string refusal in new[] { "No thanks.", "I don't drink.", "I won't sip.", "I refuse to drink.", "No more." })
+                check("quiet_drink_refusal_" + PromptHash(refusal).Substring(0, 8), Quiet(QuietDrinkFixture(original, "sip", refusal), original.Copy()) == 0, null, 0);
+            foreach (string unrelated in new[] { "No more taxes on my people.", "No thanks; I won't join your clan." })
+                check("quiet_drink_unrelated_refusal_" + PromptHash(unrelated).Substring(0, 8), Quiet(QuietDrinkFixture(original, "sip", unrelated), original.Copy()) == .25, null, .25);
+            var duplicate = QuietDrinkFixture(original);
+            var duplicates = ReadDictionaryList(duplicate, "drinkConsumptions");
+            duplicates.Add(duplicates[0]); duplicate["drinkConsumptions"] = duplicates;
+            check("quiet_drink_duplicate_metadata_rejected", Quiet(duplicate, original.Copy()) == 0, null, 0);
+            check("quiet_drink_narration_and_metadata_count_once", Quiet(plain, original.Copy(),
+                new List<Dictionary<string, object>> { TestDict("consumptionEvents", 1) }) == 0, null, 0);
+            var unknown = original.Copy(); unknown.Remaining = null; unknown.Kind = "skin";
+            check("quiet_drink_bulk_unknown_sip", Quiet(QuietDrinkFixture(unknown), unknown.Copy()) == .25, null, .25);
+            check("quiet_drink_bulk_unknown_full_rejected", Quiet(QuietDrinkFixture(unknown, "drink"), unknown.Copy()) == 0, null, 0);
+            var empty = original.Copy(); empty.Remaining = 0;
+            check("quiet_drink_empty_rejected", Quiet(QuietDrinkFixture(empty), empty) == 0 && empty.Remaining == 0, null, 0);
+            var held = original.Copy(); held.Holder = "player"; held.SharedWithPlayer = true;
+            check("quiet_drink_player_custody_unavailable", Quiet(QuietDrinkFixture(held), held.Copy()) == 0, null, 0);
+            var water = original.Copy(); water.Beverage = ResolveDrinkBeverage("water");
+            var waterEvidence = new List<Dictionary<string, object>>();
+            check("quiet_drink_water_counts_event_without_alcohol", Quiet(QuietDrinkFixture(water), water, waterEvidence) == 0
+                && water.Remaining == .5 && ReadInt(waterEvidence[0], "consumptionEvents", 0) == 1
+                && ReadString(waterEvidence[0], "alcohol", "") == "No", waterEvidence, 0);
+            var unknownContents = original.Copy(); unknownContents.Beverage = new BeverageIdentity();
+            check("quiet_drink_unknown_contents_rejected", Quiet(QuietDrinkFixture(unknownContents), unknownContents) == 0, null, 0);
+            var roundtrip = ReadDrinkVessel(TryParseJsonObject(Json.Serialize(DrinkVesselRecord(held))));
+            check("drink_record_custody_identity_roundtrip", roundtrip.Id == held.Id && roundtrip.Holder == "player"
+                && roundtrip.SharedWithPlayer && roundtrip.ContentsVersion == 3 && roundtrip.Remaining == .75, DrinkVesselRecord(roundtrip), null);
+            var same = CurrentPlayerDrinkOffer(TestDict("playerText", "*I hand the drink back to her.*"), held, true);
+            check("drink_record_generic_return_preserves_identity", same?.Vessel.Id == held.Id && same.Vessel.Beverage.Family == "wine"
+                && same.Vessel.Remaining == .75, same == null ? null : DrinkVesselRecord(same.Vessel), null);
+            check("drink_record_spoken_offer_without_action", CurrentPlayerDrinkOffer(TestDict("playerText", "Want another sip?"), held, true)?.Vessel.Id == held.Id, null, held.Id);
+            foreach (string rejected in new[] { "I might hand it back to her.", "I never hand it to her.", "I watch him hand it to her.",
+                "I hand the rope to her.", "I hand a mystery drink to her.", "I hand it to him.", "I hand it to the waitress.", "I offer her two full cups of wine." })
+                check("drink_record_invalid_offer_" + PromptHash(rejected).Substring(0, 8),
+                    CurrentPlayerDrinkOffer(TestDict("playerText", rejected), held, true)?.Vessel.Id != held.Id, null, null);
+            var defaults = DefaultPromptTemplates();
+            foreach (var mode in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group, CodexConversationContractKind.Castle, CodexConversationContractKind.Social })
+            {
+                var schema = CodexConversationSchemas.Select(mode, defaults, defaults, TestDict()).Schema;
+                var properties = ReadDictionary(schema, "properties");
+                check("quiet_drink_schema_" + mode, properties?.ContainsKey("drinkConsumptions") == true, null, true);
+            }
+            var formatRepair = TestDict("reply", "More about your clan?");
+            PreserveFormatRepairMetadata(plain, formatRepair);
+            check("quiet_drink_format_repair_preserves_choice", ReadDictionaryList(formatRepair, "drinkConsumptions").Count == 1, null, 1);
+            var filled = original.Copy();
+            ValidatedDrinkAmount(DrinkingFixture("She refills her cup with water."), "*She refills her cup with water.*",
+                new List<Dictionary<string, object>>(), "Mira", true, filled);
+            check("drink_record_refill_keeps_id_advances_contents", filled.Id == original.Id && filled.ContentsVersion == 4
+                && filled.Beverage.Alcohol == DrinkAlcohol.No && Quiet(QuietDrinkFixture(original), filled) == 0, DrinkVesselRecord(filled), null);
         }
 
         private static void RunDrinkingVesselStorageContracts(Action<string, bool, object, object> check)
@@ -285,7 +502,7 @@ namespace ReignBetaServer
                 {
                     payload["turnId"] = turn;
                     var parsed = DrinkingFixture(action);
-                    ApplyConversationDrinking(campaign, hero, payload, profile, null, parsed, ReadString(parsed, "reply", ""));
+                    ApplyLegacyConversationDrinking(campaign, hero, payload, profile, null, parsed, ReadString(parsed, "reply", ""));
                     return ReadDictionary(payload, "intoxicationReceipt");
                 }
                 double Remaining(Dictionary<string, object> receipt) => ReadDouble(ReadDictionary(ReadDictionary(receipt, "state"), "vessel"), "remaining", -1);
@@ -293,6 +510,8 @@ namespace ReignBetaServer
                 var first = Turn("sip-one", "She sips from her cup.");
                 var second = Turn("sip-two", "She sips from her cup.");
                 check("DRINK-083", ReadDouble(ReadDictionary(second, "state"), "drinks", -1) == .5 && Remaining(second) == .5, second, .5);
+                check("drink_event_count_persists", ReadLong(ReadDictionary(second, "state"), "consumptionEvents", -1) == 2
+                    && ReadLong(ReadDictionary(second, "state"), "alcoholConsumptionEvents", -1) == 2, second, 2);
                 string committed = Json.Serialize(second);
                 var replay = Turn("sip-two", "She refills her cup with water.");
                 check("replay_does_not_refill", Json.Serialize(replay) == committed, replay, committed);
@@ -301,10 +520,13 @@ namespace ReignBetaServer
                 check("persisted_finish_remainder", ReadDouble(finish, "consumed", -1) == .5 && Remaining(finish) == 0, finish, .5);
                 var empty = Turn("empty", "She sips from her cup.");
                 check("persisted_empty_cup", ReadDouble(empty, "consumed", -1) == 0 && Remaining(empty) == 0, empty, 0);
+                check("drink_empty_cup_keeps_cumulative_count", ReadLong(ReadDictionary(empty, "state"), "consumptionEvents", -1) == 3, empty, 3);
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "vessel_checkpoint");
                 BuildIntoxicationPrompt(campaign, "mira", payload, profile, null);
                 var restored = ReadDictionary(payload, "intoxicationContext");
                 check("DRINK-085", ReadDouble(restored, "drinks", -1) == .5 && ReadDouble(ReadDictionary(restored, "vessel"), "remaining", -1) == .5, restored, .5);
+                check("drink_event_count_snapshot_restore", ReadLong(restored, "consumptionEvents", -1) == 2
+                    && ReadLong(restored, "alcoholConsumptionEvents", -1) == 2, restored, 2);
                 var restoredFinish = Turn("finish", "She finishes her cup.");
                 check("restored_future_receipt_removed", ReadDouble(restoredFinish, "consumed", -1) == .5, restoredFinish, .5);
                 Turn("refill", "She refills her cup with wine.");
@@ -321,7 +543,7 @@ namespace ReignBetaServer
                 {
                     var p = new Dictionary<string, object>(payload) { ["turnId"] = "concurrent-sip" };
                     var parsed = DrinkingFixture("She sips from her cup.");
-                    ApplyConversationDrinking(campaign, "concurrent", p, profile, null, parsed, ReadString(parsed, "reply", ""));
+                    ApplyLegacyConversationDrinking(campaign, "concurrent", p, profile, null, parsed, ReadString(parsed, "reply", ""));
                 });
                 BuildIntoxicationPrompt(campaign, "concurrent", payload, profile, null);
                 var concurrent = ReadDictionary(payload, "intoxicationContext");
@@ -331,11 +553,136 @@ namespace ReignBetaServer
                         new Dictionary<string, object> { ["hero"] = "concurrent", ["turn"] = "main:concurrent-sip" }).Count;
                 check("DRINK-084", ReadDouble(concurrent, "drinks", -1) == .25 && ReadDouble(ReadDictionary(concurrent, "vessel"), "remaining", -1) == .75
                     && receipts == 1, concurrent, .25);
+                check("drink_concurrent_retry_one_event", ReadLong(concurrent, "consumptionEvents", -1) == 1
+                    && ReadLong(concurrent, "alcoholConsumptionEvents", -1) == 1, concurrent, 1);
                 for (int n = 0; n < 5; n++) Turn("full-" + n, "She drinks a cup of wine.", "blocked");
                 var blocked = Turn("blocked", "She takes a sip of kumis.", "blocked");
                 check("DRINK-089", ReadDouble(blocked, "consumed", -1) == 0 && ReadBool(ReadDictionary(blocked, "state"), "alcoholBlocked", false), blocked, 0);
+                check("drink_threshold_replacement_count_incomplete", ReadBool(ReadDictionary(blocked, "state"), "incompleteEventCount", false)
+                    && ReadLong(ReadDictionary(blocked, "state"), "consumptionEvents", -1) == 4
+                    && ReadInt(ReadDictionary(blocked, "eventAccounting"), "consumptionEvents", -1) == 0, blocked, 4);
                 var blockedFill = Turn("blocked-fill", "She refills her cup with kumis and takes a sip of kumis.", "blocked");
                 check("suppressed_reply_cannot_store_refill", ReadString(ReadDictionary(ReadDictionary(blockedFill, "state"), "vessel"), "beverage", "") == "", blockedFill, "");
+
+                payload["playerText"] = "";
+                Dictionary<string, object> Vessel(Dictionary<string, object> receipt) => ReadDictionary(ReadDictionary(receipt, "state"), "vessel");
+                var playerLines = new[] {
+                    "*I take a seat and wait for her to sit also, pulling my skin of whiskey out and taking a drink before passing it to her.*",
+                    "*I smile as I take another drink of whiskey and pass it back to her*",
+                    "*I look over and hold her gaze as I hand the drink back to her again.*",
+                    "*I take a drink from my whiskey skin and hand it to her*",
+                    "*I smile as I grab the whiskey skin and take a drink before passing it to her*" };
+                var npcLines = new[] {
+                    "She takes the skin. Drinks. Her thumb wipes the mouth of it before passing it back — practical or proprietary, and she doesn't clarify which.",
+                    "She takes the skin. Drinks. The whiskey burns the same way it did seventeen days ago, and she hands it back without wiping the mouth this time.",
+                    "She takes the skin. Her fingers close around it but she doesn't drink — just holds it. She takes a drink. A real one — not the measured sip from before. She hands it back.",
+                    "She takes the skin. Drinks — a real one, not the measured sip. Her thumb doesn't wipe the mouth this time. She hands it back.",
+                    "She takes the skin. Drinks — shorter this time, the kind of pull that's more about holding something warm than needing it. She hands it back." };
+                string sharedId = "";
+                Dictionary<string, object> sharedReceipt = null;
+                for (int i = 0; i < playerLines.Length; i++)
+                {
+                    payload["playerText"] = playerLines[i];
+                    sharedReceipt = Turn("corein-replay-" + i, npcLines[i], "corein-fixture");
+                    string id = ReadString(Vessel(sharedReceipt), "id", "");
+                    if (i == 0) sharedId = id;
+                    check("drink_record_corein_replay_" + i, ReadDouble(sharedReceipt, "consumed", -1) == .25
+                        && id == sharedId && id.Length > 0 && ReadString(Vessel(sharedReceipt), "holder", "") == "player", sharedReceipt, .25);
+                }
+                check("drink_record_corein_five_events_fractional_amount", ReadDouble(ReadDictionary(sharedReceipt, "state"), "drinks", -1) == 1.25
+                    && ReadLong(ReadDictionary(sharedReceipt, "state"), "alcoholConsumptionEvents", -1) == 5, sharedReceipt, 1.25);
+                payload["playerText"] = "*I offer her a full new cup of wine.*";
+                var refused = Turn("refused-new-cup", "She declines the cup.", "corein-fixture");
+                check("drink_record_refused_offer_preserves_original", ReadString(Vessel(refused), "id", "") == sharedId
+                    && ReadString(Vessel(refused), "family", "") == "spirits", refused, sharedId);
+                payload["playerText"] = "*I hand a full new cup of water to her.*";
+                var switched = Turn("new-water-cup", "She accepts the cup and takes a sip.", "corein-fixture");
+                check("drink_record_new_water_never_borrows_whiskey", ReadDouble(switched, "consumed", -1) == 0
+                    && ReadString(Vessel(switched), "id", "") != sharedId && ReadString(Vessel(switched), "alcohol", "") == "No", switched, 0);
+
+                payload["turnId"] = "quiet-initial";
+                payload["playerText"] = "I offer her a full cup of wine.";
+                string prompt = BuildIntoxicationPrompt(campaign, "quiet", payload, profile, null);
+                var available = ReadDrinkVessel(ReadDictionary(ReadDictionary(payload, "intoxicationContext"), "availableDrink"));
+                var quietParsed = QuietDrinkFixture(available);
+                var quietReply = ReadString(quietParsed, "reply", "");
+                ApplyLegacyConversationDrinking(campaign, "quiet", payload, profile, null, quietParsed, quietReply, persist: false);
+                check("quiet_drink_prompt_offer_and_prepare", prompt.Contains(available.Id) && available.Id.Length > 0
+                    && ReadDouble(ReadDictionary(payload, "intoxicationReceipt"), "consumed", -1) == .25
+                    && ReadString(ReadDictionary(payload, "intoxicationReceipt"), "commitState", "") == "prepared", null, .25);
+                string generation;
+                using (var connection = OpenCampaignConnection(campaign))
+                    generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                var final = CommitFinalConversationEffects(campaign, "quiet", payload, null, profile, null, quietParsed, quietReply, generation);
+                var quietCommitted = ReadDictionary(final, "drinking");
+                check("quiet_drink_plain_reply_atomic_acceptance", ReadBool(final, "ok", false)
+                    && ReadDouble(quietCommitted, "consumed", -1) == .25
+                    && ReadString(Vessel(quietCommitted), "id", "") == available.Id && Remaining(quietCommitted) == .75, final, .25);
+                string quietId = available.Id;
+                payload["playerText"] = "";
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "quiet_record_checkpoint");
+                Dictionary<string, object> QuietTurn(string turn, string serving = "sip")
+                {
+                    payload["turnId"] = turn;
+                    BuildIntoxicationPrompt(campaign, "quiet", payload, profile, null);
+                    var current = ReadDrinkVessel(ReadDictionary(ReadDictionary(payload, "intoxicationContext"), "vessel"));
+                    var parsed = QuietDrinkFixture(current, serving);
+                    ApplyLegacyConversationDrinking(campaign, "quiet", payload, profile, null, parsed, ReadString(parsed, "reply", ""));
+                    return ReadDictionary(payload, "intoxicationReceipt");
+                }
+                var quietSecond = QuietTurn("quiet-second");
+                check("quiet_drink_multiple_plain_turns", ReadDouble(ReadDictionary(quietSecond, "state"), "drinks", -1) == .5
+                    && Remaining(quietSecond) == .5, quietSecond, .5);
+                var quietReplay = QuietTurn("quiet-second", "drink");
+                check("quiet_drink_retry_reuses_receipt", Json.Serialize(quietReplay) == Json.Serialize(quietSecond), quietReplay, quietSecond);
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "quiet_record_checkpoint");
+                BuildIntoxicationPrompt(campaign, "quiet", payload, profile, null);
+                var restoredQuiet = ReadDictionary(payload, "intoxicationContext");
+                check("quiet_drink_snapshot_restores_record_and_count", ReadDouble(restoredQuiet, "drinks", -1) == .25
+                    && ReadString(ReadDictionary(restoredQuiet, "vessel"), "id", "") == quietId
+                    && ReadDouble(ReadDictionary(restoredQuiet, "vessel"), "remaining", -1) == .75, restoredQuiet, .25);
+                using (var connection = OpenCampaignConnection(campaign))
+                    generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                payload["turnId"] = "quiet-corrected-refusal";
+                var corrected = QuietDrinkFixture(ReadDrinkVessel(ReadDictionary(restoredQuiet, "vessel")));
+                ApplyLegacyConversationDrinking(campaign, "quiet", payload, profile, null, corrected, ReadString(corrected, "reply", ""), persist: false);
+                var correction = CommitFinalConversationEffects(campaign, "quiet", payload, null, profile, null, corrected, "No thanks.", generation);
+                check("quiet_drink_final_refusal_rechecks_prepared_choice", ReadDouble(ReadDictionary(correction, "drinking"), "consumed", -1) == 0, correction, 0);
+                payload["turnId"] = "quiet-cleared-metadata";
+                var cleared = QuietDrinkFixture(ReadDrinkVessel(ReadDictionary(restoredQuiet, "vessel")));
+                ApplyLegacyConversationDrinking(campaign, "quiet", payload, profile, null, cleared, ReadString(cleared, "reply", ""), persist: false);
+                cleared["drinkConsumptions"] = new List<Dictionary<string, object>>();
+                var noChoice = CommitFinalConversationEffects(campaign, "quiet", payload, null, profile, null, cleared, ReadString(cleared, "reply", ""), generation);
+                check("quiet_drink_cleared_metadata_cannot_commit_old_choice", ReadDouble(ReadDictionary(noChoice, "drinking"), "consumed", -1) == 0, noChoice, 0);
+                var currentQuiet = ReadDrinkVessel(ReadDictionary(restoredQuiet, "vessel"));
+                System.Threading.Tasks.Parallel.For(0, 8, n =>
+                {
+                    var concurrentPayload = new Dictionary<string, object>(payload) { ["turnId"] = "quiet-concurrent" };
+                    var parsed = QuietDrinkFixture(currentQuiet);
+                    ApplyLegacyConversationDrinking(campaign, "quiet", concurrentPayload, profile, null, parsed, ReadString(parsed, "reply", ""));
+                });
+                BuildIntoxicationPrompt(campaign, "quiet", payload, profile, null);
+                var quietConcurrent = ReadDictionary(payload, "intoxicationContext");
+                check("quiet_drink_concurrent_retry_counts_once", ReadDouble(quietConcurrent, "drinks", -1) == .5
+                    && ReadLong(quietConcurrent, "consumptionEvents", -1) == 2
+                    && ReadDouble(ReadDictionary(quietConcurrent, "vessel"), "remaining", -1) == .5, quietConcurrent, .5);
+                Turn("quiet-handoff", "She hands her cup back to you.", "quiet");
+                payload["playerText"] = "Want another sip?";
+                payload["turnId"] = "quiet-spoken-invitation";
+                BuildIntoxicationPrompt(campaign, "quiet", payload, profile, null);
+                var invitedRecord = ReadDrinkVessel(ReadDictionary(ReadDictionary(payload, "intoxicationContext"), "availableDrink"));
+                var invitedReply = QuietDrinkFixture(invitedRecord);
+                ApplyLegacyConversationDrinking(campaign, "quiet", payload, profile, null, invitedReply, ReadString(invitedReply, "reply", ""));
+                var invitedReceipt = ReadDictionary(payload, "intoxicationReceipt");
+                check("quiet_drink_spoken_invitation_accepts_same_record", ReadDouble(invitedReceipt, "consumed", -1) == .25
+                    && ReadString(Vessel(invitedReceipt), "id", "") == quietId && Remaining(invitedReceipt) == .25, invitedReceipt, .25);
+                payload["playerText"] = "";
+                payload["worldDay"] = 10d + 2d / 24d;
+                payload["turnId"] = "quiet-expired";
+                var expiredReply = QuietDrinkFixture(invitedRecord);
+                ApplyLegacyConversationDrinking(campaign, "quiet", payload, profile, null, expiredReply, ReadString(expiredReply, "reply", ""));
+                check("quiet_drink_expired_record_rejected", ReadDouble(ReadDictionary(payload, "intoxicationReceipt"), "consumed", -1) == 0,
+                    ReadDictionary(payload, "intoxicationReceipt"), 0);
             }
             catch (Exception ex) { check("vessel_storage_integration", false, ex.ToString(), null); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }

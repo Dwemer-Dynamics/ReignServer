@@ -2452,6 +2452,11 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     && SaveSyncTestSqlValue(campaignId, "SELECT reputation_value FROM character_reputations WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", "reputation_value", campaignId) == "1"
                     && affectedCountsAuditable;
                 add("older_save_rolls_back_all_temporal_stores", ReadBool(rolledBack, "ok", false) && ReadString(rolledBack, "result", "") == "rolled_back" && storesClean, "Older-save apply removes future conversations, events, memories, relationships, world history, rumors, actions, diplomacy, rebellions, court/reputation state, and character runtime state.");
+                add("original_input_and_receipt_round_trip_exactly", SaveSyncTestSqlValue(campaignId,
+                    "SELECT text FROM conversation_turns WHERE turn_id='old_original';", "text") == "  *I trace a 🌿.*\r\nHello.\t "
+                    && SaveSyncTestSqlValue(campaignId, "SELECT source_hash FROM conversation_input_receipts WHERE input_id='old_input';", "source_hash")
+                        == ConversationExactTextHash("  *I trace a 🌿.*\r\nHello.\t "),
+                    "Author-only originals and receipt hashes survive snapshot restore byte-for-byte; future receipts and originals are removed with their branch.");
                 add("pre_sync_backup_created", ReadBool(rolledBack, "backupCreated", false) && Directory.Exists(ReadString(rolledBack, "backupPath", "")), "Destructive apply creates a retained pre-sync recovery snapshot.");
 
                 MarkSaveSyncActiveStateDirty(campaignId);
@@ -3072,6 +3077,13 @@ VALUES('hero_a|hero_b','hero_a','hero_b',$day,$ts);",
                     new Dictionary<string, object> { ["day"] = (int)ts, ["ts"] = ts });
                 ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
                 ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
+                EnsureConversationInputSchema(connection);
+                const string exactOriginal = "  *I trace a 🌿.*\r\nHello.\t ";
+                ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
+                    TestDict("id", marker + "_original", "session", marker + "_session", "text", exactOriginal, "ts", ts));
+                ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
+VALUES($id,'timeline_test',$session,'player',$source,$hash,'fixture','received',$ts,$ts) ON CONFLICT(input_id) DO NOTHING;",
+                    TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", ConversationExactTextHash(exactOriginal), "ts", ts));
                 ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
 occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,world_day,expires_day,status,
 exposure_chance,exposure_roll,catalog_revision,participants_json,provenance_summary,snapshot_json,created_ts,updated_ts)
@@ -3180,6 +3192,8 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
                     "SELECT COUNT(*) count FROM events WHERE event_id='future_event';",
                     "SELECT COUNT(*) count FROM memories WHERE memory_id='future_memory';",
                     "SELECT COUNT(*) count FROM conversation_turns WHERE turn_id='future_turn';",
+                    "SELECT COUNT(*) count FROM conversation_turns WHERE turn_id='future_original';",
+                    "SELECT COUNT(*) count FROM conversation_input_receipts WHERE input_id='future_input';",
                     "SELECT COUNT(*) count FROM rumor_occurrences WHERE occurrence_id='future_rumor_occurrence';",
                     "SELECT COUNT(*) count FROM rumor_subject_tags WHERE occurrence_id='future_rumor_occurrence' AND subject_id='hero_a';",
                     "SELECT COUNT(*) count FROM character_reputations WHERE subject_id='hero_a' AND tag_id='test_reputation' AND reputation_value=99;",

@@ -153,6 +153,19 @@ namespace ReignBetaServer
             }
             if (activeClean)
             {
+                // Initialize only from this identity-verified native save. Every
+                // source is compared with its snapshot row; the no-op marker is
+                // not permission to include arbitrary current/foreign history.
+                using (var memoryConnection = OpenCampaignConnection(campaignId))
+                {
+                    var memoryContext = RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
+                    if (ReadString(memoryContext, "save_point_id", "") != savePointId
+                        || ReadString(memoryContext, "legacy_recovery_version", "") != LegacyMemoryRecoveryVersion)
+                    {
+                        InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId);
+                        result["memorySourceAccess"] = "verified_snapshot_membership_initialized";
+                    }
+                }
                 timer.Stop();
                 result["durationMs"] = timer.ElapsedMilliseconds;
                 StoreSaveSyncLoadReceipt(
@@ -225,7 +238,7 @@ namespace ReignBetaServer
                         "Injected Save Sync failure after installing campaign assets.");
 
                 ClearSaveSyncCaches(campaignId);
-                AdvanceMemoryRestoreGeneration(campaignId);
+                AdvanceMemoryRestoreGeneration(campaignId, point);
                 MarkSaveSyncActiveStateClean(campaignId, point);
                 timer.Stop();
                 result["result"] = "rolled_back";

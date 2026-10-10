@@ -43,6 +43,76 @@ namespace ReignBetaServer
             var context = AgencyTestContext();
             var first = EvaluateConversationAgency(AgencyTestReply(AgencyTestProposal(context)), context);
             add("first_refusal_has_no_pressure", ReadBool(first, "ok", false) && ReadInt(ReadDictionaryList(first, "updates").Single(), "pressure", -1) == 0, first);
+            var pendingContext = AgencyTestContext();
+            string pendingId = "neg_" + PromptHash("agency_timeline|npc|player|service|").Substring(0, 32);
+            pendingContext["playerText"] = "Shouldn't you know this building better if you inspected it before?";
+            pendingContext["records"] = new List<Dictionary<string, object>> { TestDict("id", pendingId, "topic", "service",
+                "objectId", "", "revision", 6, "disposition", "conditional", "subject", "Workshop partnership",
+                "terms", TestDict("gold", 0d, "durationDays", 0d, "conditions", "Inspect the stock room first."),
+                "objections", new[] { "credibility" }, "reason", "Inspection remains pending.", "reconsideration", "Inspect the stock room.") };
+            var ordinaryPending = TestDict("reply", "I have seen the building. Let us look at the stock room.",
+                "actionGate", TestDict("needed", false, "commitment", "roleplay_only", "intent", ""));
+            add("ordinary_question_preserves_pending_record", TryCompletePendingAgencyConversation(ordinaryPending, pendingContext)
+                && ReadBool(EvaluateConversationAgency(ordinaryPending, pendingContext), "ok", false)
+                && ReadDictionaryList(ordinaryPending, "proposalDecisions").Count == 0, null);
+            var soldierContext = AgencyTestContext();
+            soldierContext["playerText"] = "I absolutely agree to tell you about the soldiers and I apologize. You have my word.";
+            string soldierId = "neg_" + PromptHash("agency_timeline|npc|player|service|").Substring(0, 32);
+            soldierContext["records"] = new List<Dictionary<string, object>> { TestDict("id", soldierId,
+                "topic", "service", "objectId", "", "revision", 9, "disposition", "conditional",
+                "subject", "Workshop partnership contingent on soldier notification",
+                "terms", TestDict("gold", 0d, "durationDays", 0d, "benefit", "workshop partnership",
+                    "conditions", "Explicitly accept the before-not-after governance principle for soldiers in Phycaon"),
+                "objections", new[] { "credibility" }, "reason", "The earlier agreement was ambiguous.",
+                "reconsideration", "Confirm soldier notice before entry.") };
+            var soldierDecision = TestDict("topic", "service", "objectId", "", "recordId", soldierId,
+                "expectedRevision", 9, "subject", "Soldier notice", "disposition", "accepted",
+                "engagement", "apology", "tactic", "appeal", "stakes", "major", "benefit", "protection",
+                "objections", new string[0], "reason", "The player confirmed the condition.",
+                "evidenceKeys", new[] { "authority.peer", "trait.judgment=75" },
+                "playerQuote", "I absolutely agree to tell you about the soldiers and I apologize.",
+                "replyQuote", "Before, not after. I accept your answer.",
+                "terms", TestDict("gold", 0d, "durationDays", 0d, "conditions", "before-not-after soldier notice"));
+            var stalePartnership = TestDict("topic", "service", "objectId", "", "recordId", "",
+                "expectedRevision", 0, "disposition", "conditional", "playerQuote", "I hope you will consider being a partner",
+                "reconsideration", "Agree on transparency and partnership terms.");
+            var soldierReply = TestDict("reply", "Before, not after. I accept your answer. We can discuss partnership terms.",
+                "actionGate", TestDict("needed", false, "commitment", "roleplay_only", "intent", ""),
+                "proposalDecisions", new List<Dictionary<string, object>> { soldierDecision, stalePartnership },
+                "continuityWrites", new List<Dictionary<string, object>> { TestDict("id", soldierId, "status", "resolved") });
+            bool soldierResolved = TryResolveSoldierNoticeCondition(soldierReply, soldierContext);
+            var soldierEvaluation = EvaluateConversationAgency(soldierReply, soldierContext);
+            var soldierUpdate = ReadDictionaryList(soldierEvaluation, "updates").SingleOrDefault();
+            add("explicit_soldier_promise_clears_condition_without_accepting_partnership", soldierResolved
+                && ReadBool(soldierEvaluation, "ok", false)
+                && ReadDictionaryList(soldierReply, "proposalDecisions").Count == 1
+                && ReadString(soldierUpdate, "disposition", "") == "undecided"
+                && ReadString(ReadDictionary(soldierUpdate, "terms"), "conditions", "") == ""
+                && ReadString(soldierUpdate, "reconsideration", "").Contains("transparency")
+                && ReadDictionaryList(soldierReply, "continuityWrites").Count == 1, soldierEvaluation);
+            var ambiguousSoldier = CloneDictionary(soldierReply);
+            soldierContext["playerText"] = "I agree.";
+            add("ambiguous_agreement_does_not_clear_soldier_condition",
+                !TryResolveSoldierNoticeCondition(ambiguousSoldier, soldierContext), null);
+            pendingContext["playerText"] = "I agree to notify you before bringing soldiers into town.";
+            var explicitPending = TestDict("reply", "Good. If the workshop proves sound, we can discuss a partnership.",
+                "actionGate", TestDict("needed", false, "commitment", "roleplay_only", "intent", ""));
+            add("explicit_agreement_requires_negotiation_metadata", !TryCompletePendingAgencyConversation(explicitPending, pendingContext), null);
+            var pendingDecision = TestDict("topic", "service", "objectId", "", "recordId", pendingId,
+                "expectedRevision", 6, "subject", "Notification promise", "disposition", "accepted",
+                "engagement", "request", "tactic", "appeal", "stakes", "ordinary", "benefit", "protection",
+                "objections", new string[0], "reason", "Notification accepted.", "reconsideration", "",
+                "evidenceKeys", new[] { "authority.peer", "trait.judgment=75" },
+                "playerQuote", "I agree to notify you before bringing soldiers into town.",
+                "replyQuote", "Good.", "terms", TestDict("gold", 0d, "durationDays", 0d,
+                    "conditions", "Notify before bringing soldiers into town."));
+            explicitPending["proposalDecisions"] = new List<Dictionary<string, object>> { pendingDecision };
+            bool keptPending = TryKeepPendingAgencyCondition(explicitPending, pendingContext);
+            var pendingEvaluation = EvaluateConversationAgency(explicitPending, pendingContext);
+            add("partial_agreement_keeps_workshop_condition", keptPending && ReadBool(pendingEvaluation, "ok", false)
+                && ReadString(ReadDictionaryList(explicitPending, "proposalDecisions").Single(), "disposition", "") == "conditional"
+                && ReadString(ReadDictionary(ReadDictionaryList(explicitPending, "proposalDecisions").Single(), "terms"), "conditions", "") == "Inspect the stock room first."
+                && ReadDictionaryList(pendingEvaluation, "updates").Count == 1, pendingEvaluation);
             context["records"] = ReadDictionaryList(first, "updates");
             string[] modes = { "individual", "party_chat", "social_event", "court", "correspondence" };
             bool allHeld = true, baselineHeld = true;
@@ -203,7 +273,10 @@ namespace ReignBetaServer
                 "invalid_repair", "dialogue", "npc", request => { calls++; return TestDict("ok", true, "content", Json.Serialize(unsafeReply)); }, false);
             var failedVisible = TryParseJsonObject(ReadString(enforced, "content", ""));
             add("one_failed_repair_returns_marked_dialogue_without_effects", calls == 1 && ReadBool(enforced, "ok", false)
+                && ReadString(failedVisible, "reply", "").StartsWith("My household matters to me.\n\n[The NPC's decision could not be verified.", StringComparison.Ordinal)
                 && ReadString(failedVisible, "reply", "").EndsWith(".,", StringComparison.Ordinal)
+                && ReadString(failedVisible, "body", "") == ReadString(failedVisible, "reply", "")
+                && IsTechnicalConversationNotice(ReadString(failedVisible, "reply", ""))
                 && ReadDictionaryList(failedVisible, "proposalDecisions").Count == 0
                 && ReadDictionaryList(failedVisible, "relationshipAssessments").Count == 0
                 && !ActionGateShouldPlan(ReadDictionary(failedVisible, "actionGate"))

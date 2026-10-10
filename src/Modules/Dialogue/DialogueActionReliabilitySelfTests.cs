@@ -105,6 +105,25 @@ namespace ReignBetaServer
                     "Please pay Derthert 17 denars.", ref acceptedProbeReply)
                 && acceptedProbeReply == "I agree and will pay Derthert now.",
                 acceptedProbeGate);
+            foreach (string decision in new[] { "accept", "reject", "counter", "propose", "none" })
+            {
+                string typedReply = "Provider wording for typed " + decision + ".";
+                string originalReply = typedReply;
+                var typedGate = TestDict("needed", false, "commitment", "uncommitted");
+                add("typed_cooperation_preserves_" + decision,
+                    !EnforceActionAcceptanceCooperationGate(true, typedGate,
+                        "A typed action sentence.", ref typedReply, structuredActionProtocol: true)
+                    && typedReply == originalReply
+                    && !ReadBool(typedGate, "needed", true)
+                    && ReadString(typedGate, "commitment", "") == "uncommitted",
+                    typedGate);
+            }
+            var uncommittedResidentGate = NormalizeActionGate(TestDict(
+                "needed", true, "commitment", "uncommitted",
+                "intent", "The resident is asking for terms before signing."),
+                "Will you join me?", "Tell me the payment and duration first.");
+            add("uncommitted_resident_does_not_launch_planner",
+                !ActionGateShouldPlan(uncommittedResidentGate), uncommittedResidentGate);
 
             var movementAllowed = new HashSet<string>(new[]
             {
@@ -622,6 +641,7 @@ namespace ReignBetaServer
                 ValidateGuestServiceTerms(TestDict("wageGold", value, "wagePeriodDays", 21), errors);
                 add("invalid_wage_" + results.Count, errors.Count > 0, null);
             }
+            results.AddRange(RunPlayerActionIntentsSelfTests());
             return results;
         }
     }

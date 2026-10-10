@@ -11,7 +11,7 @@ namespace ReignBetaServer
         private const string DialogueActionExecutionRules =
             "ACTION MEANING AND NATIVE EXECUTION\n"
             + "A present accepted invitation to join the player's traveling group uses accept_temporary_party_guest, not a map order or permanent clan recruitment. "
-            + "Preserve the agreed duration using campaignCalendar.daysPerSeason/daysPerWeek. With no fixed end date use open_ended, reviewed every five days. "
+            + "Preserve the agreed duration using campaignCalendar.daysPerSeason/daysPerWeek. With no fixed end date use open_ended, reviewed every thirty days. "
             + "A guest already in the player's party needs no repeated join action. Renew and end require that speaker's active native agreement. "
             + "Discussing a destination, traveling together, 'we will', a disguise, or another person's scouting duties does not order the addressed NPC's party. "
             + "Map commands require an actual direction to an eligible separate NPC party; never move the human main party. An accepted follow command creates one lasting agreement: the NPC follows the player in person when present and escorts the player's party on the campaign map, including after scene changes. "
@@ -142,7 +142,7 @@ namespace ReignBetaServer
         {
             string text = NormalizeLookup(exchange);
             var calendar = ReadDictionary(payload, "campaignCalendar");
-            bool openEnded = ContainsAnyNormalized(text, "open ended", "no fixed end date", "every five days");
+            bool openEnded = ContainsAnyNormalized(text, "open ended", "no fixed end date", "every thirty days");
             double days = openEnded ? 0 : ExtractItemAmount(text, "days?");
             if (!openEnded && days <= 0)
                 days = ExtractItemAmount(Regex.Replace(text, @"\b(?:more|additional|extra)\s+(?=days?\b)", ""), "days?");
@@ -160,7 +160,7 @@ namespace ReignBetaServer
                 // unresolved dates/lengths must be clarified by the semantic planner.
                 if (!openEnded && Regex.IsMatch(text, @"\b(?:until|for \w+ (?:weeks?|months?|years?))\b")) return false;
                 terms["termKind"] = "open_ended";
-                terms["reviewIntervalDays"] = 5;
+                terms["reviewIntervalDays"] = 30;
             }
             bool deferred = Regex.IsMatch(text,
                 @"\b(?:return for you|come back for you|back for you|when (?:I|he|she|the player) returns?|when you (?:do )?join|after (?:the |that )?tournament|future start)\b", RegexOptions.IgnoreCase);

@@ -35,7 +35,13 @@ def main():
             temporary.replace(destination)
         finally:
             temporary.unlink(missing_ok=True)
-    print("Pinned Reign embedding model verified.")
+    if (root / "qwen-reranker.onnx").is_file():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("reign_prepare_selection", Path(__file__).with_name("Prepare-MemorySelection.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.prepare(root)
+    print("Pinned Reign local memory models verified.")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ namespace ReignBetaServer
         {
             var rows = new List<Dictionary<string, object>>();
             rows.AddRange(RunPortraitPhysiqueContractTests());
+            rows.AddRange(RunPortraitVisionContractTests());
             rows.AddRange(RunCodexImageProviderContractTests());
             rows.AddRange(RunOpenRouterImageProviderContractTests());
             Action<string, bool, string> check = (name, passed, detail) => AddSharedPortraitSelfTest(rows, name, passed, detail);

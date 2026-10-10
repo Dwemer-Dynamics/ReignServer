@@ -94,7 +94,9 @@ namespace ReignBetaServer
                     && !ReadBool(config, "features.shell_tool", true) && !ReadBool(config, "features.multi_agent", true)
                     && !ReadBool(ReadDictionary(ReadDictionary(config, "mcp_servers"), "fixture.with.dot"), "enabled", true)
                     && !ReadBool(policy, "networkAccess", true) && ReadBool(policy, "excludeTmpdirEnvVar", false)
-                    && ReadString(thread, "cwd", "") == root && !thread.ContainsKey("model") && !turn.ContainsKey("model"),
+                    && ReadString(thread, "cwd", "") == root && !thread.ContainsKey("model") && !turn.ContainsKey("model")
+                    && !config.Keys.Any(key => key.IndexOf("model", StringComparison.OrdinalIgnoreCase) >= 0)
+                    && CodexImageModel == "runtime-default",
                     "The image model is runtime-owned; the isolated thread disables inherited MCP, shell, agents and network.");
                 check("interrupt_on_success", calls.Last() == "turn/interrupt", "Turn cleanup is requested after success.");
                 calls.Clear();

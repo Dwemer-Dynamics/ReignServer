@@ -86,6 +86,15 @@ namespace Reign.Core.Contracts.Government
         public static bool CanRecommend(string status) => status == "hearing" || status == "reconsideration" || status == "awaiting_ruler";
         public static bool CanVote(string status) => status == "hearing";
 
+        // Seasonal resolutions retain "debate" until their recorded hearing decision executes.
+        // Linked hearings must finish voting; legacy unlinked proposals retain their original path.
+        public static bool CanDecideResolution(string resolutionStatus, string hearingStatus, bool hasHearing)
+        {
+            if (resolutionStatus != "proposed" && resolutionStatus != "debate") return false;
+            if (!hasHearing) return resolutionStatus == "proposed";
+            return hearingStatus == "awaiting_ruler" || hearingStatus == "reconsideration";
+        }
+
         public static int OptionScore(int interest, int partyAlignment, int rulerRelation, bool recommended,
             int commitmentShift, int personality, int stableVariance)
         {

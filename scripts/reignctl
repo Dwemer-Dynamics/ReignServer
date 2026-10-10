@@ -47,13 +47,34 @@ repair_permissions() {
     find -P "$data/campaigns" -xdev -type f -exec setfacl -m u::rw,u:reign:rw,g::---,o::--- {} +
 }
 
+# The lifecycle controller owns the PID record, including the write. A previous
+# root-owned record must never be opened by the unprivileged server shell.
+start_server_process() {
+    local executable=$1 python_root=$2 model_root=$3 bannerlord_modules=$4
+    local pid_directory=${pidfile%/*}
+    [ ! -L "$pid_directory" ] && [ ! -L "$pidfile" ] &&
+        { [ ! -e "$pidfile" ] || [ -f "$pidfile" ]; } || {
+        echo 'Redirected or non-regular Reign PID paths are not supported.' >&2
+        return 1
+    }
+    install -d -o root -g root -m 0755 "$pid_directory" || return 1
+    install -o root -g root -m 0644 /dev/null "$pidfile" || return 1
+    if ! runuser -u reign -- env REIGN_DATA_ROOT="$data" REIGN_SAVE_SYNC_ROOT="$data/save-sync" REIGN_BANNERLORD_MODULES="$bannerlord_modules" REIGN_DB_NAME=reign REIGN_DB_HOST=/var/run/postgresql REIGN_DB_USER=reign \
+        REIGN_VECTOR_PYTHON="$python_root/bin/python" REIGN_VECTOR_MODEL_DIR="$model_root" \
+        sh -c 'umask 077; setsid "$1" --port 5101 --no-browser >> "$2/logs/server.log" 2>&1 < /dev/null & echo $!' \
+        sh "$executable" "$data" 8>&- > "$pidfile"; then
+        rm -f "$pidfile"
+        return 1
+    fi
+}
+
 start() {
     repair_permissions || return 1
     running && return 0
     local executable="$root/current/ReignServer"
     [ -x "$executable" ] || executable="$root/current/ReignBetaServer"
     [ -x "$executable" ] || { echo 'Reign runtime needs installation or repair.' >&2; exit 1; }
-    install -d -o reign -g reign -m 700 "$data" "$data/logs" /run/reignserver
+    install -d -o reign -g reign -m 700 "$data" "$data/logs"
     # Do not attach to or kill an unmanaged process already using Reign's port.
     if ss -ltnH 'sport = :5101' | grep -q .; then echo 'Reign internal port 5101 is already in use.' >&2; return 1; fi
     local python_root="$root/venv" model_root="$root/models"
@@ -74,15 +95,7 @@ value=settings.get('bannerlordModules', '')
 print(value if isinstance(value,str) and value.startswith('/mnt/') else '')
 PY
 )
-    runuser -u reign -- env REIGN_DATA_ROOT="$data" REIGN_SAVE_SYNC_ROOT="$data/save-sync" REIGN_BANNERLORD_MODULES="$bannerlord_modules" REIGN_DB_NAME=reign REIGN_DB_HOST=/var/run/postgresql REIGN_DB_USER=reign \
-        REIGN_VECTOR_PYTHON="$python_root/bin/python" REIGN_VECTOR_MODEL_DIR="$model_root" \
-        sh -c 'umask 077; setsid "$1" --port 5101 --no-browser >> "$3/logs/server.log" 2>&1 < /dev/null & echo $! > "$2"' \
-        sh "$executable" "$pidfile" "$data" 8>&-
-    # Type=forking services may only adopt a process outside their cgroup when
-    # the configured PID file is trusted. Keep process creation unprivileged,
-    # then hand only the PID file back to the root-owned lifecycle controller.
-    chown root:root "$pidfile"
-    chmod 0644 "$pidfile"
+    start_server_process "$executable" "$python_root" "$model_root" "$bannerlord_modules" || return 1
     for attempt in $(seq 1 45); do
         # Retained older builds lack schema fields; reported schema mismatches must fail activation.
         if curl -fsS --max-time 2 http://127.0.0.1:5101/health | python3 -c 'import json,sys; r=json.load(sys.stdin); version=r.get("databaseSchemaVersion"); legacy=not any(k in r for k in ("databaseSchemaVersion","requiredDatabaseSchemaVersion","databaseSchemaUpToDate")); schema_ok=legacy or (type(version) is int and version>0 and version==r.get("requiredDatabaseSchemaVersion") and r.get("databaseSchemaUpToDate") is True); ok=r.get("ok") and r.get("service")=="BannerlordReignServer" and r.get("protocolVersion")==1 and schema_ok; print("ReignServer database versioning check completed." if not legacy else "ReignServer uses an older build without database version reporting.") if ok else None; sys.exit(0 if ok else 1)' 2>/dev/null; then return 0; fi
@@ -96,7 +109,7 @@ PY
 
 case "$command" in
     configure-web)
-        a2enmod proxy proxy_http >/dev/null
+        a2enmod proxy proxy_http cgid >/dev/null
         if ! grep -Eq '^[[:space:]]*Listen[[:space:]]+([^:[:space:]]+:)?8089([[:space:]]|$)' /etc/apache2/ports.conf; then
             printf 'Listen 0.0.0.0:8089\n' >> /etc/apache2/ports.conf
         fi
@@ -111,6 +124,17 @@ EOF
     ProxyRequests Off
     # Reign's HTTP listener reads bodies directly; Apache must acknowledge Expect first.
     Proxy100Continue Off
+    # This fixed-action controller remains available while the application is off.
+    ProxyPass /reign-control !
+    ScriptAlias /reign-control /usr/local/lib/reign/reign-control.py
+    <Directory /usr/local/lib/reign>
+        Options +ExecCGI -Indexes
+        Require all granted
+    </Directory>
+    ProxyErrorOverride On 502 503 504
+    ErrorDocument 502 /reign-control/offline
+    ErrorDocument 503 /reign-control/offline
+    ErrorDocument 504 /reign-control/offline
     ProxyPass / http://127.0.0.1:5101/ timeout=300
     ProxyPassReverse / http://127.0.0.1:5101/
     ErrorLog ${APACHE_LOG_DIR}/reign_error.log
@@ -120,7 +144,9 @@ EOF
         a2enconf reign-source >/dev/null
         a2ensite reign >/dev/null
         apache2ctl configtest
-        if pgrep -x apache2 >/dev/null; then service apache2 reload; fi
+        # A graceful reload does not start the cgid daemon when first enabled.
+        # This dedicated distro's proxy must restart before its control endpoint works.
+        if pgrep -x apache2 >/dev/null; then service apache2 restart; fi
         ;;
     start) start ;;
     stop) stop ;;
@@ -132,6 +158,7 @@ EOF
         [ ! -L "$root" ] && [ ! -L "$data" ] || { echo 'Redirected runtime roots are not supported.' >&2; exit 1; }
         install -d -m 755 "$root" "$root/versions"
         install -d -o reign -g reign -m 700 "$data"
+        /usr/local/lib/reign/prepare-systemd-sessions.sh
         apt-get update -qq
         apt-get install -y --no-install-recommends python3-venv libicu72 libgssapi-krb5-2 ca-certificates curl acl
         repair_permissions

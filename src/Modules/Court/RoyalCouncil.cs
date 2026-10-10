@@ -26,7 +26,8 @@ domain_packet_json TEXT NOT NULL DEFAULT '{}',is_opening INTEGER NOT NULL DEFAUL
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_royal_council_session ON royal_council_turns(campaign_id,timeline_id,session_id,created_ts);");
         }
 
-        private static Dictionary<string, object> RoyalCouncilRespond(Dictionary<string, object> payload)
+        private static Dictionary<string, object> RoyalCouncilRespond(Dictionary<string, object> payload,
+            Dictionary<string, object> settingsOverride = null, Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string role = ReadString(payload, "role", "").Trim().ToLowerInvariant();
@@ -45,13 +46,16 @@ domain_packet_json TEXT NOT NULL DEFAULT '{}',is_opening INTEGER NOT NULL DEFAUL
             string playerText = ReadString(payload, "playerText", "");
             bool opening = ReadBool(payload, "isOpening", false), expand = ReadBool(payload, "expand", false);
             List<string> heardBy = ReadStringList(payload, "presentAdvisorIds").Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
+            var memory = PrepareRouteConversationMemory(payload, speakerId, "royal_council", sessionId, turnId, heardBy,
+                settingsOverride: settingsOverride);
+            payload = memory.Payload;
+            playerText = ReadString(payload, "playerText", "");
             var prompt = new StringBuilder();
-            prompt.AppendLine("Return only JSON with one field named reply.");
-            prompt.AppendLine("You are the ruler's " + role + " advisor in a private official Royal Council. Use only the authorized packet. Never invent facts, reveal absent hidden facts, queue campaign actions, or alter relationships, reputation, or political pressure.");
+            prompt.AppendLine(UsesStructuredActions(payload) ? "Return JSON with reply and structuredActionDecision." : "Return only JSON with one field named reply.");
+            prompt.AppendLine("You are the ruler's " + role + " advisor in a private official Royal Council. Use only the authorized packet for government facts and powers. Conversation evidence establishes what people previously said, not fresh official authority. Never invent facts, reveal absent hidden facts, queue campaign actions, or alter relationships, reputation, or political pressure.");
             prompt.AppendLine("If nothing material is relevant, answer with one short sentence. Otherwise use " + (expand ? "at most two short paragraphs" : opening ? "two to four concise sentences" : "one to four concise sentences") + ". Omit ceremonial chatter.");
             prompt.AppendLine("Authorized packet: " + Json.Serialize(bounded));
-            List<Dictionary<string, object>> transcript = ReadDictionaryList(payload, "transcript");
-            prompt.AppendLine("Attributed council record: " + Json.Serialize(transcript.Skip(Math.Max(0, transcript.Count - 24)).ToList()));
+            prompt.AppendLine(StructuredActionPrompt(payload));
             prompt.AppendLine(opening ? "Give the opening briefing now." : "Player question: " + playerText);
             Dictionary<string, object> request = new Dictionary<string, object>
             {
@@ -59,45 +63,35 @@ domain_packet_json TEXT NOT NULL DEFAULT '{}',is_opening INTEGER NOT NULL DEFAUL
                 ["messages"] = BuildSimplePromptEnvelope("royal_council_advice", role, "Give bounded advisory-only counsel and return valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = ChatWithLlm(request);
-            if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Royal Council advice failed."), ["providerCallCount"] = 1, ["routedRole"] = role };
+            Dictionary<string, object> llm = GenerateRouteConversation(memory, request,
+                "Royal Council: advisory-only, no inferred actions or relationship/reputation changes. Use only this role-authorized packet for government facts or powers; personal memories are speech, not authority. Authorized packet: " + Json.Serialize(bounded)
+                    + StructuredActionPrompt(payload), expand ? 2400 : 1200, responder);
+            if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Royal Council advice failed."), ["providerCallCount"] = memory.ProviderCalls, ["routedRole"] = role };
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>();
-            string reply = LimitText(SanitizeVisibleReply(FirstNonEmpty(ReadString(parsed, "reply", ""), ReadString(llm, "content", ""))), expand ? 2400 : 1200);
+            CaptureStructuredActionDecision(payload, parsed);
+            string reply = ReadString(parsed, "reply", "");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            PublishRouteConversation(memory, reply, speakerName, connection =>
             {
                 EnsureRoyalCouncilSchema(connection);
                 EnsureMemorySchema(connection);
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO royal_council_turns(turn_id,campaign_id,timeline_id,session_id,speaker_role,speaker_hero_id,speaker_name,player_text,reply_text,heard_by_json,domain_packet_json,is_opening,created_ts)
+                ExecuteSql(connection, @"INSERT OR IGNORE INTO royal_council_turns(turn_id,campaign_id,timeline_id,session_id,speaker_role,speaker_hero_id,speaker_name,player_text,reply_text,heard_by_json,domain_packet_json,is_opening,created_ts)
 VALUES($id,$campaign,$timeline,$session,$role,$hero,$name,$player,$reply,$heard,$packet,$opening,$ts);", new Dictionary<string, object>
                 {
                     ["id"] = turnId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["session"] = sessionId, ["role"] = role,
                     ["hero"] = speakerId, ["name"] = speakerName, ["player"] = playerText, ["reply"] = reply,
                     ["heard"] = Json.Serialize(heardBy), ["packet"] = Json.Serialize(bounded), ["opening"] = opening ? 1 : 0, ["ts"] = ts
                 });
-                foreach (string listenerId in heardBy.Where(id => !string.IsNullOrWhiteSpace(id)))
-                {
-                    string memoryId = turnId + "_heard_" + RoyalCouncilStableToken(listenerId);
-                    string attributed = (string.IsNullOrWhiteSpace(playerText) ? string.Empty : "The ruler asked: " + playerText + " ")
-                        + speakerName + " (" + role + ") replied: " + reply;
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO summaries(summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,participants_json,known_by_json,visibility,importance,confidence,tags_json,status,source,embedding_status,updated_ts,payload_json,memory_lane)
-VALUES($id,$scope,$owner,'middle_term',$summary,$events,$ts,$ts,1,$participants,$known,'private',0.65,1.0,$tags,'active','royal_council','pending',$ts,$payload,'personal_state');",
-                        new Dictionary<string, object>
-                        {
-                            ["id"] = memoryId, ["scope"] = "royal_council:" + sessionId, ["owner"] = listenerId,
-                            ["summary"] = attributed, ["events"] = Json.Serialize(new[] { turnId }),
-                            ["participants"] = Json.Serialize(heardBy), ["known"] = Json.Serialize(new[] { listenerId }),
-                            ["tags"] = Json.Serialize(new[] { "royal_council", "official_council_record", role }), ["ts"] = ts,
-                            ["payload"] = Json.Serialize(new Dictionary<string, object> { ["sessionId"] = sessionId, ["turnId"] = turnId, ["speakerRole"] = role, ["speakerHeroId"] = speakerId })
-                        });
-                }
-            }
-            return new Dictionary<string, object>
+                // Canonical speaker-labeled turns above replace new paraphrased
+                // copies. Other listeners receive their own projection at recall.
+            });
+            return CompleteRouteConversationDelivery(memory, new Dictionary<string, object>
             {
                 ["ok"] = true, ["reply"] = reply, ["speakerName"] = speakerName, ["speakerHeroId"] = speakerId,
-                ["routedRole"] = role, ["providerCallCount"] = 1, ["officialRecordId"] = turnId,
+                ["routedRole"] = role, ["providerCallCount"] = memory.ProviderCalls, ["officialRecordId"] = turnId,
+                ["structuredActionDecision"] = ReadDictionary(payload, "validatedStructuredActionDecision") ?? new Dictionary<string, object>(),
                 ["nativeActions"] = new ArrayList(), ["relationshipAssessments"] = new ArrayList(), ["reputationChanges"] = new ArrayList()
-            };
+            });
         }
 
         private static Dictionary<string, object> RoyalCouncilBoundPacket(string role, Dictionary<string, object> supplied)

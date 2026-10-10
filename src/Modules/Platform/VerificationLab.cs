@@ -348,6 +348,25 @@ namespace ReignBetaServer
             bool includeBaselines)
         {
             bool explicitSuite = !string.IsNullOrWhiteSpace(requestedSuite);
+            if (string.Equals(requestedSuite, "memory_evidence_replay", StringComparison.OrdinalIgnoreCase))
+            {
+                var replay = RunMemoryEvidenceReplay();
+                AddVerificationCheck(checks, "replay.memory_evidence", "memory_evidence_replay", ReadBool(replay, "ok", false),
+                    "Provider-free local evidence and writer replay; captured responses and semantic acceptance remain separate.", replay);
+                return;
+            }
+            if (string.Equals(requestedSuite, "memory_accuracy_replay", StringComparison.OrdinalIgnoreCase))
+            {
+                var replay = RunMemoryAccuracyReplay();
+                AddVerificationCheck(checks, "replay.memory_accuracy", "memory_accuracy_replay", ReadBool(replay, "ok", false),
+                    "Provider-free source-only comparison; semantic, full-input and native acceptance remain separate.", replay);
+                return;
+            }
+            if (string.Equals(requestedSuite, "personal_gossip", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "contracts.personal_gossip", "personal_gossip", RunPersonalGossipSelfTests());
+                return;
+            }
             if (requestedSuite == "relationship_throughput_contracts" || requestedSuite == "relationship_throughput_smoke"
                 || requestedSuite == "relationship_throughput")
             {
@@ -379,6 +398,12 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.codex_images", "portraits_images", RunPortraitProviderAdapterContractTests());
                 return;
             }
+            if (string.Equals(requestedSuite, "outfit_changes", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
+            AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
+                return;
+            }
             if (string.Equals(requestedSuite, "character_narrative", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(requestedSuite, "contracts", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.character_narrative", "characters", RunCharacterNarrativeTests());
@@ -391,6 +416,8 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "pipeline.memory_precision", "memory_precision", RunMemoryPrecisionSelfTests());
             if (string.Equals(requestedSuite, "conversation_intoxication", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", RunConversationIntoxicationSelfTests());
+            if (string.Equals(requestedSuite, "relationships", StringComparison.OrdinalIgnoreCase))
+                AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RunCurrentRelationshipSelfTests());
             if (string.Equals(requestedSuite, "wanderer_population", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", RunWandererPopulationTests());
             if (string.Equals(requestedSuite, "encountered_residents", StringComparison.OrdinalIgnoreCase))
@@ -416,6 +443,7 @@ namespace ReignBetaServer
             if (ShouldRunVerificationSuite(requestedSuite, "contracts") ||
                 string.Equals(requestedSuite, "ui_contracts", StringComparison.OrdinalIgnoreCase))
             {
+                AddSubsystemListSummary(checks, "contracts.structured_actions", "contracts", RunStructuredActionSelfTests());
                 RunBuildAndContractChecks(checks, includeExpensiveSubsystems: explicitSuite);
             }
             if (ShouldStop(checks, failFast)) return;
@@ -497,6 +525,8 @@ namespace ReignBetaServer
                 });
 #endif
             AddSubsystemListSummary(checks, "contracts.portrait_derivatives", "portraits_images", RunPortraitDerivativeSelfTests());
+            AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
+            AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
             AddSubsystemListSummary(checks, "contracts.image_generation_profiles", "portraits_images", RunPortraitProviderAdapterContractTests());
             if (includeExpensiveSubsystems)
             {
@@ -1081,7 +1111,7 @@ namespace ReignBetaServer
             {
                 string prefabPath = Path.Combine(guiRoot, "Prefabs", composer.Key);
                 XmlDocument document = TryParseVerificationXml(File.Exists(prefabPath) ? File.ReadAllText(prefabPath) : "");
-                XmlElement input = document?.SelectSingleNode("//EditableTextWidget[@Text='" + composer.Value + "']") as XmlElement;
+                XmlElement input = document?.SelectSingleNode("//*[(self::EditableTextWidget or self::ReignActionEditableTextWidget) and @Text='" + composer.Value + "']") as XmlElement;
                 if (input == null || !VerificationXmlAttributeEquals(input, "MaxLength", "2147483647"))
                     boundedChatComposers.Add(composer.Key);
             }
@@ -1155,10 +1185,10 @@ namespace ReignBetaServer
             HashSet<string> catalogPrefabNames = new HashSet<string>(
                 Regex.Matches(uiCatalogText, "\\\"prefab\\\"\\s*:\\s*\\\"GUI/Prefabs/([^\\\"]+\\.xml)\\\"")
                     .Cast<Match>().Select(match => match.Groups[1].Value), StringComparer.OrdinalIgnoreCase);
-            bool previewerContractValid = reignPrefabNames.Length == 22
+            bool previewerContractValid = reignPrefabNames.Length == 26
                 && catalogPrefabNames.SetEquals(reignPrefabNames)
-                && uiCatalogText.Contains("\"targetCount\": 22", StringComparison.Ordinal)
-                && uiCatalogText.Contains("\"uniqueRuntimeMovieCount\": 21", StringComparison.Ordinal)
+                && uiCatalogText.Contains("\"targetCount\": 26", StringComparison.Ordinal)
+                && uiCatalogText.Contains("\"uniqueRuntimeMovieCount\": 25", StringComparison.Ordinal)
                 && uiCatalogText.Contains("\"targetCount\": 7", StringComparison.Ordinal)
                 && uiCatalogText.Contains("\"patchApplicationCount\": 9", StringComparison.Ordinal)
                 && previewAuditText.Contains("getPreviewFixtureInventory", StringComparison.Ordinal)
@@ -1927,7 +1957,9 @@ namespace ReignBetaServer
 				&& portraitServerText.Contains("sourceImageBase64")
 				&& portraitServerText.Contains("effectivePrompt")
 				&& portraitBridgeText.Contains("GeneratePortraitProductAsync")
-				&& portraitBridgeText.Contains("SavePortraitProductAsync(cacheKey, product)")
+				&& portraitBridgeText.Contains("SavePortraitProductAsync(cacheKey, product, replaceExisting: refreshMode.Length != 0)")
+				&& portraitCacheText.Contains("recoveredRefreshMode")
+				&& portraitServerText.Contains("productReceipt[\"portraitRefreshMode\"] = refreshMode")
 				&& portraitBridgeText.Contains("new PortraitRequestScope(campaignId, campaignFolder, snapshot)")
 				&& !portraitPatchText.Contains("GeneratePortraitProductAsync")
 				&& portraitCacheText.Contains("CommitPortraitProduct")
@@ -2791,6 +2823,16 @@ namespace ReignBetaServer
             string clientAssembly = string.IsNullOrWhiteSpace(canonicalClientAssembly)
                 ? Path.Combine(clientRoot, "bin", "Win64_Shipping_Client", "ReignBeta.dll")
                 : Path.GetFullPath(canonicalClientAssembly);
+            // The isolated CLI runs from <validation-run>/server/out while its
+            // packaged source contract tree deliberately excludes build outputs.
+            // Prefer the sibling artifact from that exact run, never a newer build.
+            if (!File.Exists(clientAssembly) && string.IsNullOrWhiteSpace(canonicalClientAssembly))
+            {
+                string exactRunRoot = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", ".."));
+                string exactRunReport = Path.Combine(exactRunRoot, "validation-report.json");
+                string exactRunClient = Path.Combine(exactRunRoot, "client", "out", "ReignBeta.dll");
+                if (File.Exists(exactRunReport) && File.Exists(exactRunClient)) clientAssembly = exactRunClient;
+            }
             if (!File.Exists(clientAssembly) && string.IsNullOrWhiteSpace(canonicalClientAssembly))
             {
                 string newestCustomClientAssembly = Directory.Exists(Path.Combine(clientRoot, ".codex-build"))
@@ -3137,11 +3179,25 @@ namespace ReignBetaServer
                 ["apiKey"] = "sk-secret-value",
                 ["portraitNanoGptApiKey"] = "portrait-secret",
                 ["portraitAtlasApiKey"] = "atlas-secret",
+                ["nanoGptApiKey"] = "nano-fixture",
+                ["openRouterApiKey"] = "router-fixture",
+                ["QDRANT_API_KEY"] = "vector-fixture",
+                ["profiles"] = new object[] { TestDict("custom-api-key", "custom-fixture", "clientSecret", "client-fixture", "maxTokens", 1200) },
                 ["safe"] = "visible"
             };
             Dictionary<string, object> redacted = RedactSensitive(secrets);
-            bool secretsSafe = !Json.Serialize(redacted).Contains("secret-value") && !Json.Serialize(redacted).Contains("portrait-secret") && !Json.Serialize(redacted).Contains("atlas-secret");
+            string safeText = Json.Serialize(redacted);
+            var hidden = new[] { "secret-value", "portrait-secret", "atlas-secret", "nano-fixture", "router-fixture", "vector-fixture", "custom-fixture", "client-fixture" };
+            bool secretsSafe = hidden.All(value => !safeText.Contains(value)) && ReadString(redacted, "safe", "") == "visible"
+                && ReadInt(ReadDictionaryList(redacted, "profiles").Single(), "maxTokens", 0) == 1200
+                && ReadString(secrets, "nanoGptApiKey", "") == "nano-fixture";
             AddVerificationCheck(checks, "faults.secret_redaction", "provider_faults", secretsSafe, "API secrets are redacted from diagnostics.", redacted);
+            string historical = Json.Serialize(TestDict("eventType", "settings.save", "data", secrets)) + "\n";
+            string exported = RedactDiagnosticLogContent(historical);
+            AddVerificationCheck(checks, "faults.historical_log_redaction", "provider_faults",
+                hidden.All(value => !exported.Contains(value)) && exported.Contains("visible") && exported.Contains("1200")
+                    && historical.Contains("nano-fixture"),
+                "Read/export redaction covers historical named-provider fields without modifying the original log.", null);
 
             string[] faults = { "timeout", "401", "429", "500", "malformed_json", "truncated_output", "context_overflow", "missing_model", "vector_unavailable", "corrupt_image", "interrupted_write", "retry_limit" };
             foreach (string fault in faults)

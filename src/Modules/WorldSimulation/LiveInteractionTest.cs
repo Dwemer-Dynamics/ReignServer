@@ -20,7 +20,7 @@ namespace ReignBetaServer
         private const int LiveTestLeaseSeconds = 45;
         private static readonly object LiveTestLock = new object();
         private static readonly HashSet<string> LiveTestModes = new HashSet<string>(
-            new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency" },
+            new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions" },
             StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LiveTestOperations = new HashSet<string>(
             new[]
@@ -32,7 +32,7 @@ namespace ReignBetaServer
                 "prepare_authority_fixture",
                 "prepare_manipulation_fixture", "restore_manipulation_fixture", "confirm", "deny",
                 "gauntlet_snapshot", "gauntlet_apply_fixture", "gauntlet_restore_fixture",
-                "action_probe_wait",
+                "action_probe_wait", "structured_action_test",
                 "gauntlet_advance_time", "gauntlet_arrive", "gauntlet_depart",
                 "gauntlet_save", "gauntlet_reload", "gauntlet_fault",
                 "ui_open", "ui_status", "ui_snapshot", "ui_action", "ui_back", "ui_close",
@@ -188,6 +188,8 @@ namespace ReignBetaServer
             string campaignId = ReadString(payload, "campaignId", "");
             string mode = NormalizeLiveTestMode(ReadString(payload, "mode", "individual_chat"));
             if (!LiveTestModes.Contains(mode)) return LiveTestError("Unsupported live-test mode.");
+            if (mode == "structured_actions" && !StructuredActionEnrollmentValid(ReadDictionary(payload, "enrollment"), campaignId))
+                return LiveTestError("Structured action tests require a verified campaign-test enrollment with separate Current and protected baseline identities.");
             Dictionary<string, object> searchStep =
                 new Dictionary<string, object>
                 {
@@ -3376,6 +3378,18 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return distinctAgency >= 2;
         }
 
+        private static bool StructuredActionEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
+        {
+            if (enrollment == null) return false;
+            string current = ReadString(enrollment, "disposableSaveName", "");
+            string baseline = ReadString(enrollment, "protectedBaselineSaveName", "");
+            return ReadString(enrollment, "source", "") == "reign_mcp_structured_actions"
+                && ReadString(enrollment, "campaignId", "") == campaignId && campaignId.Length > 0
+                && ReadString(enrollment, "campaignTestRunId", "").Length > 0
+                && ReadString(enrollment, "timelineId", "").Length > 0
+                && current.Length > 0 && baseline.Length > 0 && !string.Equals(current, baseline, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static Dictionary<string, object> NormalizeLiveTestCommand(Dictionary<string, object> run, Dictionary<string, object> input)
         {
             input = input ?? new Dictionary<string, object>();
@@ -3384,6 +3398,11 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             if (!LiveTestOperations.Contains(operation)) return null;
             string mode = NormalizeLiveTestMode(ReadString(input, "mode", ReadString(run, "mode", "individual_chat")));
             if (!LiveTestModes.Contains(mode)) return null;
+            if (operation == "structured_action_test" || mode == "structured_actions")
+            {
+                if (mode != "structured_actions" || ReadString(run, "mode", "") != "structured_actions" || operation != "structured_action_test"
+                    || !StructuredActionEnrollmentValid(ReadDictionary(run, "enrollment"), ReadString(run, "campaignId", ""))) return null;
+            }
             string commandId = FirstNonEmpty(ReadString(input, "commandId", ""), ReadString(run, "runId", "run") + "-cmd-" + Guid.NewGuid().ToString("N").Substring(0, 12));
             int maximumTimeoutSeconds = mode.Equals("passive_world", StringComparison.OrdinalIgnoreCase)
                 && operation.Equals("world_advance", StringComparison.OrdinalIgnoreCase)
@@ -3417,6 +3436,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 command["enrollment"] = enrollment;
             }
             if (operation == "send" && string.IsNullOrWhiteSpace(ReadString(command, "text", ""))) return null;
+            if (operation == "structured_action_test") command["enrollment"] = ReadDictionary(run, "enrollment");
             return command;
         }
 
@@ -3525,6 +3545,17 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             Dictionary<string, object> invalid = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["operation"] = "send", ["text"] = "" });
             Dictionary<string, object> wrongVersion = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["schemaVersion"] = 999, ["operation"] = "open" });
             add("command_schema", first != null && ReadString(first, "status", "") == "queued" && invalid == null && wrongVersion == null, "Command normalization requires the supported schema, valid operations, and non-empty dialogue text.");
+            var structuredEnrollment = new Dictionary<string, object> { ["source"] = "reign_mcp_structured_actions", ["campaignId"] = "self",
+                ["campaignTestRunId"] = "owned-run", ["timelineId"] = "test", ["disposableSaveName"] = "Current", ["protectedBaselineSaveName"] = "Baseline" };
+            var structuredRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "structured_actions", ["enrollment"] = structuredEnrollment };
+            var structuredInput = new Dictionary<string, object> { ["operation"] = "structured_action_test", ["enrollment"] = new Dictionary<string, object>() };
+            var structuredCommand = NormalizeLiveTestCommand(structuredRun, structuredInput);
+            add("structured_action_enrollment", structuredCommand != null && ReferenceEquals(structuredCommand["enrollment"], structuredEnrollment)
+                && NormalizeLiveTestCommand(fakeRun, structuredInput) == null,
+                "Structured commands inherit the verified run enrollment; a per-command replacement or dialogue-mode route cannot bypass isolation.");
+            structuredEnrollment["disposableSaveName"] = "Baseline";
+            add("structured_action_baseline_protected", NormalizeLiveTestCommand(structuredRun, structuredInput) == null,
+                "A structured test cannot target its protected baseline even with a valid run identity.");
             Dictionary<string, object> correspondenceQuiescence = NormalizeLiveTestCommand(
                 fakeRun,
                 new Dictionary<string, object>
@@ -3587,7 +3618,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 ReadInt(socialProfileTimeout, "timeoutSeconds", 0) == 3600
                 && ReadInt(unrelatedSocialTimeout, "timeoutSeconds", 0) == 1800,
                 "Only a Social Reputation profile command may retain the one-hour deadline; unrelated social commands keep the ordinary thirty-minute ceiling.");
-            add("modes", LiveTestModes.SetEquals(new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency" }), "Only implemented production interaction adapters and isolated deterministic harness adapters are registered in the transport contract.");
+            add("modes", LiveTestModes.SetEquals(new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions" }), "Only implemented production interaction adapters and isolated deterministic harness adapters are registered in the transport contract.");
             string retrievalFixtureText = LiveTestRetrievedEvidenceText(
                 new[]
                 {
@@ -4752,7 +4783,11 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "wilderness_group_fixture",
                 wildernessGroupFixture,
                 "Focused wilderness qualification requests two eligible production party participants and refuses to grade a single-NPC event as a group.");
-            add("typed_injected_parity", socialVmSource.Contains("SendAutomationLineAsync(InputText, string.Empty)"), "Typed social-event input delegates to the same send method used by injected input.");
+            bool typedInjectedParity = socialVmSource.Contains("await SendLineAsync(InputText, string.Empty, ActionDraft == null ? null : ReignBeta.Actions.ReignActionService.Copy(ActionDraft));")
+                && socialVmSource.Contains("SendAutomationLineAsync(string text, string correlationId) => SendLineAsync(text, correlationId, null);")
+                && socialVmSource.Contains("SendLineAsync(string text, string correlationId, Reign.Core.Contracts.Actions.ActionAgreement actionDraft)")
+                && socialVmSource.Contains("return await RequestGroupTurnAsync(activeHeroes, text, correlationId, actionDraft)");
+            add("typed_injected_parity", typedInjectedParity, "Typed and injected social-event input share the production send pipeline; typed input preserves its copied action draft and ordinary injected input supplies none.");
             bool adultEligibility = eligibilitySource.Contains("HeroComesOfAge")
                 && eligibilitySource.Contains("!hero.IsChild")
                 && hostSource.Contains("ReignConversationEligibility.IsAdultLivingNpc")
@@ -5193,13 +5228,16 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && socialEventClientSource.Contains("/relationships/conversation/native-receipt"),
                 "Opposite directional judgments that net to zero still acknowledge the atomic native hero-pair receipt without applying a redundant native relation change.");
             add("native_relationship_acknowledgement_captures_before_and_after",
-                correspondenceSource.Contains("int priorNativeRelation = subject.GetRelation(target);")
-                && correspondenceSource.Contains("[\"priorNativeRelation\"] = priorNativeRelation")
-                && correspondenceSource.Contains("[\"nativeRelation\"] = subject.GetRelation(target)")
-                && socialEventClientSource.Contains("int priorNativeRelation = subject.GetRelation(target);")
-                && socialEventClientSource.Contains("[\"priorNativeRelation\"] = priorNativeRelation")
-                && socialEventClientSource.Contains("[\"nativeRelation\"] = subject.GetRelation(target)"),
-                "Every production conversation path acknowledges the authoritative native relationship before and after application, so a stale request snapshot cannot distort the applied turn delta.");
+                correspondenceSource.Contains("ApplyConversationRelationOnce(receiptIds.Values<string>()")
+                && socialEventClientSource.Contains("ApplyConversationRelationOnce(adjudicationReceiptIds.Values<string>()")
+                && correspondenceSource.Contains("reign-native-relationship-receipt-v2")
+                && socialEventClientSource.Contains("reign-native-relationship-receipt-v2")
+                && relationshipBehaviorSource.Contains("NativeRelationEffectLedger.Apply(")
+                && relationshipBehaviorSource.Contains("() => subject.GetRelation(target)")
+                && relationshipBehaviorSource.Contains("[\"priorNativeRelation\"] = receipt.Before")
+                && relationshipBehaviorSource.Contains("[\"nativeRelation\"] = receipt.After")
+                && relationshipBehaviorSource.Contains("_reignRelationship_nativeConversationEffectJournal"),
+                "Conversation clients use the save-persisted native journal's before/after observations. This checks wiring; native_relation_effect contracts exercise modifiers, caps, partial callback failures and retry behavior.");
             return results;
         }
 

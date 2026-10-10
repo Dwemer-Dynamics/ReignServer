@@ -124,15 +124,43 @@ namespace ReignBetaServer
 
         private static BeverageIdentity CurrentPlayerOfferedBeverage(Dictionary<string, object> payload)
         {
+            var offers = CurrentPlayerDrinkOfferActions(payload, false).Select(ResolveUniqueDrinkBeverage).ToList();
+            return offers.Count > 0 && offers.All(b => b.Alcohol == DrinkAlcohol.Yes && b.Family == offers[0].Family)
+                ? offers[0] : new BeverageIdentity();
+        }
+
+        private static List<string> CurrentPlayerDrinkOfferActions(Dictionary<string, object> payload, bool allowReferences)
+        {
             string text = ReadFirstString(payload, "playerText", "text", "message", "query");
-            if (string.IsNullOrWhiteSpace(text) || text.Length > 4000
-                || DrinkHas(text, @"\b(?:not|never|yesterday|earlier|previously|tomorrow|if|unless|would|could|might|will|shall|pretend|imagine|remember|recall)\b"))
-                return new BeverageIdentity();
-            if (!DrinkHas(text, @"\b(?:offer|offers|offered|hand|hands|handed|pass|passes|passed|give|gives|gave|hold|holds|held|extend|extends|extended)\b")
-                || !DrinkHas(text, @"\b(?:" + DrinkVesselWords + @")s?\b"))
-                return new BeverageIdentity();
-            var beverage = ResolveUniqueDrinkBeverage(text);
-            return beverage.Alcohol == DrinkAlcohol.Yes ? beverage : new BeverageIdentity();
+            var offers = new List<string>();
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 4000) return offers;
+            // Scope tense/negation to the actual handoff. A conditional strategy in
+            // another sentence cannot negate a present narrated offer of wine.
+            // Quoted offers and another actor's handoff are not player actions.
+            foreach (Match part in Regex.Matches(MaskDrinkQuotations(text), @"[^.!?;\r\n*]+"))
+            {
+                string action = part.Value.Trim();
+                bool direct = DrinkHas(action, @"^I\s+(?:(?:gently|slowly|quietly|carefully)\s+)?(?:offer|hand|pass|give|hold|extend|slide|push|set|place)\b");
+                // The player may first drink or retrieve the vessel, then pass it.
+                // Require their own action, an explicit recipient, and no intervening
+                // actor or reported/requested handoff. This supplies contents only.
+                var handoff = DrinkMatch(action, @"\b(?:offer|hand|pass|give|extend|offering|handing|passing|giving|extending)\s+(.+)");
+                string beforeHandoff = handoff.Success ? action.Substring(0, handoff.Index) : "";
+                bool compound = handoff.Success && DrinkHas(action, @"^I\s+")
+                    && !DrinkHas(beforeHandoff, @"\b(?:he|she|they|you|watch\w*|ask\w*|tell\w*|order\w*|make|makes|let|lets|hear\w*|say\w*)\b")
+                    && !Regex.IsMatch(beforeHandoff, @"\b(?!I\b)[\p{Lu}][\p{L}]+\s+(?:hands?|passes?|gives?|takes?|drinks?)\b")
+                    && DrinkHas(handoff.Value, @"\b(?:to|toward|towards|for)\s+(?:you|her|him)\b");
+                if (!(direct || compound)
+                    || DrinkHas(action, @"\b(?:not|never|yesterday|earlier|previously|tomorrow|if|unless|would|could|might|will|shall|pretend|imagine|remember|recall)\b")
+                    || !DrinkHas(action, @"\b(?:" + DrinkVesselWords + @")s?\b")
+                        && !(allowReferences && handoff.Success
+                            && DrinkHas(handoff.Groups[1].Value, @"^(?:it\b|(?:the|my|our|that|same)\s+drink\b)"))) continue;
+                // Merely moving one's own cup does not give its contents to the NPC.
+                if (!compound && !DrinkHas(action, @"\b(?:offer|hand|pass|give|extend)\b")
+                    && !DrinkHas(action, @"\b(?:to|toward|towards|for)\s+(?:you|her|him)\b|\b(?:within|in)\s+(?:your|her|his)\s+reach\b")) continue;
+                offers.Add(action);
+            }
+            return offers;
         }
 
         private static BeverageIdentity CurrentTurnSharedBeverage(Dictionary<string, object> parsed)

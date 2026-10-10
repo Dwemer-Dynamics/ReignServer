@@ -1105,7 +1105,8 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return mantissa / (double)(1UL << 53);
         }
 
-        private static Dictionary<string, object> IdentityIntroductionApi(Dictionary<string, object> payload)
+        private static Dictionary<string, object> IdentityIntroductionApi(Dictionary<string, object> payload,
+            ReignDbConnection existingConnection = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -1121,8 +1122,9 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId) || string.IsNullOrWhiteSpace(claimedName))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer, subject, and claimedName are required." };
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
             {
+                ReignDbConnection connection = existingConnection ?? ownedConnection;
                 bool verified = false;
                 string source = "self_introduction";
                 if (string.Equals(kind, "third_party", StringComparison.OrdinalIgnoreCase))
@@ -1147,7 +1149,9 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 }
 
                 Dictionary<string, object> view = BuildIdentityView(ReadAcquaintance(connection, observerId, subjectId), payload);
-                WriteAudit(campaignId, correlationId, "server", "identity", "identity.introduction", observerId, "", encounterId, "completed", 0, verified ? "Trusted introduction verified identity." : "Claimed identity recorded.", view);
+                // The conversation's accepted-unit receipt owns audit visibility
+                // until its outer transaction commits.
+                if (existingConnection == null) WriteAudit(campaignId, correlationId, "server", "identity", "identity.introduction", observerId, "", encounterId, "completed", 0, verified ? "Trusted introduction verified identity." : "Claimed identity recorded.", view);
                 return new Dictionary<string, object> { ["ok"] = true, ["verified"] = verified, ["identityView"] = view };
             }
         }
@@ -2113,7 +2117,10 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return prompt;
         }
 
-        private static List<Dictionary<string, object>> ApplyIdentityIntroductionWrites(string campaignId, Dictionary<string, object> payload, Dictionary<string, object> parsed, string encounterId)
+        private static List<Dictionary<string, object>> ApplyIdentityIntroductionWrites(string campaignId,
+            Dictionary<string, object> payload, Dictionary<string, object> parsed, string encounterId,
+            string speakerId, string playerId, string playerText, string acceptedReply,
+            IEnumerable<string> hearingAudience, ReignDbConnection connection)
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             if (parsed == null) return results;
@@ -2125,12 +2132,25 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             present.Add(ReadFirstString(payload, "speakerHeroStringId", "heroStringId"));
             present.Add(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId"));
             present.RemoveWhere(string.IsNullOrWhiteSpace);
+            var heard = new HashSet<string>(hearingAudience ?? present, StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> write in writes)
             {
                 string observer = ReadFirstString(write, "observerHeroStringId", "observerId");
                 string subject = ReadFirstString(write, "subjectHeroStringId", "subjectId");
                 string introducer = ReadFirstString(write, "introducerHeroStringId", "introducerId");
                 string name = ReadFirstString(write, "claimedName", "name");
+                string quote = ReadFirstString(write, "supportingQuote", "evidenceQuote");
+                string spoken = introducer == speakerId ? acceptedReply : introducer == playerId ? playerText : "";
+                bool audibleQuote = ReadDictionaryList(ProjectConversationNarration(spoken, introducer, observer), "spans")
+                    .Any(span => ReadString(span, "kind", "") == "spoken_statement"
+                        && ReadString(span, "text", "").Contains(quote, StringComparison.Ordinal));
+                if (!heard.Contains(observer) || quote.Length < 8 || quote.Length > 600 || name.Length > 80
+                    || string.IsNullOrWhiteSpace(spoken) || !audibleQuote
+                    || string.IsNullOrWhiteSpace(name) || !quote.Contains(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    results.Add(TestDict("ok", false, "error", "Introduction lacks an accepted audible quote from its actual introducer.", "write", write));
+                    continue;
+                }
                 if (!present.Contains(observer) || !present.Contains(subject) || !present.Contains(introducer) || string.IsNullOrWhiteSpace(name))
                 {
                     results.Add(new Dictionary<string, object> { ["ok"] = false, ["error"] = "Introduction rejected because observer, subject, introducer, or name was not present in the scene.", ["write"] = write });
@@ -2143,12 +2163,12 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     ["subjectHeroStringId"] = subject,
                     ["introducerHeroStringId"] = introducer,
                     ["claimedName"] = name,
-                    ["kind"] = "third_party",
+                    ["kind"] = string.Equals(introducer, subject, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party",
                     ["encounterId"] = encounterId,
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
                     ["correlationId"] = EnsureCorrelationId(payload)
                 };
-                results.Add(IdentityIntroductionApi(request));
+                results.Add(IdentityIntroductionApi(request, connection));
             }
             return results;
         }

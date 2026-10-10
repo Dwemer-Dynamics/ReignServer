@@ -13,6 +13,7 @@ namespace ReignBetaServer
             "Preserve the speaker's individual temperament, loyalties, suspicion, humor, warmth, pride and ability to refuse. Answer the player's immediate meaning before pursuing another motive. Plain answers and ordinary conversation are compatible with nobility. " +
             "If the player asks what you mean, explain the concrete request, person, event or concern in ordinary words; do not answer confusion with another metaphor or treat clarification as evasion. " +
             "Read both sides of the recent exchange. An answer already received remains received; a correction already acknowledged remains acknowledged. Distinguish that settled point from any separate outstanding request. Old comprehension, suspicions and summaries are fallible past interpretations; update them from later dialogue instead of treating them as facts about the player's intent. " +
+            "Ask for details before judging a brief answer as evasion. Base penalties on current conduct, not clarification, negation, NPC hostility or third-party threats; otherwise use neutral. " +
             "Let an accepted apology close its issue. A refusal can remain firm without repeating the entire accusation or adding another test. Advance the conversation, or end it naturally when there is nothing more to say. " +
             "Use quantities when they convey actual requested information, including prices, debts, inventory and troop counts. Do not keep tallying answers, questions, apologies or favors, or repeatedly express conversation as coins, ledgers, tolls and payments. Earlier figurative wording is not a permanent personality rule. " +
             "In a group, respond from this speaker's own knowledge, interests and relationship. Another NPC's accusation is their view, not established fact or a verdict the group must repeat. Agreement may be brief; add a distinct relevant contribution rather than another version of the same lecture. " +
@@ -52,7 +53,7 @@ namespace ReignBetaServer
         {
             string speech = ConversationSpeech(text);
             const string account = @"\b(?:count(?:ed|ing|s)?|tall(?:y|ies|ied|ying)|ledger[s]?|debts?|coins?|tolls?|price|pay|paid|payment|owe[sd]?|spen[dt])\b";
-            const string social = @"\b(?:answers?|questions?|apolog(?:y|ies|ize)|courtesy|names?|words?|want|say|said|intentions?|kindness|affection|honesty|sincerity|flattery)\b";
+            const string social = @"\b(?:answers?|questions?|apolog(?:y|ies|ize)|courtesy|names?|words?|want|say|intentions?|kindness|affection|honesty|sincerity|flattery)\b";
             if (Regex.IsMatch(speech, @"\bcount\w*\s+(?:the\s+)?names\s+(?:on|in|from)\s+(?:the\s+)?(?:roll|roster|register)\b", RegexOptions.IgnoreCase)) return false;
             return Regex.IsMatch(speech, account + @"[^.!?;\r\n]{0,130}" + social + "|" + social + @"[^.!?;\r\n]{0,130}" + account, RegexOptions.IgnoreCase)
                 || Regex.IsMatch(speech, @"\b(?:third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|three|four|five|six|seven|eight|nine|ten)\s+times?\b[^.!?\r\n]{0,100}\b(?:answer|question|ask|apolog|said|say)\w*\b|\b(?:answer|question|ask|apolog)\w*\b[^.!?\r\n]{0,100}\b(?:third|fourth|fifth|sixth)\s+time\b", RegexOptions.IgnoreCase);
@@ -171,6 +172,7 @@ namespace ReignBetaServer
             var all = ReadDictionaryList(document, "active")
                 .Where(row => ReadString(row, "status", "active").Equals("active", StringComparison.OrdinalIgnoreCase)
                     && ReadString(row, "category", "") != "narrative_development"
+                    && ReadString(row, "category", "") != "life_transition"
                     && !IsGeneratedConversationRhetoric(row)).ToList();
             string query = NormalizeLookup(ConversationSpeech(relevanceQuery));
             bool first = Regex.IsMatch(query, @"\b(first|earliest|oldest|initial)\b");

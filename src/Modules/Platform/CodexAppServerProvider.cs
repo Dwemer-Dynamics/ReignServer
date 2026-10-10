@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -124,7 +124,8 @@ namespace ReignBetaServer
             settings["llmProvider"] = after;
             settings["codexExecutable"] = executable;
             if (!settings.ContainsKey("codexHome")) settings["codexHome"] = "";
-            return NormalizeChatProviderProfiles(settings) || changed;
+            bool retiredMemoryChanged = RemoveRetiredMemorySettings(settings);
+            return NormalizeChatProviderProfiles(settings) || retiredMemoryChanged || changed;
         }
 
         private static bool UsesCodexSubscription(Dictionary<string, object> settings)
@@ -321,8 +322,9 @@ namespace ReignBetaServer
         }
 
         private static string CodexChatCompletionJson(Dictionary<string, object> requestBody, Dictionary<string, object> settings, string model,
-            Dictionary<string, object> codexContext)
+            Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
+            if (canceled?.Invoke() == true) throw new OperationCanceledException("Banter was canceled before provider startup.");
             EnsureCodexAppServer(settings);
             CodexRuntimeRequestContext context = CaptureCodexRequestContext(settings, requestBody, ReadString(codexContext, "requestType", "dialogue"), model,
                 ReadString(codexContext, "correlationId", ""), codexContext);
@@ -340,6 +342,7 @@ namespace ReignBetaServer
             context.StableTurnInput = promptMapping.TurnInput;
             AugmentCodexPromptContractHash(context);
             int timeout = Math.Max(CodexRpcTimeout(settings), ReadInt(settings, "providerRequestTimeoutMs", 120000));
+            int RemainingTimeout() => timeout;
             CodexRequestTimings timings = new CodexRequestTimings();
             bool cleanupFallback = false;
             CodexThreadLease lease = CodexRuntimeThreads.Acquire(context);
@@ -397,7 +400,7 @@ namespace ReignBetaServer
                     ApplyCodexPromptMapping(context, threadParameters);
                     try
                     {
-                        thread = CodexRpc("thread/start", threadParameters, timeout);
+                        thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
                     }
                     catch (CodexRpcException fastError) when (CodexFastMode.IsExplicitThreadScopeRejection(fastError, context.Fast)
                         && context.Fast.Requested && context.Fast.State == "requested")
@@ -406,7 +409,7 @@ namespace ReignBetaServer
                         context.Fast.Applied = "standard";
                         context.Fast.Reason = "The runtime explicitly rejected Fast before generation; Standard was retried on the same model.";
                         CodexFastMode.ApplyThreadScope(threadParameters, context.Fast, CodexRuntimeProtocol);
-                        thread = CodexRpc("thread/start", threadParameters, timeout);
+                        thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
                     }
                     threadId = ReadNestedId(thread, "thread");
                     if (string.IsNullOrWhiteSpace(threadId)) throw new InvalidOperationException("Codex app-server did not return a thread id.");
@@ -421,7 +424,7 @@ namespace ReignBetaServer
                     ApplyCodexPromptMapping(context, resumeParameters);
                     try
                     {
-                        thread = CodexRpc("thread/resume", resumeParameters, timeout);
+                        thread = CodexRpc("thread/resume", resumeParameters, RemainingTimeout());
                     }
                     catch (CodexRpcException fastError) when (CodexFastMode.IsExplicitThreadScopeRejection(fastError, context.Fast)
                         && context.Fast.Requested && context.Fast.State == "requested")
@@ -430,7 +433,7 @@ namespace ReignBetaServer
                         context.Fast.Applied = "standard";
                         context.Fast.Reason = "The runtime explicitly rejected Fast before generation; Standard was retried on the same model.";
                         CodexFastMode.ApplyThreadScope(resumeParameters, context.Fast, CodexRuntimeProtocol);
-                        thread = CodexRpc("thread/resume", resumeParameters, timeout);
+                        thread = CodexRpc("thread/resume", resumeParameters, RemainingTimeout());
                     }
                     catch
                     {
@@ -452,7 +455,7 @@ namespace ReignBetaServer
                         ApplyCodexPromptMapping(context, threadParameters);
                         try
                         {
-                            thread = CodexRpc("thread/start", threadParameters, timeout);
+                            thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
                         }
                         catch (CodexRpcException fastError) when (CodexFastMode.IsExplicitThreadScopeRejection(fastError, context.Fast)
                             && context.Fast.Requested && context.Fast.State == "requested")
@@ -461,7 +464,7 @@ namespace ReignBetaServer
                             context.Fast.Applied = "standard";
                             context.Fast.Reason = "The runtime explicitly rejected Fast before generation; Standard was retried on the same model.";
                             CodexFastMode.ApplyThreadScope(threadParameters, context.Fast, CodexRuntimeProtocol);
-                            thread = CodexRpc("thread/start", threadParameters, timeout);
+                            thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
                         }
                         threadId = ReadNestedId(thread, "thread");
                         if (string.IsNullOrWhiteSpace(threadId)) throw new InvalidOperationException("Codex app-server did not return a thread id.");
@@ -490,7 +493,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> turn;
                 try
                 {
-                    turn = CodexRpc("turn/start", turnParameters, timeout);
+                    turn = CodexRpc("turn/start", turnParameters, RemainingTimeout());
                 }
                 catch (CodexRpcException fastError) when (CodexFastMode.IsExplicitPreStartRejection(fastError, context.Fast) && context.Fast.Requested && context.Fast.State == "requested")
                 {
@@ -499,7 +502,7 @@ namespace ReignBetaServer
                     context.Fast.Reason = "The runtime explicitly rejected Fast before generation; Standard was retried on the same model.";
                     CodexFastMode.ApplyStandard(turnParameters, context.Fast);
                     ReserveCodexPerformanceCall(context.ToDictionary());
-                    turn = CodexRpc("turn/start", turnParameters, timeout);
+                    turn = CodexRpc("turn/start", turnParameters, RemainingTimeout());
                 }
                 turnId = ReadNestedId(turn, "turn");
                 if (string.IsNullOrWhiteSpace(turnId)) throw new InvalidOperationException("Codex app-server did not return a turn id.");
@@ -507,7 +510,7 @@ namespace ReignBetaServer
                 RegisterCodexTurn(turnId, threadId);
                 waiter = GetOrCreateCodexTurn(turnId, threadId);
                 if (waiter == null) throw new InvalidOperationException("Codex turn was already retired.");
-                WaitForCodexTurn(waiter, timeout, false);
+                WaitForCodexTurn(waiter, RemainingTimeout(), false, canceled);
                 assembly = waiter.Assembly.Snapshot();
                 if (!string.IsNullOrWhiteSpace(assembly.Error)) throw new InvalidOperationException(assembly.Error);
                 string content = (assembly.Text ?? "").Trim();
@@ -557,7 +560,9 @@ namespace ReignBetaServer
                     if (timings.TurnCompletedUtc == default(DateTime)) timings.TurnCompletedUtc = finalAssembly.CompletedUtc;
                 }
                 if (turnStarted && !succeeded)
+                {
                     InterruptCodexTurn(threadId, turnId, settings);
+                }
                 RetireCodexTurn(turnId);
                 if (string.IsNullOrWhiteSpace(turnId)) EndCodexTurnAttempt(threadId);
                 if (lease != null && !succeeded)
@@ -595,11 +600,11 @@ namespace ReignBetaServer
 
         private static string PostLlmProviderJson(string apiUrl, string apiKey, string outboundJson, Dictionary<string, object> requestBody,
             Dictionary<string, object> settings, Dictionary<string, object> cacheRouting, string correlationId, string requestType, string model,
-            Dictionary<string, object> codexContext)
+            Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
-            if (UsesCodexSubscription(settings)) return CodexChatCompletionJson(requestBody, settings, model, codexContext);
+            if (UsesCodexSubscription(settings)) return CodexChatCompletionJson(requestBody, settings, model, codexContext, contentDelta, canceled);
             return WithCampaignProviderWait(requestType,
-                () => ProviderPostJson(apiUrl, apiKey, outboundJson, settings, cacheRouting, correlationId, requestType, model));
+                () => ProviderPostJson(apiUrl, apiKey, outboundJson, settings, cacheRouting, correlationId, requestType, model, contentDelta, canceled));
         }
 
         private static string BuildCodexPrompt(List<Dictionary<string, object>> messages)

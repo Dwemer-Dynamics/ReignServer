@@ -22,6 +22,7 @@ for (const prefix of profiles) Object.assign(settings, {
 const browser = await chromium.launch({ channel: process.env.REIGN_BROWSER_CHANNEL || 'msedge', headless: true });
 const results = [];
 let saved;
+let failVisionCatalog = false;
 try {
   const page = await browser.newPage();
   await page.route('**/*', async route => {
@@ -31,6 +32,11 @@ try {
     if (url.pathname === '/api/settings') {
       if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); Object.assign(settings, saved); }
       body = { ...settings, ok: true };
+    } else if (url.pathname === '/portraits/vision/models') {
+      if (failVisionCatalog) return route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+      body = { ok: true, models: url.searchParams.get('provider') === 'NanoGPT'
+        ? [{ id: 'fixture-nano-vision', displayName: 'Fixture subscription vision model' }]
+        : [{ id: 'fixture-vision', displayName: 'Fixture vision model' }] };
     } else if (url.pathname === '/portraits/shared-generation/catalog') body = { ok: true, characters: [
       { cacheKey: 'fixture', heroStringId: 'fixture', characterName: 'Source-free fixture', hasSource: false,
         hasPortrait: true, hasDerivatives: true, canGenerate: true, state: 'ready' }
@@ -44,6 +50,8 @@ try {
     document.getElementById('images').classList.add('active');
   });
   await page.waitForFunction(() => document.getElementById('adultPortraitProvider').value === 'AtlasCloud');
+  if (await page.locator('#portraitGenerationMethod').inputValue() !== 'text') throw new Error('Legacy settings did not default to text');
+  if (await page.locator('#portraitVisionNanoGptModel').inputValue() !== 'deepseek/deepseek-v4.1-flash') throw new Error('Legacy NanoGPT vision settings did not default to DeepSeek V4.1 Flash');
   if (await page.locator('#reignGeneratorStatus').count()) throw new Error('Retired local generator status remains visible');
   await page.evaluate(() => loadSharedPortraitCatalog());
   let rebuildConfirmation = false;
@@ -55,6 +63,50 @@ try {
   if (!rebuildConfirmation) throw new Error('Source-free shared rebuild is blocked before its cost confirmation');
   for (const width of [1672, 1024, 600]) {
     await page.setViewportSize({ width, height: 941 });
+    for (const method of ['text', 'image']) {
+      await page.selectOption('#portraitGenerationMethod', method);
+      const options = await page.evaluate(() => {
+        const card = document.getElementById('portraitGenerationOptions');
+        const bounds = card.getBoundingClientRect();
+        return { visionVisible: document.getElementById('portraitVisionSettings').checkVisibility(),
+          overflow: card.scrollWidth > card.clientWidth + 1, inViewport: bounds.left >= 0 && bounds.right <= innerWidth + 1,
+          background: getComputedStyle(card).backgroundColor };
+      });
+      if (options.visionVisible !== (method === 'text') || options.overflow || !options.inViewport || options.background !== 'rgb(18, 18, 17)')
+        throw new Error('Portrait method layout failure: ' + JSON.stringify({ width, method, options }));
+      if (method === 'text') {
+        await page.selectOption('#portraitVisionModel', 'fixture-vision');
+        await page.locator('#portraitVisionModel').focus();
+        if (await page.evaluate(() => document.activeElement.id) !== 'portraitVisionModel') throw new Error('Vision model cannot receive keyboard focus');
+      }
+      await page.evaluate(() => saveSettings());
+      if (saved.portraitGenerationMethod !== method || saved.portraitVisionModel !== 'fixture-vision' || saved.portraitVisionProvider !== 'Codex')
+        throw new Error('Portrait method/model save failed');
+      await page.evaluate(() => loadSettings());
+      if (await page.locator('#portraitGenerationMethod').inputValue() !== method || await page.locator('#portraitVisionModel').inputValue() !== 'fixture-vision')
+        throw new Error('Portrait method/model reload failed');
+      const screenshot = path.join(outputDirectory, `${width}-${method}-generation.png`);
+      await page.locator('#portraitGenerationOptions').screenshot({ path: screenshot });
+      results.push({ width, method, passed: true, options, screenshot });
+    }
+    failVisionCatalog = true;
+    await page.evaluate(() => loadPortraitVisionModels());
+    if (await page.locator('#portraitVisionModel').inputValue() !== 'fixture-vision') throw new Error('Catalog failure cleared the saved vision model');
+    failVisionCatalog = false;
+    await page.selectOption('#portraitGenerationMethod', 'text');
+    await page.selectOption('#portraitVisionProvider', 'NanoGPT');
+    await page.waitForFunction(() => [...document.getElementById('portraitVisionNanoGptModel').options].some(x => x.value === 'fixture-nano-vision'));
+    await page.selectOption('#portraitVisionNanoGptModel', 'fixture-nano-vision');
+    if (!await page.locator('#portraitVisionNanoGptModel').isVisible() || await page.locator('#portraitVisionModel').isVisible()) throw new Error('NanoGPT vision visibility failure');
+    await page.evaluate(() => saveSettings());
+    await page.evaluate(() => loadSettings());
+    if (saved.portraitVisionProvider !== 'NanoGPT' || saved.portraitVisionNanoGptModel !== 'fixture-nano-vision'
+      || saved.portraitVisionModel !== 'fixture-vision' || await page.locator('#portraitVisionNanoGptModel').inputValue() !== 'fixture-nano-vision') throw new Error('Vision provider banks did not persist');
+    const nanoScreenshot = path.join(outputDirectory, `${width}-NanoGPT-vision.png`);
+    await page.locator('#portraitGenerationOptions').screenshot({ path: nanoScreenshot });
+    results.push({ width, method: 'text', visionProvider: 'NanoGPT', passed: true, screenshot: nanoScreenshot });
+    await page.selectOption('#portraitVisionProvider', 'Codex');
+    await page.waitForFunction(() => document.getElementById('portraitVisionModel').checkVisibility());
     for (const provider of ['NanoGPT', 'OpenRouter', 'AtlasCloud']) {
       for (const prefix of profiles) await page.selectOption('#' + prefix + 'Provider', provider);
       const state = await page.evaluate(({ profiles, provider }) => profiles.map(prefix => {
@@ -86,7 +138,7 @@ try {
           && !document.getElementById(prefix + 'AtlasProfileSettings').checkVisibility()
           && !document.getElementById(prefix + 'RequestParameters').checkVisibility() };
     }));
-    if (codex.some(x => !x.visible || !x.disabled || x.value !== 'gpt-image-2' || x.overflow || !x.hiddenOthers))
+    if (codex.some(x => !x.visible || !x.disabled || x.value !== 'runtime-default' || x.overflow || !x.hiddenOthers))
       throw new Error('Codex profile failure: ' + JSON.stringify(codex));
     for (const prefix of ['adultPortrait', 'adultScenery']) {
       if (await page.locator('#' + prefix + 'Provider option[value="Codex"]').count()

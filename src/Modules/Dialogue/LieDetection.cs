@@ -72,6 +72,19 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
             {
                 verification = VerifyNativeCurrentLocationClaim(payload, claim, claimantId, targetId);
             }
+            if (verification == null && !lookupOnly)
+            {
+                var spans = ExtractAssertedWorldHistorySpans(claim);
+                if (spans.Count != 1)
+                    return new Dictionary<string, object> { ["ok"] = true, ["recorded"] = false,
+                        ["outcome"] = "not_adjudicable", ["reason"] = spans.Count == 0 ? "no_asserted_claimant_deed" : "multiple_claims_require_separate_evidence",
+                        ["promptPacket"] = new Dictionary<string, object> { ["speakerVerdict"] = "unknown",
+                            ["behaviorRule"] = "No source-bound historical falsehood was established. Do not infer a lie or an accepted fact from this check." } };
+                // Persist the actual assertion, never the surrounding mixed monologue.
+                claim = ReadString(spans[0], "quote", "");
+                verifyPayload["claim"] = claim;
+                verifyPayload["claimSourceEvidence"] = spans[0];
+            }
             if (verification == null) verification = WorldHistoryVerifyApi(verifyPayload);
             if (!ReadBool(verification, "ok", false)) return verification;
 
@@ -739,6 +752,29 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             add("hundred_point_advantage", Math.Abs(HistoricalLieSuccessChance(200d, 100d) - 70d) < 0.001d, "A 100-point advantage produces 70%.");
             add("upper_cap", Math.Abs(HistoricalLieSuccessChance(1000d, 0d) - 80d) < 0.001d, "Success is capped at 80%.");
             add("lower_cap", Math.Abs(HistoricalLieSuccessChance(0d, 1000d) - 10d) < 0.001d, "Success has a 10% floor.");
+
+            foreach (string ordinary in new[] { "I smiled and nodded.", "I settled the matter.", "I led a toast to our friendship.",
+                "If I led the battle, I would be proud.", "I will command the army tomorrow.", "She said, \"I led the battle at Test Field.\"",
+                "Lord A led the battle at Test Field.", "*I led the army in an imagined scene.*", "I paid attention to your answer.", "I met your expectations." })
+            {
+                var harmless = WorldHistoryLieCheckApi(new Dictionary<string, object> { ["campaignId"] = campaignId,
+                    ["timelineId"] = timelineId, ["claim"] = ordinary, ["claimantId"] = "main_hero", ["targetId"] = "lord_a", ["worldDay"] = 101d });
+                add("source_gate_" + PromptHash(ordinary).Substring(0, 8), ReadString(harmless, "outcome", "") == "not_adjudicable"
+                    && !ReadBool(harmless, "recorded", true), "Ordinary, hypothetical, quoted or other-actor wording creates no historical lie/belief: " + ordinary);
+            }
+            var splitSource = ExtractAssertedWorldHistorySpans("*I smiled.* I led the battle at Test Field. I am proud of my friends.");
+            add("claim_span_excludes_surrounding_monologue", splitSource.Count == 1
+                && ReadString(splitSource[0], "quote", "") == "I led the battle at Test Field"
+                && ReadInt(splitSource[0], "start", 0) == 12, "Only the asserted actor/action/event span is eligible for lasting claim storage.");
+            add("substring_is_not_leadership", ReadString(ClassifyWorldHistoryClaim("I smiled and settled beside her."), "claimFamily", "") != "leadership", "led inside other words is not a claim.");
+            add("toast_is_not_military_command", ReadString(ClassifyWorldHistoryClaim("I led a toast."), "claimFamily", "") != "leadership", "Whole word led still requires a military object.");
+            add("event_location_must_match", !HistoryClaimMatchesNamedLocation("I led the battle at Different Field.",
+                new Dictionary<string, object> { ["location_name"] = "Test Field" }), "A different complete battle cannot contradict the claimed battle.");
+            add("complete_roster_database_integer", HistoryEventRosterComplete(TestDict("is_complete", 1L))
+                && !HistoryEventRosterComplete(TestDict("is_complete", 0L))
+                && !HistoryEventRosterComplete(TestDict()), "PostgreSQL integer flags preserve both complete and incomplete roster semantics.");
+            add("entered_town_is_completed_travel", ExtractAssertedWorldHistorySpans("I entered the town on day one.").Count == 1,
+                "An asserted completed arrival remains eligible for historical verification and retention checks.");
 
             Dictionary<string, object> genericLookup = WorldHistoryLieCheckApi(new Dictionary<string, object>
             {

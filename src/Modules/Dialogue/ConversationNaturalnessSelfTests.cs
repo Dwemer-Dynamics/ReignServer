@@ -141,6 +141,9 @@ namespace ReignBetaServer
             results.AddRange(RunDialogueActionReliabilitySelfTests());
             results.AddRange(RunActionAvailabilityRoutingSelfTests());
             results.AddRange(RunDynamicCharacteristicsSelfTests());
+            results.AddRange(RunMemorySpecialistIndexSelfTests());
+            results.AddRange(RunLateInteractionMemorySelfTests());
+            results.AddRange(RunCharacterLifeStateSelfTests());
             return results;
         }
 

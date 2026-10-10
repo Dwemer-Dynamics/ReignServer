@@ -8,11 +8,16 @@ using System.Text;
 namespace Reign.Core.Contracts.Dialogue
 {
     public enum ReignXpSkill { Charm, Steward, Trade, Leadership, Tactics }
+    public enum ReignXpReason { Conversation, SocialCharm, SocialBonus, PetitionDecision }
 
     public sealed class ReignXpOptions
     {
         public bool Enabled { get; set; } = true;
         public double Multiplier { get; set; } = 1;
+        public double ConversationMultiplier { get; set; } = 1;
+        public double SocialCharmMultiplier { get; set; } = 1;
+        public double SocialBonusMultiplier { get; set; } = 1;
+        public double PetitionMultiplier { get; set; } = 1;
         public bool Confirmed { get; set; }
     }
 
@@ -61,9 +66,28 @@ namespace Reign.Core.Contracts.Dialogue
             && !double.IsInfinity(value) && value >= .25 && value <= 5
             && Math.Abs(value * 4 - Math.Round(value * 4)) < .000001;
 
-        public static float Amount(double baseXp, ReignXpOptions options) => options != null
+        public static bool IsValidCategoryMultiplier(double value) => !double.IsNaN(value)
+            && !double.IsInfinity(value) && value >= 0 && value <= 5
+            && Math.Abs(value * 4 - Math.Round(value * 4)) < .000001;
+
+        public static double CategoryMultiplier(ReignXpReason reason, ReignXpOptions options)
+        {
+            if (options == null) return double.NaN;
+            switch (reason)
+            {
+                case ReignXpReason.Conversation: return options.ConversationMultiplier;
+                case ReignXpReason.SocialCharm: return options.SocialCharmMultiplier;
+                case ReignXpReason.SocialBonus: return options.SocialBonusMultiplier;
+                case ReignXpReason.PetitionDecision: return options.PetitionMultiplier;
+                default: return double.NaN;
+            }
+        }
+
+        public static float Amount(double baseXp, ReignXpOptions options, ReignXpReason reason) => options != null
             && options.Confirmed && options.Enabled && IsValidMultiplier(options.Multiplier)
-            && baseXp > 0 && baseXp <= PetitionXp ? (float)(baseXp * options.Multiplier) : 0;
+            && IsValidCategoryMultiplier(CategoryMultiplier(reason, options))
+            && baseXp > 0 && baseXp <= PetitionXp
+                ? (float)(baseXp * options.Multiplier * CategoryMultiplier(reason, options)) : 0;
 
         public static ReignXpSkill? SelectPhaseSkill(string phaseKey, IEnumerable<ReignXpParticipant> people)
         {

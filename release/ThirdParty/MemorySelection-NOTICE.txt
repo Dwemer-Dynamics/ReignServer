@@ -1,0 +1,37 @@
+Qwen3-Reranker-0.6B
+Upstream: https://huggingface.co/Qwen/Qwen3-Reranker-0.6B
+ONNX conversion: https://huggingface.co/onnx-community/Qwen3-Reranker-0.6B-ONNX
+Conversion revision: 9995c50e2310679108a55f5ccd16ba8be9f17c20
+License: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+Reign derives a binary-score-only ONNX graph during explicit preparation.
+The pinned Q4 weights are retained; floating tensors are converted to FP16 and
+only the last position and no/yes output columns are materialized. Exact hashes
+are pinned in embedding-model.lock.json and services/vector-worker/selection.py.
+
+LLMLingua-2
+Upstream: https://huggingface.co/microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+Project: https://github.com/microsoft/LLMLingua
+ONNX conversion: https://huggingface.co/ldenoue/llmlingua-2-bert-base-multilingual-cased-meetingbank
+Conversion revision: d7070a9b381ca5297dd7bd5cf7704dde81470518
+License: MIT, Copyright (c) Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Model files remain outside source control and are acquired only during explicit
+installation/preparation. Neither adapter contacts a hosted model provider.

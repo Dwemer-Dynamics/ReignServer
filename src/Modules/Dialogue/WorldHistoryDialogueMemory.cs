@@ -209,8 +209,8 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
             text.AppendLine("These recorded game events are known to this NPC. Public news establishes the result, not personal attendance. A firsthand participant competed in that event and must not describe it as merely heard news. A named winning teammate won with the champion; do not say that teammate lost, was eliminated, or failed to finish. When relevant to a verified introduction, connect the supplied achievement to that person; do not treat it as an unsupported boast. Do not invent additional feats or witnesses.");
             int documentedWins = events.Max(row => ReadInt(row, "documentedPlayerTournamentWins", 0));
             if (documentedWins > 0)
-                text.AppendLine("The visible history documents " + documentedWins.ToString(CultureInfo.InvariantCulture)
-                    + " player tournament victories in this timeline. The examples below are a selection, not the total. Do not say there were only as many victories as listed.");
+                text.AppendLine("The visible history documents " + RoughPerformanceCount(documentedWins)
+                    + " tournament victories for this person in this timeline. Use rough language; the examples below are a selection, not a lifetime total. Do not say there were only as many victories as listed.");
             foreach (var row in events)
             {
                 string basis = ReadBool(row, "tournamentFirsthand", false) || ReadString(row, "knowledgeBasis", "secondhand") == "firsthand"

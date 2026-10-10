@@ -70,10 +70,17 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             CreateEmbeddingTrigger(connection, "summaries", "summary", "summary_id", "summary,summary_type,memory_lane,tags_json,participants_json,about_entities_json,location_id,visibility,status", true);
             CreateEmbeddingTrigger(connection, "beliefs", "belief", "belief_id", "claim,source,about_entities_json,visibility", false);
             CreateEmbeddingTrigger(connection, "comprehension", "comprehension", "comprehension_id", "text,stance,about_entities_json", false);
-            DropEmbeddingTriggers(connection, "conversation_turns");
+            CreateEmbeddingTrigger(connection, "conversation_turns", "conversation_turn", "turn_id",
+                "text,speaker_id,participants_json,payload_json,status,world_day", true);
             CreateWorldHistoryEmbeddingTriggers(connection);
             EnsureWorldHistoryEmbeddingFilter(connection);
             EnsureConversationEmbeddingPolicy(connection);
+            // Only the derivative index is backfilled. Original transcripts and campaign effects are untouched.
+            if (ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_original_dialogue_v1' LIMIT 1;").FirstOrDefault(), "value", "") != "complete")
+            {
+                SeedEmbeddingJobs(connection, "conversation_turns", "conversation_turn", "turn_id");
+                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_original_dialogue_v1','complete');");
+            }
 
             Dictionary<string, object> seeded = QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_v1_seeded' LIMIT 1;").FirstOrDefault();
             if (!string.Equals(ReadString(seeded, "value", ""), "complete", StringComparison.OrdinalIgnoreCase))
@@ -210,13 +217,7 @@ WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
 
         private static void QueueRetiredEmbeddingDeletes(ReignDbConnection connection)
         {
-            ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type='conversation_turn';");
-            ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
-SELECT 'conversation_turn',source_id,'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')
-FROM embedding_documents WHERE source_type='conversation_turn' AND status='indexed'
-ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');");
-            ExecuteSql(connection, "DELETE FROM embedding_documents WHERE source_type='conversation_turn' AND status<>'indexed';");
-
+            // Original attributed turns are active semantic sources again; deletion is driven by their own status/trigger.
             string ineligibleEvent = "NOT " + EventEmbeddingEligibilitySql("e.");
             ExecuteSql(connection, @"DELETE FROM embedding_jobs WHERE source_type='event' AND source_id IN
 (SELECT e.event_id FROM events e WHERE " + ineligibleEvent + ");");
@@ -371,7 +372,8 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 ? " WHERE " + WorldHistoryEmbeddingEligibilitySql("")
                 : string.Equals(sourceType, "event", StringComparison.OrdinalIgnoreCase)
                     ? " WHERE " + EventEmbeddingEligibilitySql("")
-                    : "";
+                    : string.Equals(sourceType, "conversation_turn", StringComparison.OrdinalIgnoreCase)
+                        ? " WHERE LOWER(COALESCE(status,'active'))='active'" : "";
             ExecuteSql(connection, "INSERT OR IGNORE INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "SELECT '" + sourceType + "'," + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now') FROM " + table + where + ";");
         }
@@ -384,6 +386,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
             SeedEmbeddingJobs(connection, "summaries", "summary", "summary_id");
             SeedEmbeddingJobs(connection, "beliefs", "belief", "belief_id");
             SeedEmbeddingJobs(connection, "comprehension", "comprehension", "comprehension_id");
+            SeedEmbeddingJobs(connection, "conversation_turns", "conversation_turn", "turn_id");
             SeedEmbeddingJobs(connection, "world_history_events", "world_history_event", "event_id");
             QueueRetiredEmbeddingDeletes(connection);
         }
@@ -411,6 +414,7 @@ WHERE (d.source_id IS NULL OR d.status<>'indexed')" + where + ";",
             seed("summaries", "summary", "summary_id", "LOWER(COALESCE(s.status,'active'))='active'");
             seed("beliefs", "belief", "belief_id", "");
             seed("comprehension", "comprehension", "comprehension_id", "");
+            seed("conversation_turns", "conversation_turn", "turn_id", "LOWER(COALESCE(s.status,'active'))='active'");
             seed("world_history_events", "world_history_event", "event_id", WorldHistoryEmbeddingEligibilitySql("s."));
         }
 
@@ -794,6 +798,10 @@ LIMIT $limit;",
                     }
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, sourceType, sourceId, row, text, settings);
                     document.Payload["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                    var restoredContext = QuerySql(connection, "SELECT timeline_id FROM memory_restored_source_context WHERE state_id='current';").SingleOrDefault();
+                    string restoredTimeline = ReadString(restoredContext, "timeline_id", "");
+                    if (IsVerifiedRestoredMemorySource(connection, row, restoredTimeline))
+                        document.Payload["restoredSavePointId"] = ReadString(RestoredMemorySourceContext(connection, restoredTimeline), "save_point_id", "");
                     document.ContentHash = SemanticSha256Hex(document.Text + CanonicalJson(document.Payload));
                     Dictionary<string, object> indexed = QuerySql(connection, @"SELECT content_hash,status FROM embedding_documents
 WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=$provider LIMIT 1;",
@@ -944,7 +952,8 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 || string.Equals(sourceType, "summary", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(sourceType, "conversation_turn", StringComparison.OrdinalIgnoreCase))
             {
-                return string.Equals(status, "active", StringComparison.OrdinalIgnoreCase);
+                return string.Equals(status, "active", StringComparison.OrdinalIgnoreCase)
+                    && (sourceType != "conversation_turn" || !string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(row)));
             }
             return !string.Equals(status, "deleted", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(status, "superseded", StringComparison.OrdinalIgnoreCase)
@@ -955,10 +964,16 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
         private static string BuildCanonicalEmbeddingText(string sourceType, Dictionary<string, object> row)
         {
             List<string> parts = new List<string> { sourceType.Replace('_', ' ') + ":" };
-            parts.Add(ReadFirstString(row, "semantic_text", "summary", "claim", "text", "description"));
+            parts.Add(sourceType == "conversation_turn" ? ConversationTurnTextForRecall(row)
+                : ReadFirstString(row, "semantic_text", "summary", "claim", "text", "description"));
             parts.Add(ReadFirstString(row, "event_type", "memory_type", "summary_type", "category", "stance", "channel"));
             parts.Add(ReadFirstString(row, "location_name", "location_id"));
             parts.Add(ReadString(row, "speaker_name", ""));
+            if (sourceType == "conversation_turn")
+            {
+                parts.Add("speaker=" + ReadString(row, "speaker_id", ""));
+                parts.Add("role=" + ReadString(row, "role", ""));
+            }
             parts.Add(ReadString(row, "tags_json", ""));
             parts.Add(ReadString(row, "about_entities_json", ""));
             parts.Add(ReadString(row, "participants_json", ""));
@@ -984,7 +999,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 ["sourceType"] = sourceType,
                 ["sourceId"] = sourceId,
                 ["memoryLane"] = FirstNonEmpty(ReadFirstString(row, "memory_lane", "memory_domain"), InferEmbeddingLane(sourceType, row)),
-                ["ownerId"] = ReadFirstString(row, "owner_id", "believer_id"),
+                ["ownerId"] = sourceType == "conversation_turn" ? ReadString(row, "speaker_id", "") : ReadFirstString(row, "owner_id", "believer_id"),
                 ["knownBy"] = mental ? new List<string>() : knownBy,
                 ["hiddenFrom"] = TextListFromJson(ReadString(row, "hidden_from_json", "[]")),
                 ["privateMental"] = mental, ["eligibilityVersion"] = 2,
@@ -1132,7 +1147,11 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                     filters["observerId"] = observerId;
                     if (asOfWorldDay < double.MaxValue) filters["asOfWorldDay"] = asOfWorldDay;
                     using (var connection = OpenCampaignConnection(campaignId))
+                    {
                         filters["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                        string point = ReadString(RestoredMemorySourceContext(connection, timelineId), "save_point_id", "");
+                        if (point.Length > 0) filters["restoredSavePointId"] = point;
+                    }
                 }
                 request["filters"] = filters;
                 Dictionary<string, object> response = TryParseJsonObject(PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/search"), Json.Serialize(request),
@@ -1141,6 +1160,11 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 if (!string.IsNullOrWhiteSpace(observerId) && !ReadBool(response, "eligibilityApplied", false))
                 {
                     status["reason"] = "observer_filter_unavailable_sql_fallback";
+                    return status;
+                }
+                if (filters.ContainsKey("restoredSavePointId") && !ReadBool(response, "restoredSourceEligibilityApplied", false))
+                {
+                    status["reason"] = "restored_source_filter_unavailable_sql_fallback";
                     return status;
                 }
                 List<Dictionary<string, object>> results = ReadDictionaryList(response, "results").Take(Math.Max(1, ReadInt(settings, "vectorSearchTopK", 96))).ToList();
@@ -1173,6 +1197,9 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
 
         private static List<string> SemanticSourceTypesForRoute(Dictionary<string, object> route)
         {
+            // Legacy consumers read memory/summary documents. Only original-aware
+            // precision/analyst callers opt into conversation turns, so new index
+            // entries cannot crowd out results an older consumer can actually use.
             HashSet<string> types = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "memory", "summary" };
             if (RouteHasLane(route, "personal_state")) types.Add("comprehension");
             if (RouteHasLane(route, "beliefs_and_rumors")) types.Add("belief");
@@ -1196,7 +1223,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 string id = ReadString(payload, "sourceId", "");
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 Dictionary<string, object> row = QuerySql(connection, "SELECT * FROM " + table + " WHERE " + idColumn + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
-                if (row == null || !EmbeddingRowActive(sourceType, row) || !KnowledgeRowVisibleToNpc(table, row, knowledge)) continue;
+                if (row == null || !EmbeddingRowActive(sourceType, row) || !KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
                 if (ReadString(payload, "sourceHash", "") != MemorySourceHash(new[] { row })) continue;
                 row["vectorSemanticScore"] = ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
                 rows.Add(row);
@@ -1490,8 +1517,8 @@ WHERE source_type<>'world_history_event' OR source_id IN
                     int expectedTriggerCount =
                         ReignPostgreSqlDialect.IsPostgreSql(connection)
                             ? 18 : 20;
-                    add("schema_and_triggers", triggerCount >= expectedTriggerCount && rawConversationTriggerCount == 0 && queued >= 2,
-                        "Durable semantic source tables have insert, update, and delete queue triggers; canonical raw conversation deliberately uses exact-history FTS instead.");
+                    add("schema_and_triggers", triggerCount >= expectedTriggerCount && rawConversationTriggerCount >= 3 && queued >= 2,
+                        "Original attributed conversation and durable semantic sources have insert, update, and delete queue triggers; reads revalidate original eligibility.");
                     add("knowledge_filter", ownerAllowed && strangerDenied, "Private semantic candidates remain visible to their owner and hidden from strangers.");
                     add("external_payload_privacy", payload.IndexOf("abandoned", StringComparison.OrdinalIgnoreCase) < 0 && payload.IndexOf("promise", StringComparison.OrdinalIgnoreCase) < 0,
                         "Vector payload metadata contains no raw memory prose.");

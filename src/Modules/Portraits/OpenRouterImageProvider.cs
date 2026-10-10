@@ -25,7 +25,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> BuildOpenRouterImagePayload(string model, string prompt, byte[] source, string size)
         {
             if (!OpenRouterImageModels.Contains(model)) throw new ArgumentException("Select a supported OpenRouter image model.");
-            if (source == null || source.Length == 0) throw new ArgumentException("OpenRouter image edits require the source image.");
+            if (source != null && source.Length == 0) throw new ArgumentException("OpenRouter image references must not be empty.");
             string[] dimensions = (size ?? "").Replace('*', 'x').Split('x');
             int width = 0, height = 0;
             if (dimensions.Length == 2) { int.TryParse(dimensions[0], out width); int.TryParse(dimensions[1], out height); }
@@ -38,8 +38,9 @@ namespace ReignBetaServer
                 ["aspect_ratio"] = ratio,
                 ["input_references"] = new ArrayList { new Dictionary<string, object> {
                     ["type"] = "image_url", ["image_url"] = new Dictionary<string, object> {
-                        ["url"] = "data:image/png;base64," + Convert.ToBase64String(source) } } }
+                        ["url"] = source == null ? "" : "data:image/png;base64," + Convert.ToBase64String(source) } } }
             };
+            if (source == null) body.Remove("input_references");
             if (gpt) body["quality"] = "high";
             else body["resolution"] = "2K";
             return body;
@@ -64,7 +65,8 @@ namespace ReignBetaServer
                 byte[] bytes = data.Count == 0 ? null : DecodeImageBase64(ReadString(data[0], "b64_json", ""));
                 if (bytes == null || bytes.Length == 0)
                     return PortraitImageCallResult.Fail("OpenRouter", profile.OpenRouterModel,
-                        "OpenRouter returned no image data; the reference image will not be used as a generated result.", timer.ElapsedMilliseconds, requestChars, response.Length);
+                        "OpenRouter returned no image data; the reference image will not be used as a generated result. "
+                            + PortraitProviderFailureDetail(ReadDictionary(raw, "error")), timer.ElapsedMilliseconds, requestChars, response.Length);
                 return PortraitImageCallResult.Success("OpenRouter", profile.OpenRouterModel, "OpenRouter reference image",
                     bytes, timer.ElapsedMilliseconds, requestChars, response.Length);
             }

@@ -1408,13 +1408,13 @@ namespace ReignBetaServer
             return verification && ActiveCodexPerformanceBudget.Value != null && ShouldCancelVerification();
         }
 
-        private static void WaitForCodexTurn(CodexTurnWaiter waiter, int timeoutMs, bool verification)
+        private static void WaitForCodexTurn(CodexTurnWaiter waiter, int timeoutMs, bool verification, Func<bool> canceled = null)
         {
             if (waiter == null) throw new InvalidOperationException("Codex turn waiter was not created.");
             Stopwatch stopwatch = Stopwatch.StartNew();
             while (!waiter.Completed.Wait(250))
             {
-                if (ShouldCancelCodexWait(verification))
+                if (canceled?.Invoke() == true || ShouldCancelCodexWait(verification))
                     throw new OperationCanceledException(verification ? "Codex verification was cancelled." : "Codex request was cancelled.");
                 if (stopwatch.ElapsedMilliseconds >= timeoutMs)
                     throw new TimeoutException("Codex app-server turn timed out after " + timeoutMs + " ms.");

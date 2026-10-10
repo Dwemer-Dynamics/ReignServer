@@ -22,6 +22,12 @@ namespace ReignBetaServer
                 ["heroStringId"] = id, ["name"] = name, ["age"] = age, ["isAvailable"] = true };
             var roster = new List<Dictionary<string, object>> { Hero("madam", "Aelia Varro", 29), Hero("worker-a", "Mira Cassia"), Hero("worker-b", "Tavian Corvus") };
             Dictionary<string, object> Charge(string id, object gold, string evidence) => new Dictionary<string, object> { ["heroId"] = id, ["gold"] = gold, ["evidence"] = evidence };
+            Check("structured_turn_never_extracts_recruitment_from_speech", () => {
+                var state = new Dictionary<string, object> { ["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion };
+                var response = new Dictionary<string, object> { ["reply"] = "I will join your clan permanently for 100 denars." };
+                FinalizeTavernHouseTerms(state, response, "worker-a", "explicit-turn", true);
+                Require(!response.ContainsKey("recruitmentAgreement") && !response.ContainsKey("termsError"), "Structured conversation attempted legacy recruitment extraction.");
+            });
             Check("exact_visible_terms", () => {
                 const string speech = "I offer Mira Cassia for 120 denars. Tavian Corvus is free of charge. I offer Aelia Varro for 450 denars.";
                 var charges = ValidateTavernHouseQuoteCharges(new List<Dictionary<string, object>> {

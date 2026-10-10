@@ -28,6 +28,10 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             results.AddRange(RunConversationDiagnosticsSelfTests());
+            results.AddRange(RunGroupConversationTurnOrderSelfTests());
+            results.AddRange(RunGroupConversationFloorSelfTests());
+            results.AddRange(RunPromptEditorPersistenceTests());
+            results.AddRange(RunReignXpOptionsSelfTests());
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
             var providerChoice = new Dictionary<string, object> {
@@ -77,6 +81,9 @@ namespace ReignBetaServer
             string navigationPreview = Path.Combine(VerificationDir, "control-center-navigation", "control-center.html");
             Directory.CreateDirectory(Path.GetDirectoryName(navigationPreview));
             File.WriteAllText(navigationPreview, controlCenter);
+            string offlinePreview = File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "server-offline.html"))
+                .Replace("@SERVER_CONTROL_SCRIPT@", File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "server-control.js")));
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(navigationPreview), "server-offline.html"), offlinePreview);
             add("control_center_navigation_preview", File.Exists(navigationPreview),
                 "Exact provider-free Control Center HTML for the isolated browser matrix.", navigationPreview);
             add("support_bundle_ui_contract",
@@ -330,7 +337,7 @@ namespace ReignBetaServer
                         && nextTurnOrder.FirstOrDefault() == "npc_recipient"
                         && new HashSet<string>(directAddressOrder, StringComparer.OrdinalIgnoreCase).SetEquals(
                             new[] { "npc_recipient", "npc_noble", "npc_witness" }),
-                        "A directly named recipient always speaks first while the remaining eligible speakers use a turn-varying stable shuffle instead of roster order.",
+                        "Named participants speak in mention order before other eligible speakers; remaining speakers use a stable turn-specific order.",
                         new Dictionary<string, object> { ["firstTurn"] = directAddressOrder, ["nextTurn"] = nextTurnOrder });
 
                     Dictionary<string, object> rolePayload = new Dictionary<string, object>
@@ -1191,10 +1198,16 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
 (SELECT COUNT(*) FROM events WHERE event_id='durable_turn_event') AS durable_events,
 (SELECT COUNT(*) FROM memories WHERE event_id='durable_turn_event') AS durable_memories,
 (SELECT COUNT(*) FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id='durable_turn_event')) AS durable_memory_fts,
+(SELECT COUNT(*) FROM memories WHERE event_id='durable_turn_event' AND payload_json::jsonb->>'observerScope'='author_interpretation'
+ AND known_by_json::jsonb='[""npc_a""]'::jsonb) AS author_memories,
+(SELECT COUNT(*) FROM memories WHERE event_id='durable_turn_event' AND payload_json::jsonb->>'observerScope'='observable_source_spans'
+ AND known_by_json::jsonb @> '[""npc_a"",""player""]'::jsonb) AS observable_memories,
 (SELECT COUNT(*) FROM event_fts WHERE event_id='durable_turn_event') AS durable_event_fts,
 (SELECT COUNT(*) FROM events WHERE event_id IN ('low_salience_turn_event','durable_turn_event') AND embedding_status='skipped') AS skipped_event_embeddings,
 (SELECT COUNT(*) FROM embedding_jobs WHERE source_type='event' AND source_id IN ('low_salience_turn_event','durable_turn_event')) AS raw_event_embedding_jobs,
-(SELECT COUNT(*) FROM embedding_jobs WHERE source_type='conversation_turn') AS raw_turn_embedding_jobs,
+(SELECT COUNT(*) FROM conversation_turns WHERE status='active') AS active_original_turns,
+(SELECT COUNT(*) FROM conversation_turns t WHERE t.status='active' AND EXISTS
+ (SELECT 1 FROM embedding_jobs j WHERE j.source_type='conversation_turn' AND j.source_id=t.turn_id)) AS indexed_active_originals,
 (SELECT COUNT(*) FROM embedding_jobs WHERE source_type='memory' AND source_id IN (SELECT memory_id FROM memories WHERE event_id='durable_turn_event')) AS durable_memory_embedding_jobs;").FirstOrDefault()
                         ?? new Dictionary<string, object>();
                 }
@@ -1203,23 +1216,26 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && ReadInt(conversationProjectionCounts, "low_events", -1) == 1
                     && ReadInt(conversationProjectionCounts, "low_memories", -1) == 0
                     && ReadInt(conversationProjectionCounts, "low_event_fts", -1) == 0
-                    && ReadInt(durableTurnStore, "memoryCount", -1) == 1
+                    && ReadInt(durableTurnStore, "memoryCount", -1) == 2
                     && ReadInt(conversationProjectionCounts, "durable_events", -1) == 1
-                    && ReadInt(conversationProjectionCounts, "durable_memories", -1) == 1
-                    && ReadInt(conversationProjectionCounts, "durable_memory_fts", -1) == 1
+                    && ReadInt(conversationProjectionCounts, "durable_memories", -1) == 2
+                    && ReadInt(conversationProjectionCounts, "durable_memory_fts", -1) == 2
+                    && ReadInt(conversationProjectionCounts, "author_memories", -1) == 1
+                    && ReadInt(conversationProjectionCounts, "observable_memories", -1) == 1
                     && ReadInt(conversationProjectionCounts, "durable_event_fts", -1) == 0,
-                    "Canonical raw conversation remains separate from long-term retrieval: low-salience turns add no durable memory, while an explicit memory write is indexed exactly once.",
+                    "Low-salience turns add no durable memory. An explicit write indexes its private author interpretation and separate audience-safe source account once each.",
                     new Dictionary<string, object>
                     {
                         ["lowSalience"] = lowSalienceStore, ["durable"] = durableTurnStore,
                         ["counts"] = conversationProjectionCounts
                     });
-                add("raw_conversation_uses_fts_not_vectors",
+                add("original_conversation_semantics_preserve_source_authority",
                     ReadInt(conversationProjectionCounts, "skipped_event_embeddings", -1) == 2
                     && ReadInt(conversationProjectionCounts, "raw_event_embedding_jobs", -1) == 0
-                    && ReadInt(conversationProjectionCounts, "raw_turn_embedding_jobs", -1) == 0
-                    && ReadInt(conversationProjectionCounts, "durable_memory_embedding_jobs", -1) == 1,
-                    "Raw turns and their canonical source events remain available to exact-history FTS without entering the vector backlog; only the explicit durable memory is queued for semantic indexing.",
+                    && ReadInt(conversationProjectionCounts, "active_original_turns", 0) > 0
+                    && ReadInt(conversationProjectionCounts, "indexed_active_originals", -1) == ReadInt(conversationProjectionCounts, "active_original_turns", 0)
+                    && ReadInt(conversationProjectionCounts, "durable_memory_embedding_jobs", -1) == 2,
+                    "Every active original turn enters semantic discovery without vectorizing duplicate source events; explicit author and audience-safe memories each enter once. Canonical originals remain authoritative.",
                     conversationProjectionCounts);
                 Dictionary<string, object> broadRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Reconstruct our prior group discussion without guessing.", new Dictionary<string, object>());
@@ -3162,6 +3178,14 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                             ["serverActionId"] = repairActionId,
                             ["source"] = "world_diplomacy_director"
                         }
+                    },
+                    // A stale file cache must never recreate a rolled-back
+                    // player handover absent from the authoritative database.
+                    new Dictionary<string, object>
+                    {
+                        ["id"] = "pa_rolled_back_reconciliation_fixture",
+                        ["campaignId"] = campaignId, ["status"] = "enqueued",
+                        ["command"] = "give_gold"
                     }
                 });
                 WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
@@ -3206,6 +3230,13 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         ["queueStatus"] = ReadString(repairedQueue.FirstOrDefault(), "status", ""),
                         ["eventStatus"] = ReadString(repairedEvent, "executionStatus", "")
                     });
+                var repairedCache = ReadActionQueueFromPath(CampaignFile(campaignId, "actions", "action-queue.json"));
+                add("action_status_audit_repair_persists_without_resurrecting_handover",
+                    repairedCache.Any(row => ReadString(row, "id", "") == repairActionId
+                        && ReadString(row, "status", "") == "completed")
+                    && !repairedCache.Any(row => DurableConversationAction(ReadString(row, "id", "")))
+                    && !repairedQueue.Any(row => ReadString(row, "id", "") == "pa_rolled_back_reconciliation_fixture"),
+                    "Ordinary action recovery persists its terminal queue status and excludes stale player handover cache rows absent from PostgreSQL.", repairedCache);
                 add("provider_middleware_status", ReadBool(ProviderMiddlewareStatus(), "ok", false), "Provider middleware exposes circuit, concurrency, idempotency, and latency state.", ProviderMiddlewareStatus());
                 add("provider_transient_connection_closed_variants",
                     IsTransientLlmFailure("The underlying connection was closed: The connection was closed unexpectedly.")

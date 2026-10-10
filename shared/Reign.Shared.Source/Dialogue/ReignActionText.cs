@@ -45,10 +45,9 @@ namespace ReignBeta.Dialogue
 
         public static string ToRichText(string text, bool actionsEnabled = true)
         {
-            // Bound before parsing, so truncation cannot leave an open native tag.
+            // The scrollable transcript owns layout, not a character limit. Keep the
+            // entire accepted reply, including narration that crosses an old limit.
             text = text ?? string.Empty;
-            bool truncated = text.Length > 4000;
-            if (truncated) text = text.Substring(0, 4000);
             var builder = new StringBuilder();
             foreach (Segment segment in actionsEnabled ? Parse(text) : new List<Segment> { new Segment { Text = text } })
             {
@@ -66,7 +65,6 @@ namespace ReignBeta.Dialogue
                 }
                 if (segment.IsAction) builder.Append("</span>");
             }
-            if (truncated) builder.Append("...");
             return builder.ToString();
         }
     }

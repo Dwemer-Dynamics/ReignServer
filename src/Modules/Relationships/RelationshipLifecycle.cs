@@ -1750,6 +1750,8 @@ VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
         private static List<Dictionary<string, object>> RunCurrentRelationshipSelfTests()
         {
             List<Dictionary<string, object>> results = RunMbtiRelationshipSelfTests();
+            results.AddRange(RunAutonomousCorrespondenceSelfTests());
+            results.AddRange(RunPlayerApproachSelfTests());
             results.AddRange(RunRelationshipLifecycleSelfTests());
             results.AddRange(RunRelationshipFlingSelfTests());
             results.AddRange(RunWorldRelationshipModelSelfTests());

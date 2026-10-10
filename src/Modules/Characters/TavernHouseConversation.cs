@@ -104,6 +104,12 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> TavernHouseRespond(Dictionary<string, object> payload)
+            => TavernHouseRespondCore(payload, planOnly: false);
+
+        private static Dictionary<string, object> TavernHouseTurnPlanApi(Dictionary<string, object> payload)
+            => TavernHouseRespondCore(payload, planOnly: true);
+
+        private static Dictionary<string, object> TavernHouseRespondCore(Dictionary<string, object> payload, bool planOnly)
         {
             try
             {
@@ -112,14 +118,20 @@ namespace ReignBetaServer
                 {
                     var state = ReadTavernHouseSession(path) ?? NewTavernHouseSession(payload);
                     ValidateTavernHouseScope(state, payload);
+                    if (UsesStructuredActions(payload)) state["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                     if (ReadString(state, "status", "") == "closed") return TavernHouseError("This visit has ended.", "closed");
                     string requestId = ReadString(payload, "requestId", "");
                     if (string.IsNullOrWhiteSpace(requestId)) return TavernHouseError("A stable requestId is required for each speaker turn.");
                     var responses = ReadDictionaryList(state, "responses");
                     var previous = responses.FirstOrDefault(x => ReadString(x, "requestId", "") == requestId);
-                    string requestHash = TavernHouseHash(Json.Serialize(new[] { ReadString(payload, "playerText", ""), ReadString(payload, "speakerHeroStringId", ""), ReadString(payload, "playerTurnId", "") }));
+                    string requestHash = TavernHouseHash(Json.Serialize(new[] { ReadString(payload, "playerText", ""), ReadString(payload, "speakerHeroStringId", ""), ReadString(payload, "playerTurnId", "") })
+                        + (UsesStructuredActions(payload) ? Json.Serialize(ReadDictionary(payload, "structuredActionContext")) : ""));
                     if (previous != null)
                     {
+                        if (planOnly)
+                            return ReadString(previous, "requestHash", "") == requestHash
+                                ? TestDict("ok", true, "completedReplay", true, "providerCalls", 0)
+                                : TavernHouseError("The completed request has different input.");
                         return ReplayTavernHouseCompletedTurn(state, previous, requestHash,
                             replay => FinalizeTavernHouseTerms(state, replay, ReadString(previous, "speakerId", ""), requestId, ReadBool(previous, "visiting", false)),
                             () => { state["responses"] = responses; SaveTavernHouseSession(path, state); });
@@ -165,6 +177,7 @@ namespace ReignBetaServer
                             : LoadPromptTemplate("tavern_house_negotiation_role.txt") + "\nAvailable native roster (identity and pricing choices only, not present witnesses): "
                                  + Json.Serialize(roster.Select(x => new { heroId = CharacterIdFrom(x), name = ReadString(x, "name", ""), isMadam = ReadBool(x, "isMadam", false) })));
                     ApplyTavernHouseOpening(state, chat);
+                    if (planOnly) return GroupConversationFloorApi(chat);
                     var response = DispatchTavernHouseDialogue(state, requestId, requestHash, chat,
                         () => PartyChatRespond(chat), pending => RecoverTavernHouseDialogue(state, pending),
                         () => SaveTavernHouseSession(path, state));
@@ -174,7 +187,8 @@ namespace ReignBetaServer
                     string playerText = ReadString(payload, "playerText", "");
                     if (!string.IsNullOrWhiteSpace(playerText) && !transcript.Any(x => ReadString(x, "playerTurnId", "") == playerTurn && ReadString(x, "role", "") == "player"))
                         transcript.Add(new Dictionary<string, object> { ["role"] = "player", ["heroId"] = ReadString(state, "playerHeroStringId", ""), ["name"] = ReadString(ReadDictionary(state, "player"), "name", "Player"), ["text"] = playerText, ["playerTurnId"] = playerTurn, ["phase"] = visiting ? "visit" : "negotiation" });
-                    transcript.Add(new Dictionary<string, object> { ["role"] = "npc", ["heroId"] = speakerId, ["name"] = ReadString(speaker, "name", ""), ["text"] = ReadString(response, "reply", ""), ["requestId"] = requestId, ["phase"] = visiting ? "visit" : "negotiation" });
+                    if (!string.IsNullOrWhiteSpace(ReadString(response, "reply", "")))
+                        transcript.Add(new Dictionary<string, object> { ["role"] = "npc", ["heroId"] = speakerId, ["name"] = ReadString(speaker, "name", ""), ["text"] = ReadString(response, "reply", ""), ["requestId"] = requestId, ["phase"] = visiting ? "visit" : "negotiation" });
                     state["transcript"] = transcript; state["transcriptRevision"] = ReadInt(state, "transcriptRevision", 0) + 1;
                     response["transcriptRevision"] = state["transcriptRevision"];
                     if (!visiting) state.Remove("quote");
@@ -333,7 +347,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                     if (ReadBool(extracted, "ok", false)) { state["quote"] = ReadDictionary(extracted, "quote"); response["quote"] = state["quote"]; }
                     else if (ReadString(extracted, "code", "") != "no_offer") response["quoteError"] = ReadString(extracted, "error", "Ask the madam to restate the exact terms.");
                 }
-                var recruitment = ExtractTavernHouseRecruitment(state, speakerId, requestId, ReadString(response, "reply", ""));
+                var recruitment = UsesStructuredActions(state) ? null : ExtractTavernHouseRecruitment(state, speakerId, requestId, ReadString(response, "reply", ""));
                 if (recruitment != null) response["recruitmentAgreement"] = recruitment;
             }
             catch (Exception ex) { response["termsError"] = "The conversation is saved; its terms could not be confirmed: " + ex.Message; }

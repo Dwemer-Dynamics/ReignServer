@@ -21,6 +21,7 @@ namespace ReignBetaServer
                 {
                     ["campaignId"] = campaignId, ["eventId"] = "progress_event", ["turnId"] = "progress_turn",
                     ["correlationId"] = "progress_turn", ["playerName"] = "Player", ["playerText"] = "Everyone, hello.",
+                    ["playerHeroStringId"] = "player", ["timelineId"] = "test",
                     ["activeHeroIds"] = ids, ["progressiveReplies"] = true, ["replyCursor"] = 0,
                     ["conversationRelationshipChangesEnabled"] = false,
                     ["attendees"] = ids.Select(id => new Dictionary<string, object>
@@ -103,6 +104,8 @@ namespace ReignBetaServer
                     "All progress requests, failures and replay retain exactly one authoritative player submission.");
 
                 payload["turnId"] = "legacy_turn";
+                payload["contributionId"] = "legacy_turn";
+                payload["sceneTurnId"] = "legacy_turn";
                 payload["progressiveReplies"] = false;
                 payload.Remove("replyCursor");
                 produced.Clear();
@@ -121,6 +124,7 @@ namespace ReignBetaServer
                 // This identifier is generated above, never supplied by a caller.
                 // The Verification Lab owns the surrounding isolated database.
                 TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "campaign")));
+                ReignPostgreSqlStorage.DropCampaign(campaignId);
             }
             return tests;
         }

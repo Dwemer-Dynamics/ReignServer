@@ -1027,7 +1027,8 @@ exchange_count=$count,last_exchange_id=$exchange,last_world_day=$day,updated_ts=
         private static Dictionary<string, object> NormalizeAndPersistConversationSocialSignals(
             string campaignId, Dictionary<string, object> parsed, Dictionary<string, object> request,
             string npcId, string playerId, string playerText, string npcReply,
-            Dictionary<string, object> conceptionGate, string exchangeId, double worldDay)
+            Dictionary<string, object> conceptionGate, string exchangeId, double worldDay,
+            bool persist = true, ReignDbConnection existingConnection = null)
         {
             string timelineId = "main";
             string sessionId = ReadFirstString(request, "conversationSessionId", "sessionId", "conversationId");
@@ -1062,8 +1063,9 @@ exchange_count=$count,last_exchange_id=$exchange,last_world_day=$day,updated_ts=
             }
             List<Dictionary<string, object>> accepted = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> rejected = new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
             {
+                ReignDbConnection connection = existingConnection ?? ownedConnection;
                 EnsureSocialReputationSchema(connection);
                 timelineId = FirstNonEmpty(ReadString(request, "timelineId", ""),
                     ResolveCharacterSocialTimeline(connection));
@@ -1121,7 +1123,7 @@ exchange_count=$count,last_exchange_id=$exchange,last_world_day=$day,updated_ts=
                         ["exchangeId"] = exchangeId, ["worldDay"] = worldDay,
                         ["speakerClanTier"] = speakerClanTier, ["targetClanTier"] = targetClanTier
                     };
-                    ExecuteSql(connection, @"INSERT INTO court_social_signal_evidence(
+                    if (persist) ExecuteSql(connection, @"INSERT INTO court_social_signal_evidence(
 campaign_id,timeline_id,exchange_id,signal_id,session_id,signal_type,speaker_id,target_id,
 supporting_quote,accepted,rejection_reason,evidence_json,created_ts)
 VALUES($campaign,$timeline,$exchange,$signal,$session,$type,$speaker,$target,$quote,$accepted,$reason,$evidence,$ts)

@@ -156,7 +156,15 @@ namespace ReignBetaServer
                 && !ReignActionText.ToRichText("<img src=evil> *<a href=evil>nod</a>*").Contains("<a "));
             check("no_retroactive_guess", ReignActionText.ToRichText("He nods. Yes.") == "He nods. Yes.");
             check("player_not_italicized", ReignActionText.ToRichText("*I nod.*", false) == "*I nod.*");
-            check("truncation_balanced", !ReignActionText.ToRichText("*" + new string('x', 5000) + "*").Contains("<span"));
+            string longAction = "*" + string.Concat(Enumerable.Repeat("She listens and remembers. ", 240)) + "The final action ends here.*";
+            string longReply = "Spoken opening. " + longAction + "\n\nThe final answer remains visible.";
+            string longRichText = ReignActionText.ToRichText(longReply);
+            check("long_reply_retains_final_answer", longRichText.EndsWith("The final answer remains visible.")
+                && longRichText.Contains("The final action ends here.</span>"));
+            check("long_narration_balanced", longRichText.Split("<span style=\"Action\">").Length == 2
+                && longRichText.Split("</span>").Length == 2);
+            check("long_player_reply_retains_final_answer", ReignActionText.ToRichText(longReply, false).EndsWith("The final answer remains visible."));
+            check("long_reply_still_neutralizes_markup", !ReignActionText.ToRichText(longReply + "<img src=bad>").Contains("<img"));
             check("unicode_preserved", ReignActionText.ToRichText("*Él hoche la tête.*") .Contains("Él hoche la tête."));
 
             string campaign = "intoxication_test_" + Guid.NewGuid().ToString("N");
@@ -168,7 +176,7 @@ namespace ReignBetaServer
                 {
                     payload["turnId"] = turn;
                     var parsed = response("He drinks a cup of wine.", "drink", 1);
-                    return ApplyConversationDrinking(campaign, hero, payload, profile, null, parsed, ReadString(parsed, "reply", ""));
+                    return ApplyLegacyConversationDrinking(campaign, hero, payload, profile, null, parsed, ReadString(parsed, "reply", ""));
                 };
                 drink("npc", "one");
                 check("commit_one", ReadDouble(ReadDictionary(ReadDictionary(payload, "intoxicationReceipt"), "state"), "drinks", 0) == 1);
@@ -209,7 +217,7 @@ namespace ReignBetaServer
                 {
                     var concurrentPayload = new Dictionary<string, object> { ["worldDay"] = 10d, ["turnId"] = "same_concurrent_turn" };
                     var concurrentReply = response("He drinks a cup of wine.", "drink", 1);
-                    ApplyConversationDrinking(campaign, "concurrent_npc", concurrentPayload, profile, null, concurrentReply, ReadString(concurrentReply, "reply", ""));
+                    ApplyLegacyConversationDrinking(campaign, "concurrent_npc", concurrentPayload, profile, null, concurrentReply, ReadString(concurrentReply, "reply", ""));
                 });
                 BuildIntoxicationPrompt(campaign, "concurrent_npc", payload, profile, null);
                 check("concurrent_retries_once", ReadDouble(ReadDictionary(payload, "intoxicationContext"), "drinks", -1) == 1);
@@ -219,20 +227,20 @@ namespace ReignBetaServer
                 var observedProfile = new Dictionary<string, object> { ["name"] = "Mira", ["isFemale"] = true,
                     ["attributes"] = new Dictionary<string, object> { ["endurance"] = 3 } };
                 var observedPayload = new Dictionary<string, object> { ["worldDay"] = 10d, ["turnId"] = "observed_one" };
-                ApplyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
+                ApplyLegacyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
                     misindexed, ReadString(misindexed, "reply", ""));
                 string firstReceipt = Json.Serialize(ReadDictionary(observedPayload, "intoxicationReceipt"));
                 var secondObserved = omitted("*She drinks a cup of wine.*", new string[0]);
-                ApplyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
+                ApplyLegacyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
                     secondObserved, ReadString(secondObserved, "reply", ""));
                 check("changed_replay_keeps_original_receipt", firstReceipt == Json.Serialize(ReadDictionary(observedPayload, "intoxicationReceipt")));
                 observedPayload["turnId"] = "observed_two";
                 secondObserved = omitted("*She drinks a cup of wine.*", new string[0]);
-                ApplyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
+                ApplyLegacyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
                     secondObserved, ReadString(secondObserved, "reply", ""));
                 observedPayload["turnId"] = "observed_three";
                 var thirdObserved = omitted("*She picks up her cup again and drinks a mouthful.*", new[] { "They are sharing wine." });
-                ApplyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
+                ApplyLegacyConversationDrinking(campaign, "observed_npc", observedPayload, observedProfile, null,
                     thirdObserved, ReadString(thirdObserved, "reply", ""));
                 string observedPrompt = BuildIntoxicationPrompt(campaign, "observed_npc", observedPayload, observedProfile, null);
                 check("observed_sequence_accumulates_fractional_drinks", ReadDouble(ReadDictionary(observedPayload, "intoxicationContext"), "drinks", -1) == 1.5);
@@ -247,6 +255,9 @@ namespace ReignBetaServer
                 ReignPostgreSqlStorage.DropCampaign(campaign);
             }
             rows.AddRange(RunConversationDrinkingRegressionTests());
+            rows.AddRange(RunConversationDrinkSceneSelfTests());
+            rows.AddRange(RunConversationDrinkPromptSelfTests());
+            rows.AddRange(RunConversationDrinkActionSelfTests());
             return rows;
         }
     }

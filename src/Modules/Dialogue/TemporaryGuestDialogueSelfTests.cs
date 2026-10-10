@@ -52,7 +52,7 @@ namespace ReignBetaServer
                 "You agreed to join my party earlier; can we part now?") == "end_temporary_party_guest", null);
             check("initial_join_keeps_future_departure_safeguard", TemporaryPartyGuestCandidateToPreserve(
                 TestDict("needed", true, "commitment", "accepted", "intent", "I agree to join the player party; a later end_temporary_party_guest may end the arrangement."),
-                "Join my party with a five-day review.") == "accept_temporary_party_guest", null);
+                "Join my party with a thirty-day review.") == "accept_temporary_party_guest", null);
             check("refused_gate_cannot_preserve_action", TemporaryPartyGuestCandidateToPreserve(uncommitted, "leave my party") == "", null);
             check("native_context_serialization_roundtrip", BuildTemporaryGuestDialoguePromptBlock(TryParseJsonObject(Json.Serialize(payload)), heroId)
                 .Contains("guest_fixture_agreement"), null);
@@ -142,9 +142,9 @@ namespace ReignBetaServer
             check("missing_extension_term_not_invented", BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate,
                 routingPayload, routingHero, "Stay longer?", "I will stay a little longer.", lifecycleAllowed) == null, null);
             var openRenewal = BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate, routingPayload, routingHero,
-                "Renew our arrangement with no fixed end date, reviewed every five days.", "I agree.", lifecycleAllowed);
+                "Renew our arrangement with no fixed end date, reviewed every thirty days.", "I agree.", lifecycleAllowed);
             check("explicit_open_ended_renewal_preserved", ReadString(ReadDictionary(openRenewal, "terms"), "termKind", "") == "open_ended"
-                && ReadInt(ReadDictionary(openRenewal, "terms"), "reviewIntervalDays", 0) == 5, openRenewal);
+                && ReadInt(ReadDictionary(openRenewal, "terms"), "reviewIntervalDays", 0) == 30, openRenewal);
             var transportPayload = ReadDictionary(DefaultActionTestSnapshot(), "payload");
             var transportHero = ReadDictionary(transportPayload, "hero");
             string transportHeroId = ReadString(transportHero, "heroStringId", "");

@@ -77,6 +77,20 @@
       }); return;
     }
     if (value && typeof value === 'object') {
+      if (value.repairStatus && typeof value.repairStatus === 'object') {
+        const repair = value.repairStatus;
+        const categories = { format_recovery: 'Format recovery', metadata_correction: 'Metadata correction', visible_prose_correction: 'Visible prose correction', unresolved_failure: 'Unresolved failure', validation_correction: 'Validation correction' };
+        const stages = repair.stages || [];
+        const names = [...new Set(stages.map(s => categories[s.category] || label(s.category)))];
+        parent.append(make('p', (repair.allChecksCleared ? 'Repair checks cleared' : 'Unresolved repair failure')
+          + (names.length ? ' · ' + names.join(' · ') : '') + ' · Structured status is authoritative.', repair.allChecksCleared ? 'hint' : 'cdProblem'));
+      }
+      if (value.memoryVerification) {
+        const check = value.memoryVerification;
+        parent.append(make('p', 'Memory check: ' + label(check.outcome || 'unverified')
+          + (check.model ? ' · ' + check.model : '') + ' · Checks: ' + (check.checkerCalls || 0)
+          + ' · Rewrites: ' + (check.rewriteCalls || 0), 'hint'));
+      }
       const entries = Object.entries(value);
       if (!entries.length) { parent.append(make('p', 'Empty object — no fields.', 'cdProse')); return; }
       for (const [key, v] of entries) {

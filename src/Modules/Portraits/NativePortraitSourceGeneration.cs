@@ -392,8 +392,8 @@ namespace ReignBetaServer
                 },
                 ["source"] = new Dictionary<string, object>
                 {
-                    ["width"] = NativePortraitSourceWidth,
-                    ["height"] = NativePortraitSourceHeight,
+                    ["width"] = ReadInt(sourceProvenance, "width", NativePortraitSourceWidth),
+                    ["height"] = ReadInt(sourceProvenance, "height", NativePortraitSourceHeight),
                     ["sha256"] = Sha256Hex(sourceImage),
                     ["renderContract"] = ReadString(sourceProvenance, "renderContract", NativePortraitRenderContract),
                     ["provenance"] = sourceProvenance ?? new Dictionary<string, object>()
@@ -434,8 +434,8 @@ namespace ReignBetaServer
                 ["schema"] = PortraitInputReceiptSchema,
                 ["version"] = PortraitProductReceiptVersion,
                 ["renderContract"] = ReadString(sourceProvenance, "renderContract", NativePortraitRenderContract),
-                ["width"] = NativePortraitSourceWidth,
-                ["height"] = NativePortraitSourceHeight,
+                ["width"] = ReadInt(sourceProvenance, "width", NativePortraitSourceWidth),
+                ["height"] = ReadInt(sourceProvenance, "height", NativePortraitSourceHeight),
                 ["sha256"] = Sha256Hex(sourceImage),
                 ["provenance"] = sourceProvenance ?? new Dictionary<string, object>()
             };

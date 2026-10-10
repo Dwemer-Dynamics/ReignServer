@@ -178,63 +178,6 @@ namespace ReignBetaServer
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
-        private static Dictionary<string, double> TryMinimeMemoryLaneScores(Dictionary<string, object> settings, string topic, bool worldConnected)
-        {
-            Dictionary<string, double> scores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-            if (!ReadBool(settings, "enableMinimeMemoryWorker", true) || !ReadBool(settings, "enableMinimeMemoryReranking", true)
-                || string.IsNullOrWhiteSpace(topic))
-            {
-                return scores;
-            }
-            string endpoint = ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank");
-            if (string.IsNullOrWhiteSpace(endpoint))
-            {
-                return scores;
-            }
-            List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>
-            {
-                LaneCandidate("personal_state", "The NPC's recent feelings, mood, fears, desires, private experiences, and current personal condition."),
-                LaneCandidate("interpersonal_history", "Past interactions and relationship continuity between this NPC and the player or another named person."),
-                LaneCandidate("world_affairs", "Wars, alliances, marriages, tournaments, sieges, rulers, settlements, and major public events."),
-                LaneCandidate("local_awareness", "Nearby armies, local danger, the present settlement, witnessed activity, and immediate surroundings."),
-                LaneCandidate("commitments_and_plots", "Promises, debts, favors, threats, schemes, bargains, oaths, secrets, and unresolved plans."),
-                LaneCandidate("beliefs_and_rumors", "What the NPC believes, suspects, has heard as gossip, or considers uncertain court knowledge."),
-                LaneCandidate("exact_history", "A request to recall exact wording, a specific earlier conversation, letter, meeting, or date.")
-            };
-            try
-            {
-                string raw = PostJsonToUrl(endpoint, Json.Serialize(new Dictionary<string, object>
-                {
-                    ["query"] = LimitText(topic, 1600), ["candidates"] = candidates, ["top_k"] = candidates.Count
-                }), Math.Max(250, Math.Min(15000, ReadInt(settings, "minimeRerankTimeoutMs", 15000))));
-                Dictionary<string, object> decoded = TryParseJsonObject(raw);
-                List<Dictionary<string, object>> results = ReadDictionaryList(decoded, "results")
-                    .Concat(ReadDictionaryList(decoded, "ranked")).Concat(ReadDictionaryList(decoded, "items")).ToList();
-                foreach (Dictionary<string, object> result in results)
-                {
-                    string id = ReadFirstString(result, "id", "candidate_id", "candidateId");
-                    if (!MemoryLaneIds.Contains(id, StringComparer.OrdinalIgnoreCase) || id == "world_affairs" && !worldConnected) continue;
-                    if (!result.ContainsKey("score") && !result.ContainsKey("similarity")) continue;
-                    double semantic = ClampDouble(ReadDouble(result, "score", ReadDouble(result, "similarity", 0d)), -1d, 1d);
-                    if (semantic >= 0.25d)
-                    {
-                        scores[id] = semantic;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogOperational("minime.memory_lane_route_failed", new Dictionary<string, object> { ["error"] = LimitText(ex.Message, 500) });
-                scores.Clear();
-            }
-            return scores;
-        }
-
-        private static Dictionary<string, object> LaneCandidate(string id, string text)
-        {
-            return new Dictionary<string, object> { ["id"] = id, ["text"] = text };
-        }
-
         private static bool RouteHasLane(Dictionary<string, object> route, string lane)
         {
             return ReadStringList(route, "selectedLanes").Contains(lane, StringComparer.OrdinalIgnoreCase)
@@ -282,7 +225,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> SearchExactConversationHistory(ReignDbConnection connection, string npcId, string topic,
             Dictionary<string, object> route, int charBudget, Dictionary<string, object> semanticSearch = null, string excludedSessionId = "",
-            int recentRawTurnLimit = 30, KnowledgeAccessContext knowledge = null)
+            int recentRawTurnLimit = 30, KnowledgeAccessContext knowledge = null, Dictionary<string, object> queryContext = null)
         {
             if (LooksLikeMostRecentConversationRecall(topic))
             {
@@ -299,27 +242,29 @@ namespace ReignBetaServer
             string fts = BuildFtsQuery(terms);
             string excludeCurrent = (string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND s.session_id<>$excluded_session")
                 + " AND t.world_day<=" + (knowledge?.WorldDay ?? double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
-                + (string.IsNullOrWhiteSpace(knowledge?.TimelineId) ? "" : " AND COALESCE(NULLIF(t.payload_json::jsonb->>'timelineId',''),'') IN ('','" + knowledge.TimelineId.Replace("'","''") + "')");
+                + (string.IsNullOrWhiteSpace(knowledge?.TimelineId) ? "" : " AND " + MemorySourceTimelineSql("conversation_turns", "t", "'" + knowledge.TimelineId.Replace("'", "''") + "'"));
             Dictionary<string, object> searchParameters = new Dictionary<string, object> { ["query"] = fts, ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" };
             if (!string.IsNullOrWhiteSpace(fts))
             {
                 try
                 {
-                    string lexicalSql = ReignPostgreSqlDialect.IsPostgreSql(connection)
-                        ? @"SELECT t.*,ts_rank(
-to_tsvector('simple',COALESCE(f.text,'')),
-websearch_to_tsquery('simple',$query)) AS lexical_rank
-FROM conversation_turn_fts f
-JOIN conversation_turns t ON t.turn_id=f.turn_id JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE to_tsvector('simple',COALESCE(f.text,'')) @@ websearch_to_tsquery('simple',$query)
-AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
-ORDER BY lexical_rank DESC,t.ts DESC LIMIT 8;"
-                        : @"SELECT t.*,bm25(conversation_turn_fts) AS lexical_rank FROM conversation_turn_fts f
+                    if (ReignPostgreSqlDialect.IsPostgreSql(connection))
+                    {
+                        var access = knowledge ?? new KnowledgeAccessContext { NpcId = npcId };
+                        var plan = PlanMemoryQuery(npcId, access.PlayerId, topic, queryContext ?? new());
+                        plan.Session = excludedSessionId ?? "";
+                        plan.Timeline = access.TimelineId;
+                        plan.WorldDay = access.WorldDay;
+                        matched = FindLexicalMemoryRecallTurns(connection, plan, access, MemoryRecallLexicalLimit, excludeCurrentSession: true);
+                    }
+                    else
+                    {
+                        string lexicalSql = @"SELECT t.*,bm25(conversation_turn_fts) AS lexical_rank FROM conversation_turn_fts f
 JOIN conversation_turns t ON t.turn_id=f.turn_id JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE conversation_turn_fts MATCH $query AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + @"
 ORDER BY bm25(conversation_turn_fts),t.ts DESC LIMIT 8;";
-                    matched = QuerySql(connection, lexicalSql,
-                        searchParameters);
+                        matched = QuerySql(connection, lexicalSql, searchParameters);
+                    }
                     for (int index = 0; index < matched.Count; index++)
                     {
                         matched[index]["lexical_ordinal"] = index;
@@ -332,19 +277,52 @@ ORDER BY bm25(conversation_turn_fts),t.ts DESC LIMIT 8;";
             }
 
             HashSet<string> matchedIds = new HashSet<string>(matched.Select(row => ReadString(row, "turn_id", "")), StringComparer.OrdinalIgnoreCase);
+            var lexicalSources = matched.ToList();
+            var topicSources = new List<Dictionary<string, object>>();
+            var lateSources = new List<Dictionary<string, object>>();
+            var vectorSources = new List<Dictionary<string, object>>();
+            if (knowledge != null && !string.IsNullOrWhiteSpace(knowledge.TimelineId))
+            {
+                var plan = new MemoryQueryPlan { Observer = npcId, Peer = knowledge.PlayerId, Timeline = knowledge.TimelineId,
+                    Query = topic ?? "", WorldDay = knowledge.WorldDay };
+                topicSources = FindMemorySpecialistTurns(connection, plan, knowledge, 8, 32, true);
+                lateSources = FindLateInteractionTurns(connection, plan, knowledge, 8);
+                var localSources = FuseMemorySearchRanks(12, new(), topicSources, lateSources);
+                foreach (var row in localSources)
+                {
+                    if (ReadString(row, "session_id", "") == excludedSessionId || !matchedIds.Add(ReadString(row, "turn_id", ""))) continue;
+                    row["lexical_ordinal"] = int.MaxValue;
+                    row["vectorSemanticScore"] = (localSources.Count - localSources.IndexOf(row)) / 100d;
+                    matched.Add(row);
+                }
+            }
             foreach (Dictionary<string, object> hit in SemanticHits(semanticSearch, "conversation_turn"))
             {
                 Dictionary<string, object> payload = ReadDictionary(hit, "payload") ?? new Dictionary<string, object>();
                 string turnId = ReadString(payload, "sourceId", "");
-                if (string.IsNullOrWhiteSpace(turnId) || matchedIds.Contains(turnId)) continue;
-                Dictionary<string, object> row = QuerySql(connection, @"SELECT t.* FROM conversation_turns t
+                if (string.IsNullOrWhiteSpace(turnId)) continue;
+                var existing = matched.FirstOrDefault(r => ReadString(r,"turn_id","") == turnId);
+                Dictionary<string, object> row = existing ?? QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.turn_id=$id AND " + MemorySessionObserverSql("s", "t") + @" AND t.status='active'" + excludeCurrent + " LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = turnId, ["npc"] = npcId, ["excluded_session"] = excludedSessionId ?? "" }).FirstOrDefault();
                 if (row == null) continue;
+                vectorSources.Add(row);
+                if (existing != null) continue;
                 row["vectorSemanticScore"] = ReadDouble(hit, "score", 0d);
                 row["lexical_ordinal"] = int.MaxValue;
                 matched.Add(row);
                 matchedIds.Add(turnId);
+            }
+
+            // Apply rank fusion to the actual legacy anchor, not just to an
+            // appended list that lexical_ordinal would always outrank. Missing
+            // or shadow-only local models leave the original search unchanged.
+            if (topicSources.Count > 0 || lateSources.Count > 0)
+            {
+                var ranks = FuseMemorySearchRanks(64, lexicalSources, topicSources, lateSources, vectorSources)
+                    .ToDictionary(r=>ReadString(r,"turn_id",""), r=>ReadDouble(r,"relevance",0), StringComparer.Ordinal);
+                foreach (var row in matched)
+                    row["retrieval_fusion_score"] = ranks.GetValueOrDefault(ReadString(row,"turn_id",""), 0);
             }
 
             // A reconstruction request and the NPC's reconstruction answer are audit
@@ -377,10 +355,46 @@ ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId,
                 return new Dictionary<string, object> { ["text"] = "", ["matchedTurnIds"] = new List<string>(), ["expandedTurnIds"] = new List<string>() };
             }
 
-            Dictionary<string, object> anchor = matched.OrderBy(row => targetDay >= 0d ? Math.Abs(ReadDouble(row, "world_day", 0d) - targetDay) : 0d)
+            var ordered = matched.OrderBy(row => targetDay >= 0d ? Math.Abs(ReadDouble(row, "world_day", 0d) - targetDay) : 0d)
+                .ThenByDescending(row => ReadDouble(row, "retrieval_fusion_score", 0d))
                 .ThenBy(row => ReadInt(row, "lexical_ordinal", int.MaxValue))
                 .ThenByDescending(row => ReadDouble(row, "vectorSemanticScore", 0d))
-                .ThenByDescending(row => ReadLong(row, "ts", 0)).First();
+                .ThenByDescending(row => ReadLong(row, "ts", 0)).ToList();
+            // A long session can contain many separate answers. Do not discard
+            // the original pool again at the writer handoff, or broad topic
+            // matches can hide the exact passages already found by retrieval.
+            bool preserveOriginalPool = charBudget >= 24000;
+            if (preserveOriginalPool)
+                ordered = PreserveMemoryRecallCandidatePool(ordered, lexicalSources, MemoryRecallLexicalLimit);
+            int maximumAnchors = preserveOriginalPool ? MemoryRecallLexicalLimit + MemoryRecallSupplementLimit : 1;
+            int anchorBudget = Math.Max(600, charBudget / maximumAnchors);
+            var records = new List<Dictionary<string, object>>();
+            var included = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var anchor in ordered)
+            {
+                if (records.Count >= maximumAnchors) break;
+                // One included neighboring line does not prove that its paired
+                // speaker or question reached the packet. Deduplicate turns only
+                // after expanding each retained anchor's complete source context.
+                var record = RenderExactConversationAnchor(connection, npcId, anchor, terms, anchorBudget, knowledge, preserveOriginalPool, included);
+                if (ReadString(record, "text", "").Length == 0) continue;
+                records.Add(record);
+                included.UnionWith(ReadStringList(record, "expandedTurnIds"));
+            }
+            return TestDict("text", string.Join("\n\n", records.Select(r => ReadString(r, "text", ""))),
+                "matchedTurnIds", matched.Select(r => ReadString(r, "turn_id", "")).Distinct(StringComparer.Ordinal).ToList(),
+                "expandedTurnIds", included.ToList(), "sessionId", records.Count > 0 ? ReadString(records[0], "sessionId", "") : "",
+                "anchorTurnId", records.Count > 0 ? ReadString(records[0], "anchorTurnId", "") : "",
+                "anchorTurnIds", records.Select(r => ReadString(r, "anchorTurnId", "")).ToList(),
+                "sourceSessionIds", records.Select(r => ReadString(r, "sessionId", "")).Distinct(StringComparer.Ordinal).ToList(),
+                "candidateLimit", maximumAnchors, "retainedCandidateCount", ordered.Count,
+                "rankingPolicy", MemoryRecallRankingPolicy);
+        }
+
+        private static Dictionary<string, object> RenderExactConversationAnchor(ReignDbConnection connection, string npcId,
+            Dictionary<string, object> anchor, List<string> terms, int charBudget, KnowledgeAccessContext knowledge, bool preserveWholeExchange,
+            ISet<string> alreadyIncluded = null)
+        {
             string sessionId = ReadString(anchor, "session_id", "");
             int ordinal = ReadInt(anchor, "turn_order", 0);
             Dictionary<string, object> sourceSession = QuerySql(connection,
@@ -408,11 +422,26 @@ ORDER BY t.ts DESC LIMIT 16;", new Dictionary<string, object> { ["npc"] = npcId,
             List<Dictionary<string, object>> expanded = QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active'
  AND turn_order BETWEEN $start AND $end ORDER BY turn_order;",
-                new Dictionary<string, object> { ["session"] = sessionId, ["start"] = Math.Max(0, ordinal - 4), ["end"] = ordinal + 4 }).Where(t => PrecisionTurnVisible(t,npcId,knowledge)).ToList();
+                new Dictionary<string, object> { ["session"] = sessionId, ["start"] = Math.Max(0, ordinal - 4), ["end"] = ordinal + 4 }).Where(t => PrecisionTurnVisible(t, npcId, knowledge, connection)).ToList();
             StringBuilder builder = new StringBuilder();
             List<string> included = new List<string>();
             string anchorTurnId = ReadString(anchor, "turn_id", "");
             string anchorExchangeId = ReadString(anchor, "exchange_id", "");
+            var wholeExchange = expanded.Where(turn => ReadString(turn, "turn_id", "") == anchorTurnId
+                || (anchorExchangeId.Length > 0 && ReadString(turn, "exchange_id", "") == anchorExchangeId)).ToList();
+            if (preserveWholeExchange && anchorExchangeId.Length > 0)
+                wholeExchange = QuerySql(connection, @"SELECT * FROM conversation_turns
+WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
+                    TestDict("session", sessionId, "exchange", anchorExchangeId))
+                    .Where(turn => PrecisionTurnVisible(turn, npcId, knowledge, connection)).ToList();
+            if (preserveWholeExchange && knowledge != null)
+            {
+                var precedingContext = ExpandMemoryRecallPrecedingTurn(connection, wholeExchange, knowledge);
+                wholeExchange = ExpandPrecisionQuestionContext(connection, wholeExchange, knowledge)
+                    .Concat(precedingContext).DistinctBy(turn => ReadString(turn, "turn_id", "")).ToList();
+            }
+            var wholeTurnIds = wholeExchange.Select(turn => ReadString(turn, "turn_id", "")).ToHashSet(StringComparer.Ordinal);
+            expanded = expanded.Concat(wholeExchange).DistinctBy(turn => ReadString(turn, "turn_id", "")).ToList();
             List<Dictionary<string, object>> prioritized = expanded
                 .OrderBy(turn => ReadString(turn, "turn_id", "").Equals(anchorTurnId, StringComparison.OrdinalIgnoreCase) ? 0
                     : !string.IsNullOrWhiteSpace(anchorExchangeId)
@@ -425,12 +454,12 @@ WHERE session_id=$session AND status='active'
                 && ReadString(turn, "exchange_id", "").Equals(anchorExchangeId, StringComparison.OrdinalIgnoreCase));
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             int remaining = Math.Max(120, effectiveBudget - sourceHeader.Length);
-            for (int index = 0; index < prioritized.Count && (remaining >= 120 || charBudget >= 24000); index++)
+            for (int index = 0; index < prioritized.Count && (remaining >= 120 || preserveWholeExchange); index++)
             {
                 Dictionary<string, object> turn = prioritized[index];
+                if (alreadyIncluded?.Contains(ReadString(turn, "turn_id", "")) == true) continue;
                 string line = RenderExactHistoryTurn(turn, knowledge);
-                bool requiredWholeTurn = charBudget >= 24000 && (ReadString(turn, "turn_id", "") == anchorTurnId
-                    || (anchorExchangeId.Length > 0 && ReadString(turn, "exchange_id", "") == anchorExchangeId));
+                bool requiredWholeTurn = preserveWholeExchange && wholeTurnIds.Contains(ReadString(turn, "turn_id", ""));
                 int partnerReserve = index == 0 && hasExchangePartner
                     ? (effectiveBudget < 1200 ? 120 : Math.Min(800, Math.Max(180, effectiveBudget / 3)))
                     : 0;
@@ -439,7 +468,7 @@ WHERE session_id=$session AND status='active'
                 {
                     continue;
                 }
-                string rendered = charBudget >= 24000 ? (requiredWholeTurn || line.Length <= allowed ? line : "") : ExactHistoryLineExcerpt(line, terms, allowed);
+                string rendered = preserveWholeExchange ? (requiredWholeTurn || line.Length <= allowed ? line : "") : ExactHistoryLineExcerpt(line, terms, allowed);
                 if (string.IsNullOrWhiteSpace(rendered))
                 {
                     continue;
@@ -460,11 +489,10 @@ WHERE session_id=$session AND status='active'
             }
             return new Dictionary<string, object>
             {
-                ["text"] = charBudget >= 24000
+                ["text"] = selected.Count == 0 ? "" : preserveWholeExchange
                     ? RenderContinuityRecord(string.Join(",", included), "targeted_historical_exchange", npcId, sessionId,
                         ReadDouble(anchor, "world_day", 0d), 95, true, SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge))
                     : SanitizeUnknownIdentityEvidenceText(builder.ToString().TrimEnd(), knowledge),
-                ["matchedTurnIds"] = matched.Select(row => ReadString(row, "turn_id", "")).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                 ["expandedTurnIds"] = included,
                 ["sessionId"] = sessionId,
                 ["anchorTurnId"] = anchorTurnId
@@ -477,7 +505,19 @@ WHERE session_id=$session AND status='active'
             turn = turn ?? new Dictionary<string, object>();
             string role = NormalizeMemoryCategory(ReadString(turn, "role", ""));
             string speaker = ReadString(turn, "speaker_name", ReadString(turn, "role", "Unknown"));
-            string body = ReadString(turn, "text", "");
+            string body = ConversationTurnTextForRecall(turn);
+            var sourcePayload = TryParseJsonObject(ReadString(turn, "payload_json", "{}")) ?? TestDict();
+            // Accepted interpreter spans already carry an observer-specific
+            // projection. A second verb heuristic can erase a valid clause that
+            // starts mid-sentence. Retrieval's source/audience gates still apply.
+            bool interpretedPlayer = HasValidatedPlayerSourceProjection(turn);
+            if (knowledge != null && !interpretedPlayer)
+            {
+                if (role.Equals("player", StringComparison.OrdinalIgnoreCase)
+                    && ReadString(turn, "speaker_id", "") != knowledge.NpcId)
+                    body = ProjectCurrentPlayerPromptText(body, knowledge.NpcId, sourcePayload);
+                body = ObserverConversationText(body, ReadString(turn, "speaker_id", ""), knowledge.NpcId, role == "player");
+            }
             if (knowledge != null && knowledge.PlayerIdentityUnknown)
             {
                 bool playerAuthored = role.Equals("player", StringComparison.OrdinalIgnoreCase);
@@ -499,9 +539,13 @@ WHERE session_id=$session AND status='active'
                 body = SanitizeUnknownIdentityEvidenceText(body, knowledge);
             }
 
+            string caveat = role.Equals("npc", StringComparison.OrdinalIgnoreCase)
+                && ReadString(ReadDictionary(sourcePayload, "conversationGrounding"), "status", "") == "unresolved"
+                ? " [Source status: unverified NPC statement; not independent factual evidence.]" : "";
+            if (role.Equals("npc", StringComparison.OrdinalIgnoreCase)) caveat += RecallStatementSourceCaveat(body);
             return "- [Day " + ReadDouble(turn, "world_day", 0d)
                 .ToString("0.##", CultureInfo.InvariantCulture) + "] "
-                + speaker + ": " + body;
+                + "[source=" + ReadString(turn, "turn_id", "") + " role=" + role + "] " + speaker + ": " + body + caveat;
         }
 
         private static Dictionary<string, object> SanitizeUnknownIdentityExactHistory(
@@ -752,6 +796,14 @@ WHERE session_id=$session AND status='active'
             if (string.IsNullOrWhiteSpace(sessionId)) return false;
             cache = cache ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             if (cache.TryGetValue(sessionId, out bool cached)) return cached;
+            // Caller already applied observer/time eligibility. NPC-only gossip is
+            // source-bearing testimony even though no player spoke in that exchange.
+            if (QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE session_id=$id AND channel='npc_gossip' LIMIT 1;",
+                new Dictionary<string, object> { ["id"] = sessionId }).Count > 0)
+            {
+                cache[sessionId] = true;
+                return true;
+            }
             List<Dictionary<string, object>> playerTurns = QuerySql(connection, @"SELECT text FROM conversation_turns
 WHERE session_id=$session AND status='active' AND role='player' ORDER BY turn_order;",
                 new Dictionary<string, object> { ["session"] = sessionId });
@@ -766,7 +818,7 @@ WHERE session_id=$session AND status='active' AND role='player' ORDER BY turn_or
             string exclusion = string.IsNullOrWhiteSpace(excludedSessionId) ? "" : " AND session_id<>$excluded_session";
             List<Dictionary<string, object>> sessions = QuerySql(connection, @"SELECT * FROM conversation_sessions
 WHERE status='closed' AND (npc_id=$npc OR " + MemoryJsonContainsSql("participants_json","$npc") + ")" + exclusion + @"
-ORDER BY end_ts DESC,start_ts DESC;",
+ORDER BY end_ts DESC,start_ts DESC,session_id DESC;",
                 new Dictionary<string, object>
                 {
                     ["npc"] = npcId, ["participant"] = "%\"" + (npcId ?? "") + "\"%", ["excluded_session"] = excludedSessionId ?? ""
@@ -780,7 +832,7 @@ ORDER BY end_ts DESC,start_ts DESC;",
                 string candidateSessionId = ReadString(session, "session_id", "");
                 List<Dictionary<string, object>> sessionTurns = QuerySql(connection, @"SELECT * FROM conversation_turns
 WHERE session_id=$session AND status='active'
-ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candidateSessionId }).Where(t => PrecisionTurnVisible(t,npcId,knowledge)).ToList();
+ORDER BY turn_order DESC,turn_id DESC;", new Dictionary<string, object> { ["session"] = candidateSessionId }).Where(t => PrecisionTurnVisible(t, npcId, knowledge, connection)).ToList();
                 // Recall probes are evidence that the probe occurred, but must not displace the
                 // source conversations they were trying to reconstruct. Keep every complete
                 // source-bearing session involving this NPC until the configured raw window is met.
@@ -817,7 +869,8 @@ ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candi
                 selected.Add(new Dictionary<string, object>
                 {
                     ["turnOrder"] = ReadInt(turn, "turn_order", 0), ["turnId"] = ReadString(turn, "turn_id", ""), ["text"] = rendered,
-                    ["sessionId"] = ReadString(turn, "session_id", ""), ["sessionEndTs"] = ReadLong(turn, "session_end_ts", 0)
+                    ["sessionId"] = ReadString(turn, "session_id", ""), ["sessionEndTs"] = ReadLong(turn, "session_end_ts", 0),
+                    ["sessionStartTs"] = ReadLong(turn, "session_start_ts", 0)
                 });
                 used += rendered.Length + 1;
             }
@@ -826,7 +879,9 @@ ORDER BY turn_order DESC;", new Dictionary<string, object> { ["session"] = candi
             builder.AppendLine("Historical deictic terms in each source (we/us/here/present/everyone/all three) refer only to that source conversation, never to the current group. A source session's participant list proves only who heard or spoke in that conversation, not who witnessed an older event described inside it. Only an explicit source-event witness link or the current NPC's own attributed first-person line establishes firsthand participation; another NPC's collective wording cannot override this NPC's denial or missing witness evidence.");
             string renderedSession = "";
             foreach (Dictionary<string, object> row in selected
-                .OrderBy(item => ReadLong(item, "sessionEndTs", 0)).ThenBy(item => ReadInt(item, "turnOrder", 0)))
+                .OrderBy(item => ReadLong(item, "sessionEndTs", 0)).ThenBy(item => ReadLong(item, "sessionStartTs", 0))
+                .ThenBy(item => ReadString(item, "sessionId", ""), StringComparer.Ordinal)
+                .ThenBy(item => ReadInt(item, "turnOrder", 0)).ThenBy(item => ReadString(item, "turnId", ""), StringComparer.Ordinal))
             {
                 string rowSession = ReadString(row, "sessionId", "");
                 if (!rowSession.Equals(renderedSession, StringComparison.OrdinalIgnoreCase))

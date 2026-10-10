@@ -11,7 +11,8 @@ namespace ReignBetaServer
         private const string DrinkVesselWords = @"cup|glass|goblet|mug|tankard|bottle|drinking horn|horn|bowl|chalice|flagon|flask|jug|pitcher|ewer|wine[- ]?skin|waterskin|skin|amphora";
         private const string DrinkPortionWords = @"sip|mouthful|swig|pull|gulp|swallow|draught|draft";
         private const string DrinkVerbPattern =
-            @"\b(?:takes?|has|have)\s+(?:(?:a|an|another|half(?:\s+a)?|quarter(?:\s+of\s+a)?|\d+|" + DrinkNumberWords + @")\s+)?(?:(?:slow|long|deep|short|small|little|tiny|careful|measured|deliberate|tentative|cautious|hearty|large|quick|swift|generous|solid|real|full|whole|entire)\s+){0,4}(?:sip|mouthful|swig|pull|gulp|swallow|draught|draft|drink)s?\b"
+            @"\b(?:takes?|taking|took|has|have)\s+(?:(?:a|an|another|half(?:\s+a)?|quarter(?:\s+of\s+a)?|\d+|" + DrinkNumberWords + @")\s+)?(?:(?:slow|long|deep|short|small|little|tiny|careful|measured|deliberate|tentative|cautious|hearty|large|quick|swift|generous|solid|real|full|whole|entire)\s+){0,4}(?:sip|mouthful|swig|pull|gulp|swallow|draught|draft|drink)s?\b"
+            + @"|\bpulls?\s+(?:a|another)\s+drink\b|\b(?:a|another)\s+(?:(?:short|long|small|slow|measured)\s+)?pull\b"
             + @"|\b(?:knocks?|throws?|tosses?)\s+back\b|\bpolishes?\s+off\b"
             + @"|\b(?:drinks?|drank|drinking|sips?|sipped|sipping|swallows?|swallowed|swallowing|gulps?|gulped|gulping|quaffs?|quaffed|quaffing|swigs?|swigged|swigging|imbibes?|imbibed|imbibing|consumes?|consumed|consuming|chugs?|chugged|chugging|sups?|supped|supping|slurps?|slurped|slurping|downs|downed|downing|drains?|drained|draining|finishes?|finished|finishing|empties|emptied|emptying)\b";
 
@@ -36,7 +37,7 @@ namespace ReignBetaServer
             "\"[^\"]*(?:\"|$)|“[^”]*(?:”|$)|(?<![\\p{L}])'[^'\\r\\n]+'",
             m => new string(' ', m.Length));
 
-        private static bool CurrentDrinkSubject(string prefix, string heroName, bool? isFemale, out int subjectEnd)
+        private static bool CurrentDrinkSubject(string prefix, string heroName, bool? isFemale, out int subjectEnd, bool forConsumption = false)
         {
             subjectEnd = 0;
             string pronouns = isFemale.HasValue ? (isFemale.Value ? "she|they" : "he|they") : "he|she|they";
@@ -65,6 +66,7 @@ namespace ReignBetaServer
             if (DrinkHas(local, @"\b(?:not|never|no|refus\w*|declin\w*|pretend\w*|imagin\w*|recall\w*|remember\w*|would|could|might|will|shall|wants?|plans?|tries?|attempts?|almost|nearly|makes?|lets?|helps?|forces?|orders?|watches?|watching|hears?|sees?|thinks?|says?|tells?|quotes?)\b|n['’]t\b|\bused\s+to\b|\bonce\s*$|\blong\s+ago\b"))
                 return false;
             if (DrinkHas(prefix, @"\b(?:yesterday|earlier|previously|tomorrow|recall\w*|remember\w*|used\s+to)\b")) return false;
+            if (forConsumption && DrinkHas(local, @"\b(?:without|consider\w*|contemplat\w*|planning|talking\s+about)\b")) return false;
             return true;
         }
 
@@ -79,9 +81,12 @@ namespace ReignBetaServer
             var result = new List<NarratedDrink>();
             if (string.IsNullOrWhiteSpace(action) || action.Length > 4000) return result;
             string narration = MaskDrinkQuotations(action);
+            string previousSentence = "";
             foreach (Match sentenceMatch in Regex.Matches(narration, @"[^.!?;]+"))
             {
                 string sentence = sentenceMatch.Value;
+                string priorSentence = previousSentence;
+                previousSentence = sentence;
                 if (DrinkHas(sentence, @"\b(?:yesterday|earlier|previously|tomorrow|if|unless|would|could|might|will|shall)\b")) continue;
                 var verbs = Regex.Matches(sentence, DrinkVerbPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                     TimeSpan.FromMilliseconds(100)).Cast<Match>().Where(v =>
@@ -91,7 +96,25 @@ namespace ReignBetaServer
                 {
                     var verb = verbs[n];
                     string prefix = sentence.Substring(0, verb.Index);
-                    if (!CurrentDrinkSubject(prefix, heroName, isFemale, out int subjectEnd)) continue;
+                    // A comparison names an alternative; it does not perform it.
+                    // Keep any independent later sip in this same action eligible.
+                    if (DrinkHas(prefix, @"\b(?:than|instead\s+of|in\s+place\s+of)\s+(?:actually\s+)?$")) continue;
+                    bool nominal = DrinkHas(verb.Value, @"^(?:a|another)\s+.*pull$");
+                    bool subjectKnown = CurrentDrinkSubject(prefix, heroName, isFemale, out int subjectEnd, forConsumption: true);
+                    bool ellipticalVerb = DrinkHas(verb.Value, @"^(?:drinks?|sips?|swigs?|gulps?|quaffs?|chugs?)$");
+                    bool inheritedVessel = false;
+                    if ((nominal || ellipticalVerb) && string.IsNullOrWhiteSpace(prefix))
+                    {
+                        // Elliptical narration inherits only a verified acquisition by
+                        // this actor in the immediately preceding sentence of this action.
+                        subjectKnown = CurrentDrinkSubject(priorSentence, heroName, isFemale, out _, forConsumption: true)
+                            && DrinkHas(priorSentence, @"\b(?:takes?|accepts?|receives?|picks?\s+up)\b.{0,90}\b(?:" + DrinkVesselWords + @")\b")
+                            && !DrinkHas(priorSentence, @"\b(?:and|then)\s+(?:(?:she|he)\s+)?(?:hands?|passes?|gives?)\b|\b(?:sets?|puts?)\s+(?:it|the\s+(?:" + DrinkVesselWords + @"))\s+(?:down|aside|away)\b")
+                            && !DrinkHas(sentence, @"\b(?:of\s+(?:the\s+)?(?:reins|rope|bow)|never|almost|consider\w*|imagin\w*)\b")
+                            && (!nominal || !DrinkHas(sentence, @"\b(?:not|without)\b"));
+                        inheritedVessel = subjectKnown;
+                    }
+                    if (!subjectKnown) continue;
                     if (DrinkHas(prefix, @"\b(?:counts?|pours?|fills?|hands?|passes?|buys?|holds?|raises?|carries?|serves?|spills?|delivers?|lists?|describes?)\s*$")) continue;
                     if (DrinkHas(prefix, @"\b(?:a|an|the|his|her|their|another|some|of|" + DrinkNumberWords + @"|\d+)\s*$")
                         && !DrinkHas(prefix, @"\btakes?\s+(?:a|another|" + DrinkNumberWords + @"|\d+)\s*$")) continue;
@@ -104,7 +127,7 @@ namespace ReignBetaServer
                         || DrinkHas(consumed, @"\bempty\s+(?:(?:wine|ale|beer|mead)\s+)?(?:" + DrinkVesselWords + @")\b")
                         || DrinkHas(consumed, @"\bswallows?\s+(?:her|his|their)\s+pride\b")
                         || DrinkHas(consumed, @"\bfinishes?\s+(?:her|his|their|the|a)\s+(?:sentence|story|tale|thought)\b")) continue;
-                    if (DrinkHas(consumed, @"\btakes?\s+a\s+drink\s+from\s+(?:the\s+(?:waitress|waiter|server)|him|her(?!\s+(?:own\s+)?(?:" + DrinkVesselWords + @")\b))\b")) continue;
+                    if (DrinkHas(consumed, @"\b(?:takes?|taking|took)\s+a\s+drink\s+from\s+(?:the\s+(?:waitress|waiter|server)|him|her(?!\s+(?:own\s+)?(?:" + DrinkVesselWords + @")\b))\b")) continue;
                     if (DrinkHas(prefix, @"\bbefore\s*$") && !DrinkHas(consumed, @"\b(?:" + DrinkPortionWords + @")s?\b")) continue;
                     bool completion = DrinkHas(verb.Value, @"^(?:drain|finish|empt|polish)")
                         || DrinkHas(consumed, @"\b(?:entire|whole|all\s+(?:of\s+)?(?:the|her|his)|until\s+it\s+is\s+empty|last\s+of|remainder|rest\s+of)\b");
@@ -112,6 +135,9 @@ namespace ReignBetaServer
                     var beverage = ResolveDrinkBeverage(consumed);
                     bool portion = DrinkHas(consumed, @"\b(?:" + DrinkPortionWords + @")s?\b");
                     bool reference = DrinkHas(consumed, @"\b(?:it|contents|rest|remainder)\b");
+                    if (DrinkHas(verb.Value, @"^swallow") && vessel.Length == 0
+                        && beverage.Alcohol == DrinkAlcohol.Unknown && !DrinkHas(consumed, @"\b(?:mouthful|sip|wine|ale|water)\b")
+                        && result.Count == 0) continue; // Swallowing an emotion or "it" is not a drink.
                     if (DrinkHas(verb.Value, @"^(?:finish|empt|drain|down|swallow|consume|sup)")
                         && vessel.Length == 0 && beverage.Alcohol == DrinkAlcohol.Unknown && !portion && !reference) continue;
                     if (DrinkHas(consumed, @"\b(?:pride|words|anger|breath|food|meal|stew)\b") && !portion) continue;
@@ -119,10 +145,31 @@ namespace ReignBetaServer
                     {
                         Action = action, Start = sentenceMatch.Index + verb.Index, Length = consumed.Length,
                         Evidence = action.Substring(sentenceMatch.Index + verb.Index, consumed.Length), ObjectText = consumed,
-                        Vessel = vessel, Beverage = beverage, Completion = completion
+                        Vessel = vessel.Length > 0 ? vessel : inheritedVessel ? DrinkVesselKind(priorSentence) : "",
+                        Beverage = beverage, Completion = completion
                     };
                     ReadDrinkQuantity(candidate, verb.Value);
                     if (candidate.Count < 1 || candidate.Count > 20) continue;
+                    if (n > 0 && result.Count > 0 && DrinkHas(verb.Value, @"^taking\b")
+                        && result.Last().Start == sentenceMatch.Index + verbs[n - 1].Index
+                        && DrinkHas(prefix, @",\s*$")
+                        && !DrinkHas(consumed, @"\b(?:another|again|second|additional)\b"))
+                    {
+                        // "Drinks wine, taking a small sip" describes one act.
+                        // A later "then takes another sip" remains a second act.
+                        var previous = result.Last();
+                        if (!previous.ExplicitAmount.HasValue)
+                        {
+                            previous.Count = candidate.Count;
+                            previous.ExplicitAmount = candidate.ExplicitAmount;
+                            previous.Serving = candidate.Serving;
+                            previous.QuantitySource = candidate.QuantitySource;
+                        }
+                        previous.Length = candidate.Start + candidate.Length - previous.Start;
+                        previous.Evidence = action.Substring(previous.Start, previous.Length);
+                        previous.ObjectText = previous.Evidence;
+                        continue;
+                    }
                     // A swallow of "it/the mouthful" completes the previous action; "another"
                     // or a second independently numbered portion establishes a new occurrence.
                     if (result.Count > 0 && DrinkHas(verb.Value, @"^swallow") && !DrinkHas(consumed, @"\b(?:another|again|second|\d+|two|three)\b")

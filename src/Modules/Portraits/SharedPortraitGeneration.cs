@@ -1296,6 +1296,7 @@ namespace ReignBetaServer
                     && controlCenterHtml.Contains("'xai/grok-imagine-image-quality/edit'"),
                 "The Control Center exposes four complete independent profile selectors with the full provider/model catalog and one shared connection area.");
             rows.AddRange(RunAdultPortraitContractTests());
+            rows.AddRange(RunOutfitChangeContractTests());
             return rows;
         }
 

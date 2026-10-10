@@ -13,7 +13,7 @@ namespace ReignBetaServer
     {
         private const string CodexImageProvider = "Codex";
         // The official runtime selects the image tool model. Never pass this as the agent's model.
-        private const string CodexImageModel = "gpt-image-2";
+        private const string CodexImageModel = "runtime-default";
         private const int CodexImageMaxBytes = 32 * 1024 * 1024;
         private const int CodexImageMaxMessageChars = 48 * 1024 * 1024;
         private static readonly SemaphoreSlim CodexImageGate = new SemaphoreSlim(1, 1);
@@ -60,7 +60,7 @@ namespace ReignBetaServer
             CodexImageSession session = null;
             try
             {
-                ValidateCodexPng(source);
+                if (source != null) ValidateCodexPng(source);
                 if (cancelled != null && cancelled()) throw new OperationCanceledException("Codex image request was cancelled.");
                 string root = Path.Combine(CodexWorkingDirectory(), "image-jobs");
                 AssertCodexImageLocalPath(root);
@@ -68,9 +68,9 @@ namespace ReignBetaServer
                 job = Path.Combine(root, Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(job);
                 string reference = Path.Combine(job, "reference.png");
-                File.WriteAllBytes(reference, source);
+                if (source != null) File.WriteAllBytes(reference, source);
                 session = new CodexImageSession(settings, job, timeout, cancelled);
-                var result = RunCodexImageExchange(job, prompt, size, session.Rpc, session.WaitForImage);
+                var result = RunCodexImageExchange(job, prompt, size, session.Rpc, session.WaitForImage, source != null);
                 byte[] bytes = ReadCodexImageResult(result, job);
                 return PortraitImageCallResult.Success(CodexImageProvider, CodexImageModel,
                     "codex app-server built-in image generation (runtime-managed model)", bytes,
@@ -99,7 +99,7 @@ namespace ReignBetaServer
         // The transport is injectable so contracts exercise the actual request sequence without providers.
         private static Dictionary<string, object> RunCodexImageExchange(string job, string prompt, string size,
             Func<string, Dictionary<string, object>, Dictionary<string, object>> rpc,
-            Func<string, string, Dictionary<string, object>> wait)
+            Func<string, string, Dictionary<string, object>> wait, bool includeReference = true)
         {
             var account = ReadDictionary(rpc("account/read", new Dictionary<string, object> { ["refreshToken"] = false }), "account");
             if (!ReadString(account, "type", "").Equals("chatgpt", StringComparison.OrdinalIgnoreCase))
@@ -130,18 +130,19 @@ namespace ReignBetaServer
             string turnId = "";
             try
             {
+                var input = new List<Dictionary<string, object>> {
+                    new Dictionary<string, object> { ["type"] = "skill", ["name"] = "imagegen", ["path"] = skill } };
+                if (includeReference) input.Add(new Dictionary<string, object> { ["type"] = "localImage", ["path"] = Path.Combine(job, "reference.png") });
+                input.Add(new Dictionary<string, object> { ["type"] = "text", ["text"] = "Use $imagegen to create exactly one image "
+                    + (includeReference ? "guided by the attached reference. " : "from the written description alone. No reference image is supplied. ")
+                    + "Requested framing: " + CodexImageFraming(size) + ". Normal, non-sexual content only. "
+                    + "Use the native built-in image result and save only under the working directory.\n\nIMAGE BRIEF:\n" + prompt });
                 var turn = rpc("turn/start", new Dictionary<string, object>
                 {
                     ["threadId"] = threadId, ["cwd"] = job, ["approvalPolicy"] = "never",
                     ["sandboxPolicy"] = new Dictionary<string, object> { ["type"] = "workspaceWrite", ["writableRoots"] = new[] { job },
                         ["networkAccess"] = false, ["excludeTmpdirEnvVar"] = true, ["excludeSlashTmp"] = true },
-                    ["input"] = new[] {
-                        new Dictionary<string, object> { ["type"] = "skill", ["name"] = "imagegen", ["path"] = skill },
-                        new Dictionary<string, object> { ["type"] = "localImage", ["path"] = Path.Combine(job, "reference.png") },
-                        new Dictionary<string, object> { ["type"] = "text", ["text"] = "Use $imagegen to create exactly one image guided by the attached reference. "
-                            + "Requested framing: " + CodexImageFraming(size) + ". Normal, non-sexual content only. "
-                            + "Use the native built-in image result and save only under the working directory.\n\nIMAGE BRIEF:\n" + prompt }
-                    }
+                    ["input"] = input.ToArray()
                 });
                 turnId = ReadNestedId(turn, "turn");
                 if (string.IsNullOrWhiteSpace(turnId)) throw new InvalidDataException("Codex returned no image turn.");
@@ -192,7 +193,8 @@ namespace ReignBetaServer
         {
             if (item == null || ReadString(item, "type", "") != "imageGeneration"
                 || ReadString(item, "status", "") != "completed" || ReadDictionary(item, "failure") != null)
-                throw new InvalidDataException("Codex did not return a successful image-generation item; the image may have been refused or the account limit reached.");
+                throw new InvalidDataException("Codex did not return a successful image-generation item. "
+                    + PortraitProviderFailureDetail(ReadDictionary(item, "failure") ?? ReadDictionary(item, "error")));
             string result = ReadString(item, "result", "");
             byte[] bytes;
             if (!string.IsNullOrWhiteSpace(result))
@@ -220,6 +222,22 @@ namespace ReignBetaServer
             }
             ValidateCodexPng(bytes);
             return bytes;
+        }
+
+        private static string CodexImageRefusalText(Dictionary<string, object> item)
+        {
+            string text = ReadString(item, "text", "");
+            return ReadString(item, "type", "") == "agentMessage" && PortraitContentRefusal(text) ? LimitText(text, 1000) : "";
+        }
+
+        private static Dictionary<string, object> CompleteCodexImageTurn(Dictionary<string, object> turn,
+            Dictionary<string, object> image, string refusal)
+        {
+            if (ReadString(turn, "status", "") != "completed")
+                throw new InvalidDataException("Codex image turn failed or was interrupted. " + PortraitProviderFailureDetail(ReadDictionary(turn, "error")));
+            if (image == null)
+                throw new InvalidDataException("Codex finished without generating an image. " + refusal);
+            return image;
         }
 
         private static void ValidateCodexPng(byte[] bytes)
@@ -327,6 +345,7 @@ namespace ReignBetaServer
             public Dictionary<string, object> WaitForImage(string threadId, string turnId)
             {
                 Dictionary<string, object> image = null;
+                string refusal = "";
                 for (;;)
                 {
                     lock (sync)
@@ -339,6 +358,8 @@ namespace ReignBetaServer
                             if (ReadString(parameters, "turnId", ReadString(turn, "id", "")) != turnId) continue;
                             messages.Remove(message);
                             var item = ReadDictionary(parameters, "item");
+                            string itemRefusal = CodexImageRefusalText(item);
+                            if (!string.IsNullOrEmpty(itemRefusal)) refusal = itemRefusal;
                             if (ReadString(message, "method", "") == "item/completed" && ReadString(item, "type", "") == "imageGeneration")
                             {
                                 if (image != null) throw new InvalidDataException("Codex produced multiple images for a single-image job.");
@@ -346,9 +367,39 @@ namespace ReignBetaServer
                             }
                             if (ReadString(message, "method", "") == "turn/completed")
                             {
-                                if (ReadString(turn, "status", "") != "completed") throw new InvalidDataException("Codex image turn failed or was interrupted.");
-                                if (image == null) throw new InvalidDataException("Codex finished without generating an image.");
-                                return image;
+                                return CompleteCodexImageTurn(turn, image, refusal);
+                            }
+                        }
+                    }
+                    Wait();
+                }
+            }
+
+            public string WaitForText(string threadId, string turnId)
+            {
+                string final = "";
+                for (;;)
+                {
+                    lock (sync)
+                    {
+                        foreach (var message in messages.ToArray())
+                        {
+                            var parameters = ReadDictionary(message, "params");
+                            var turn = ReadDictionary(parameters, "turn");
+                            if (ReadString(parameters, "threadId", "") != threadId || ReadString(parameters, "turnId", ReadString(turn, "id", "")) != turnId) continue;
+                            messages.Remove(message);
+                            var item = ReadDictionary(parameters, "item");
+                            if (ReadString(message, "method", "") == "item/completed" && ReadString(item, "type", "") == "agentMessage"
+                                && ReadString(item, "phase", "final_answer") != "commentary")
+                            {
+                                if (final.Length > 0) throw new InvalidDataException("Codex returned multiple final vision descriptions.");
+                                final = ReadString(item, "text", "");
+                                if (final.Length > 16000) throw new InvalidDataException("Codex vision description is too large.");
+                            }
+                            if (ReadString(message, "method", "") == "turn/completed")
+                            {
+                                if (ReadString(turn, "status", "") != "completed") throw new InvalidDataException("Codex vision failed or was interrupted. " + PortraitProviderFailureDetail(ReadDictionary(turn, "error")));
+                                return final;
                             }
                         }
                     }
@@ -377,7 +428,8 @@ namespace ReignBetaServer
                             throw new InvalidOperationException("Codex requested an interactive tool or approval; image jobs cannot grant it.");
                         var item = ReadDictionary(ReadDictionary(value, "params"), "item");
                         if (string.IsNullOrEmpty(method) || method == "turn/completed"
-                            || (method == "item/completed" && ReadString(item, "type", "") == "imageGeneration"))
+                            || (method == "item/completed" && (ReadString(item, "type", "") == "imageGeneration"
+                                || ReadString(item, "type", "") == "agentMessage")))
                         {
                             lock (sync) { if (messages.Count >= 32) throw new InvalidDataException("Too many pending image protocol messages."); messages.Add(value); }
                             changed.Set();

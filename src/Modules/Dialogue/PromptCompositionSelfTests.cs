@@ -75,20 +75,81 @@ namespace ReignBetaServer
                 && ReadString(fresh.Messages[0], "content", "").Contains("ACTION GATE RULES")
                 && ReadString(next.Messages[0], "content", "").Contains("MEMORY WRITE RULES"), fresh.Diagnostics);
 
+            string structuredPrefix = BuildDialogueGlobalPrefix(false, true, new List<Dictionary<string, object>>(), structuredActions: true);
+            string structuredCommonerPrefix = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>(), structuredActions: true);
+            int stationOffset = structuredPrefix.IndexOf("\nNOBLE PROMPT\n", StringComparison.Ordinal);
+            add("structured_shared_rules_precede_station_and_scene_variants", stationOffset > 0
+                && structuredPrefix.Substring(0, stationOffset) == structuredCommonerPrefix.Substring(0, stationOffset)
+                && structuredPrefix.Contains("REGISTERED INTERPERSONAL ACTIONS")
+                && !structuredPrefix.Contains("Do not choose command names")
+                && !structuredPrefix.Contains("ACTION GATE RULES"), null);
+            foreach (string schemaName in new[] { "dialogue_output_schema.json", "event_output_schema.json" })
+            {
+                var actionOutput = TryParseJsonObject(ConversationActionOutputSchema(LoadPromptTemplate(schemaName), true));
+                var decision = ReadDictionary(actionOutput, "structuredActionDecision");
+                add("structured_json_example_has_complete_none_decision_" + schemaName, decision != null
+                    && new[] { "kind", "proposalId", "revision", "termsHash", "reason", "clauses" }.All(decision.ContainsKey)
+                    && ReadString(decision, "kind", "") == "none" && ReadInt(decision, "revision", -1) == 0
+                    && !ReadBool(ReadDictionary(actionOutput, "actionGate"), "needed", true)
+                    && ReadDictionaryList(actionOutput, "suggestedActions").Count == 0, actionOutput);
+            }
+
+            var cultureVoices = new Dictionary<string, string> {
+                ["empire"] = "Imperial voice:", ["vlandia"] = "Vlandian voice:",
+                ["sturgia"] = "Sturgian voice:", ["battania"] = "Battanian voice:",
+                ["aserai"] = "Aserai voice:", ["khuzait"] = "Khuzait voice:",
+                ["nord"] = "Nord voice:"
+            };
+            foreach (var cultureVoice in cultureVoices)
+            {
+                var speaker = new Dictionary<string, object> { ["cultureId"] = cultureVoice.Key,
+                    ["cultureName"] = "Contradictory display name", ["name"] = "Fixture Speaker", ["clanName"] = "Fixture Clan" };
+                string foundation = BuildStableCharacterPrompt("culture-fixture", "Fixture Speaker", speaker,
+                    new Dictionary<string, object>());
+                add("speaker_culture_voice_" + cultureVoice.Key,
+                    foundation.Contains("CULTURAL SPEECH - THIS SPEAKER")
+                    && foundation.Contains(cultureVoice.Value)
+                    && foundation.Contains("spoken words remain generic")
+                    && foundation.Contains("\n- Clan: Fixture Clan")
+                    && cultureVoices.Where(other => other.Key != cultureVoice.Key)
+                        .All(other => !foundation.Contains(other.Value)), null);
+                add("speaker_culture_turn_reminder_" + cultureVoice.Key,
+                    CulturalVoiceTurnReminder(speaker, false).Contains("this " + cultureVoice.Key + " speaker's cadence")
+                    && CulturalVoiceTurnReminder(speaker, true).Contains("visible letter body"), null);
+            }
+            add("culture_name_fallback_when_id_absent", CulturalVoicePrompt(new Dictionary<string, object> {
+                    ["cultureName"] = "Battanian" }).Contains("Battanian voice:"), null);
+            add("unknown_native_culture_stays_unassigned", CulturalVoicePrompt(new Dictionary<string, object> {
+                    ["cultureId"] = "modded_culture", ["cultureName"] = "Nord" })
+                .Contains("No specific cultural speech pattern")
+                && !CulturalVoicePrompt(new Dictionary<string, object> { ["cultureId"] = "modded_culture" })
+                    .Contains("Nord voice:"), null);
+            add("unknown_culture_has_no_turn_reminder", string.IsNullOrEmpty(CulturalVoiceTurnReminder(
+                new Dictionary<string, object> { ["cultureId"] = "modded_culture", ["cultureName"] = "Nord" }, false)), null);
+
             foreach (bool noble in new[] { false, true })
             {
                 string id = noble ? "prompt-noble" : "prompt-commoner";
-                var profile = new Dictionary<string, object> { ["heroStringId"] = id, ["name"] = "Fixture Speaker", ["isLord"] = noble, ["age"] = 35 };
+                string expectedVoice = noble ? "Imperial voice:" : "Aserai voice:";
+                var profile = new Dictionary<string, object> { ["heroStringId"] = id, ["name"] = "Fixture Speaker", ["isLord"] = noble,
+                    ["age"] = 35, ["cultureId"] = noble ? "empire" : "aserai" };
                 if (!noble) profile["encounteredResident"] = new Dictionary<string, object> {
                     ["schema"] = "reign-encountered-resident-v1", ["residentId"] = id, ["occupation"] = "Merchant" };
                 var character = new Dictionary<string, object> { ["traits"] = new Dictionary<string, object> {
                     ["basePersonalitySummary"] = "PERSONALITY_COVERAGE_SENTINEL: cautious and protective of family." } };
                 var empty = new Dictionary<string, object>();
                 foreach (string mode in new[] { "dialogue", "party_chat", "social_event" })
+                foreach (bool structured in new[] { false, true })
                 {
                     var payload = new Dictionary<string, object> { ["campaignId"] = "verify_prompt_composition", ["heroStringId"] = id,
                         ["hero"] = profile, ["playerName"] = "Ruler", ["playerText"] = "What do you mean? I do not understand.",
                         ["sceneContext"] = "An audience with the ruler.", ["mode"] = mode == "social_event" ? "settlement_home" : mode };
+                    if (structured)
+                    {
+                        payload["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
+                        payload["structuredActionContext"] = TestDict("playerId", "ruler", "npcId", id);
+                        PreparePlayerActionPrompt(payload);
+                    }
                     var snapshot = new Dictionary<string, object> { ["profile"] = profile, ["characteristics"] = character,
                         ["state"] = empty, ["relationships"] = empty, ["memorySummary"] = empty };
                     var transcriptFixture = new List<Dictionary<string, object>>
@@ -103,9 +164,20 @@ namespace ReignBetaServer
                     var messages = BuildTestMessages(empty, payload, snapshot,
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                         mode, out string text, out var diagnostics);
-                    add("production_envelope_" + id + "_" + mode, messages.Count == 3
+                    var drinkBudget = ReadDictionary(diagnostics, "drinkPromptBudget");
+                    add("production_envelope_" + id + "_" + mode + (structured ? "_structured" : ""), messages.Count == 4
+                        && ReadString(messages[1], "content", "").Contains(DrinkingOutputContract)
+                        && ReadInt(drinkBudget, "inputTokenBudget", 0) == ConversationDrinkInputTokenBudget
+                        && ReadInt(drinkBudget, "inputTokenEstimate", int.MaxValue) <= ConversationDrinkInputTokenBudget
                         && text.Contains("PERSONALITY_COVERAGE_SENTINEL") && text.Contains("AUTHORITATIVE FACT BOUNDARY")
+                        && text.Contains(expectedVoice)
+                        && ReadString(messages.Last(), "content", "").Contains("CULTURAL VOICE CHECK FOR THIS SPEAKER")
+                        && ReadString(messages.Last(), "content", "").Contains("visible spoken words")
                         && text.Contains("ACTION ROUTING BOUNDARY") && text.Contains("What do you mean? I do not understand.")
+                        && (!structured || (ReadString(messages[0], "content", "").Contains("REGISTERED INTERPERSONAL ACTIONS")
+                            && ReadString(messages[0], "content", "").Contains("\"structuredActionDecision\"")
+                            && !ReadString(messages.Last(), "content", "").Contains("REGISTERED INTERPERSONAL ACTIONS")
+                            && text.Split(new[] { "REGISTERED INTERPERSONAL ACTIONS" }, StringSplitOptions.None).Length == 2))
                         && text.Contains("CURRENT CONVERSATION GUIDANCE") && text.Contains("Confusion alone is not refusal or evasion")
                         && !text.Contains("LEGACY CUSTOM PROMPT EXTENSION")
                         && text.Split(new[] { "PLAYER_HISTORY_SENTINEL" }, StringSplitOptions.None).Length == 2
@@ -118,6 +190,8 @@ namespace ReignBetaServer
                     "RECEIVED_LETTER_HISTORY_SENTINEL", profile, character, empty,
                     "Fixture Speaker previously wrote: NPC_LETTER_HISTORY_SENTINEL");
                 add("production_correspondence_" + id, ReadDictionary(letter.Diagnostics, "composition") != null
+                    && letter.Messages.Any(message => ReadString(message, "content", "").Contains(expectedVoice))
+                    && ReadString(letter.Messages.Last(), "content", "").Contains("visible letter body")
                     && ReadString(letter.Messages[0], "content", "").Contains("REBELLION DECISION CONTRACT")
                     && ReadString(letter.Messages.Last(), "content", "").Contains("RECEIVED_LETTER_HISTORY_SENTINEL")
                     && ReadString(letter.Messages.Last(), "content", "").Contains("NPC_LETTER_HISTORY_SENTINEL")
@@ -197,6 +271,7 @@ namespace ReignBetaServer
             var nextPage = PromptEvidencePage(unicode, 0, ReadInt(firstPage, "nextOffset", 0), 4);
             add("prompt_pages_preserve_unicode_characters", ReadString(firstPage, "content", "") + ReadString(nextPage, "content", "") == "ab\U0001F451cd"
                 && !ReadBool(PromptEvidencePage(unicode, 0, 3, 4), "ok", true), null);
+            results.AddRange(RunConversationDrinkPromptSelfTests());
             return results;
         }
     }

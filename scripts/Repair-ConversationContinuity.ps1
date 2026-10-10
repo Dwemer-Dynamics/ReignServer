@@ -11,8 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
 $document = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-$expectedSchema = if ($Mode -eq 'Stage') { 'reign-memory-stage-request-v1' } else { 'reign-continuity-repair-v1' }
-if ($document.schema -ne $expectedSchema -or $document.campaignId -notmatch '^[A-Za-z0-9_-]{1,128}$') {
+$expectedSchemas = if ($Mode -eq 'Stage') { @('reign-memory-stage-request-v1','reign-conversation-original-audit-v1') } else { @('reign-continuity-repair-v1') }
+if ($document.schema -notin $expectedSchemas -or $document.campaignId -notmatch '^[A-Za-z0-9_-]{1,128}$') {
     throw 'A reviewed continuity repair manifest with an exact campaign id is required.'
 }
 $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()

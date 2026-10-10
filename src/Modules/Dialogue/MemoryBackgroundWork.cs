@@ -153,12 +153,9 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
                     else if (type == "memory_consolidation")
                         result = ConsolidateNpcMemory(campaignId, owner, false, ReadString(job, "group_key", ""));
                     else throw new InvalidOperationException("Unknown memory job type.");
-                    bool incomplete = ReadString(result, "compactionStatus", "") == "incomplete";
                     using (var connection = OpenCampaignConnection(campaignId))
                     {
-                        if (incomplete) RetryMemoryJob(connection, jobId, token, ReadInt(job, "attempt_count", 1), "Compaction incomplete; original sources retained.", result);
-                        else FinishMemoryJob(connection, jobId, token,
-                            ReadString(result, "reason", "") == "empty_session" || (type == "memory_consolidation" && ReadInt(result, "summaryCount", 0) == 0) ? "no_op" : "completed", result);
+                        CompleteMemoryCompactionJob(connection, jobId, token, ReadInt(job, "attempt_count", 1), type, result);
                     }
                 }
                 catch (Exception ex)
@@ -169,6 +166,19 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
                 }
                 finally { CurrentMemoryJob.Value = previousFence; }
             }
+        }
+
+        private static void CompleteMemoryCompactionJob(ReignDbConnection connection, string id, string token,
+            int attempt, string type, Dictionary<string, object> result)
+        {
+            bool incomplete = ReadString(result, "compactionStatus", "") == "incomplete";
+            if (incomplete && !ReadBool(result, "retryable", true))
+                FinishMemoryJob(connection, id, token, "incomplete", result);
+            else if (incomplete)
+                RetryMemoryJob(connection, id, token, attempt, "Compaction incomplete; original sources retained.", result);
+            else FinishMemoryJob(connection, id, token,
+                ReadString(result, "reason", "") == "empty_session"
+                    || (type == "memory_consolidation" && ReadInt(result, "summaryCount", 0) == 0) ? "no_op" : "completed", result);
         }
 
         private static void FinishMemoryJob(ReignDbConnection connection, string id, string token, string status, Dictionary<string, object> result) =>
@@ -213,8 +223,9 @@ WHERE job_id=$id AND lease_token=$token AND status='running';", new Dictionary<s
                             foreach (string id in QuerySql(connection, @"SELECT job_id FROM memory_background_jobs WHERE attempt_count<4 AND next_attempt_ts<=$now
 AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now)) ORDER BY created_ts LIMIT 50;", new Dictionary<string, object> { ["now"] = now })
                                 .Select(r => ReadString(r, "job_id", "")).ToList())
-                                EnqueuePriorityBackgroundWork("memory.resume", "maintenance", () => ProcessMemoryBackgroundJob(campaignId, id));
-                        }
+                                 EnqueuePriorityBackgroundWork("memory.resume", "maintenance", () => ProcessMemoryBackgroundJob(campaignId, id));
+                         }
+                         ReconcileMemorySpecialistIndex(campaignId);
                     }
                 }
                 finally { Interlocked.Exchange(ref MemoryReconcileQueued, 0); }

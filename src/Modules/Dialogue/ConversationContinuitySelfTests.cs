@@ -25,7 +25,7 @@ namespace ReignBetaServer
             var discovered = BuildContinuityProviderPreflight(settings, payload, body, NanoGptChatCompletionsUrl, model, catalog);
             add("capacity_catalog_default_route_verified", ReadBool(discovered, "capacityVerified", false)
                 && ReadInt(discovered, "verifiedContextTokens", 0) == 1048576
-                && ReadInt(discovered, "inputAllowance", 0) == 64000
+                && ReadInt(discovered, "inputAllowance", 0) == 1048576 - 8000 - ConversationCapacitySafetyReserve
                 && ReadString(discovered, "capacitySourceHash", "").Length > 0, discovered);
             foreach (int estimate in new[] { 48225, 50231, 50841, 50000, 49033 })
             {
@@ -39,6 +39,22 @@ namespace ReignBetaServer
                     && ReadBool(result, "requiredSourceCoverageComplete", false) && Json.Serialize(body) == before, result);
             }
             add("capacity_catalog_shared_across_speakers", fetches == 1, fetches);
+            foreach (int estimate in new[] { 65000, 90000, 150000, 300000 })
+            {
+                var expandedBody = TestDict("model", model, "messages", new[] {
+                    TestDict("role", "user", "content", "required_latest " + new string('p', estimate * 3)) }, "max_tokens", 8000);
+                string original = Json.Serialize(expandedBody);
+                var expanded = BuildContinuityProviderPreflight(settings, payload, expandedBody, NanoGptChatCompletionsUrl, model, catalog);
+                add("capacity_verified_context_above_old_64k_" + estimate, ReadBool(expanded, "fits", false)
+                    && ReadBool(expanded, "physicalCapacityFits", false)
+                    && ReadInt(expanded, "selectedInputAllowance", 0) >= ReadInt(expanded, "inputTokenEstimate", 0)
+                    && ConversationPromptHardCharacterLimit(TestDict("promptHardCharacterLimit", 240000), expanded) >= original.Length
+                    && Json.Serialize(expandedBody) == original, expanded);
+            }
+            add("capacity_unverified_and_nonconversation_keep_character_ceiling",
+                ConversationPromptHardCharacterLimit(TestDict("promptHardCharacterLimit", 120000), null) == 120000
+                && ConversationPromptHardCharacterLimit(TestDict(), TestDict("capacityVerified", false, "fits", true)) == 240000
+                && ConversationPromptHardCharacterLimit(TestDict(), TestDict("capacityVerified", true, "fits", false)) == 240000, null);
             foreach (var changed in new[] { TestDict("provider", "fixture"), TestDict("routing", TestDict("only", new[] { "fixture" })),
                 TestDict("stickyprovider", true), TestDict("models", new[] { "other" }) })
             {
@@ -57,7 +73,7 @@ namespace ReignBetaServer
             var changedOutput = new Dictionary<string, object>(body) { ["max_tokens"] = 131073 };
             add("capacity_model_output_ceiling_retained", !ReadBool(BuildContinuityProviderPreflight(settings, payload, changedOutput,
                 NanoGptChatCompletionsUrl, model, catalog), "fits", true), null);
-            body["tools"] = new string('z', 60000);
+            body["tools"] = new string('z', 1048576);
             add("capacity_expansion_still_checks_final_tools", !ReadBool(BuildContinuityProviderPreflight(settings, payload, body,
                 NanoGptChatCompletionsUrl, model, catalog), "fits", true), null);
             body.Remove("tools");
@@ -90,9 +106,44 @@ namespace ReignBetaServer
                 && ReadInt(ReadDictionary(envelope.Diagnostics, "continuityPreflight"), "inputAllowance", 0) == ReadInt(final, "inputAllowance", -1)
                 && selected.LiveTurn.Contains(required) && selected.LiveTurn.Contains(exchange) && selected.LiveTurn.Contains(foundation)
                 && selected.LiveTurn.Contains(latestInput), final);
-            finalBody["messages"] = envelope.Messages.Concat(new[] { TestDict("role", "user", "content", new string('r', 65000)) }).ToList();
+            finalBody["messages"] = envelope.Messages.Concat(new[] { TestDict("role", "user", "content", new string('r', 1048576)) }).ToList();
             add("capacity_repair_append_rechecked", !ReadBool(BuildContinuityProviderPreflight(settings,
                 TestDict("promptEnvelope", envelope.Diagnostics), finalBody, NanoGptChatCompletionsUrl, model, catalog), "fits", true), null);
+
+            foreach (string route in new[] { "dialogue", "event" })
+            {
+                string historyKey = route == "dialogue" ? "priorDialogueText" : "eventHistoryText";
+                string largeRequired = RenderContinuityRecord("required_topical_capacity", "memory", "npc_a", "current", 20d, 200, true,
+                    "Complete recent summaries: " + new string('m', 300000));
+                var largeValues = new Dictionary<string, string> { ["heroName"] = "Speaker", ["playerName"] = "Traveler",
+                    ["contextPullText"] = largeRequired, [historyKey] = exchange, ["playerText"] = latestInput };
+                var large = BuildBudgetedConversationLiveTurn(route + "_live_turn_template.txt", historyKey, largeValues,
+                    "SCENE", foundation, "RELATIONSHIP", "GLOBAL", "CHARACTER", capacity: sharedCapacity);
+                var largeEnvelope = CreatePromptEnvelope(route, "capacity_hotfix", "GLOBAL", "CHARACTER", large.LiveTurn);
+                FinalizeContinuityPromptBudget(largeEnvelope, turn, sharedCapacity);
+                var largeBody = TestDict("model", model, "messages", largeEnvelope.Messages, "max_tokens", 8000);
+                var largeFinal = BuildContinuityProviderPreflight(settings, TestDict("promptEnvelope", largeEnvelope.Diagnostics),
+                    largeBody, NanoGptChatCompletionsUrl, model, catalog);
+                add("capacity_large_protected_floor_survives_" + route, ReadBool(large.Diagnostics, "targetMet", false)
+                    && ReadInt(large.Diagnostics, "targetInputTokens", 0) > 64000 && ReadBool(largeFinal, "fits", false)
+                    && large.LiveTurn.Contains(largeRequired) && large.LiveTurn.Contains(exchange)
+                    && large.LiveTurn.Contains(foundation) && large.LiveTurn.Contains(latestInput)
+                    && Json.Serialize(largeBody).Length <= ConversationPromptHardCharacterLimit(settings, largeFinal), largeFinal);
+            }
+            var unavailableEnvelope = CreatePromptEnvelope("dialogue", "capacity_failure", "rules", "character", new string('u', 160000));
+            string unavailableOriginal = Json.Serialize(unavailableEnvelope.Messages);
+            var unknown = ResolveConversationCapacity(TestDict("llmProvider", "openai_compatible"), TestDict("max_tokens", 8000),
+                "https://unknown.invalid/chat", model, catalog);
+            FinalizeContinuityPromptBudget(unavailableEnvelope, TestDict(), unknown);
+            var unavailableFinal = BuildContinuityProviderPreflight(TestDict("llmProvider", "openai_compatible"),
+                TestDict("promptEnvelope", unavailableEnvelope.Diagnostics), TestDict("messages", unavailableEnvelope.Messages, "max_tokens", 8000),
+                "https://unknown.invalid/chat", model, catalog);
+            var recoverable = EnsureConversationDelivery(TestDict("ok", false, "errorCode", "prompt_hard_limit_exceeded", "promptPreflight", unavailableFinal));
+            add("capacity_failure_retains_envelope_and_recoverable_delivery", !ReadBool(unavailableFinal, "fits", true)
+                && ReadBool(ReadDictionary(unavailableEnvelope.Diagnostics, "continuityPreflight"), "capacityRejectionDeferredToProviderPreflight", false)
+                && unavailableOriginal == Json.Serialize(unavailableEnvelope.Messages) && !ReadBool(recoverable, "ok", true)
+                && ReadBool(ReadDictionary(recoverable, "conversationRecovery"), "canContinue", false)
+                && ReadInt(ReadDictionary(recoverable, "conversationRecovery"), "additionalProviderCalls", -1) == 0, unavailableFinal);
 
             foreach (string invalid in new[] { "{", "{\"data\":[]}", Json.Serialize(TestDict("data", new[] {
                 TestDict("id", model, "context_length", "1 million", "max_output_tokens", 8000) })),
@@ -124,6 +175,8 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunConversationContinuitySelfTests()
         {
             var results = new List<Dictionary<string, object>>();
+            results.AddRange(RunConversationQuestionStateAssertions());
+            results.AddRange(RunPromptEvidenceAllocationAssertions());
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
                 "caseId", "continuity_" + id, "passed", pass, "summary", id, "data", data));
             var observer = new KnowledgeAccessContext { NpcId = "npc_b" };
@@ -197,13 +250,64 @@ namespace ReignBetaServer
                 add("unaccepted_player_suggestion_rejected", ReadDictionaryList(StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player",
                     "event_3", "Perhaps, but I have not decided.", new List<Dictionary<string, object>> { proposed }, 3), "rejected").Count == 1, null);
                 var stale = new Dictionary<string, object>(concern) { ["id"] = id, ["status"] = "resolved", ["transitionReason"] = "He explained it.", ["evidenceQuote"] = "He explained it and I understand now." };
-                add("stale_transition_rejected", ReadDictionaryList(StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "event_4",
+                add("stale_transition_rejected", ReadDictionaryList(StoreAcceptedConversationContinuity(connection, new Dictionary<string, object>(payload), "npc_a", "player", "event_4",
                     "He explained it and I understand now.", new List<Dictionary<string, object>> { stale }, 4), "rejected").Any(x => ReadString(x, "reason", "") == "stale_revision"), null);
-                stale["expectedRevision"] = 1;
-                StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "event_5", "He explained it and I understand now.",
+                // The model incorrectly increments the revision. The trusted
+                // request snapshot is still revision 1, and no concurrent edit occurred.
+                stale["expectedRevision"] = 2;
+                var correction = StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "event_5", "He explained it and I understand now.",
                     new List<Dictionary<string, object>> { stale }, 5);
+                add("server_binds_read_revision_despite_model_increment", ReadStringList(correction, "applied").Contains(id)
+                    && ReadString(ReadDictionaryList(correction, "writeReceipts").FirstOrDefault(), "revisionBinding", "") == "server_read_snapshot", correction);
                 add("resolution_keeps_history_leaves_active_prompt", !BuildProtectedConversationContinuity(campaign, "npc_a", payload, TestDict()).Contains(quote)
                     && QuerySql(connection, "SELECT * FROM conversation_continuity_versions;").Count == 2, null);
+                var correctedRow = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", id)).Single();
+                add("accepted_source_never_uses_previous_scene_turn", ReadString(correctedRow, "source_event_id", "") == "event_5"
+                    && ReadString(correctedRow, "source_turn_id", "") != "accepted_turn_1", correctedRow);
+
+                // Capture, accept a different request, then attempt the prepared
+                // update. A model supplying the new revision cannot bypass CAS.
+                var parallelPayload = new Dictionary<string, object>(payload);
+                BuildProtectedConversationContinuity(campaign, "npc_a", parallelPayload, TestDict());
+                var intervening = new Dictionary<string, object>(stale) { ["meaning"] = "An intervening correction", ["expectedRevision"] = 2 };
+                var interveningReceipt = StoreAcceptedConversationContinuity(connection, new Dictionary<string, object>(payload), "npc_a", "player", "event_parallel",
+                    "He explained it and I understand now.", new List<Dictionary<string, object>> { intervening }, 6);
+                stale["expectedRevision"] = 3;
+                var concurrent = StoreAcceptedConversationContinuity(connection, parallelPayload, "npc_a", "player", "event_stale_snapshot",
+                    "He explained it and I understand now.", new List<Dictionary<string, object>> { stale }, 7);
+                add("genuine_intervening_revision_is_not_rebased", ReadStringList(interveningReceipt, "applied").Contains(id)
+                    && ReadDictionaryList(concurrent, "rejected").Any(r => ReadString(r, "reason", "") == "concurrent_revision_changed")
+                    && ReadInt(QuerySql(connection, "SELECT revision FROM conversation_continuity WHERE record_id=$id;", TestDict("id", id)).Single(), "revision", 0) == 3, concurrent);
+
+                string splitReply = "I understand your answer. *She sets down the cup without drinking.* That question is answered.";
+                var splitWrite = new Dictionary<string, object>(concern) { ["id"] = "split_evidence_episode", ["kind"] = "episode",
+                    ["subject"] = "An answered question", ["status"] = "resolved", ["transitionReason"] = "Answer acknowledged",
+                    ["evidenceQuote"] = "I understand your answer. That question is answered.",
+                    ["evidenceSpans"] = new List<Dictionary<string, object>> {
+                        TestDict("quote", "I understand your answer."), TestDict("quote", "That question is answered.") } };
+                var splitReceipt = StoreAcceptedConversationContinuity(connection, new Dictionary<string, object>(payload), "npc_a", "player", "split_event",
+                    splitReply, new List<Dictionary<string, object>> { splitWrite }, 8);
+                add("explicit_discontiguous_spans_commit_without_fabricated_quote", ReadStringList(splitReceipt, "applied").Contains("split_evidence_episode")
+                    && !FindCriticalConversationContinuityViolations(TestDict("reply", splitReply, "continuityWrites", new List<Dictionary<string, object>> { splitWrite }), payload, "npc_a")
+                        .Any(v => ReadString(v, "type", "") == "critical_continuity_metadata"), splitReceipt);
+                var joinedOnly = new Dictionary<string, object>(splitWrite); joinedOnly.Remove("evidenceSpans");
+                add("joined_quote_without_spans_still_rejected", AcceptedContinuityEvidenceSpans(joinedOnly, splitReply).Count == 0, null);
+                splitWrite["evidenceSpans"] = new List<Dictionary<string, object>> { TestDict("quote", "I understand your answer."), TestDict("quote", "You promised to leave tonight.") };
+                add("one_fabricated_span_rejects_whole_evidence_bundle", AcceptedContinuityEvidenceSpans(splitWrite, splitReply).Count == 0, null);
+                const string lateQuote = "And you touched my arm while telling me sixteen.";
+                string lateReply = new string('x', 1601) + lateQuote;
+                var staleOffset = TestDict("evidenceQuote", lateQuote, "evidenceSpans", new[] {
+                    TestDict("quote", lateQuote, "start", 0, "length", lateQuote.Length) });
+                var rebound = AcceptedContinuityEvidenceSpans(staleOffset, lateReply);
+                add("unique_stale_zero_offset_binds_actual_quote", rebound.Count == 1
+                    && ReadInt(rebound[0], "start", -1) == 1601
+                    && ReadDictionaryList(RemoveUnsupportedContinuityWrites(TestDict("reply", lateReply,
+                        "continuityWrites", new[] { staleOffset })), "continuityWrites").Count == 1, rebound);
+                add("duplicate_quote_rejects_even_supplied_offset", AcceptedContinuityEvidenceSpans(staleOffset,
+                    lateReply + " " + lateQuote).Count == 0, null);
+                add("fabricated_quote_removes_only_bad_write", ReadDictionaryList(RemoveUnsupportedContinuityWrites(
+                    TestDict("reply", lateReply, "continuityWrites", new[] { staleOffset,
+                        TestDict("evidenceQuote", "You touched an invented door.") })), "continuityWrites").Count == 1, null);
 
                 // Legacy production shape: interpretation/asserted plus a shared
                 // known-by list. Filtering must happen before recent-row limits.
@@ -233,6 +337,9 @@ VALUES($campaign,'timeline_a','shared_night','pair_intimacy','sexual_intimacy_co
                 add("completed_step_does_not_resolve_parent", QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='parent_concern' AND status='open';").Count == 1, null);
                 add("arrival_is_opportunity_not_completion", ContinuityAgendaOpportunity(parent, payload).Contains("opportunity is not completion"), null);
                 var deferred = new Dictionary<string, object>(parent) { ["status"] = "deferred", ["expectedRevision"] = 1, ["nextStep"] = "Wait for reliable news." };
+                // This update belongs to a later provider request. Capture what
+                // that request could read rather than reusing an earlier snapshot.
+                CaptureContinuityReadSnapshot(connection, payload, "npc_a");
                 StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "defer_event", quote, new List<Dictionary<string, object>> { deferred }, 8);
                 for (int i = 0; i < 200; i++)
                     StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "unrelated_" + i, "We discuss a different matter.", new List<Dictionary<string, object>>(), 10 + i);
@@ -303,7 +410,9 @@ VALUES('old_tournament',$campaign,'npc_a','player','closed',1,2,'[""npc_a"",""pl
                     "I remember the kiss we shared. That does not mean I agree to leave my family today.", "in_person", 19d, 4, "town_a", new List<string> { "npc_a", "player" }, TestDict());
                 string legacyFoundation = BuildProtectedConversationContinuity(campaign, "npc_a", payload, TestDict());
                 add("legacy_affection_and_current_boundary_survive_together", legacyFoundation.Contains("legacy_affection")
-                    && legacyFoundation.Contains("kiss we shared") && legacyFoundation.Contains("does not mean I agree"), null);
+                    && legacyFoundation.Contains("kiss we shared") && legacyFoundation.Contains("does not mean I agree"),
+                    TestDict("sourceRetained", legacyFoundation.Contains("legacy_affection"), "affectionRetained", legacyFoundation.Contains("kiss we shared"),
+                        "boundaryRetained", legacyFoundation.Contains("does not mean I agree")));
                 add("legacy_pair_history_is_not_shared_with_other_npc", !BuildProtectedConversationContinuity(campaign, "npc_b", payload, TestDict()).Contains("legacy_affection"), null);
                 ExecuteSql(connection,@"INSERT INTO memories(memory_id,event_id,owner_id,memory_type,ts,world_day,location_id,summary,participants_json,known_by_json,visibility,importance,tags_json,status,payload_json)
 VALUES('consolidated_closeness','affection_event','npc_a','episodic',4,0,'town_a','She accepted his cloak, leaned against him, and asked him to stay.','[""npc_a"",""player""]','[""npc_a"",""player""]','private',1,'[""intimacy"",""vulnerability""]','consolidated','{}');");
@@ -324,6 +433,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             }
             RunContinuityPromptAndPresenceTests(campaign, add);
             RunConversationCapacitySelfTests(add);
+            RunSharedActivityMemorySelfTests(add);
             RunContinuityProductionEnvelopeTests(campaign, add);
             return results;
         }
@@ -353,7 +463,10 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                 var proof = ReadDictionary(envelope.Diagnostics,"continuityPreflight");
                 add("final_envelope_protects_agenda_intimacy_and_boundary_"+mode, final.Contains("pair_intimacy") && final.Contains("recovered_father_concern")
                     && final.Contains("legacy_affection") && final.Contains("does not mean I agree") && final.Contains("consolidated_closeness") && final.Contains(latest)
-                    && ReadBool(proof,"requiredSourceCoverageComplete",false),proof);
+                    && ReadBool(proof,"requiredSourceCoverageComplete",false),TestDict("preflight",proof,
+                        "pairIntimacyRetained",final.Contains("pair_intimacy"),"concernRetained",final.Contains("recovered_father_concern"),
+                        "legacyAffectionRetained",final.Contains("legacy_affection"),"boundaryRetained",final.Contains("does not mean I agree"),
+                        "consolidatedClosenessRetained",final.Contains("consolidated_closeness"),"currentPlayerRetained",final.Contains(latest)));
                 if(mode == "in_person") add("final_envelope_retains_complete_latest_exchange_after_200_turns",final.Contains("unrelated turn 199") && final.Contains("road on turn 199") && final.Contains("I have checked the saddle."),null);
             }
         }
@@ -404,7 +517,25 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                 string selected=SelectWholeContinuityRecords(transcript,1200,true,decisions,"test_transcript");
                 add("whole_recent_exchange_survives_"+count,selected.Contains("Question "+(count-1)) && selected.Contains("Answer "+(count-1))
                     && selected.Contains("Complete second paragraph.") && decisions.OfType<Dictionary<string,object>>().Any(d=>ReadBool(d,"required",false)&&ReadBool(d,"retained",false)),decisions);
+                add("latest_thirty_messages_survive_compaction_"+count, lines.TakeLast(30).All(line =>
+                    selected.Contains(FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
+                    && ContinuityPromptRecords(transcript, true).Count(record => record.Required) == Math.Min(count, 15), decisions);
+                var transcriptContext = TestDict();
+                SetMemoryTranscriptContext(transcriptContext, lines);
+                var suppliedHashes = ReadDictionary(transcriptContext, "memoryPromptSourceHashes");
+                add("dedup_only_claims_protected_transcript_sources_"+count,
+                    suppliedHashes.Count == Math.Min(30, lines.Count)
+                    && lines.TakeLast(30).All(line => suppliedHashes.ContainsKey(ReadString(line, "id", "")))
+                    && lines.Take(Math.Max(0, lines.Count - 30)).All(line => !suppliedHashes.ContainsKey(ReadString(line, "id", ""))), suppliedHashes.Keys.ToList());
             }
+            var boundaryLines = Enumerable.Range(0, 35).Select(i => TestDict("id", "boundary_"+i,
+                "exchangeId", "boundary_exchange_"+(i/2), "role", i%2==0 ? "player" : "npc",
+                "speaker", i%2==0 ? "Traveler" : "Speaker", "text", "Complete boundary message " + i + ".")).ToList();
+            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, FormatDialogueForPrompt);
+            var boundaryRecords = ContinuityPromptRecords(boundaryTranscript, true).Where(record => record.Required).ToList();
+            add("recent_window_keeps_whole_exchange_at_thirtieth_message", boundaryRecords.Count == 16
+                && boundaryRecords.First().SourceId == "boundary_4,boundary_5"
+                && boundaryRecords.Last().SourceId == "boundary_34", boundaryRecords.Select(record => record.SourceId).ToList());
             foreach (string corpus in new[] { "escaped_ascii", "unicode" })
             {
                 string optionalBody = corpus == "unicode" ? new string('界', 2000) : string.Concat(Enumerable.Repeat("\\\"line\n", 1200));
@@ -434,7 +565,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             capacity=BuildContinuityProviderPreflight(settings,TestDict(),body,"https://example.invalid/chat","fixture/model");
             add("verified_route_expands_in_8k_steps",ReadBool(capacity,"fits",false)&&ReadInt(capacity,"selectedInputAllowance",0)==56000,capacity);
             add("certificate_does_not_cross_provider_route",!ReadBool(BuildContinuityProviderPreflight(settings,TestDict(),body,"https://different.invalid/chat","fixture/model"),"capacityVerified",true),null);
-            body["tools"]=new string('z',60000);
+            body["tools"]=new string('z',1000000);
             add("final_preflight_includes_tool_schema_overhead",!ReadBool(BuildContinuityProviderPreflight(settings,TestDict(),body,"https://example.invalid/chat","fixture/model"),"fits",true),null);
             add("unicode_estimate_is_conservative",EstimateContinuityTokens(new string('界',1000))>=3000,null);
             var lostSourcePayload = TestDict("promptEnvelope",TestDict("continuityPreflight",TestDict("requiredSourceIds",new[] {"required_source_lost_by_adapter"})));
@@ -456,6 +587,17 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             var repaired=RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),TestDict("requestType","dialogue","maxTokens",3000),payload,
                 PromptParityIdentity(),noLines,campaign,"continuity-corrected","dialogue","npc_a","Speaker","Traveler","",request=>TestDict("ok",true,"content",Json.Serialize(response("I need reliable news before deciding where to ride."))));
             add("production_repair_accepts_grounded_correction",ReadBool(repaired,"ok",false),repaired);
+            var missingGate = response("I need reliable news before deciding where to ride.");
+            missingGate.Remove("actionGate");
+            var restoredGate = RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),
+                TestDict("requestType","dialogue","maxTokens",3000),payload,PromptParityIdentity(),noLines,campaign,
+                "continuity-schema-preservation","dialogue","npc_a","Speaker","Traveler","",
+                request=>TestDict("ok",true,"content",Json.Serialize(missingGate)));
+            var restoredGateObject = TryParseJsonObject(ReadString(restoredGate,"content",""));
+            add("prose_repair_preserves_required_action_gate",ReadBool(restoredGate,"ok",false)
+                && ReadDictionary(restoredGateObject,"actionGate") != null
+                && StructuredResponseIsComplete(ReadString(restoredGate,"content",""),"dialogue")
+                && ReadBool(ReadDictionary(restoredGate,"roleplayContinuityRepair"),"revalidationCleared",false),restoredGate);
             var unsupportedWrite = response("We found him. The tournament is behind us, and the road is ours again.");
             unsupportedWrite["continuityWrites"] = new List<Dictionary<string,object>> {
                 TestDict("id","old_agenda","kind","agenda","status","resolved",
@@ -523,7 +665,8 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             string projectedGroup = Json.Serialize(groupPayload);
             add("group_payload_does_not_reveal_private_turn_to_other_npc",
                 !projectedGroup.Contains("We leave at dawn")
-                && ReadString(groupPayload,"playerText","").Contains("whispers privately")
+                && ReadString(groupPayload,"playerText","").Contains("I lean toward Ulagara and whisper")
+                && ReadString(groupPayload,"playerText","").Contains("I face the group")
                 && ReadDictionaryList(groupPayload,"groupTranscript").Count == 2, null);
         }
     }

@@ -167,7 +167,6 @@ namespace ReignBetaServer
             "noble_prompt.txt",
             "commoner_prompt.txt",
             "ambassador_role.txt",
-            "context_selector_system.txt",
             "context_pull_check_inventory_appearance.txt",
             "context_pull_check_player_appearance_status.txt",
             "context_pull_nearby_settlements.txt",
@@ -183,6 +182,8 @@ namespace ReignBetaServer
             "dialogue_system.txt",
             "dialogue_live_turn_template.txt",
             "dialogue_internal_posture.txt",
+            "jealousy_approach.txt",
+            "rescue_opening.txt",
             "dialogue_output_schema.json",
             "pull_out.txt",
             "action_planner_system.txt",
@@ -217,6 +218,22 @@ namespace ReignBetaServer
             "relevant_memory",
             "relationship_history"
         };
+
+        private static Dictionary<string, object> PersistBoundedMotiveCliReport(Dictionary<string, object> result, string evidenceDirectory)
+        {
+            Directory.CreateDirectory(evidenceDirectory);
+            string fullJson = Json.Serialize(result);
+            string path = Path.Combine(evidenceDirectory, "motive-conversation-" + Guid.NewGuid().ToString("N") + ".json");
+            File.WriteAllText(path, fullJson, new UTF8Encoding(false));
+            var rows = ReadDictionaryList(result, "results");
+            var failed = rows.Where(row => !CheckPassed(row)).ToList();
+            return TestDict("schema", "reign-motive-cli-summary-v1", "ok", ReadBool(result, "ok", false) && rows.Count > 0 && failed.Count == 0,
+                "passedCount", rows.Count - failed.Count, "failedCount", failed.Count, "totalCount", rows.Count,
+                "failures", failed.Take(32).Select(row => TestDict("caseId", LimitText(ReadFirstString(row, "caseId", "id", "name"), 160),
+                    "summary", LimitText(ReadFirstString(row, "summary", "error", "message"), 512))).ToList(),
+                "failureDetailsLimited", failed.Count > 32, "resultsPath", path,
+                "resultsSha256", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullJson))).ToLowerInvariant());
+        }
 
         private static void Main(string[] args)
         {
@@ -415,7 +432,8 @@ namespace ReignBetaServer
                     ["ok"] = rows.Count > 0 && rows.All(x => ReadBool(x, "passed", false)),
                     ["passedCount"] = rows.Count(x => ReadBool(x, "passed", false)), ["totalCount"] = rows.Count, ["results"] = rows
                 };
-                Console.WriteLine(Json.Serialize(result));
+                Console.WriteLine(Json.Serialize(HasArg(args, "--json")
+                    ? PersistBoundedMotiveCliReport(result, Path.Combine(TestsDir, "cli-reports")) : result));
                 Environment.ExitCode = ReadBool(result, "ok", false) ? 0 : 1;
                 return;
             }
@@ -2092,6 +2110,22 @@ namespace ReignBetaServer
                     {
                         response = CorrespondenceTickApi(request.JsonBody);
                     }
+                    else if (request.Method == "POST" && request.Path == "/approaches/evaluate")
+                    {
+                        response = PlayerApproachEvaluateApi(request.JsonBody);
+                    }
+                    else if (request.Method == "POST" && request.Path == "/approaches/decision")
+                    {
+                        response = PlayerApproachDecisionApi(request.JsonBody);
+                    }
+                    else if (request.Method == "POST" && request.Path == "/correspondence/autonomous/candidates")
+                    {
+                        response = AutonomousCorrespondenceCandidatesApi(request.JsonBody);
+                    }
+                    else if (request.Method == "POST" && request.Path == "/correspondence/autonomous/evaluate")
+                    {
+                        response = AutonomousCorrespondenceEvaluateApi(request.JsonBody);
+                    }
                     else if (request.Method == "POST" && request.Path == "/correspondence/read")
                     {
                         response = CorrespondenceReadApi(request.JsonBody);
@@ -2224,9 +2258,25 @@ namespace ReignBetaServer
                     {
                         response = ConversationSceneHourlyTickApi(request.JsonBody);
                     }
+                    else if (request.Method == "POST" && request.Path == "/gossip/tick")
+                    {
+                        response = PersonalGossipTickApi(request.JsonBody);
+                    }
+                    else if (request.Method == "GET" && request.Path == "/gossip/status")
+                    {
+                        response = PersonalGossipStatusApi(request.Query);
+                    }
                     else if (request.Method == "POST" && request.Path == "/conversation-scene/formal-outfits/scan")
                     {
                         response = RunInteractiveRequest(() => ScanFormalOutfitsApi(request.JsonBody));
+                    }
+                    else if (request.Method == "POST" && request.Path.StartsWith("/party-banter/", StringComparison.Ordinal))
+                    {
+                        response = PartyBanterApi(request.Path.Substring("/party-banter/".Length), request.JsonBody);
+                    }
+                    else if (request.Method == "POST" && request.Path == "/party-chat/turn-plan")
+                    {
+                        response = RunInteractiveRequest(() => GroupConversationFloorApi(request.JsonBody));
                     }
                     else if (request.Method == "POST" && request.Path == "/party-chat/respond")
                     {
@@ -2239,6 +2289,10 @@ namespace ReignBetaServer
                     else if (request.Method == "POST" && request.Path == "/tavern-house/respond")
                     {
                         response = RunInteractiveRequest(() => TavernHouseRespond(request.JsonBody));
+                    }
+                    else if (request.Method == "POST" && request.Path == "/tavern-house/turn-plan")
+                    {
+                        response = RunInteractiveRequest(() => TavernHouseTurnPlanApi(request.JsonBody));
                     }
                     else if (request.Method == "POST" && request.Path == "/tavern-house/confirm")
                     {
@@ -2268,6 +2322,10 @@ namespace ReignBetaServer
                     {
                         response = RunInteractiveRequest(() => SocialEventTurnApi(request.JsonBody));
                     }
+                    else if (request.Method == "POST" && request.Path == "/events/social/turn-plan")
+                    {
+                        response = RunInteractiveRequest(() => SocialEventTurnPlanApi(request.JsonBody));
+                    }
                     else if (request.Method == "POST" && request.Path == "/events/social/resolve")
                     {
                         response = SocialEventResolve(request.JsonBody);
@@ -2284,6 +2342,10 @@ namespace ReignBetaServer
                     {
                         response = PortraitRegister(request.JsonBody);
                     }
+                    else if (request.Method == "GET" && request.Path == "/portraits/vision/models")
+                    {
+                        response = PortraitVisionModelCatalog(request.Query.TryGetValue("provider", out string visionProvider) ? visionProvider : "Codex");
+                    }
                     else if (request.Method == "GET" && request.Path == "/portraits/status")
                     {
                         response = PortraitStatus(request.JsonBody, request.Query);
@@ -2295,6 +2357,10 @@ namespace ReignBetaServer
                     else if (request.Method == "POST" && request.Path == "/portraits/request")
                     {
                         response = PortraitRequest(request.JsonBody);
+                    }
+                    else if (request.Method == "POST" && request.Path.StartsWith("/portraits/outfit/", StringComparison.Ordinal))
+                    {
+                        response = OutfitChangeApi(request.JsonBody, request.Path.Substring("/portraits/outfit/".Length));
                     }
                     else if (request.Method == "POST" && request.Path == "/portraits/generate")
                     {
@@ -2805,7 +2871,7 @@ WHERE source='dialogue_llm'
                     "SELECT value FROM schema_meta WHERE key='version' LIMIT 1;")
                     .FirstOrDefault();
                 return string.Equals(ReadString(version, "value", ""), "5",
-                    StringComparison.Ordinal) && QuerySql(connection,"SELECT value FROM schema_meta WHERE key='memory_precision_v1' AND value='complete';").Count==1;
+                    StringComparison.Ordinal) && QuerySql(connection,"SELECT value FROM schema_meta WHERE (key='memory_precision_v1' AND value='complete') OR (key IN ('explicit_accepted_commitment_bootstrap_v1','character_performance_backfill_v1','character_commitment_timeline_v1') AND value='1');").Count==4;
             }
             catch
             {
@@ -3062,6 +3128,8 @@ WHERE table_schema=current_schema() AND table_name IN (
             EnsureMemoryBackgroundWorkSchema(connection);
             EnsureCategorizedMemorySchema(connection);
             EnsureMemoryPrecisionSchema(connection);
+            EnsureCharacterCommitmentTimeline(connection);
+            EnsureLatestAcceptedCommitments(connection);
             EnsureGroupConversationStateSchema(connection);
             // Rebellion storage is campaign infrastructure. World Test and
             // Save Sync can inspect it before the first weekly evaluation, so
@@ -3785,12 +3853,14 @@ VALUES($subject_id,$target_id,$trust,$fear,$respect,$resentment,$loyalty,$debt,$
                 return;
             }
 
-            string obligationId = FirstNonEmpty(ReadFirstString(item, "obligation_id", "obligationId", "id"), "obl_" + Guid.NewGuid().ToString("N"));
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO obligations(obligation_id,event_id,owed_by,owed_to,description,status,created_day,importance,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,ts,payload_json)
-VALUES($obligation_id,$event_id,$owed_by,$owed_to,$description,$status,$created_day,$importance,$participants_json,$about_entities_json,$known_by_json,$hidden_from_json,$visibility,$ts,$payload_json);",
+            string obligationId = StableCommitmentId(item);
+            PreserveCommitmentOriginalSource(connection, obligationId, eventId, item);
+            ExecuteSql(connection, @"INSERT OR REPLACE INTO obligations(obligation_id,event_id,owed_by,owed_to,description,status,created_day,importance,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,ts,payload_json,timeline_id)
+VALUES($obligation_id,$event_id,$owed_by,$owed_to,$description,$status,$created_day,$importance,$participants_json,$about_entities_json,$known_by_json,$hidden_from_json,$visibility,$ts,$payload_json,$timeline);",
                 new Dictionary<string, object>
                 {
                     ["obligation_id"] = obligationId,
+                    ["timeline"] = ContinuityTimeline(item),
                     ["event_id"] = eventId ?? "",
                     ["owed_by"] = ReadFirstString(item, "owed_by", "owedBy", "actorId", "subject"),
                     ["owed_to"] = ReadFirstString(item, "owed_to", "owedTo", "targetId", "target"),
@@ -3844,6 +3914,12 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
             UpsertTemporalAssertion(connection, ReadString(item, "campaignId", ""), eventId, comprehensionId, "interpretation", item, ts);
         }
 
+        private static bool IsPracticeDuelActionReport(Dictionary<string, object> payload)
+        {
+            return CanonicalCommand(ReadFirstString(payload, "type", "command")) == "duel_player"
+                && ReadString(ReadDictionary(payload, "result"), "resultCode", "") == "practice_duel_completed";
+        }
+
         private static Dictionary<string, object> StoreActionResultMemory(Dictionary<string, object> payload, string source)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -3858,6 +3934,16 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                 ReadFirstString(payload, "actorHeroStringId", "actorHeroId"),
                 ReadFirstString(payload, "targetHeroStringId", "targetHeroId")
             }, new List<string>());
+            bool practiceDuel = IsPracticeDuelActionReport(payload);
+            if (practiceDuel)
+            {
+                string playerId = ReadString(payload, "playerHeroStringId", "");
+                // The native report must identify exactly the player and one NPC.
+                // Missing identity must never fall through to a public memory.
+                if (string.IsNullOrWhiteSpace(playerId) || participants.Count != 2 || !participants.Contains(playerId))
+                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Practice duel memory requires the player and exact opponent." };
+                participants = participants.Where(id => id != playerId).ToList();
+            }
             Dictionary<string, object> evt = new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
@@ -3870,6 +3956,12 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                 ["importance"] = status.Equals("completed", StringComparison.OrdinalIgnoreCase) ? 0.75d : 0.55d,
                 ["payload"] = payload
             };
+            if (practiceDuel)
+            {
+                evt["worldDay"] = ReadDouble(payload, "worldDay", 0d);
+                evt["timelineId"] = ReadString(payload, "timelineId", "");
+                evt["eventType"] = "practice_duel_completed";
+            }
             return StoreWorldMemoryEvent(evt, source);
         }
 
@@ -3892,7 +3984,8 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
             List<string> sharedParticipants = null,
             bool retrievalEligible = true,
             Dictionary<string, object> continuityPayload = null,
-            List<Dictionary<string, object>> continuityWrites = null)
+            List<Dictionary<string, object>> continuityWrites = null,
+            ReignDbConnection existingConnection = null)
         {
             List<string> participants = MergeStringLists(sharedParticipants, new[] { heroId, playerId });
             string summary = LimitText("Player: " + (playerText ?? "") + "\nNPC: " + (reply ?? ""), 1200);
@@ -3940,6 +4033,13 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
             List<Dictionary<string, object>> preparedBeliefs = PrepareStructuredWrites(beliefWrites, heroId, playerId, locationId, eventType, "belief", participants);
             List<Dictionary<string, object>> preparedObligations = PrepareStructuredWrites(obligationWrites, heroId, playerId, locationId, eventType, "obligation", participants);
             List<Dictionary<string, object>> preparedComprehension = PrepareStructuredWrites(comprehensionWrites, heroId, playerId, locationId, eventType, "comprehension", participants);
+            var acceptedSources = CurrentConversationSources(playerId, heroId, playerText, reply, eventId,
+                ReadFirstString(continuityPayload, "sceneTurnId", "exchangeId", "turnId"));
+            AttachConversationWriteEvidence((memoryWrites ?? new List<Dictionary<string, object>>()).Concat(preparedBeliefs)
+                .Concat(preparedObligations).Concat(preparedComprehension), acceptedSources, heroId, eventId);
+            int incompleteSourceWrites = (memoryWrites ?? new List<Dictionary<string, object>>()).Concat(preparedBeliefs)
+                .Concat(preparedObligations).Concat(preparedComprehension)
+                .Count(write => ReadString(write, "sourceValidation", "incomplete") != "supported_span");
             foreach (var write in preparedBeliefs.Concat(preparedObligations).Concat(preparedComprehension))
             {
                 write["timelineId"] = ContinuityTimeline(continuityPayload);
@@ -3947,6 +4047,8 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                 write["sourceSpeakerId"] = heroId;
                 write["sourceAcceptedText"] = reply ?? "";
             }
+
+            memoryWrites = ScopeConversationMemoryWrites(memoryWrites, heroId, playerId, playerText, reply, eventId, participants);
 
             Dictionary<string, object> eventPayload = new Dictionary<string, object>
             {
@@ -3982,9 +4084,10 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
 
             Dictionary<string, object> stored;
             List<string> episodicMemoryIds = new List<string>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-            using (var publication = connection.BeginTransaction())
+            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
             {
+                var connection = existingConnection ?? ownedConnection;
+                using var publication = existingConnection == null ? connection.BeginTransaction() : null;
                 stored = StoreWorldMemoryEvent(eventPayload, eventType, connection);
                 foreach (Dictionary<string, object> memory in memoryWrites ?? new List<Dictionary<string, object>>())
                 {
@@ -3996,6 +4099,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
 
                     Dictionary<string, object> copy = new Dictionary<string, object>(memory, StringComparer.OrdinalIgnoreCase);
                     copy["timelineId"] = ContinuityTimeline(continuityPayload);
+                    copy["worldDay"] = ReadDouble(continuityPayload, "worldDay", ReadDouble(copy, "worldDay", 0d));
                     copy["sourceEventId"] = eventId;
                     copy["sourceHash"] = PromptHash(reply ?? "");
                     copy["evidenceClass"] = "reported";
@@ -4003,7 +4107,9 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                     {
                         copy["memoryGroupKey"] = memoryGroupKey ?? "";
                     }
-                    List<string> knownBy = MergeStringLists(MergeStringLists(ReadStringList(copy, "known_by"), ReadStringList(copy, "knownBy")), participants);
+                    bool authorInterpretation = ReadString(copy, "observerScope", "") == "author_interpretation";
+                    List<string> memoryAudience = authorInterpretation ? new List<string> { heroId } : participants;
+                    List<string> knownBy = authorInterpretation ? memoryAudience : MergeStringLists(MergeStringLists(ReadStringList(copy, "known_by"), ReadStringList(copy, "knownBy")), memoryAudience);
                     List<string> witnesses = MergeStringLists(ReadStringList(copy, "witnesses"), new List<string>());
                     List<string> tags = MergeStringLists(ReadStringList(copy, "tags"), new[] { "conversation" });
                     if (tags.Count == 0)
@@ -4024,7 +4130,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                         ReadDouble(copy, "world_day", ReadDouble(copy, "worldDay", 0d)),
                         FirstNonEmpty(ReadFirstString(copy, "location_id", "locationId", "settlementId"), locationId),
                         text.Trim(),
-                        participants,
+                        memoryAudience,
                         witnesses,
                         Json.Serialize(ExtractEntityIds(aboutRaw)),
                         knownBy,
@@ -4059,7 +4165,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                         heroId, playerId, eventId, reply, continuityWrites, ts);
                 }
                 ExecuteSql(connection, "DELETE FROM memory_projections WHERE owner_id=$owner;", new Dictionary<string, object> { ["owner"] = heroId });
-                publication.Commit();
+                publication?.Commit();
             }
             List<string> projectedMemoryIds = ReadStringList(stored, "memoryIds");
             stored["projectedMemoryIds"] = projectedMemoryIds;
@@ -4067,6 +4173,8 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
             stored["episodicMemoryWriteIds"] = episodicMemoryIds;
             stored["memoryIds"] = MergeStringLists(projectedMemoryIds, episodicMemoryIds);
             stored["memoryCount"] = projectedMemoryIds.Count + episodicMemoryIds.Count;
+            stored["sourceEvidenceStatus"] = incompleteSourceWrites == 0 ? "complete" : "incomplete";
+            stored["incompleteSourceWriteCount"] = incompleteSourceWrites;
             stored["structuredWriteCounts"] = new Dictionary<string, object>
             {
                 ["memoryWrites"] = memoryWrites == null ? 0 : memoryWrites.Count,
@@ -4355,6 +4463,10 @@ ORDER BY ts DESC LIMIT 400;",
                     ["method"] = ReadString(compact, "method", "deterministic"),
                     ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
                     ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                    ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
+                    ["selectedSourceIndices"] = compact.TryGetValue("selectedSourceIndices", out object selectedIndices) ? selectedIndices : Array.Empty<int>(),
+                    ["retryable"] = ReadBool(compact, "retryable", false),
+                    ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
                     ["sourceHash"] = MemorySourceHash(rows), ["processingVersion"] = MemoryPrecisionVersion,
                     ["sourceItemCount"] = rows.Count,
                     ["correlationId"] = summaryCorrelationId
@@ -4431,7 +4543,9 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
                     ["sourceEventIds"] = sourceEvents,
                     ["sourceMemoryCount"] = sourceMemoryIds.Count,
                     ["method"] = ReadString(compact, "method", "deterministic"),
-                    ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete")
+                    ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
+                    ["compactionDiagnostic"] = ReadDictionary(compact, "compactionDiagnostic") ?? TestDict(),
+                    ["retryable"] = ReadBool(compact, "retryable", true)
                 });
                 if (created.Count >= maxGroups)
                 {
@@ -4447,14 +4561,17 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
                 ["npcId"] = npcId,
                 ["summaryCount"] = created.Count,
                 ["compactionStatus"] = created.Any(r => ReadString(r, "compactionStatus", "") == "incomplete") ? "incomplete" : "complete",
+                ["retryable"] = created.Any(r => ReadString(r, "compactionStatus", "") == "incomplete" && ReadBool(r, "retryable", true)),
                 ["summaries"] = created
             };
         }
 
         private static Dictionary<string, object> BuildMiddleTermSummary(Dictionary<string, object> settings, string npcId, string groupKey,
             List<Dictionary<string, object>> rows, int sourceCharacterLimit = 60000, string sourceInstructions = "",
-            string correlationId = "")
+            string correlationId = "", Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
+            if (responder != null && string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+                throw new InvalidOperationException("Compaction response fixtures require isolated Verification Lab state.");
             int maxChars = Math.Max(500, Math.Min(5000, ReadInt(settings, "memoryConsolidationMaxSummaryChars", 1800)));
             bool dialogueDerived = (groupKey ?? "").StartsWith("conversation:", StringComparison.OrdinalIgnoreCase)
                 || (groupKey ?? "").StartsWith("scene:", StringComparison.OrdinalIgnoreCase);
@@ -4474,13 +4591,25 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
                 .ToList();
             sourceCharacterLimit = Math.Max(10000, Math.Min(120000, sourceCharacterLimit));
             string joined = BuildBalancedSummarySource(sourceText, sourceCharacterLimit);
-            List<string> topics = TryExtractMinimeTopics(settings, joined, ReadInt(settings, "minimeMaxTopics", 5));
+            List<string> topics = BuildMemorySummaryTopics(rows.OrderBy(row => ReadLong(row, "ts", 0)), ReadInt(settings, "minimeMaxTopics", 5));
             bool useLlm = ReadBool(settings, "useMemoryLlmForConsolidation", true);
-            if (useLlm && joined == string.Join("\n---\n", sourceText) && LlmProviderConfigured(settings))
+            var complete = AcceptMemorySummarySelection(TestDict("sourceIndices", Enumerable.Range(1, sourceText.Count).ToArray()),
+                rows, sourceText, topics, maxChars);
+            if (complete != null) return MemoryCompactionOutcome(complete, "complete_sources_fit_locally");
+            var retained = ExtractiveMemoryFallback(sourceText, topics);
+            if (!sourceText.Any() || !Enumerable.Range(1, sourceText.Count)
+                .Any(i => MemorySummarySelectionText(sourceText, new List<int> { i }).Length <= maxChars))
+                return MemoryCompactionOutcome(retained, "no_record_fits_summary_budget");
+            if (!useLlm) return MemoryCompactionOutcome(retained, "generation_disabled");
+            if (joined != string.Join("\n---\n", sourceText))
+                return MemoryCompactionOutcome(retained, "source_input_exceeds_budget");
+            if (responder == null && !LlmProviderConfigured(settings))
+                return MemoryCompactionOutcome(retained, "provider_not_configured");
             {
-                Dictionary<string, object> llm = ChatWithLlm(new Dictionary<string, object>
+                var request = new Dictionary<string, object>
                 {
                     ["requestType"] = "memory",
+                    ["singleProviderAttempt"] = true,
                     ["correlationId"] = correlationId ?? string.Empty,
                     ["heroStringId"] = npcId,
                     ["temperature"] = 0.1d,
@@ -4495,47 +4624,18 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
                         new Dictionary<string, object>
                         {
                             ["role"] = "user",
-                            ["content"] = "Compress these related memory records into one searchable middle-term memory under " + maxChars + " characters. Return {\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.0}.\nGroup: " + groupKey
+                            ["content"] = "Select whole numbered source records for a compact, source-linked conversation digest under " + maxChars + " characters, including a 180-character coverage notice. Return {\"sourceIndices\":[1,3]}. Use only existing one-based record numbers, without duplicates, at most 16. Do not write a paraphrase, new facts or clipped quotations. Preserve answers together with their questions, later corrections and outcomes; retain uncertainty and speaker ownership. Prefer useful enduring context over repeated stage directions. If no safe useful selection fits, return {\"sourceIndices\":[]}; originals will remain available. A selection is partial coverage, never proof that omitted details did not occur.\nGroup: " + groupKey
                                 + "\nRecord count: " + sourceText.Count.ToString(CultureInfo.InvariantCulture)
                                 + (string.IsNullOrWhiteSpace(sourceInstructions) ? "" : "\nSource rules: " + sourceInstructions.Trim())
-                                + "\nRecords (chronological):\n" + joined
+                                + "\nRecords (chronological):\n" + string.Join("\n---\n", sourceText.Select((text, index) =>
+                                    "Record " + (index + 1).ToString(CultureInfo.InvariantCulture) + " (" + text.Length + " characters):\n" + text))
                         }
                     },
                     ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
-                });
-                Dictionary<string, object> parsed = ReadBool(llm, "ok", false) ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
-                string summary = ReadString(parsed, "summary", "");
-                if (!string.IsNullOrWhiteSpace(summary) && summary.Trim().Length <= maxChars
-                    && joined == string.Join("\n---\n", sourceText))
-                {
-                    return new Dictionary<string, object>
-                    {
-                        ["summary"] = dialogueDerived
-                            ? EnsureConversationSummaryProvenance(summary.Trim(), maxChars)
-                            : summary.Trim(),
-                        ["tags"] = MergeStringLists(ReadStringList(parsed, "tags"), topics),
-                        ["confidence"] = ClampDouble(ReadDouble(parsed, "confidence", 0.8d), 0d, 1d),
-                        ["method"] = "memory_llm",
-                        ["coverageComplete"] = MemorySummaryCoversSources(summary, rows),
-                        ["compactionStatus"] = "complete",
-                        ["sourceHash"] = MemorySourceHash(rows),
-                        ["processingVersion"] = MemoryPrecisionVersion
-                    };
-                }
+                };
+                var llm = responder == null ? ChatWithLlm(request) : responder(request);
+                return EvaluateMemoryCompactionResponse(llm, rows, sourceText, topics, maxChars, dialogueDerived);
             }
-
-            List<string> preferred = rows
-                .Where(row => !ReadString(row, "memory_type", "").Equals("event", StringComparison.OrdinalIgnoreCase))
-                .Select(row => ReadString(row, "summary", "").Trim())
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (preferred.Count == 0)
-            {
-                preferred = sourceText;
-            }
-
-            return ExtractiveMemoryFallback(sourceText, topics);
         }
 
         private static string EnsureConversationSummaryProvenance(string summary, int maxChars)
@@ -4593,6 +4693,9 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
             List<Dictionary<string, object>> summaries = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> temporalKnowledge = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> nativeWorldHistory = new List<Dictionary<string, object>>();
+            var recentWindow = new List<MemoryEvidence>();
+            var recentWindowDiagnostics = TestDict();
+            var recallAudit = TestDict();
             List<string> warnings = new List<string>();
             List<string> sourceEventIds = new List<string>();
             Dictionary<string, object> settings = settingsOverride ?? LoadSettings();
@@ -4606,6 +4709,10 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload_jso
             string precisionMode;
             using (var connection = OpenCampaignConnection(campaignId)) precisionMode = MemoryPrecisionMode(connection, settings);
             string precisionQuery = ReadString(routeContext, "memoryQueryText", topic);
+            // Scene state is grounding for the writer, not the player's historical
+            // question. Keep lexical routing and semantic retrieval on that same
+            // question even for callers that supplied a combined legacy topic.
+            topic = precisionQuery;
             if (precisionMode == "precision")
             {
                 var precise = BuildPrecisionMemoryPacket(campaignId, npcId, playerId, locationId, precisionQuery, routeContext, settings, false);
@@ -4750,7 +4857,15 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 {
                     Dictionary<string, object> targetedHistory = SearchExactConversationHistory(connection, npcId, topic,
                         retrievalRoute, ReadBool(routeContext, "deferContinuityAllocation", false) ? 24000 : 2400,
-                        semanticRetrieval, currentConversationSessionId, rawTurnLimit, knowledge);
+                        semanticRetrieval, currentConversationSessionId, rawTurnLimit, knowledge, routeContext);
+                    recallAudit = TestDict("schema", "reign-memory-recall-v1", "query", topic,
+                        "rankingPolicy", ReadString(targetedHistory, "rankingPolicy", "recent_history"),
+                        "matchedTurnIds", ReadStringList(targetedHistory, "matchedTurnIds"),
+                        "anchorTurnIds", ReadStringList(targetedHistory, "anchorTurnIds"),
+                        "expandedTurnIds", ReadStringList(targetedHistory, "expandedTurnIds"),
+                        "candidateLimit", ReadInt(targetedHistory, "candidateLimit", 0),
+                        "retainedCandidateCount", ReadInt(targetedHistory, "retainedCandidateCount", 0),
+                        "sourceSessionIds", ReadStringList(targetedHistory, "sourceSessionIds"));
                     string targetedText = ReadString(targetedHistory, "text", "");
                     if (!string.IsNullOrWhiteSpace(targetedText))
                     {
@@ -4762,7 +4877,11 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                         {
                             exactHistory = targetedHistory;
                         }
-                        else if (addsOlderEvidence)
+                        // IDs present in the legacy recent block do not prove
+                        // final delivery: that unprotected block can be reduced
+                        // by the writer's shared allocator. Preserve targeted
+                        // whole records independently until final serialization.
+                        else if (addsOlderEvidence || ReadBool(routeContext, "deferContinuityAllocation", false))
                         {
                             exactHistory = new Dictionary<string, object>
                             {
@@ -4787,6 +4906,8 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                     knowledge, topic, retrievalRoute, semanticRetrieval,
                     ReadBool(ReadDictionary(routeContext, "identityView"), "knowsIdentity", false));
                 timingPhases["nativeWorldHistoryMs"] = phaseTimer.ElapsedMilliseconds;
+                recentWindow = LoadRecentConversationWindow(connection, PlanMemoryQuery(npcId, playerId, precisionQuery, routeContext),
+                    routeContext, knowledge, settings, recentWindowDiagnostics);
             }
             phaseTimer.Restart();
 
@@ -4799,7 +4920,13 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             minimeRerank["applied"] = ReadBool(semanticRetrieval, "applied", false);
             minimeRerank["method"] = "persistent_vector_index_plus_deterministic_rank";
             minimeRerank["candidateCount"] = summaries.Count + memories.Count + beliefs.Count + comprehension.Count;
-            summaries = OrderRerankedRows(summaries, "updated_ts").Take(8).ToList();
+            using (var observerConnection = OpenCampaignConnection(campaignId))
+            {
+                memories = ProjectRetrievedConversationMemories(observerConnection, memories, knowledge);
+                summaries = ProjectRetrievedConversationMemories(observerConnection, summaries, knowledge);
+            }
+            var recentSummaryIds = recentWindow.Where(e => e.Kind == "recent_summary").Select(e => e.SourceId).ToHashSet(StringComparer.Ordinal);
+            summaries = OrderRerankedRows(summaries, "updated_ts").Where(row => !recentSummaryIds.Contains(ReadString(row, "summary_id", ""))).Take(8).ToList();
             memories = OrderRerankedRows(memories, "ts").Take(16).ToList();
             beliefs = OrderRerankedRows(beliefs, "ts").Take(8).ToList();
             comprehension = OrderRerankedRows(comprehension, "ts").Take(6).ToList();
@@ -4933,11 +5060,22 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             {
                 packet = packet.TrimEnd() + "\n\nExact conversation source (use for precise continuity; do not invent omitted lines):\n" + exactText;
             }
+            using (var correspondenceConnection = OpenCampaignConnection(campaignId))
+                foreach (var letter in LoadCorrespondenceMemory(correspondenceConnection, npcId, playerId, precisionQuery, routeContext, knowledge))
+                {
+                    packet += "\n\n" + RenderContinuityRecord(letter.SourceId, letter.Kind, letter.Owner, letter.Session, letter.Day, 119, true, letter.Text);
+                    sourceEventIds.Add(letter.SourceId);
+                }
+            var recentPacket = SelectPrecisionEvidence(recentWindow, 2000, PlanMemoryQuery(npcId, playerId, precisionQuery, routeContext).SuppliedSources);
+            if (recentPacket.Text.Length > 0) packet += "\n\n" + recentPacket.Text;
+            packet = ProtectMemoryRecallSourcePolicy(npcId) + "\n\n" + packet;
             timingPhases["rankingAndFormattingMs"] = phaseTimer.ElapsedMilliseconds;
             timer.Stop();
             Dictionary<string, object> memoryPacketResult = new Dictionary<string, object>
             {
                 ["memoryPacket"] = packet,
+                ["recallAudit"] = recallAudit,
+                ["recentMemoryWindow"] = ReadDictionary(recentWindowDiagnostics, "recentMemoryWindow"),
                 ["retrievalRoute"] = retrievalRoute,
                 ["semanticRetrieval"] = new Dictionary<string, object>
                 {
@@ -4949,7 +5087,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 },
                 ["minimeTopics"] = minimeTopics,
                 ["minimeRerank"] = minimeRerank,
-                ["sourceSummaryIds"] = summaries.Select(row => ReadString(row, "summary_id", "")).Where(id => !string.IsNullOrWhiteSpace(id)).ToList(),
+                ["sourceSummaryIds"] = summaries.Select(row => ReadString(row, "summary_id", "")).Concat(recentSummaryIds).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList(),
                 ["matchedTurnIds"] = ReadStringList(exactHistory, "matchedTurnIds"),
                 ["expandedTurnIds"] = ReadStringList(exactHistory, "expandedTurnIds"),
                 ["exactHistorySessionId"] = ReadString(exactHistory, "sessionId", ""),
@@ -4962,7 +5100,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 ["counts"] = new Dictionary<string, object>
                 {
                     ["memories"] = memories.Count,
-                    ["middleTermSummaries"] = summaries.Count,
+                    ["middleTermSummaries"] = summaries.Count + recentSummaryIds.Count,
                     ["relationships"] = relationships.Count,
                     ["obligations"] = obligations.Count,
                     ["beliefs"] = beliefs.Count,
@@ -4996,7 +5134,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 throw new InvalidOperationException("Unknown memory candidate table.");
             string where = string.IsNullOrWhiteSpace(extraWhere) ? "1=1" : "(" + extraWhere + ")";
             where += " AND COALESCE(payload_json,'{}') NOT LIKE '%\"continuityQuarantined\":true%'";
-            where += " AND " + MemoryEligibilitySql(table);
+            where += " AND " + MemoryEligibilitySql(table) + " AND " + MemorySourceTimelineSql(table);
             string order = table == "summaries" ? "updated_ts" : "ts";
             if(queryTerms != null && queryTerms.Count>0)
             {
@@ -5016,8 +5154,8 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 var rows = QuerySql(connection, "SELECT * FROM " + table + " WHERE " + where
                     + " ORDER BY " + order + " DESC," + key + " LIMIT $batch OFFSET $offset;",
                     new Dictionary<string, object> { ["observer"] = knowledge?.NpcId ?? "", ["batch"] = batch, ["offset"] = offset,
-                        ["query"] = BuildFtsQuery(queryTerms ?? new List<string>()) });
-                result.AddRange(rows.Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge)).Take(Math.Max(1, limit) - result.Count));
+                        ["query"] = BuildFtsQuery(queryTerms ?? new List<string>()), ["timeline"] = knowledge?.TimelineId ?? "" });
+                result.AddRange(rows.Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge, connection)).Take(Math.Max(1, limit) - result.Count));
                 if (rows.Count < batch) break;
                 offset += batch;
             }
@@ -5059,11 +5197,11 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
 
             return QuerySql(connection, "SELECT * FROM " + table + " WHERE status='active' AND " + idColumn
                     + " IN (" + string.Join(",", placeholders.ToArray()) + ");", parameters)
-                .Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge))
+                .Where(row => KnowledgeRowVisibleToNpc(table, row, knowledge, connection))
                 .ToList();
         }
 
-        private static bool KnowledgeRowVisibleToNpc(string table, Dictionary<string, object> row, KnowledgeAccessContext knowledge)
+        private static bool KnowledgeRowVisibleToNpc(string table, Dictionary<string, object> row, KnowledgeAccessContext knowledge, ReignDbConnection connection = null)
         {
             if (row == null)
             {
@@ -5072,7 +5210,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             if (ReadBool(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "continuityQuarantined", false)) return false;
 
             knowledge = knowledge ?? new KnowledgeAccessContext();
-            if (!MemoryTimeVisible(row, knowledge)) return false;
+            if (!MemoryTimeVisible(row, knowledge, connection)) return false;
             string id = knowledge.NpcId;
             if (!knowledge.HasNpc)
             {
@@ -5126,6 +5264,8 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             public string NpcId = "";
             public string TimelineId = "";
             public double WorldDay = double.MaxValue;
+            public long AsOfAcceptedSequence = long.MaxValue;
+            public long AsOfTimestamp = long.MaxValue;
             public string PlayerId = "";
             public string PlayerName = "";
             public string PlayerClanId = "";
@@ -5163,6 +5303,8 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             KnowledgeAccessContext context = new KnowledgeAccessContext
             {
                 TimelineId = ReadString(source, "timelineId", ""),
+                AsOfAcceptedSequence = ReadLong(source, "memoryAsOfAcceptedSequence", long.MaxValue),
+                AsOfTimestamp = ReadLong(source, "memoryAsOfTimestamp", long.MaxValue),
                 WorldDay = ReadDouble(source, "worldDay", ReadDouble(source, "currentWorldDay", double.MaxValue)),
                 NpcId = NormalizeKnowledgeId(FirstNonEmpty(npcId, ReadFirstString(source, "npcId", "heroStringId", "heroId", "speakerHeroStringId", "characterId"), ReadFirstString(profile, "npcId", "heroStringId", "heroId"))),
                 PlayerId = NormalizeKnowledgeId(FirstNonEmpty(playerId, ReadFirstString(source, "playerId", "mainHeroStringId", "playerHeroStringId"), ReadFirstString(profile, "mainHeroStringId", "playerHeroStringId"))),
@@ -5696,12 +5838,12 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 var rows = QuerySql(connection, "SELECT m.*,ts_rank(to_tsvector('simple',COALESCE(f.text,'') || ' ' || COALESCE(f.tags,'') || ' ' || COALESCE(f.entities,'')),websearch_to_tsquery('simple',$query)) AS lexical_rank"
                     + " FROM " + ftsTable + " f JOIN " + table + " m ON m." + key + "=f." + key
                     + " WHERE m.status='active' AND to_tsvector('simple',COALESCE(f.text,'') || ' ' || COALESCE(f.tags,'') || ' ' || COALESCE(f.entities,'')) @@ websearch_to_tsquery('simple',$query)"
-                    + (knowledge == null ? "" : " AND " + MemoryEligibilitySql(table, "m"))
+                    + (knowledge == null ? "" : " AND " + MemoryEligibilitySql(table, "m") + " AND " + MemorySourceTimelineSql(table, "m"))
                     + " ORDER BY lexical_rank DESC,m." + key + " LIMIT 128 OFFSET $offset;",
-                    new Dictionary<string, object> { ["query"] = query, ["observer"] = knowledge?.NpcId ?? "", ["offset"] = offset });
+                    new Dictionary<string, object> { ["query"] = query, ["observer"] = knowledge?.NpcId ?? "", ["offset"] = offset, ["timeline"] = knowledge?.TimelineId ?? "" });
                 foreach (var row in rows)
                 {
-                    if (knowledge != null && !KnowledgeRowVisibleToNpc(table, row, knowledge)) continue;
+                    if (knowledge != null && !KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
                     result.Add(ReadString(row, key, ""));
                     if (result.Count >= Math.Max(1, limit)) return result;
                 }
@@ -6101,6 +6243,17 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             row = row ?? new Dictionary<string, object>();
             Dictionary<string, object> payload = TryParseJsonObject(ReadString(row, "payload_json", "")) ?? new Dictionary<string, object>();
             List<string> provenance = new List<string>();
+            if (ReadString(payload, "sourceValidation", "") == "incomplete")
+            {
+                var originals = ReadDictionaryList(payload, "originalSources");
+                if (originals.Count > 0)
+                    text = "Summary incomplete; use the original attributed evidence instead:\n" + string.Join("\n", originals.Select(s =>
+                        "source=" + ReadString(s, "turnId", "") + "; speaker=" + ReadString(s, "speakerId", "") + ": " + ReadString(s, "text", "")));
+                else provenance.Add("incomplete source validation; do not treat summary as certain");
+            }
+            var sourceEvidence = ReadDictionary(payload, "sourceEvidence");
+            if (sourceEvidence != null)
+                provenance.Add("evidence=" + ReadString(sourceEvidence, "evidenceType", "unverified_summary") + "; speaker=" + ReadString(sourceEvidence, "speakerId", "unknown"));
             double worldDay = ReadDouble(row, "world_day", ReadDouble(row, "created_day", ReadDouble(payload, "worldDay", ReadDouble(payload, "world_day", 0d))));
             if (worldDay > 0d)
             {
@@ -6244,7 +6397,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             int safeMaxTopics = Math.Max(1, Math.Min(12, maxTopics <= 0 ? 5 : maxTopics));
             // Topic hints are lexical routing metadata, not a semantic inference task.
             // Keeping this local prevents a worker round trip from serializing the foreground path.
-            return MemoryQueryTerms(LimitText(text, 1800)).Take(safeMaxTopics).ToList();
+            return BuildMemorySummaryTopics(new[] { TestDict("summary", text ?? "") }, safeMaxTopics);
         }
 
         private static Dictionary<string, object> TryRerankMemoryCandidates(
@@ -6842,83 +6995,6 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 ["timing"] = response["timing"]
             });
             return response;
-        }
-
-        private static Dictionary<string, object> TrySelectContextPullsWithLlm(
-            Dictionary<string, object> settings,
-            string mode,
-            string campaignId,
-            string heroId,
-            string playerText,
-            string sceneContext,
-            List<string> available,
-            string correlationId)
-        {
-            string selectorModel = ReadString(settings, "selectorModel", "");
-            if (string.IsNullOrWhiteSpace(selectorModel))
-            {
-                return null;
-            }
-
-            if (!LlmProviderConfigured(settings))
-            {
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "selector_api_not_configured" };
-            }
-
-            List<Dictionary<string, object>> availablePulls = ContextPullCatalog(available);
-            string prompt = "Mode: " + mode
-                + "\nCampaign: " + campaignId
-                + "\nHero id: " + heroId
-                + "\nScene context:\n" + (string.IsNullOrWhiteSpace(sceneContext) ? "none" : sceneContext)
-                + "\n\nPlayer message:\n" + (playerText ?? "")
-                + "\n\nAvailable context pull prompts:\n" + Json.Serialize(availablePulls)
-                + "\n\nReturn JSON exactly like {\"selectedPulls\":[{\"id\":\"nearby_settlements\",\"reason\":\"player asked about nearby towns\",\"arguments\":{\"radius\":80,\"maxCount\":8}}]}. Return an empty selectedPulls array for greetings or when no extra pull is needed.";
-
-            Dictionary<string, object> selectorLlmRequest = new Dictionary<string, object>
-            {
-                ["requestType"] = "context_selector",
-                ["campaignId"] = campaignId,
-                ["correlationId"] = correlationId,
-                ["heroStringId"] = heroId,
-                ["model"] = selectorModel,
-                ["temperature"] = 0d,
-                ["maxTokens"] = 900,
-                ["messages"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object> { ["role"] = "system", ["content"] = LoadPromptTemplate("context_selector_system.txt") },
-                    new Dictionary<string, object> { ["role"] = "user", ["content"] = prompt }
-                },
-                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
-            };
-            Dictionary<string, object> llm = ChatWithLlm(selectorLlmRequest);
-            llm = WithDiagnosticTransformation("Answer structure and format repair", llm, () => RetryMalformedStructuredResponse(llm, selectorLlmRequest, campaignId, correlationId, "context_selector", heroId, ""));
-
-            if (!ReadBool(llm, "ok", false))
-            {
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = false,
-                    ["error"] = "selector_llm_failed",
-                    ["llm"] = llm
-                };
-            }
-
-            Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>();
-            List<Dictionary<string, object>> selected = NormalizeSelectedContextPulls(ReadDictionaryList(parsed, "selectedPulls"), available);
-            if (selected.Count == 0)
-            {
-                selected = NormalizeSelectedContextPulls(ReadDictionaryList(parsed, "pulls"), available);
-            }
-
-            return new Dictionary<string, object>
-            {
-                ["ok"] = true,
-                ["model"] = selectorModel,
-                ["selectedPulls"] = selected,
-                ["durationMs"] = ReadLong(llm, "durationMs", 0),
-                ["requestChars"] = ReadLong(llm, "requestChars", 0),
-                ["responseChars"] = ReadLong(llm, "responseChars", 0)
-            };
         }
 
         private static List<Dictionary<string, object>> DeterministicContextPullSelection(string mode, string playerText, string sceneContext, List<string> available)
@@ -8549,6 +8625,12 @@ The previous attempt did not complete a JSON object within its output budget.
                 all = all.Where(x => string.Equals(ReadString(x, "channel", ""), "ambassador_official", StringComparison.OrdinalIgnoreCase)
                     && (string.IsNullOrWhiteSpace(postingId) || string.Equals(ReadString(x, "postingId", ""), postingId, StringComparison.OrdinalIgnoreCase))).ToList();
             }
+            all = ReadOriginalConversationHistory(campaignId, payload, heroId, "", limit, all);
+            if (!officialMode)
+            {
+                all.AddRange(PlayerAttentionHistory(campaignId, heroId, payload));
+                all = all.OrderBy(line => ReadLong(line, "ts", ReadLong(line, "timestamp", 0))).ToList();
+            }
             int start = Math.Max(0, all.Count - limit);
             List<Dictionary<string, object>> lines = all.Skip(start).ToList();
             foreach (Dictionary<string, object> line in lines)
@@ -8571,7 +8653,7 @@ The previous attempt did not complete a JSON object within its output budget.
         private static Dictionary<string, object> DialogueRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            return RunCodexConversationScope(payload, () => DialogueRespondCore(payload));
+            return RunPlayerActionTurn(payload, () => RunCodexConversationScope(payload, () => DialogueRespondCore(payload)));
         }
 
         private static Dictionary<string, object> DialogueRespondCore(Dictionary<string, object> payload)
@@ -8636,10 +8718,13 @@ The previous attempt did not complete a JSON object within its output budget.
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
             }
 
-            if (string.IsNullOrWhiteSpace(playerText))
+            bool npcOpening = PrepareIndividualNpcOpening(campaignId, heroId, payload);
+            if (string.IsNullOrWhiteSpace(playerText) && !npcOpening)
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "playerText is required." };
             }
+            ApplyPlayerInputAudienceToPayload(payload, heroId);
+            playerText = ReadString(payload, "playerText", "");
             if (officialAmbassador)
             {
                 Dictionary<string, object> officialContextError = ValidateOfficialAmbassadorContext(campaignId, payload);
@@ -8677,7 +8762,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 ["guardedPromptOverride"] = guardedPromptOverrideEvidence
             });
 
-            string promptPlayerText = playerPromptLabel == "pull_out"
+            string promptPlayerText = npcOpening ? IndividualNpcOpeningCue : playerPromptLabel == "pull_out"
                 ? LoadPromptTemplate("pull_out.txt")
                 : playerText;
             payload["playerPromptLabel"] = playerPromptLabel;
@@ -8798,7 +8883,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     selectedContextPulls, contextBundles);
             }
             Dictionary<string, object> catalog = ActionCatalog();
-            List<Dictionary<string, object>> compactActionCatalog = CompactActionCatalog(catalog);
+            List<Dictionary<string, object>> compactActionCatalog = UsesStructuredActions(payload) ? new List<Dictionary<string, object>>() : CompactActionCatalog(catalog);
             contextLoadMs = phaseTimer.ElapsedMilliseconds;
             WriteAudit(campaignId, correlationId, "server", "dialogue", "context.loaded", heroId, "", "", "completed", contextLoadMs, "Loaded character stack, memory, context bundles, and action catalog.", new Dictionary<string, object>
             {
@@ -8872,26 +8957,11 @@ The previous attempt did not complete a JSON object within its output budget.
             });
 
             phaseTimer.Restart();
-            Dictionary<string, object> dialogueLlmRequest = new Dictionary<string, object>
-            {
-                ["requestType"] = "dialogue",
-                ["campaignId"] = campaignId,
-                ["correlationId"] = correlationId,
-                ["heroStringId"] = heroId,
-                ["playerText"] = playerText,
-                ["messages"] = messages,
-                ["promptEnvelope"] = promptEnvelope.Diagnostics,
-                ["promptCacheEligible"] = true,
-                ["temperature"] = Math.Min(0.5d, ReadDouble(settings, "temperature", 0.7d)),
-                // Dialogue JSON carries the visible reply plus private decision,
-                // relationship, memory, identity, and action metadata. A 2,000
-                // token ceiling repeatedly truncated otherwise valid first calls
-                // and forced a complete prompt resend solely to close the JSON.
-                ["maxTokens"] = StructuredDialogueResponseMaxTokens(settings),
-                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
-            };
+            Dictionary<string, object> dialogueLlmRequest = BuildConversationGenerationRequest(
+                settings, promptEnvelope, campaignId, correlationId, heroId, playerText, false);
             AttachCodexAuthoritativeConversationMetadata(dialogueLlmRequest, payload, campaignId, heroId, "dialogue", requestedConversationSessionId,
                 identityView, profile, state, relationships, summary, conversationSceneState, memories, contextBundles, priorLines, promptPlayerText);
+            AttachStructuredActionResponseContract(dialogueLlmRequest, payload);
             Dictionary<string, object> llm = ChatWithLlm(dialogueLlmRequest);
             llm = WithDiagnosticTransformation("Answer structure and format repair", llm, () => RetryMalformedStructuredResponse(llm, dialogueLlmRequest, campaignId, correlationId, "dialogue", heroId, ""));
             if (!ReadBool(llm, "visibleRepairFailure", false))
@@ -8910,13 +8980,20 @@ The previous attempt did not complete a JSON object within its output budget.
                 campaignId, correlationId, "dialogue", heroId, heroName, playerName, ""));
             if (!actionAcceptanceCooperation && !ReadBool(llm, "visibleRepairFailure", false))
                 llm = WithDiagnosticTransformation("Negotiation and NPC agency", llm, () => EnforceConversationAgencyResponse(llm, dialogueLlmRequest, motiveDecision, payload,
-                    campaignId, correlationId, "dialogue", heroId, persist: !governmentCertificationMemoryIsolation,
+                    campaignId, correlationId, "dialogue", heroId, persist: false,
                     validateRepair: candidate => ValidateAgencyRepairedResponse(candidate, motiveDecision, payload, identityView, priorLines, heroId, heroName, playerName)));
+            llm = EnforceApproachOpening(llm, dialogueLlmRequest, payload,
+                validateRepair: candidate => ValidateAgencyRepairedResponse(candidate, motiveDecision, payload, identityView, priorLines, heroId, heroName, playerName));
+            llm = EnsureConversationDelivery(llm);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return ConversationAgencyReplayResponse(llm, heroId);
+            PreserveConversationVerification(payload, llm);
             RecordCodexFinalRepairEvidence(llm);
             llmMs = phaseTimer.ElapsedMilliseconds;
             if (!ReadBool(llm, "ok", false))
             {
+                llm["inputRecovery"] = RetainUnansweredPlayerContribution(campaignId, payload, heroId,
+                    FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "playerId", "mainHeroStringId"), ReadFirstString(profile, "mainHeroStringId")),
+                    playerName, heroName, playerText);
                 totalTimer.Stop();
                 Dictionary<string, object> failedTiming = WithNpcRelationshipTiming(
                     DialogueTiming(totalTimer.ElapsedMilliseconds, upsertMs,
@@ -8942,6 +9019,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     ["ok"] = false,
                     ["stage"] = "llm",
                     ["error"] = LlmFailureForDisplay(llm),
+                    ["conversationRecovery"] = ReadDictionary(llm, "conversationRecovery"), ["inputRecovery"] = ReadDictionary(llm, "inputRecovery"),
                     ["llm"] = llm,
                     ["timing"] = failedTiming
                 };
@@ -8982,12 +9060,11 @@ The previous attempt did not complete a JSON object within its output budget.
             List<Dictionary<string, object>> recallConsistencyRepairs;
             reply = RepairVisibleExactRecallIdentifiers(playerText, reply, parsed, messages, out recallConsistencyRepairs);
             if (!governmentCertificationMemoryIsolation && !agencyVisibleFailure)
-                reply = ApplyConversationDrinking(campaignId, heroId, payload, profile, characteristics, parsed, reply);
-            Dictionary<string, object> conversationSceneResolution = FinalizeConversationSceneState(
-                campaignId, payload, heroId, playerText, reply, ReadString(payload, "mode", "dialogue"), parsed);
+                reply = ApplyConversationDrinking(campaignId, heroId, payload, profile, characteristics, parsed, reply, persist: false);
+            Dictionary<string, object> conversationSceneResolution = TestDict("status", "pending_acceptance");
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            string decisionId = Guid.NewGuid().ToString("N");
+            string decisionId = AcceptedConversationEventId(campaignId, heroId, payload);
             string emotion = parsed == null ? "" : ReadString(parsed, "emotion", "");
             string intent = parsed == null ? "" : ReadString(parsed, "intent", "");
             string relationshipSignal = parsed == null ? "" : ReadFirstString(parsed, "relationshipSignal", "relationship_signal");
@@ -8996,9 +9073,12 @@ The previous attempt did not complete a JSON object within its output budget.
                 FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "playerId", "mainHeroStringId"), ReadFirstString(profile, "mainHeroStringId", "playerHeroStringId")),
                 ReadString(payload, "sceneTurnId", ""));
             if (agencyVisibleFailure) relationshipAssessments.Clear();
-            Dictionary<string, object> actionGate = NormalizeActionGate(parsed == null ? null : ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate"), playerText, reply);
+            Dictionary<string, object> actionGate = npcOpening
+                ? new Dictionary<string, object> { ["allowed"] = false, ["reason"] = "npc_approach_opening" }
+                : NormalizeActionGate(parsed == null ? null : ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate"), playerText, reply);
             bool actionAcceptanceGateRepaired = EnforceActionAcceptanceCooperationGate(
-                actionAcceptanceCooperation, actionGate, playerText, ref reply);
+                actionAcceptanceCooperation, actionGate, playerText, ref reply,
+                UsesStructuredActions(payload));
             Dictionary<string, object> chancellorDecision = NormalizeChancellorDecision(
                 parsed, payload, playerText, reply, correlationId);
             Dictionary<string, object> nobleDocketTurn = NormalizeNobleDocketTurn(
@@ -9017,7 +9097,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     ? NormalizeAndPersistConversationSocialSignals(
                         campaignId, parsed, payload, heroId, socialPlayerId,
                         playerText, reply, conceptionGate, decisionId,
-                        socialWorldDay)
+                        socialWorldDay, persist: false)
                     : new Dictionary<string, object>
                     {
                         ["ok"] = true,
@@ -9037,21 +9117,21 @@ The previous attempt did not complete a JSON object within its output budget.
             List<Dictionary<string, object>> obligationWrites = parsed == null ? new List<Dictionary<string, object>>() : ReadDictionaryList(parsed, "obligationWrites").Concat(ReadDictionaryList(parsed, "obligation_writes")).ToList();
             List<Dictionary<string, object>> comprehensionWrites = parsed == null ? new List<Dictionary<string, object>>() : ReadDictionaryList(parsed, "comprehensionWrites").Concat(ReadDictionaryList(parsed, "comprehension_writes")).ToList();
             List<Dictionary<string, object>> dynamicCharacteristicWrites = NormalizeDynamicCharacteristicWrites(parsed, heroId, profile, payload, reply);
-            if (agencyVisibleFailure) dynamicCharacteristicWrites.Clear();
+            if (agencyVisibleFailure || npcOpening) dynamicCharacteristicWrites.Clear();
             List<Dictionary<string, object>> roleWriteRejections = new List<Dictionary<string, object>>();
             memoryWrites = FilterConversationRoleMisattributions(memoryWrites, payload, playerText, "memory", roleWriteRejections);
             beliefWrites = FilterConversationRoleMisattributions(beliefWrites, payload, playerText, "belief", roleWriteRejections);
             obligationWrites = FilterConversationRoleMisattributions(obligationWrites, payload, playerText, "obligation", roleWriteRejections);
             comprehensionWrites = FilterConversationRoleMisattributions(comprehensionWrites, payload, playerText, "comprehension", roleWriteRejections);
-            memoryWrites = FilterRoleplayFeedbackWrites(memoryWrites, "memory", roleWriteRejections);
-            beliefWrites = FilterRoleplayFeedbackWrites(beliefWrites, "belief", roleWriteRejections);
-            obligationWrites = FilterRoleplayFeedbackWrites(obligationWrites, "obligation", roleWriteRejections);
-            comprehensionWrites = FilterRoleplayFeedbackWrites(comprehensionWrites, "comprehension", roleWriteRejections);
+            memoryWrites = FilterRoleplayFeedbackWrites(memoryWrites, "memory", roleWriteRejections, payload, heroId, campaignId);
+            beliefWrites = FilterRoleplayFeedbackWrites(beliefWrites, "belief", roleWriteRejections, payload, heroId, campaignId);
+            obligationWrites = FilterRoleplayFeedbackWrites(obligationWrites, "obligation", roleWriteRejections, payload, heroId, campaignId);
+            comprehensionWrites = FilterRoleplayFeedbackWrites(comprehensionWrites, "comprehension", roleWriteRejections, payload, heroId, campaignId);
             Dictionary<string, object> stateUpdates = parsed == null
                 ? new Dictionary<string, object>()
                 : NormalizeSafeConversationStateUpdates(
                     ReadDictionary(parsed, "stateUpdates") ?? ReadDictionary(parsed, "state_updates"),
-                    roleWriteRejections);
+                    roleWriteRejections, payload, heroId, campaignId);
             Dictionary<string, object> politicalRiskPosture =
                 ReadDictionary(motiveDecision, "politicalRiskPosture")
                 ?? new Dictionary<string, object>();
@@ -9094,8 +9174,9 @@ The previous attempt did not complete a JSON object within its output budget.
                 dynamicCharacteristicWrites.Clear();
                 stateUpdates.Clear();
             }
-            List<Dictionary<string, object>> suggestedActions = parsed == null ? new List<Dictionary<string, object>>() : NormalizeSuggestedActions(parsed.ContainsKey("suggestedActions") ? parsed["suggestedActions"] : null, compactActionCatalog);
-            List<Dictionary<string, object>> identityIntroductionResults = ApplyIdentityIntroductionWrites(campaignId, payload, parsed, ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"));
+            List<Dictionary<string, object>> suggestedActions = npcOpening || parsed == null ? new List<Dictionary<string, object>>() : NormalizeSuggestedActions(parsed.ContainsKey("suggestedActions") ? parsed["suggestedActions"] : null, compactActionCatalog);
+            CaptureStructuredActionDecision(payload, parsed);
+            List<Dictionary<string, object>> identityIntroductionResults = new List<Dictionary<string, object>>();
             WriteAudit(campaignId, correlationId, "server", "dialogue", "model.parsed", heroId, "", "", parsed == null ? "warning" : "completed", phaseTimer.ElapsedMilliseconds, parsed == null ? "Model response was not valid JSON; visible reply fallback was used." : "Dialogue model JSON parsed.", new Dictionary<string, object>
             {
                 ["rawContent"] = content,
@@ -9159,7 +9240,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     : "[Bannerlord Reign prompt override did not queue an action: " + string.Join("; ", testDirectiveErrors.DefaultIfEmpty("No matching action command was found.")) + "]";
                 reply = string.IsNullOrWhiteSpace(reply) || reply == "..." ? statusLine : reply + "\n\n" + statusLine;
             }
-            else if (!rulerPetitionAudience && !nobleDocketAudience && !courtLifeAudience)
+            else if (!npcOpening && !rulerPetitionAudience && !nobleDocketAudience && !courtLifeAudience)
             {
                 if (!agencyVisibleFailure)
                 {
@@ -9200,13 +9281,29 @@ The previous attempt did not complete a JSON object within its output budget.
                 stateUpdates.Clear();
             }
             reply = FinalizeDialogueActionOutcome(reply, payload, hero, queuedDialogueActions, dialogueActionErrors);
+            reply = RenderGroundedSceneHeading(payload, heroId, parsed, reply);
+            if (!FinalizeConversationGrounding(payload, heroId, parsed, ref reply))
+            {
+                agencyVisibleFailure = true;
+                memoryWrites.Clear(); beliefWrites.Clear(); comprehensionWrites.Clear(); relationshipAssessments.Clear();
+                relationshipUpdates.Clear(); obligationWrites.Clear(); dynamicCharacteristicWrites.Clear(); stateUpdates.Clear();
+                queuedDialogueActions.Clear(); queuedTestDirectiveActions.Clear();
+            }
+            // Only the final accepted prose can ground social evidence; previewing
+            // a draft must never make an intimacy event durable.
+            conceptionGate = NormalizeConceptionGate(parsed == null ? null : ReadDictionary(parsed, "conceptionGate") ?? ReadDictionary(parsed, "conception_gate"),
+                reply, playerPromptLabel == "pull_out" || ReadBool(payload, "suppressConceptionGate", false));
+            bool publishContextEffects = !agencyVisibleFailure && !governmentCertificationMemoryIsolation && !actionAcceptanceCooperation;
+            if (publishContextEffects)
+                socialSignalValidation = NormalizeAndPersistConversationSocialSignals(campaignId, parsed, payload,
+                    heroId, socialPlayerId, playerText, reply, conceptionGate, decisionId, socialWorldDay, persist: false);
             actionShadowPreview = BuildActionShadowPreview(queuedTestDirectiveActions, queuedDialogueActions, testDirectiveErrors, dialogueActionErrors);
-            Dictionary<string, object> playerLine = DialogueLine(ts, "player", playerName, playerText);
+            Dictionary<string, object> playerLine = npcOpening ? null : DialogueLine(ts, "player", playerName, playerText);
             Dictionary<string, object> npcLine = DialogueLine(ts, "npc", heroName, reply);
             if (officialAmbassador)
             {
                 Dictionary<string, object> officialContext = ReadDictionary(payload, "ambassadorContext") ?? new Dictionary<string, object>();
-                foreach (Dictionary<string, object> line in new[] { playerLine, npcLine })
+                foreach (Dictionary<string, object> line in new[] { playerLine, npcLine }.Where(line => line != null))
                 {
                     line["channel"] = "ambassador_official";
                     line["postingId"] = ReadString(officialContext, "postingId", "");
@@ -9223,18 +9320,42 @@ The previous attempt did not complete a JSON object within its output budget.
             {
                 ["socialSignals"] = ReadDictionaryList(socialSignalValidation, "signals")
             };
-            Dictionary<string, object> conversationExchange = StoreConversationExchange(campaignId, socialExchangePayload, heroId, dialoguePlayerId,
-                playerName, heroName, playerText, reply, decisionId, ts);
+            CopyPlayerInputSource(payload, socialExchangePayload);
+            var acceptedUnit = new AcceptedConversationUnit {
+                Campaign = campaignId, Hero = heroId, Player = dialoguePlayerId,
+                PlayerName = playerName, HeroName = heroName,
+                Location = FirstNonEmpty(ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"), ReadFirstString(profile, "currentSettlementId", "settlementId")),
+                EventId = decisionId, EventType = "dialogue_turn", PlayerText = playerText, Reply = reply, Timestamp = ts,
+                Generation = _playerActionGeneration, Payload = payload, Motive = motiveDecision, Profile = profile,
+                Characteristics = characteristics, Parsed = parsed, Memories = memoryWrites, Beliefs = beliefWrites,
+                Relationships = relationshipUpdates, Obligations = obligationWrites, Comprehensions = comprehensionWrites,
+                Continuity = actionAcceptanceCooperation ? null : ReadDictionaryList(parsed, "continuityWrites"),
+                RetrievalEligible = !recallOnlyTurn && ShouldPersistGovernmentCertificationConversationSideEffects(governmentCertificationMemoryIsolation),
+                CommitEffects = publishContextEffects, PublishScene = publishContextEffects,
+                PublishSocial = publishContextEffects && !recallOnlyTurn, PublishIntroductions = publishContextEffects,
+                SceneMode = ReadString(payload, "mode", "dialogue"), ConceptionGate = conceptionGate };
+            Dictionary<string, object> conversationExchange = PublishAcceptedConversationUnit(acceptedUnit,
+                accept => StoreConversationExchange(campaignId, socialExchangePayload, heroId, dialoguePlayerId,
+                    playerName, heroName, playerText, reply, decisionId, ts, acceptance: accept));
+            llm["conversationEffectAcceptance"] = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "effects");
+            conversationSceneResolution = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "scene");
+            socialSignalValidation = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "social");
+            identityIntroductionResults = ReadDictionaryList(ReadDictionary(conversationExchange, "acceptedUnit"), "introductions");
+            if (!ReadBool(payload, "conversationGroundingFailed", false) && !recallOnlyTurn && ShouldPersistGovernmentCertificationConversationSideEffects(governmentCertificationMemoryIsolation))
+                AcceptPersonalGossip(campaignId, payload, parsed, conversationExchange, heroId, dialoguePlayerId, playerText, reply);
             string conversationSessionId = ReadString(conversationExchange, "sessionId", "");
             double dialogueWorldDay = ReadDouble(payload, "worldDay", 0d);
             Dictionary<string, object> immediateSocialIncidents = ProcessImmediatePlayerIntimacySignals(
                 campaignId, ReadString(socialSignalValidation, "timelineId", "main"),
                 conversationSessionId, ReadDictionaryList(socialSignalValidation, "signals"), dialogueWorldDay);
             string dialogueLocationId = FirstNonEmpty(ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"), ReadFirstString(profile, "currentSettlementId", "settlementId"));
-            playerLine["sessionId"] = conversationSessionId;
-            playerLine["exchangeId"] = decisionId;
-            playerLine["worldDay"] = dialogueWorldDay;
-            playerLine["locationId"] = dialogueLocationId;
+            if (playerLine != null)
+            {
+                playerLine["sessionId"] = conversationSessionId;
+                playerLine["exchangeId"] = decisionId;
+                playerLine["worldDay"] = dialogueWorldDay;
+                playerLine["locationId"] = dialogueLocationId;
+            }
             npcLine["sessionId"] = conversationSessionId;
             npcLine["exchangeId"] = decisionId;
             npcLine["worldDay"] = dialogueWorldDay;
@@ -9244,7 +9365,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 : new Dictionary<string, object>();
             if (officialAmbassador)
                 RecordOfficialAmbassadorExchange(campaignId, payload, heroId, dialoguePlayerId, playerLine, npcLine, conversationExchange, ts);
-            AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), playerLine);
+            if (playerLine != null) AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), playerLine);
             AppendJsonLineToPath(CharacterFile(campaignId, heroId, "history", "dialogue.jsonl"), npcLine);
             foreach (Dictionary<string, object> memoryWrite in memoryWrites)
             {
@@ -9255,24 +9376,11 @@ The previous attempt did not complete a JSON object within its output budget.
                 campaignId, heroId, dynamicCharacteristicWrites, payload, conversationExchange,
                 decisionId, "dialogue", dialogueLocationId, ts, new[] { heroId, dialoguePlayerId });
 
-            string memoryGroupKey = BuildMemoryGroupKey(new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase)
-            {
-                ["memoryGroupKey"] = string.IsNullOrWhiteSpace(conversationSessionId) ? ReadFirstString(payload, "memoryGroupKey", "memory_group_key") : "conversation:" + conversationSessionId
-            }, heroId, dialoguePlayerId, dialogueLocationId, "conversation", ts);
-            Dictionary<string, object> memoryLayerStore = StoreTurnMemoryLayers(
-                campaignId, decisionId, "dialogue_turn", heroId, dialoguePlayerId, dialogueLocationId,
-                playerText, reply, memoryWrites, beliefWrites, relationshipUpdates,
-                obligationWrites, comprehensionWrites, memoryGroupKey, ts,
-                sharedParticipants: null,
-                retrievalEligible: !recallOnlyTurn
-                    && ShouldPersistGovernmentCertificationConversationSideEffects(
-                        governmentCertificationMemoryIsolation),
-                continuityPayload: payload,
-                continuityWrites: actionAcceptanceCooperation ? null : ReadDictionaryList(parsed, "continuityWrites"));
+            Dictionary<string, object> memoryLayerStore = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "memory");
             if (ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation))
                 UpdateSharedGroupConversationState(campaignId, payload, heroId,
-                    heroName, reply, conversationSessionId, ts);
+                    heroName, reply, conversationSessionId, ts, decisionId);
             Dictionary<string, object> motiveOutcome =
                 ShouldPersistGovernmentCertificationConversationSideEffects(
                     governmentCertificationMemoryIsolation)
@@ -9627,6 +9735,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
 
             List<Dictionary<string, object>> all = ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId));
+            all = ReadOriginalConversationHistory(campaignId, payload, "", "social_event_" + SafeMemoryKey(eventId), limit, all);
             int start = Math.Max(0, all.Count - limit);
             return new Dictionary<string, object>
             {
@@ -9654,6 +9763,7 @@ The previous attempt did not complete a JSON object within its output budget.
 
             List<Dictionary<string, object>> all = ReadJsonLinesFromPath(
                 PartyChatSessionTranscriptFile(campaignId, payload));
+            all = ReadOriginalConversationHistory(campaignId, payload, "", sessionId, limit, all);
             int start = Math.Max(0, all.Count - limit);
             List<Dictionary<string, object>> lines = all.Skip(start).ToList();
             for (int index = 0; index < lines.Count; index++)
@@ -9678,7 +9788,7 @@ The previous attempt did not complete a JSON object within its output budget.
         private static Dictionary<string, object> SocialEventRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            return RunCodexConversationScope(payload, () => SocialEventRespondCore(payload));
+            return RunPlayerActionTurn(payload, () => RunCodexConversationScope(payload, () => SocialEventRespondCore(payload)));
         }
 
         private static Dictionary<string, object> SocialEventRespondCore(Dictionary<string, object> payload)
@@ -9817,7 +9927,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 .ToList();
             List<Dictionary<string, object>> selectedContextPulls = NormalizeSelectedContextPulls(ReadDictionaryList(payload, "selectedContextPulls"), ContextPullIds.ToList());
             List<Dictionary<string, object>> contextBundles = ReadDictionaryList(payload, "contextBundles");
-            List<Dictionary<string, object>> compactActionCatalog = CompactActionCatalog(ActionCatalog());
+            List<Dictionary<string, object>> compactActionCatalog = UsesStructuredActions(payload) ? new List<Dictionary<string, object>>() : CompactActionCatalog(ActionCatalog());
             contextLoadMs = phaseTimer.ElapsedMilliseconds;
             WriteAudit(campaignId, correlationId, "server", auditMode, "context.loaded", heroId, "", eventId, "completed", contextLoadMs, "Loaded event character stack, transcript, context bundles, and action catalog.", new Dictionary<string, object>
             {
@@ -9889,26 +9999,12 @@ The previous attempt did not complete a JSON object within its output budget.
             });
 
             phaseTimer.Restart();
-            Dictionary<string, object> eventLlmRequest = new Dictionary<string, object>
-            {
-                ["requestType"] = "social_event",
-                ["campaignId"] = campaignId,
-                ["correlationId"] = correlationId,
-                ["heroStringId"] = heroId,
-                ["eventId"] = eventId,
-                ["playerText"] = playerText,
-                ["messages"] = messages,
-                ["promptEnvelope"] = promptEnvelope.Diagnostics,
-                ["promptCacheEligible"] = true,
-                // Event/party JSON includes participation, relationship evidence,
-                // memory writes, and action gates. Give it enough room on the first
-                // attempt instead of predictably resending the full prompt for repair.
-                ["maxTokens"] = StructuredEventResponseMaxTokens(settings),
-                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
-            };
+            Dictionary<string, object> eventLlmRequest = BuildConversationGenerationRequest(
+                settings, promptEnvelope, campaignId, correlationId, heroId, playerText, true, eventId);
             AttachCodexAuthoritativeConversationMetadata(eventLlmRequest, payload, campaignId, heroId, auditMode,
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), identityView, profile, state, relationships, summary,
                 conversationSceneState, null, contextBundles, eventLines, promptTurnText);
+            AttachStructuredActionResponseContract(eventLlmRequest, payload);
             Dictionary<string, object> llm = ChatWithLlm(eventLlmRequest);
             llm = WithDiagnosticTransformation("Answer structure and format repair", llm, () => RetryMalformedStructuredResponse(llm, eventLlmRequest, campaignId, correlationId, auditMode, heroId, eventId));
             if (!ReadBool(llm, "visibleRepairFailure", false))
@@ -9931,13 +10027,19 @@ The previous attempt did not complete a JSON object within its output budget.
                 auditMode, heroId, eventId));
             if (!ReadBool(llm, "visibleRepairFailure", false))
                 llm = WithDiagnosticTransformation("Negotiation and NPC agency", llm, () => EnforceConversationAgencyResponse(llm, eventLlmRequest, motiveDecision, payload,
-                campaignId, correlationId, auditMode, heroId,
+                campaignId, correlationId, auditMode, heroId, persist: false,
                 validateRepair: candidate => ValidateAgencyRepairedResponse(candidate, motiveDecision, payload, identityView, eventLines, heroId, heroName, playerName)));
+            llm = EnsureConversationDelivery(llm, allowQuiet: true);
             if (ReadBool(ReadDictionary(llm, "conversationAgency"), "replayed", false)) return ConversationAgencyReplayResponse(llm, heroId);
+            PreserveConversationVerification(payload, llm);
             RecordCodexFinalRepairEvidence(llm);
             llmMs = phaseTimer.ElapsedMilliseconds;
             if (!ReadBool(llm, "ok", false))
             {
+                llm["inputRecovery"] = RetainUnansweredPlayerContribution(campaignId, payload, heroId,
+                    FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), ReadFirstString(profile, "mainHeroStringId")),
+                    playerName, heroName, playerText, grouped: true,
+                    socialEvent: ReadString(payload, "mode", "") == "party_chat" ? "party_chat" : eventId);
                 totalTimer.Stop();
                 Dictionary<string, object> failedTiming = WithNpcRelationshipTiming(
                     DialogueTiming(totalTimer.ElapsedMilliseconds, upsertMs,
@@ -9959,7 +10061,8 @@ The previous attempt did not complete a JSON object within its output budget.
                     ["timing"] = failedTiming,
                     ["llm"] = llm
                 });
-                return new Dictionary<string, object> { ["ok"] = false, ["stage"] = "llm", ["llm"] = llm, ["timing"] = failedTiming };
+                return new Dictionary<string, object> { ["ok"] = false, ["stage"] = "llm", ["error"] = LlmFailureForDisplay(llm),
+                    ["conversationRecovery"] = ReadDictionary(llm, "conversationRecovery"), ["inputRecovery"] = ReadDictionary(llm, "inputRecovery"), ["llm"] = llm, ["timing"] = failedTiming };
             }
 
             phaseTimer.Restart();
@@ -9989,12 +10092,11 @@ The previous attempt did not complete a JSON object within its output budget.
             List<Dictionary<string, object>> recallConsistencyRepairs;
             reply = RepairVisibleExactRecallIdentifiers(playerText, reply, parsed, messages, out recallConsistencyRepairs);
             if (!agencyVisibleFailure)
-                reply = ApplyConversationDrinking(campaignId, heroId, payload, profile, characteristics, parsed, reply);
-            Dictionary<string, object> conversationSceneResolution = FinalizeConversationSceneState(
-                campaignId, payload, heroId, playerText, reply, ReadString(payload, "mode", "social_event"), parsed);
+                reply = ApplyConversationDrinking(campaignId, heroId, payload, profile, characteristics, parsed, reply, persist: false);
+            Dictionary<string, object> conversationSceneResolution = TestDict("status", "pending_acceptance");
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            string decisionId = Guid.NewGuid().ToString("N");
+            string decisionId = AcceptedConversationEventId(campaignId, heroId, payload);
             string emotion = parsed == null ? "" : ReadString(parsed, "emotion", "");
             string intent = parsed == null ? "" : ReadString(parsed, "intent", "");
             string relationshipSignal = parsed == null ? "" : ReadFirstString(parsed, "relationshipSignal", "relationship_signal");
@@ -10032,15 +10134,15 @@ The previous attempt did not complete a JSON object within its output budget.
             beliefWrites = FilterConversationRoleMisattributions(beliefWrites, payload, playerText, "belief", roleWriteRejections);
             obligationWrites = FilterConversationRoleMisattributions(obligationWrites, payload, playerText, "obligation", roleWriteRejections);
             comprehensionWrites = FilterConversationRoleMisattributions(comprehensionWrites, payload, playerText, "comprehension", roleWriteRejections);
-            memoryWrites = FilterRoleplayFeedbackWrites(memoryWrites, "memory", roleWriteRejections);
-            beliefWrites = FilterRoleplayFeedbackWrites(beliefWrites, "belief", roleWriteRejections);
-            obligationWrites = FilterRoleplayFeedbackWrites(obligationWrites, "obligation", roleWriteRejections);
-            comprehensionWrites = FilterRoleplayFeedbackWrites(comprehensionWrites, "comprehension", roleWriteRejections);
+            memoryWrites = FilterRoleplayFeedbackWrites(memoryWrites, "memory", roleWriteRejections, payload, heroId, campaignId);
+            beliefWrites = FilterRoleplayFeedbackWrites(beliefWrites, "belief", roleWriteRejections, payload, heroId, campaignId);
+            obligationWrites = FilterRoleplayFeedbackWrites(obligationWrites, "obligation", roleWriteRejections, payload, heroId, campaignId);
+            comprehensionWrites = FilterRoleplayFeedbackWrites(comprehensionWrites, "comprehension", roleWriteRejections, payload, heroId, campaignId);
             Dictionary<string, object> stateUpdates = parsed == null
                 ? new Dictionary<string, object>()
                 : NormalizeSafeConversationStateUpdates(
                     ReadDictionary(parsed, "stateUpdates") ?? ReadDictionary(parsed, "state_updates"),
-                    roleWriteRejections);
+                    roleWriteRejections, payload, heroId, campaignId);
             Dictionary<string, object> politicalRiskPosture =
                 ReadDictionary(motiveDecision, "politicalRiskPosture")
                 ?? new Dictionary<string, object>();
@@ -10066,7 +10168,8 @@ The previous attempt did not complete a JSON object within its output budget.
             List<Dictionary<string, object>> suggestedActions = approachOpening || parsed == null
                 ? new List<Dictionary<string, object>>()
                 : NormalizeSuggestedActions(parsed.ContainsKey("suggestedActions") ? parsed["suggestedActions"] : null, compactActionCatalog);
-            List<Dictionary<string, object>> identityIntroductionResults = ApplyIdentityIntroductionWrites(campaignId, payload, parsed, eventId);
+            CaptureStructuredActionDecision(payload, parsed);
+            List<Dictionary<string, object>> identityIntroductionResults = new List<Dictionary<string, object>>();
             WriteAudit(campaignId, correlationId, "server", auditMode, "model.parsed", heroId, "", eventId, parsed == null ? "warning" : "completed", phaseTimer.ElapsedMilliseconds, parsed == null ? "Model response was not valid JSON; visible reply fallback was used." : "Event model JSON parsed.", new Dictionary<string, object>
             {
                 ["rawContent"] = content,
@@ -10100,7 +10203,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 ,["conversationSceneResolution"] = conversationSceneResolution
             });
             List<string> eventActionErrors = new List<string>();
-            List<Dictionary<string, object>> queuedEventActions = approachOpening || agencyVisibleFailure
+            List<Dictionary<string, object>> queuedEventActions = approachOpening || agencyVisibleFailure || participation == "quiet"
                 ? new List<Dictionary<string, object>>()
                 : QueueAcceptedDialogueActions(campaignId, payload, profile, playerText, reply, actionGate, suggestedActions, out eventActionErrors);
             if (queuedEventActions.Count > 0)
@@ -10120,10 +10223,18 @@ The previous attempt did not complete a JSON object within its output budget.
                 stateUpdates.Clear();
             }
             reply = FinalizeDialogueActionOutcome(reply, payload, profile, queuedEventActions, eventActionErrors);
+            reply = RenderGroundedSceneHeading(payload, heroId, parsed, reply);
+            if (!FinalizeConversationGrounding(payload, heroId, parsed, ref reply))
+            {
+                agencyVisibleFailure = true;
+                memoryWrites.Clear(); beliefWrites.Clear(); comprehensionWrites.Clear(); relationshipAssessments.Clear();
+                relationshipUpdates.Clear(); obligationWrites.Clear(); dynamicCharacteristicWrites.Clear(); stateUpdates.Clear();
+                queuedEventActions.Clear();
+            }
             bool privatePlayerInputForSpeaker = ReadBool(payload, "privatePlayerInputForSpeaker", false);
             string sharedPlayerText = ReadString(payload, "publicPlayerText", playerText);
             string sharedReply = privatePlayerInputForSpeaker
-                ? "*The speaker replies privately to the player.*" : reply;
+                ? "*The speaker replies privately to the player.*" : ObserverConversationText(reply, heroId, "");
             Dictionary<string, object> playerLine = approachOpening || ReadBool(payload, "suppressPlayerTranscript", false)
                 || partyChatRequest && ReadInt(payload, "partySpeakerIndex", 0) > 0
                 ? null
@@ -10137,7 +10248,8 @@ The previous attempt did not complete a JSON object within its output budget.
             string eventTranscriptPath = partyChatTurn
                 ? PartyChatSessionTranscriptFile(campaignId, payload)
                 : SocialEventTranscriptFile(campaignId, eventId);
-            string socialPlayerId = ReadFirstString(profile, "mainHeroStringId");
+            string socialPlayerId = FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+                ReadFirstString(profile, "mainHeroStringId"));
             string socialLocationId = FirstNonEmpty(
                 ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"),
                 ReadFirstString(profile, "currentSettlementId", "settlementId"));
@@ -10146,26 +10258,33 @@ The previous attempt did not complete a JSON object within its output budget.
                     MergeStringLists(ReadStringList(payload, "participants"), ReadStringList(payload, "activeHeroIds")),
                     new[] { heroId, socialPlayerId })
                 : new List<string>();
-            Dictionary<string, object> conversationExchange = partyChatTurn
-                ? StorePartyConversationExchange(
-                    campaignId, payload, heroId, socialPlayerId, playerName, heroName, sharedPlayerText, sharedReply, decisionId, ts)
-                : StoreSocialEventConversationExchange(
-                    campaignId, payload, heroId, socialPlayerId, playerName, heroName, sharedPlayerText, sharedReply, decisionId, eventId, ts);
-            if (privatePlayerInputForSpeaker)
-            {
-                Dictionary<string, object> privateRequest = new Dictionary<string, object>(payload,
-                    StringComparer.OrdinalIgnoreCase);
-                string privateTurnKey = SafeMemoryKey(ReadFirstString(payload,
-                    "sceneTurnId", "turnId", "exchangeId"));
-                privateRequest["conversationSessionId"] = ReadString(payload, "conversationSessionId", "")
-                    + "_whisper_" + SafeMemoryKey(heroId) + "_" + privateTurnKey;
-                privateRequest["sceneTurnId"] = ReadFirstString(payload, "sceneTurnId", "turnId", "exchangeId")
-                    + "_whisper_" + SafeMemoryKey(heroId);
-                privateRequest["participants"] = new List<string> { heroId, socialPlayerId };
-                privateRequest["activeHeroIds"] = new List<string> { heroId };
-                StoreGroupedConversationExchange(campaignId, privateRequest, heroId, socialPlayerId,
-                    playerName, heroName, playerText, reply, decisionId, ts, "private_whisper", "");
-            }
+            var acceptedUnit = new AcceptedConversationUnit {
+                Campaign = campaignId, Hero = heroId, Player = socialPlayerId, Location = socialLocationId,
+                PlayerName = playerName, HeroName = heroName, EventId = decisionId,
+                EventType = partyChatTurn ? "party_chat_turn" : "social_event_turn", PlayerText = playerText, Reply = reply,
+                Timestamp = ts, Generation = _playerActionGeneration, Payload = payload, Motive = motiveDecision,
+                Profile = profile, Characteristics = characteristics, Parsed = parsed, Memories = memoryWrites,
+                Beliefs = beliefWrites, Relationships = relationshipUpdates, Obligations = obligationWrites,
+                Comprehensions = comprehensionWrites, Continuity = ReadDictionaryList(parsed, "continuityWrites"),
+                Participants = privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : partyChatTurn ? sharedParticipants : null,
+                RetrievalEligible = !recallOnlyTurn, CommitEffects = !agencyVisibleFailure,
+                PublishScene = !agencyVisibleFailure && participation != "quiet",
+                PublishIntroductions = !agencyVisibleFailure && participation != "quiet",
+                SceneMode = ReadString(payload, "mode", "social_event"),
+                GroupConversation = partyChatTurn, PrivateWhisper = privatePlayerInputForSpeaker };
+            Dictionary<string, object> conversationExchange = PublishAcceptedConversationUnit(acceptedUnit,
+                accept => partyChatTurn
+                    ? StorePartyConversationExchange(campaignId, payload, heroId, socialPlayerId, playerName, heroName,
+                        sharedPlayerText, privatePlayerInputForSpeaker ? sharedReply : reply, decisionId, ts, accept)
+                    : StoreSocialEventConversationExchange(campaignId, payload, heroId, socialPlayerId, playerName, heroName,
+                        sharedPlayerText, privatePlayerInputForSpeaker ? sharedReply : reply, decisionId, eventId, ts, accept));
+            llm["conversationEffectAcceptance"] = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "effects");
+            conversationSceneResolution = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "scene");
+            identityIntroductionResults = ReadDictionaryList(ReadDictionary(conversationExchange, "acceptedUnit"), "introductions");
+            Dictionary<string, object> gossipExchange = privatePlayerInputForSpeaker
+                ? ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "privateExchange") : conversationExchange;
+            if (!ReadBool(payload, "conversationGroundingFailed", false) && participation != "quiet" && !recallOnlyTurn)
+                AcceptPersonalGossip(campaignId, payload, parsed, gossipExchange, heroId, socialPlayerId, playerText, reply, conversationExchange);
             if (partyChatTurn || !string.IsNullOrWhiteSpace(ReadString(conversationExchange, "sessionId", "")))
             {
                 string storedSessionId = ReadString(conversationExchange, "sessionId", "");
@@ -10214,34 +10333,11 @@ The previous attempt did not complete a JSON object within its output budget.
                 dynamicCharacteristicAudience);
 
             string partySessionId = ReadString(conversationExchange, "sessionId", "");
-            string memoryGroupKey = partyChatTurn && !string.IsNullOrWhiteSpace(partySessionId)
-                ? "conversation:" + partySessionId
-                : BuildMemoryGroupKey(payload, heroId, socialPlayerId, socialLocationId, "social_event", ts);
-            Dictionary<string, object> memoryLayerStore = StoreTurnMemoryLayers(
-                campaignId,
-                decisionId,
-                partyChatTurn ? "party_chat_turn" : "social_event_turn",
-                heroId,
-                socialPlayerId,
-                socialLocationId,
-                playerText,
-                reply,
-                memoryWrites,
-                beliefWrites,
-                relationshipUpdates,
-                obligationWrites,
-                comprehensionWrites,
-                memoryGroupKey,
-                ts,
-                partyChatTurn
-                    ? privatePlayerInputForSpeaker ? new List<string> { heroId, socialPlayerId } : sharedParticipants
-                    : null,
-                retrievalEligible: !recallOnlyTurn,
-                continuityPayload: payload, continuityWrites: ReadDictionaryList(parsed, "continuityWrites"));
+            Dictionary<string, object> memoryLayerStore = ReadDictionary(ReadDictionary(conversationExchange, "acceptedUnit"), "memory");
             Dictionary<string, object> sharedConversationPayload = new Dictionary<string, object>(payload,
                 StringComparer.OrdinalIgnoreCase) { ["playerText"] = sharedPlayerText };
             UpdateSharedGroupConversationState(campaignId, sharedConversationPayload, heroId, heroName, sharedReply,
-                FirstNonEmpty(partySessionId, GroupConversationSessionId(payload), eventId), ts);
+                FirstNonEmpty(partySessionId, GroupConversationSessionId(payload), eventId), ts, decisionId);
             Dictionary<string, object> motiveOutcome = ApplyConversationMotiveOutcome(
                 campaignId, motiveDecision, payload, reply, intent, decisionId, decisionBrief);
             if (stateUpdates.Count > 0)
@@ -10401,6 +10497,33 @@ The previous attempt did not complete a JSON object within its output budget.
             return response;
         }
 
+        // Live dialogue, event/party turns and isolated replay must use the same
+        // sampling, output budget and envelope metadata. Route-specific prompt
+        // preparation and the live repair pipeline remain at their call sites.
+        private static Dictionary<string, object> BuildConversationGenerationRequest(
+            Dictionary<string, object> settings, PromptEnvelope envelope, string campaignId,
+            string correlationId, string heroId, string playerText, bool socialEvent, string eventId = "")
+        {
+            var request = new Dictionary<string, object>
+            {
+                ["requestType"] = socialEvent ? "social_event" : "dialogue",
+                ["campaignId"] = campaignId,
+                ["correlationId"] = correlationId,
+                ["heroStringId"] = heroId,
+                ["playerText"] = playerText,
+                ["messages"] = envelope.Messages,
+                ["promptEnvelope"] = envelope.Diagnostics,
+                ["promptCacheEligible"] = true,
+                // Structured replies carry visible prose and private metadata;
+                // a small first-call budget causes avoidable full-prompt repairs.
+                ["maxTokens"] = socialEvent ? StructuredEventResponseMaxTokens(settings) : StructuredDialogueResponseMaxTokens(settings),
+                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
+            };
+            if (socialEvent) request["eventId"] = eventId;
+            else request["temperature"] = Math.Min(0.5d, ReadDouble(settings, "temperature", 0.7d));
+            return request;
+        }
+
         private static int StructuredEventResponseMaxTokens(Dictionary<string, object> settings)
         {
             return Math.Max(8000, ReadInt(settings, "maxTokens", 900));
@@ -10414,6 +10537,8 @@ The previous attempt did not complete a JSON object within its output budget.
         private static Dictionary<string, object> PartyChatRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
+            var floorResult = ApplyGroupConversationFloorToSpeaker(payload);
+            if (floorResult != null) return floorResult;
             bool familyChambers = ReadBool(payload, "familyChambers", false);
             if (ReadBool(ReadDictionary(payload, "speaker"), "isChild", false))
             {
@@ -10466,16 +10591,17 @@ The previous attempt did not complete a JSON object within its output budget.
             payload["sceneContext"] = sceneContext
                 + "\nServer mode: party_chat. The speaker must only speak as themselves, while staying aware this is a group conversation."
                 + "\nGROUP CONVERSATION CONTRACT: The structured group transcript is authoritative. Preserve every speaker label and never claim another participant's words as your own."
+                + "\n" + GroupConversationParticipationGuidance
                 + "\nNESTED-EVENT WITNESS RULE: Being present for this conversation proves only that a participant heard this conversation. It does not make them a witness to an older event described by someone else. Only an explicit source-event witness link or that NPC's own attributed first-person record establishes firsthand participation. Another speaker saying 'we', 'everyone', or 'all three' cannot override an NPC's own denial or missing witness evidence."
                 + (npcOpening
                     ? "\nCURRENT-BEAT PRIORITY: The player has entered but has not spoken. Initiate naturally; do not answer, acknowledge, quote, or infer a player message. Every prior labeled line belongs to that NPC, never to the player."
-                    : "\nCURRENT-BEAT PRIORITY: Directly answer the latest player message before extending an earlier topic. Prior NPC lines are context to engage, not a replacement question. When the player asks for current or canonical facts, use only the selected live bundles; if a requested list or fact is absent, say it is unavailable instead of improvising local lore.")
+                    : "\nCURRENT-BEAT PRIORITY: Consider the latest player contribution and current scene before extending an earlier topic. If it asks you a question, answer naturally when warranted; an observable action may instead invite your initiative. Prior NPC lines are context to engage, not a replacement question. When the player asks for current or canonical facts, use only the selected live bundles; if a requested list or fact is absent, say it is unavailable instead of improvising local lore.")
                 + "\nRECALL GROUNDING: A plausible story is not evidence of an already established memory. Never claim a past event was previously discussed, externally verified, or part of supplied recall evidence unless it is present in the attributed transcript, selected memory/history evidence, or character foundation. The NPC may originate a new, low-impact autobiographical detail that is compatible with native facts and their traits; present it as a new disclosure and emit the required dynamicCharacteristicWrites entry so it becomes stable soft character canon. Never invent named relatives, major offices, ownership, wars, crimes, deaths, campaign outcomes, or facts about another person. Preserve evidence granularity and clearly label hypothetical examples as hypothetical."
                 + (ReadInt(payload, "partySpeakerIndex", 0) > 0
-                    ? " At least one NPC has already spoken in this group beat. Address, build on, question, agree or disagree with, or deliberately brush aside a specific prior NPC contribution when it is relevant. Set reactionTargetHeroStringId to that NPC's supplied id even when participation is speak."
+                    ? " Earlier response opportunities may have been quiet. Only actual attributed contributions establish prior speech. Engage a specific prior contribution when relevant and set reactionTargetHeroStringId to that NPC's supplied id; otherwise make your own warranted contribution or remain quiet."
                     : npcOpening
-                        ? " You are the first NPC initiating this room encounter; greet, introduce yourself, make an observation, or request attention without implying that the player spoke."
-                        : " You are the first NPC answering this group beat; make a distinct contribution that later speakers can engage with.");
+                        ? " This is an opportunity to initiate the room encounter naturally if warranted, without implying that the player spoke. Quiet is also valid."
+                        : " You have the first speaking opportunity this group beat. Answer naturally if appropriate; a brief response or quiet participation is valid.");
 
             string castlePrompt = ReadString(payload, "castleDialoguePrompt", "");
             Dictionary<string, object> partyVisitorContext = ReadDictionary(payload, "nobleVisitorContext");
@@ -10532,6 +10658,8 @@ The previous attempt did not complete a JSON object within its output budget.
             if (participants.Count == 0)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No eligible wilderness participants." };
             string[] direction = SelectWildernessDirection(payload);
+            string initiatorId = CharacterIdFrom(participants[RandomNumberGenerator.GetInt32(participants.Count)]);
+            payload["wildernessInitiatorHeroStringId"] = initiatorId;
             // Passive planning cannot materialize or construct a dynamic character.
             // Their first interactive response performs construction synchronously.
             long constructionMs = 0;
@@ -10604,6 +10732,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 participantIds = participants.Select(CharacterIdFrom).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
             }
             participantIds = participantIds.Where(id => participants.Any(participant => CharacterIdFrom(participant) == id)).Distinct().ToList();
+            // The prompt's selected initiator is authoritative, not a model guess.
+            if (!participantIds.Contains(initiatorId)) participantIds.Insert(0, initiatorId);
             // The client supplies authority for any outside participant; a model
             // must not add a new person to the encounter.
             externalHeroId = ReadString(payload, "externalHeroId", "");
@@ -10631,6 +10761,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 ["openingText"] = LimitText(opening, 1600),
                 ["playerHook"] = LimitText(playerHook, 700),
                 ["participantHeroIds"] = participantIds,
+                ["initiatorHeroStringId"] = initiatorId,
                 ["externalHeroId"] = LimitText(externalHeroId, 120),
                 ["externalContext"] = LimitText(externalContext, 700),
                 ["terrainKey"] = LimitText(terrainKey, 80),
@@ -10688,7 +10819,9 @@ The previous attempt did not complete a JSON object within its output budget.
             AppendWildernessVarietyPrompt(builder, payload, direction ?? SelectWildernessDirection(payload));
             var openingParticipants = (participants ?? new List<Dictionary<string, object>>()).Take(WildernessParticipantLimit).ToList();
             if (openingParticipants.Count > 0)
-                builder.AppendLine("Initiating participant id: " + LimitText(CharacterIdFrom(openingParticipants[RandomNumberGenerator.GetInt32(openingParticipants.Count)]), 160)
+                builder.AppendLine("Initiating participant id: " + LimitText(
+                    openingParticipants.Any(p => CharacterIdFrom(p) == ReadString(payload, "wildernessInitiatorHeroStringId", ""))
+                        ? ReadString(payload, "wildernessInitiatorHeroStringId", "") : CharacterIdFrom(openingParticipants[0]), 160)
                     + ". Give this person the initiating action or question; other listed people may react. Adapt the direction to their established character rather than forcing a new trait.");
             builder.AppendLine("Participants:");
             foreach (Dictionary<string, object> participant in openingParticipants)
@@ -10702,6 +10835,7 @@ The previous attempt did not complete a JSON object within its output budget.
 
             builder.AppendLine();
             builder.AppendLine("Rules:");
+            builder.AppendLine("- Native gender and pronouns in each participant brief are authoritative. Use she/her for female participants, he/him for male participants, or they/them when unknown. Names, occupation Lord, personality and earlier event wording never override native identity.");
             builder.AppendLine("- Time of day must affect lighting, visibility, fatigue, privacy, or travel routine.");
             builder.AppendLine("- If terrain_key is water, frame the scene around travel by water.");
             builder.AppendLine("- approach_description shows the concrete incident and what makes it worth engaging with.");
@@ -11013,7 +11147,11 @@ The previous attempt did not complete a JSON object within its output budget.
                 profile["narrativeVersion"] = existingProfile["narrativeVersion"];
             profile = WithNarrativeCampaignVersion(campaignId, profile);
             PreserveWandererIdentity(profile, existingProfile);
-            WriteJsonObject(profilePath, profile);
+            lock (FileLock)
+            {
+                PreserveConfirmedOutfit(campaignId, heroId, profile);
+                WriteJsonObject(profilePath, profile);
+            }
             WriteCampaignMetadata(campaignId, profile);
             EnsureJsonObjectFile(Path.Combine(dir, "template.json"), LoadCharacterTemplate(heroId, profile));
             EnsureJsonObjectFile(Path.Combine(dir, "characteristics.json"), DefaultCharacteristics(hero));
@@ -11571,8 +11709,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 CatalogCommand("create_clan_accord", "regular", "RegularCreateClanAccord", "actorHeroId (current noble),TargetHero (player),terms.accordType,terms.consentConfirmed,terms.playerConfirmed", "Establish one fixed beneficial clan accord after explicit mutual acceptance; lesser nobles may arrange it for their clan. Player ruler and native eligibility required. No kingdom treaty or vote support."),
                 CatalogCommand("cancel_clan_accord", "regular", "RegularCancelClanAccord", "actorHeroId (current noble),TargetHero (player),terms.accordId,terms.playerConfirmed", "End a named active accord with the current noble's clan at the player's explicit request, removing benefits and applying the cancellation consequence."),
                 CatalogCommand("release_resident_from_duty", "regular", "RegularReleaseResidentFromDuty", "actorHeroId (current speaker),TargetHero (resident),terms.releaseConfirmed", "The resident's source commander or home-owning clan leader explicitly releases them from duty, consuming one saved source troop exactly once."),
-                CatalogCommand("accept_temporary_party_guest", "regular", "RegularAcceptTemporaryPartyGuest", "actorHeroId,reason,terms.purpose,terms.termKind=fixed|open_ended,terms.durationDays=1..126 only for fixed; preserve fractional seasons using campaignCalendar,terms.reviewIntervalDays=5 for open_ended,terms.consentConfirmed,terms.armyExitAccepted when applicable,terms.agreedGold for resident payment", "A consenting foreign noble or known resident temporarily joins the player party without changing permanent affiliations. Military residents require prior duty release."),
-                CatalogCommand("renew_temporary_party_guest", "regular", "RegularRenewTemporaryPartyGuest", "actorHeroId,reason,terms.purpose,terms.termKind=fixed|open_ended,terms.durationDays=1..126 only for fixed; preserve fractional seasons using campaignCalendar,terms.reviewIntervalDays=5 for open_ended,terms.consentConfirmed", "Renew or revise an active temporary noble guest agreement with fresh consent."),
+                CatalogCommand("accept_temporary_party_guest", "regular", "RegularAcceptTemporaryPartyGuest", "actorHeroId,reason,terms.purpose,terms.termKind=fixed|open_ended,terms.durationDays=1..126 only for fixed; preserve fractional seasons using campaignCalendar,terms.reviewIntervalDays=30 for open_ended,terms.consentConfirmed,terms.armyExitAccepted when applicable,terms.agreedGold for resident payment", "A consenting foreign noble or known resident temporarily joins the player party without changing permanent affiliations. Military residents require prior duty release."),
+                CatalogCommand("renew_temporary_party_guest", "regular", "RegularRenewTemporaryPartyGuest", "actorHeroId,reason,terms.purpose,terms.termKind=fixed|open_ended,terms.durationDays=1..126 only for fixed; preserve fractional seasons using campaignCalendar,terms.reviewIntervalDays=30 for open_ended,terms.consentConfirmed", "Renew or revise an active temporary noble guest agreement with fresh consent."),
                 CatalogCommand("end_temporary_party_guest", "regular", "RegularEndTemporaryPartyGuest", "actorHeroId,reason,terms.departureReason", "End an active temporary noble guest agreement and begin the protected return journey."),
                 CatalogCommand("acknowledge_own_faction_combat_risk", "regular", "RegularAcknowledgeOwnFactionCombatRisk", "actorHeroId,reason,terms.consentConfirmed", "Explicitly accept that participating against the guest's own faction causes native succession and banishment into the player clan."),
                 CatalogCommand("give_gold_to_player", "regular", "RegularGiveGoldToPlayer", "actorHeroId,GoldAmount,reason", "Transfer denars from an actor hero to the player."),
@@ -11789,7 +11927,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     tags.Insert(0, "dialogue");
                 }
 
-                writes.Add(new Dictionary<string, object>
+                var normalized = new Dictionary<string, object>
                 {
                     ["id"] = Guid.NewGuid().ToString("N"),
                     ["ts"] = ts,
@@ -11799,7 +11937,33 @@ The previous attempt did not complete a JSON object within its output budget.
                     ["text"] = text.Trim(),
                     ["importance"] = Math.Max(1, Math.Min(5, ReadInt(memory, "importance", 1))),
                     ["tags"] = tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
-                });
+                };
+                // Preserve the proposed citation until accepted-source binding.
+                // Validation markers, hashes, owners and fabricated originals are
+                // deliberately not copied from provider metadata.
+                var citation = ReadDictionary(memory, "sourceEvidence");
+                if (citation != null && citation.Count > 0)
+                    normalized["sourceEvidence"] = new Dictionary<string, object>
+                    {
+                        ["turnId"] = ReadString(citation, "turnId", ""),
+                        ["speakerId"] = ReadString(citation, "speakerId", ""),
+                        ["actorIds"] = ReadStringList(citation, "actorIds"),
+                        ["evidenceType"] = ReadString(citation, "evidenceType", "spoken_statement"),
+                        ["quote"] = ReadString(citation, "quote", "")
+                    };
+                foreach (string key in new[] { "evidenceQuote", "supportingQuote", "replyQuote" })
+                {
+                    string quote = ReadString(memory, key, "");
+                    if (quote.Length > 0) normalized[key] = quote;
+                }
+                var extraCitations = ReadDictionaryList(memory, "sourceEvidenceSpans").Take(8).Select(c => new Dictionary<string, object>
+                {
+                    ["turnId"] = ReadString(c, "turnId", ""), ["speakerId"] = ReadString(c, "speakerId", ""),
+                    ["actorIds"] = ReadStringList(c, "actorIds"), ["evidenceType"] = ReadString(c, "evidenceType", "spoken_statement"),
+                    ["quote"] = ReadString(c, "quote", "")
+                }).ToList();
+                if (extraCitations.Count > 0) normalized["sourceEvidenceSpans"] = extraCitations;
+                writes.Add(normalized);
             }
 
             return writes;
@@ -12278,6 +12442,7 @@ The previous attempt did not complete a JSON object within its output budget.
             out List<string> errors)
         {
             errors = new List<string>();
+            if (UsesStructuredActions(payload)) return new List<Dictionary<string, object>>();
             payload = BindResidentActionProfile(payload, hero);
             string correlationId = EnsureCorrelationId(payload);
             List<Dictionary<string, object>> queued = new List<Dictionary<string, object>>();
@@ -13020,9 +13185,12 @@ The previous attempt did not complete a JSON object within its output budget.
             bool enabled,
             Dictionary<string, object> actionGate,
             string playerText,
-            ref string visibleReply)
+            ref string visibleReply,
+            bool structuredActionProtocol = false)
         {
-            if (!enabled || ActionGateShouldPlan(actionGate))
+            // Typed decisions own consent and visible wording. The willingness prompt
+            // must never manufacture a legacy acceptance or contradict that decision.
+            if (structuredActionProtocol || !enabled || ActionGateShouldPlan(actionGate))
             {
                 return false;
             }
@@ -13047,15 +13215,15 @@ The previous attempt did not complete a JSON object within its output budget.
             string commitment = NormalizeLookup(ReadString(actionGate, "commitment", ""));
             if (string.IsNullOrWhiteSpace(commitment))
             {
-                return true;
+                return false;
             }
 
-            if (ContainsAnyNormalized(commitment, "refused", "refusal", "threat", "bluff", "roleplay only", "roleplay_only", "conditional", "considering", "proposed", "negotiating"))
+            if (ContainsAnyNormalized(commitment, "refused", "refusal", "threat", "bluff", "roleplay only", "roleplay_only", "conditional", "considering", "proposed", "negotiating", "uncommitted", "not committed"))
             {
                 return false;
             }
 
-            return ContainsAnyNormalized(commitment, "accepted", "accept", "commanded", "final", "sealed", "agreed", "commit", "committed", "immediate", "ordered");
+            return ReignBeta.Shared.Dialogue.PlayerActionRules.IsAcceptedCommitment(commitment);
         }
 
         private static Dictionary<string, object> PlanActionsFromGate(string campaignId, Dictionary<string, object> payload, Dictionary<string, object> hero, string playerText, string visibleReply, Dictionary<string, object> actionGate)
@@ -13666,7 +13834,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
 
             // An initial open-ended invitation commonly explains that either side may
-            // "end the arrangement" at a future five-day review.  That safeguard is
+            // "end the arrangement" at a future thirty-day review.  That safeguard is
             // not a present departure request.  Prefer the explicit current join verb;
             // genuine departure exchanges do not contain one of these join phrases.
             if (explicitDeparture || ContainsAnyNormalized(acceptedExchange,
@@ -14296,7 +14464,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 terms["consentConfirmed"] = true;
                 if (!TryCompleteAcceptedGuestSchedule(terms, payload, acceptedExchange)) return null;
                 if (command == "renew_temporary_party_guest" && ReadString(terms, "termKind", "") == "open_ended"
-                    && !ContainsAnyNormalized(acceptedExchange, "open ended", "no fixed end date", "every five days"))
+                    && !ContainsAnyNormalized(acceptedExchange, "open ended", "no fixed end date", "every thirty days"))
                     return null; // An unspecified extension must not silently replace a fixed term with open-ended service.
                 var existing = TemporaryGuestDialogueContext(payload, speakerHeroId);
                 if (ReadString(existing, "phase", "") == "AwaitingStart" && ReadBool(terms, "startNow", false))
@@ -14442,10 +14610,12 @@ The previous attempt did not complete a JSON object within its output budget.
 
             foreach (Dictionary<string, object> candidate in candidates ?? new List<Dictionary<string, object>>())
             {
+                if (IsCurrentPlayerTransferAlternative(candidate, payload)) continue;
                 Dictionary<string, object> candidateCopy = CloneDictionary(candidate);
                 Dictionary<string, object> normalized = NormalizeActionCommand(candidateCopy, campaignId, out List<string> actionErrors, payload, resolutionText);
                 if (normalized != null && actionErrors.Count == 0)
                 {
+                    if (IsCurrentPlayerTransferAlternative(normalized, payload)) continue;
                     queued.Add(QueueAction(campaignId, normalized));
                     break;
                 }
@@ -14463,6 +14633,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     Dictionary<string, object> repairedNormalized = NormalizeActionCommand(repaired, campaignId, out List<string> repairErrors, payload, resolutionText);
                     if (repairedNormalized != null && repairErrors.Count == 0)
                     {
+                        if (IsCurrentPlayerTransferAlternative(repairedNormalized, payload)) continue;
                         queued.Add(QueueAction(campaignId, repairedNormalized));
                         break;
                     }
@@ -17159,6 +17330,7 @@ The previous attempt did not complete a JSON object within its output budget.
         private static string InferDuelModeFromDirective(string text)
         {
             string q = (text ?? string.Empty).ToLowerInvariant();
+            if (ContainsAnyNormalized(q, "practice") || Regex.IsMatch(q, @"\bspar(?:ring)?\b")) return "practice";
             if (q.Contains("lethal")
                 || q.Contains("to the death")
                 || q.Contains("death")
@@ -17424,18 +17596,25 @@ The previous attempt did not complete a JSON object within its output budget.
             string correlationId,
             string auditMode,
             string heroId,
-            string eventId)
+            string eventId,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             if (!ReadBool(llm, "ok", false))
                 return llm;
             string initialContent = ReadString(llm, "content", "");
             bool initialAccepted = StructuredResponseIsComplete(initialContent, auditMode)
+                && StructuredActionResponseHasDecision(initialContent, request)
                 && ConversationVisibleReplyPassesRequestQualityGate(
                     initialContent, request, auditMode);
             DiagnosticValidation("Check answer structure", initialAccepted,
                 DiagnosticStructuredIssues(initialContent, auditMode, request), initialContent);
             if (initialAccepted)
                 return llm;
+
+            llm = RepairMissingStructuredActionResponseDecision(llm, request, campaignId,
+                correlationId, auditMode, heroId, eventId, responder);
+            if (!ReadBool(llm, "ok", false)) return llm;
+            initialContent = ReadString(llm, "content", "");
 
             string normalizedMode = NormalizeLookup(auditMode).Replace(' ', '_');
             Dictionary<string, object> initiallyParsed = TryParseJsonObject(initialContent);
@@ -17458,7 +17637,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 WriteAudit(campaignId, correlationId, "server", auditMode, "llm.schema_completion", heroId, "", eventId,
                     "completed", 0, "A provider-corrupted reply key was repaired deterministically without resending the full prompt.",
                     ReadDictionary(llm, "deterministicSchemaCompletion"));
-                return llm;
+                return RepairMissingStructuredActionResponseDecision(llm, request, campaignId,
+                    correlationId, auditMode, heroId, eventId, responder);
             }
             if (IsConversationStructuredMode(normalizedMode)
                 && initiallyParsed != null
@@ -17478,7 +17658,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 WriteAudit(campaignId, correlationId, "server", auditMode, "llm.schema_completion", heroId, "", eventId,
                     "completed", 0, "Incomplete private response metadata was completed deterministically without resending the prompt.",
                     ReadDictionary(llm, "deterministicSchemaCompletion"));
-                return llm;
+                return RepairMissingStructuredActionResponseDecision(llm, request, campaignId,
+                    correlationId, auditMode, heroId, eventId, responder);
             }
 
             if (IsConversationStructuredMode(normalizedMode)
@@ -17505,7 +17686,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 WriteAudit(campaignId, correlationId, "server", auditMode, "llm.schema_completion", heroId, "", eventId,
                     "completed", 0, "A closed visible reply was recovered from truncated JSON without resending the full prompt.",
                     ReadDictionary(llm, "deterministicSchemaCompletion"));
-                return llm;
+                return RepairMissingStructuredActionResponseDecision(llm, request, campaignId,
+                    correlationId, auditMode, heroId, eventId, responder);
             }
 
             List<Dictionary<string, object>> attempts = new List<Dictionary<string, object>>();
@@ -17513,9 +17695,17 @@ The previous attempt did not complete a JSON object within its output budget.
             {
                 ["attempted"] = true,
                 ["initialContentChars"] = ReadString(llm, "content", "").Length,
+                ["initialFinishReason"] = ReadString(llm, "finishReason", ""),
+                ["initialFailureKind"] = StructuredConversationFailureKind(llm),
+                ["initialFailureEvidence"] = StructuredConversationFailureEvidence(llm, request),
                 ["attempts"] = attempts
             };
-            for (int attempt = 1; attempt <= 2; attempt++)
+            // An empty typed-action answer has no metadata to repair. Permit one
+            // regeneration with the complete evidence, then fail without effects;
+            // do not pay for repeated full-context calls to repair the same {}.
+            int maximumAttempts = UsesStructuredActions(request) && initiallyParsed != null && initiallyParsed.Count == 0 ? 1 : 2;
+            diagnostics["maximumAttempts"] = maximumAttempts;
+            for (int attempt = 1; attempt <= maximumAttempts; attempt++)
             {
                 Dictionary<string, object> retryRequest = CloneDictionary(request ?? new Dictionary<string, object>());
                 List<Dictionary<string, object>> retryMessages = ReadDictionaryList(request, "messages")
@@ -17538,6 +17728,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 string structuredFieldGuidance = correspondenceMode
                     ? " Include every required correspondence field: shouldReply, body, reason, actionGate, rebellionDecision, and campaignOrder. The body must contain the complete in-character written reply when shouldReply is true."
                     : " Include every required field, including reply and actionGate when this is dialogue. The reply field must contain a complete in-character reaction; never return only a quoted fragment copied from the latest player message, and never put a participation enum such as speak, agree, disagree, or quiet in reply.";
+                if (UsesStructuredActions(request))
+                    structuredFieldGuidance += " Include the required structuredActionDecision with kind, proposalId, revision, termsHash, reason and clauses. Preserve exact pending proposal identity; a native receipt acknowledgment with no pending proposal uses none, empty identifiers and revision 0. Never substitute legacy actionGate for this decision.";
                 // The original messages already include the character context. When the
                 // provider returned no usable answer, repeating the context can push a
                 // near-capacity prompt over the safety ceiling before either retry runs.
@@ -17545,7 +17737,11 @@ The previous attempt did not complete a JSON object within its output budget.
                 retryMessages.Add(new Dictionary<string, object>
                 {
                     ["role"] = "system",
-                    ["content"] = "FORMAT REPAIR ATTEMPT " + attempt.ToString(CultureInfo.InvariantCulture) + ": Correct the rejected response below instead of inventing a replacement. Preserve every usable part of its in-character answer, personality, tone, decisions, and structured effects. Use the original character and scene instructions already supplied above to correct only malformed, missing, or explicitly invalid fields. Return exactly one complete valid JSON object matching the required response schema. Do not return an empty object. Do not use Markdown or code fences." + structuredFieldGuidance
+                    ["content"] = "FORMAT REPAIR ATTEMPT " + attempt.ToString(CultureInfo.InvariantCulture)
+                        + (ConversationStructuredObjectHasUsableVisibleReply(initiallyParsed)
+                            ? ": Correct the rejected response below. Preserve every usable part of its in-character answer, personality, tone, decisions, and structured effects."
+                            : ": The previous output had no usable answer. Answer the latest player turn using the original character and scene instructions already supplied above.")
+                        + " Return exactly one complete valid JSON object matching the required response schema. Write the complete reply field first, then its grounded private metadata. Do not return an empty object. Do not use Markdown or code fences." + structuredFieldGuidance
                         + "\n\nREJECTED ORIGINAL RESPONSE TO CORRECT:\n"
                         + LimitText(initialContent, 16000)
                         + (repeatCharacterContext
@@ -17558,10 +17754,19 @@ The previous attempt did not complete a JSON object within its output budget.
                 retryRequest["reasoningDisabled"] = true;
                 retryRequest["temperature"] = attempt == 1 ? 0.05d : 0d;
                 retryRequest["maxTokens"] = Math.Max(2200, ReadInt(retryRequest, "maxTokens", 2200));
-                Dictionary<string, object> retry = ChatWithLlm(retryRequest);
+                Dictionary<string, object> retry = responder == null ? ChatWithLlm(retryRequest) : responder(retryRequest);
+                var incompleteRetry = TryParseJsonObject(ReadString(retry, "content", ""));
+                if (ReadBool(retry, "ok", false) && IsConversationStructuredMode(normalizedMode)
+                    && !StructuredResponseIsComplete(ReadString(retry, "content", ""), auditMode)
+                    && ConversationStructuredObjectHasUsableVisibleReply(incompleteRetry)
+                    && ConversationVisibleReplyPassesRequestQualityGate(ReadString(retry, "content", ""), request, auditMode))
+                    retry["content"] = Json.Serialize(CompleteConversationStructuredResponse(incompleteRetry, normalizedMode, out _));
+                retry = RepairMissingStructuredActionResponseDecision(retry, request, campaignId,
+                    correlationId, auditMode, heroId, eventId, responder);
                 bool retryStructurallyUsable = ReadBool(retry, "ok", false)
                     && StructuredResponseIsComplete(
-                        ReadString(retry, "content", ""), auditMode);
+                        ReadString(retry, "content", ""), auditMode)
+                    && StructuredActionResponseHasDecision(ReadString(retry, "content", ""), request);
                 bool retryPassedQualityGate = retryStructurallyUsable
                     && ConversationVisibleReplyPassesRequestQualityGate(
                         ReadString(retry, "content", ""), request, auditMode);
@@ -17572,8 +17777,9 @@ The previous attempt did not complete a JSON object within its output budget.
                     : null;
                 if (retryStructurallyUsable && retryObject != null)
                 {
+                    PreserveFormatRepairMetadata(initiallyParsed, retryObject);
                     MarkRepairedVisibleResponse(
-                        retryObject, retryPassedQualityGate);
+                        retryObject, retryPassedQualityGate, "format_recovery");
                     retry["content"] = Json.Serialize(retryObject);
                 }
                 Dictionary<string, object> attemptDiagnostics = new Dictionary<string, object>
@@ -17588,9 +17794,14 @@ The previous attempt did not complete a JSON object within its output budget.
                         : "",
                     ["retryContentChars"] = ReadString(retry, "content", "").Length,
                     ["retryError"] = ReadString(retry, "error", ""),
+                    ["finishReason"] = ReadString(retry, "finishReason", ""),
+                    ["failureKind"] = retryPassedQualityGate ? "" : StructuredConversationFailureKind(retry),
                     ["originalResponseProvided"] = true,
                     ["characterContextProvided"] = repeatCharacterContext
                 };
+                attemptDiagnostics["requestCharacters"] = retryMessages.Sum(message => ReadString(message, "content", "").Length);
+                attemptDiagnostics["callKind"] = ConversationStructuredObjectHasUsableVisibleReply(initiallyParsed) ? "format_repair" : "full_regeneration";
+                attemptDiagnostics["usage"] = ReadDictionary(retry, "usage") ?? new Dictionary<string, object>();
                 attempts.Add(attemptDiagnostics);
                 WriteAudit(campaignId, correlationId, "server", auditMode, "llm.format_retry", heroId, "", eventId,
                     !retryStructurallyUsable ? "failed"
@@ -17614,7 +17825,8 @@ The previous attempt did not complete a JSON object within its output budget.
             llm["formatRetry"] = diagnostics;
             llm["ok"] = false;
             llm["errorCode"] = "structured_response_incomplete_after_retries";
-            llm["error"] = "The provider did not return a complete dialogue response after two bounded format-repair attempts. No transcript or memory was written from the partial output.";
+            llm["error"] = "The provider did not return a complete dialogue response after " + maximumAttempts.ToString(CultureInfo.InvariantCulture)
+                + " bounded recovery attempt(s). No transcript or memory was written from the partial output.";
             return llm;
         }
 
@@ -17824,6 +18036,11 @@ The previous attempt did not complete a JSON object within its output budget.
             add("emotion", "guarded");
             add("intent", "respond_in_character");
             add("relationshipSignal", "unchanged");
+            string assessmentAbsence = ConversationAssessmentAbsenceReason(completed);
+            if (assessmentAbsence == "relationship_assessment_missing") completed["relationshipAssessmentStatus"] = "missing";
+            else if (assessmentAbsence == "relationship_assessment_invalid"
+                && !StructuredObjectArrayFieldsAreValid(completed, false, "relationshipAssessments", "relationship_assessments"))
+                completed["relationshipAssessmentStatus"] = "invalid";
             normalizeObjectArray("relationshipAssessments", new[] { "relationship_assessments" });
             Dictionary<string, object> decisionBrief = ReadDictionary(completed, "decisionBrief")
                 ?? ReadDictionary(completed, "decision_brief");
@@ -17965,10 +18182,6 @@ The previous attempt did not complete a JSON object within its output budget.
             {
                 return parsed.ContainsKey("actions");
             }
-            if (mode == "context_selector")
-            {
-                return parsed.ContainsKey("selectedPulls") || parsed.ContainsKey("pulls");
-            }
             if (mode == "generated_wilderness_event")
             {
                 return !string.IsNullOrWhiteSpace(ReadFirstString(parsed, "openingText", "opening_text", "event_opening_text", "opening"));
@@ -18021,11 +18234,21 @@ The previous attempt did not complete a JSON object within its output budget.
             return true;
         }
 
-        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload)
+        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload) => ChatWithLlm(payload, null, null);
+
+        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled)
         {
             ThrowIfCampaignRequestReplaced();
             payload = payload ?? new Dictionary<string, object>();
-            Dictionary<string, object> settings = LoadSettings();
+            if (IsRetiredMemoryRequest(ReadString(payload, "requestType", "")))
+                return TestDict("ok", false, "errorCode", "memory_llm_stage_retired", "providerCallCount", 0);
+            Dictionary<string, object> settings = BanterProviderSettings(payload, LoadSettings());
+            bool singleAttempt = ReadBool(payload, "singleProviderAttempt", false);
+            if (singleAttempt)
+            {
+                settings = CloneDictionary(settings);
+                settings["llmTransientMaxAttempts"] = 1;
+            }
             bool codexSubscription = UsesCodexSubscription(settings);
             bool namedApiProvider = ReadString(settings, "llmProvider", "") == OpenRouterProvider || ReadString(settings, "llmProvider", "") == NanoGptProvider;
             string apiUrl = namedApiProvider ? LlmApiUrl(settings) : ReadString(payload, "apiUrl", LlmApiUrl(settings));
@@ -18083,6 +18306,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
 
             Dictionary<string, object> requestBody = BuildChatRequestBody(settings, payload, messages, model);
+            if (contentDelta != null && !codexSubscription) requestBody["stream"] = true;
             if (codexSubscription) EnrichCodexGenerationContext(settings, payload, requestType, model, codexContext, requestBody);
 
             Dictionary<string, object> cacheRouting = ConfigurePromptCacheRouting(settings, payload, requestBody, apiUrl, model, requestType);
@@ -18102,7 +18326,7 @@ The previous attempt did not complete a JSON object within its output budget.
             int totalRequestChars = outboundJson.Length;
             int messageChars = messages.Sum(message => ReadString(message, "content", "").Length);
             int warningCharacterLimit = ReadInt(settings, "promptWarningCharacterLimit", 100000);
-            int hardCharacterLimit = ReadInt(settings, "promptHardCharacterLimit", 240000);
+            int hardCharacterLimit = ConversationPromptHardCharacterLimit(settings, continuityPreflight);
             Dictionary<string, object> promptPreflight = new Dictionary<string, object>
             {
                 ["messageCharacters"] = messageChars,
@@ -18111,6 +18335,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 ["continuity"] = continuityPreflight,
                 ["warningCharacterLimit"] = warningCharacterLimit,
                 ["hardCharacterLimit"] = hardCharacterLimit,
+                ["configuredHardCharacterLimit"] = ReadInt(settings, "promptHardCharacterLimit", 240000),
                 ["warningExceeded"] = outboundJson.Length > warningCharacterLimit,
                 ["hardLimitExceeded"] = outboundJson.Length > hardCharacterLimit
             };
@@ -18161,9 +18386,9 @@ The previous attempt did not complete a JSON object within its output budget.
                 try
                 {
                     CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
-                    responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
+                    responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext, contentDelta, canceled);
                 }
-                catch (Exception reasoningException) when (ShouldRetryWithoutReasoning(reasoningRouting, reasoningException.Message))
+                catch (Exception reasoningException) when (!singleAttempt && ShouldRetryWithoutReasoning(reasoningRouting, reasoningException.Message))
                 {
                     StartReasoningFallbackCooldown(settings, apiUrl, model);
                     reasoningRouting["fallbackUsed"] = true;
@@ -18177,7 +18402,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
                     responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
                 }
-                catch (Exception cacheRouteException) when (ShouldRetryWithoutCache(cacheRouting, cacheRouteException.Message))
+                catch (Exception cacheRouteException) when (!singleAttempt && ShouldRetryWithoutCache(cacheRouting, cacheRouteException.Message))
                 {
                     StartPromptCacheCooldown(settings, apiUrl, model);
                     cacheRouting["fallbackUsed"] = true;
@@ -18193,7 +18418,7 @@ The previous attempt did not complete a JSON object within its output budget.
                         CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
                         responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
                     }
-                    catch (Exception reasoningException) when (ShouldRetryWithoutReasoning(reasoningRouting, reasoningException.Message))
+                    catch (Exception reasoningException) when (!singleAttempt && ShouldRetryWithoutReasoning(reasoningRouting, reasoningException.Message))
                     {
                         StartReasoningFallbackCooldown(settings, apiUrl, model);
                         reasoningRouting["fallbackUsed"] = true;
@@ -18428,8 +18653,7 @@ The previous attempt did not complete a JSON object within its output budget.
             request.Method = "POST";
             request.ContentType = "application/json";
             request.Accept = "application/json";
-            int providerRequestTimeoutMs = Math.Max(15000,
-                Math.Min(600000, ReadInt(settings, "providerRequestTimeoutMs", 120000)));
+            int providerRequestTimeoutMs = Math.Clamp(ReadInt(settings, "providerRequestTimeoutMs", 120000), 15000, 600000);
             request.Timeout = providerRequestTimeoutMs;
             request.ReadWriteTimeout = providerRequestTimeoutMs;
             if (!string.IsNullOrWhiteSpace(apiKey))
@@ -20213,6 +20437,7 @@ The previous attempt did not complete a JSON object within its output budget.
 
             BindDialogueSettlementAuthorization(record, terms, payload, command, mappedType,
                 correlationId, errors);
+            BindPaymentRefund(record, terms, payload, command, errors);
             BindDialogueActionAuthority(record, terms, payload, command, mappedType,
                 correlationId, errors, raw);
 
@@ -20792,7 +21017,7 @@ The previous attempt did not complete a JSON object within its output budget.
             if (raw == "open_ended" || raw == "openended" || raw == "open")
             {
                 terms["termKind"] = "open_ended";
-                terms["reviewIntervalDays"] = 5;
+                terms["reviewIntervalDays"] = 30;
                 terms.Remove("durationDays");
                 return;
             }
@@ -20822,6 +21047,14 @@ The previous attempt did not complete a JSON object within its output budget.
 
         private static Dictionary<string, object> QueueAction(string campaignId, Dictionary<string, object> record)
         {
+            if (_playerActionTurn != null && IsDialogueActionSource(ReadString(record, "source", ""))
+                && !ReadString(record, "serverActionId", "").StartsWith("pa_", StringComparison.Ordinal))
+            {
+                string turn = FirstNonEmpty(ReadFirstString(_playerActionTurn, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(_playerActionTurn));
+                record["serverActionId"] = "da_" + ReignBeta.Shared.Dialogue.PlayerActionRules.Hash(campaignId + "|" + ContinuityTimeline(_playerActionTurn)
+                    + "|" + turn + "|" + ReadString(record, "command", "") + "|" + ReadString(record, "actorHeroStringId", "") + "|" + ReadString(record, "targetHeroStringId", "")).Substring(0, 48);
+                record["actionId"] = record["serverActionId"];
+            }
             string id = ReadString(record, "serverActionId", Guid.NewGuid().ToString("N"));
             string correlationId = ReadString(record, "correlationId", "");
             Dictionary<string, object> row = new Dictionary<string, object>
@@ -20835,8 +21068,27 @@ The previous attempt did not complete a JSON object within its output budget.
                 ["record"] = record
             };
 
+            if (_stagedTurnActions != null)
+            {
+                var prior = ReadDurableConversationAction(campaignId, id);
+                if (prior != null)
+                {
+                    if (ReadString(ReadDictionary(prior, "record"), "termsHash", "") != ReadString(record, "termsHash", ""))
+                        throw new InvalidOperationException("This turn already has different immutable action terms.");
+                    return prior;
+                }
+                _stagedTurnActions.Add(row); return row;
+            }
             lock (FileLock)
             {
+                Dictionary<string, object> durable = ReadDurableConversationAction(campaignId, id);
+                if (durable != null)
+                {
+                    if (ReadString(ReadDictionary(durable, "record"), "termsHash", "") != ReadString(record, "termsHash", ""))
+                        throw new InvalidOperationException("This action ID already has different immutable terms.");
+                    return durable;
+                }
+                SaveDurableConversationAction(campaignId, row);
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
                 queue.RemoveAll(x => ReadString(x, "id", "") == id);
                 queue.Add(row);
@@ -20883,22 +21135,27 @@ The previous attempt did not complete a JSON object within its output budget.
                         continue;
                     }
 
-                    if (!status.Equals("queued", StringComparison.OrdinalIgnoreCase) && !status.Equals("proposed", StringComparison.OrdinalIgnoreCase))
+                    bool retryDelivery = DurableConversationAction(ReadString(row, "id", ""))
+                        && !IsTerminalActionReportStatus(status)
+                        && nowTs - ReadLong(row, "deliveredTs", 0) >= 30;
+                    if (!retryDelivery && !status.Equals("queued", StringComparison.OrdinalIgnoreCase) && !status.Equals("proposed", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
                     long queuedTs = ReadLong(row, "ts", 0);
-                    if (queuedTs > 0 && nowTs - queuedTs > deliveryMaxAgeSeconds)
+                    if (!DurableConversationAction(ReadString(row, "id", "")) && queuedTs > 0 && nowTs - queuedTs > deliveryMaxAgeSeconds)
                     {
                         row["status"] = "expired";
                         row["expiredTs"] = nowTs;
                         row["expiryReason"] = "Undelivered action exceeded the six-hour delivery window.";
+                        SaveDurableConversationAction(campaignId, row);
                         continue;
                     }
 
                     row["status"] = "delivered";
                     row["deliveredTs"] = nowTs;
+                    SaveDurableConversationAction(campaignId, row);
                     selected.Add(row);
                 }
 
@@ -20982,6 +21239,7 @@ The previous attempt did not complete a JSON object within its output budget.
                             ignoredStatusRegression = true;
                         }
                         found = true;
+                        SaveDurableConversationAction(campaignId, row);
                         break;
                     }
                 }
@@ -21032,6 +21290,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     ["ignoredStatusRegression"] = true
                 };
             }
+            if (found) RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
             Dictionary<string, object> memoryStore = StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = EvaluateCompletedActionRelationships(payload);
             UpdateDiplomaticEventForAction(campaignId, id, status, payload);
@@ -21206,6 +21465,18 @@ The previous attempt did not complete a JSON object within its output budget.
         private static List<Dictionary<string, object>> ReadActionQueueUnlocked(string campaignId)
         {
             string path = CampaignFile(campaignId, "actions", "action-queue.json");
+            var durable = ReadDurableConversationActions(campaignId);
+            if (durable.Count > 0 || File.Exists(path))
+            {
+                var legacy = File.Exists(path) ? ReadActionQueueFromPath(path) : new List<Dictionary<string, object>>();
+                // Save Sync restores the database. A newer JSON cache must never resurrect an undone handover.
+                // Ordinary legacy actions still need their repaired terminal state
+                // persisted to both the queue and linked diplomacy event.
+                var ordinary = ReconcileActionQueueTerminalReceiptsUnlocked(campaignId,
+                    legacy.Where(r => !DurableConversationAction(ReadString(r, "id", ""))).ToList(), true);
+                return durable.Concat(ordinary).OrderBy(r => ReadLong(r, "ts", 0))
+                    .ThenBy(r => ReadString(r, "id", "").StartsWith("pa_", StringComparison.Ordinal) ? 0 : 1).ToList();
+            }
             if (!File.Exists(path))
             {
                 string legacyPath = Path.Combine(DataDir, "action-queue.json");
@@ -21332,7 +21603,6 @@ The previous attempt did not complete a JSON object within its output budget.
                 case "character_construction": key = "characterConstructionModel"; break;
                 case "relationship": key = "relationshipModel"; break;
                 case "correspondence": key = "correspondenceModel"; break;
-                case "context_selector": key = "selectorModel"; break;
                 case "action_planner": key = "actionPlannerModel"; break;
                 case "action_router": key = "actionRouterModel"; break;
                 case "action_repair": key = "actionRouterModel"; break;
@@ -22879,6 +23149,7 @@ Return exactly this JSON shape:
                 ["siteUrl"] = "",
                 ["appTitle"] = "Bannerlord Reign",
                 ["dialogueModel"] = "zai-org/glm-5.2",
+                ["personalGossip"] = DefaultPersonalGossipSettings(),
                 ["characterConstructionModel"] = "zai-org/glm-5.2",
                 ["diplomacyModel"] = "zai-org/glm-5.2",
                 ["eventsModel"] = "zai-org/glm-5.2",
@@ -22887,7 +23158,6 @@ Return exactly this JSON shape:
                 ["relationshipModel"] = "zai-org/glm-5.2",
                 ["correspondenceModel"] = "zai-org/glm-5.2",
                 ["strategyModel"] = "zai-org/glm-5.2",
-                ["selectorModel"] = "",
                 ["enableMinimeMemoryWorker"] = true,
                 ["minimeTopicUrl"] = "http://127.0.0.1:8082/topic",
                 ["minimeMaxTopics"] = 5,
@@ -22936,6 +23206,10 @@ Return exactly this JSON shape:
                 ["reasoningEffort"] = "medium",
                 ["reasoningFallbackCooldownSeconds"] = 300,
                 ["portraitProvider"] = "NanoGPT",
+                ["portraitGenerationMethod"] = "text",
+                ["portraitVisionProvider"] = "Codex",
+                ["portraitVisionModel"] = "runtime-default",
+                ["portraitVisionNanoGptModel"] = DefaultNanoPortraitVisionModel,
                 ["portraitNanoGptImageGenerationsUrl"] = "https://nano-gpt.com/api/v1/images/generations",
                 ["portraitNanoGptChatCompletionsUrl"] = "https://nano-gpt.com/api/v1/chat/completions",
                 ["portraitNanoGptApiKey"] = "",
@@ -22980,7 +23254,23 @@ Return exactly this JSON shape:
                 ["textureTraceEnabled"] = false,
                 ["saveSyncEnabled"] = true,
                 ["reignXpEnabled"] = true,
+                ["playerApproachesEnabled"] = true,
+                ["playerAttentionTrackingEnabled"] = true,
+                ["playerJealousyApproachesEnabled"] = true,
+                ["playerKeepInvitationsEnabled"] = true,
+                ["playerPatrolInterceptionsEnabled"] = true,
+                ["playerBattleRescueDialogueEnabled"] = true,
+                ["playerPrisonRescueDialogueEnabled"] = true,
                 ["reignXpMultiplier"] = 1.0,
+                ["reignXpConversationMultiplier"] = 1.0,
+                ["reignXpSocialCharmMultiplier"] = 1.0,
+                ["reignXpSocialBonusMultiplier"] = 1.0,
+                ["reignXpPetitionMultiplier"] = 1.0,
+                ["banterEnabled"] = true,
+                ["banterMaxResponses"] = 6,
+                ["banterMaxCharacters"] = 360,
+                ["banterProvider"] = "",
+                ["banterModel"] = "",
                 ["autoOpenBrowser"] = true
             };
         }
@@ -23039,12 +23329,18 @@ Return exactly this JSON shape:
 
         private static Dictionary<string, object> SaveSettings(Dictionary<string, object> incoming)
         {
+            string approachError = ValidatePlayerApproachOptions(incoming);
+            if (!string.IsNullOrEmpty(approachError)) return TestDict("ok", false, "error", approachError);
+            string banterError = ValidateBanterOptions(incoming);
+            if (!string.IsNullOrEmpty(banterError)) return TestDict("ok", false, "error", banterError);
             string xpError = ValidateReignXpOptions(incoming);
             if (!string.IsNullOrEmpty(xpError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = xpError };
             string imageProviderError = ValidateCodexImageSettings(incoming);
             if (!string.IsNullOrEmpty(imageProviderError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = imageProviderError };
+            string visionError = ValidatePortraitVisionSettings(incoming);
+            if (!string.IsNullOrEmpty(visionError)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = visionError };
             Dictionary<string, object> settings = DefaultSettings();
             if (File.Exists(SettingsPath))
             {
@@ -23523,29 +23819,17 @@ Return exactly this JSON shape:
                 return ReadPromptTemplatesApi();
             }
 
-            Dictionary<string, object> files = ReadDictionary(payload, "files") ?? payload;
-            int saved = 0;
             lock (FileLock)
             {
-                Directory.CreateDirectory(PromptsDir);
-                foreach (KeyValuePair<string, object> pair in files)
-                {
-                    string name = Path.GetFileName(pair.Key ?? "");
-                    if (!IsPromptFileNameAllowed(name))
-                    {
-                        continue;
-                    }
-
-                    File.WriteAllText(PromptPath(name), Convert.ToString(pair.Value) ?? string.Empty, Encoding.UTF8);
-                    saved++;
-                }
+                EnsurePromptTemplates();
+                var result = PersistPromptEditorFiles(PromptsDir, ReadDictionary(payload, "files") ?? payload,
+                    ReadDictionary(payload, "expectedFiles"));
+                if (!ReadBool(result, "ok", false)) return result;
+                LogOperational("prompts.save", new Dictionary<string, object> { ["saved"] = result["saved"], ["promptsDir"] = PromptsDir });
+                InvalidatePromptRuntimeCache();
+                // Return the exact persisted bytes, without another migration pass after the write.
+                return result;
             }
-
-            LogOperational("prompts.save", new Dictionary<string, object> { ["saved"] = saved, ["promptsDir"] = PromptsDir });
-            InvalidatePromptRuntimeCache();
-            Dictionary<string, object> response = ReadPromptTemplatesApi();
-            response["saved"] = saved;
-            return response;
         }
 
         private static void EnsurePromptTemplates()
@@ -23758,7 +24042,7 @@ Treat the name, age, gender, and culture as private generation guidance. They de
                 PromptMeta("tavern_house_look_again_summary.txt", "Tavern House: Look Again Summary", "image", true, "Summarizes the complete completed conversation into a faithful non-explicit visual moment."),
                 PromptMeta("tavern_house_look_again_image.txt", "Tavern House: Look Again Image", "image", true, "Non-explicit scene from the conversation summary and every participant reference. Tokens: {townName}, {participants}, {summary}."),
                 PromptMeta("tavern_house_portrait_clothing.txt", "Tavern House: Portrait Clothing", "image", true, "One clothing-only edit for every adult madam and worker, regardless of culture or gender. Uses the configured Adult Portraits provider after the identity portrait. Token: [TAVERN ROLE]."),
-                PromptMeta("context_selector_system.txt", "Context Selector System", "context", true, "Rules for choosing which context pulls are needed before a response."),
+                PromptMeta(OutfitPromptName, "Conversation: New Clothes", "image", true, "Dedicated clothing-only edit of the current full-body portrait. The player's exact outfit description is appended as quoted garment data. Normal Portraits at Physical Confidence 0-39; Adult Portraits at 40-100. No automatic fallback between profiles."),
                 PromptMeta("context_pull_check_inventory_appearance.txt", "Check Inventory And Appearance", "context", true, "Selector-readable header for NPC inventory, equipment, and material presentation."),
                 PromptMeta("context_pull_check_player_appearance_status.txt", "Check Player Appearance Status", "context", true, "Selector-readable header for the player's visible clothing, status, and disguise cues."),
                 PromptMeta("context_pull_nearby_settlements.txt", "Nearby Settlements", "context", true, "Selector-readable header for nearby towns, castles, villages, and routes."),
@@ -23774,6 +24058,8 @@ Treat the name, age, gender, and culture as private generation guidance. They de
                 PromptMeta("dialogue_system.txt", "Dialogue System Message", "general", true, "Top-level system message for individual conversations."),
                 PromptMeta("dialogue_live_turn_template.txt", "Dialogue Live Turn", "general", true, "Non-cacheable scene, memory, and latest-message template for individual conversations."),
                 PromptMeta("dialogue_internal_posture.txt", "Dialogue Decision Policy", "general", true, "Private deliberation instructions and compact decision-brief limits. Raw reasoning is forbidden."),
+                PromptMeta("jealousy_approach.txt", "Jealousy Approach", "general", true, "NPC-first opening using witnessed rival attention and authoritative neglect severity."),
+                PromptMeta("rescue_opening.txt", "Rescue Opening", "general", true, "NPC-first response to verified battle or prison rescue evidence."),
                 PromptMeta("dialogue_output_schema.json", "Dialogue Output Schema", "hidden", false, "Strict JSON contract for individual conversation replies."),
                 PromptMeta("pull_out.txt", "Pull Out", "general", true, "Authoritative player-action prompt sent as a normal conversation turn after the player prevents an insemination pregnancy roll."),
                 PromptMeta("action_planner_system.txt", "Hidden Action Planner System", "general", true, "System message for converting action gates into strict action JSON."),
@@ -23883,7 +24169,7 @@ privacy: Suggested action metadata is server/debug material until validated.";
 ";
                 case "duel_player":
                     return @"action_rules: DuelPlayer is conversation-scoped. Use it only when the current adult one-on-one NPC visibly accepts or demands a duel with the player. actorHeroId is the current NPC/opponent and TargetHero is the player. The game will not teleport anyone; it arms a mission hook that starts after the conversation closes if both agents are present.
-terms: duelMode must be ""training"" or ""lethal"". For a nonlethal duel, duelPurpose must be ""friendly"" for consensual practice/sparring or ""hostile"" for a genuine challenge made from anger, offense, or enmity. Lethal is a fight to the death or possible death, implies duelPurpose=""lethal"", and may be emitted only when the supplied native personal relation is -80 or lower. Optional terms: lethal, challengeTone, targetDeathRiskPercent, playerDeathRiskPercent, allowPlayerDeath, pauseNearbyAgents, pauseRadius, playerHealth, opponentHealth, trainingStopHealth. The game revalidates adulthood, personal relation, active one-to-one context, and entity direction before execution. Completed hostile and lethal duels become win/loss rumors; friendly sparring does not.
+terms: duelMode must be ""practice"", ""honor"" or ""lethal"". Practice is consensual, nonlethal sparring: duelPurpose=""practice"", lethal=false. Its result is remembered only by the NPC opponent; it creates no public combat record, kingdom news, reputation or automatic relationship change. Use practice for requests to practice or spar without reputational stakes. Honor is a nonlethal personal challenge with public win/loss evidence. Lethal is a fight to the death or possible death, implies duelPurpose=""lethal"", and may be emitted only when the supplied native personal relation is -80 or lower. The legacy training mode remains supported for old actions. Optional terms: lethal, challengeTone, targetDeathRiskPercent, playerDeathRiskPercent, allowPlayerDeath, pauseNearbyAgents, pauseRadius, playerHealth, opponentHealth, trainingStopHealth. The game revalidates adulthood, personal relation, active one-to-one context, and entity direction before execution. Practice mode overrides stale hostile purpose and death-risk terms; never turn practice into an arrest or honor challenge.
 ";
                 case "prepare_arrest":
                 case "confirm_arrest":
@@ -23902,7 +24188,7 @@ terms: duelMode must be ""training"" or ""lethal"". For a nonlethal duel, duelPu
 ";
                 case "accept_temporary_party_guest":
                 case "renew_temporary_party_guest":
-                    return @"action_rules: Use only for the current lord, lady or encountered resident's own explicit agreement to travel temporarily in the player's party. Their clan and kingdom do not change. A resident soldier or guard must first receive authorized duty release. terms.purpose states the narrative purpose. terms.termKind describes only the schedule and must be exactly open_ended or fixed; never use temporary_party_guest or a social role such as independent ally, companion, retainer, or partner as termKind. Any agreement for a stated number of days is fixed and requires durationDays from 1 through 126, preserving fractional seasons using campaignCalendar. Open-ended means there is no end date: set termKind=open_ended, set reviewIntervalDays=5, and omit durationDays. terms.consentConfirmed is true only when the visible NPC reply clearly accepts. If attached to an army, armyExitAccepted separately requires explicit consent. For an agreed resident payment set the exact integer agreedGold. Permanent companion recruitment uses recruit_encountered_resident instead.
+                    return @"action_rules: Use only for the current lord, lady or encountered resident's own explicit agreement to travel temporarily in the player's party. Their clan and kingdom do not change. A resident soldier or guard must first receive authorized duty release. terms.purpose states the narrative purpose. terms.termKind describes only the schedule and must be exactly open_ended or fixed; never use temporary_party_guest or a social role such as independent ally, companion, retainer, or partner as termKind. Any agreement for a stated number of days is fixed and requires durationDays from 1 through 126, preserving fractional seasons using campaignCalendar. Open-ended means there is no end date: set termKind=open_ended, set reviewIntervalDays=30, and omit durationDays. terms.consentConfirmed is true only when the visible NPC reply clearly accepts. If attached to an army, armyExitAccepted separately requires explicit consent. For an agreed resident payment set the exact integer agreedGold. Permanent companion recruitment uses recruit_encountered_resident instead.
 ";
                 case "recruit_encountered_resident":
                     return @"action_rules: Only the current known resident can agree to become the player's permanent companion. Require a present unconditional visible acceptance, agreementKind=permanent, consentConfirmed=true and exact agreedGold, including zero when free. State a negotiated paid price explicitly in denars. Never act on a proposal, refusal, condition, hypothetical, silence or recruitment of a third person. Preserve their body, equipped clothes, name and progression. Native capacity, gold and presence are revalidated. A guard or soldier first needs release_resident_from_duty by the actual source commander or home-owning clan leader. Never substitute join_clan or create a duplicate wanderer.
@@ -24174,7 +24460,7 @@ terms: duelMode must be ""training"" or ""lethal"". For a nonlethal duel, duelPu
                 case "surrender_to_player": return "Mark a party as willing to surrender to the player and stop its movement.";
                 case "leave_player_alone": return "Stop a party from pursuing or threatening the player.";
                 case "kill_character": return "Execute or kill a target hero through the native character death action.";
-                case "duel_player": return "Arm a conversation-born duel with the current one-on-one NPC, either a friendly training bout or a lethal honor/reputation duel resolved by the mission hook.";
+                case "duel_player": return "Arm a conversation-born practice duel (private, nonlethal, no reputation effects), nonlethal duel of honor, or duel to the death with the current one-on-one NPC.";
                 case "prepare_arrest": return "Record the player's stated accusation and the current NPC's reaction while guards move into position, without beginning custody.";
                 case "confirm_arrest": return "Confirm a prepared arrest on a later player turn and route custody to the correct dungeon, player party, surrender, duel, or battle path.";
                 case "release_arrested_character": return "Release a player-arrested character while preserving the accusation and historical record.";
@@ -24219,8 +24505,11 @@ terms: duelMode must be ""training"" or ""lethal"". For a nonlethal duel, duelPu
 
         private static Dictionary<string, string> DefaultPromptTemplates()
         {
-			Dictionary<string, string> defaults = new Dictionary<string, string>
+            Dictionary<string, string> defaults = new Dictionary<string, string>
             {
+                ["party_banter_topics.txt"] = BanterTopicSeeds,
+                ["jealousy_approach.txt"] = JealousyApproachPrompt,
+                ["rescue_opening.txt"] = "The player chose Listen to them after a native rescue and has said nothing. Speak FIRST. In your opening explicitly refer to their actual help in the supplied battle or prison escape. Respond with gratitude, wounded pride, reserve or an attempt to repay according to your traits and relationship. Do not invent payment, promises or a romantic debt; do not claim inevitable defeat or sole rescue credit. Preserve the supplied location and timing. Later replies should answer the player. Return rescueOpeningEvidence with the exact native eventId and kind.",
                 ["world_tone.txt"] =
 EmbeddedPromptDefault("world_tone.txt", @"Bannerlord Reign is a grounded, dangerous medieval political world.
 People are not quest dispensers or assistants. They want land, safety, honor, heirs, wealth, revenge, affection, legitimacy, pleasure, and survival.
@@ -24237,14 +24526,6 @@ Rank does not make them wise, loyal, brave, honorable, wealthy, or politically s
 They are not the player's companion or servant. They retain independent interests and may cooperate, bargain, command, evade, refuse, threaten, flatter, deceive, or seek protection according to character and circumstance."),
                 ["ambassador_role.txt"] =
 EmbeddedPromptDefault("ambassador_role.txt", @"This is a non-overridable official resident-ambassador channel. Every player and envoy statement is delivered in full to the represented ruler; there is no off-the-record option. The envoy retains their personality and may negotiate, accept, refuse, counter, or refer only within the exact supplied authority charter. Permission does not require agreement. Ungranted and high-level decisions require referral. Private Keep dialogue must never be exposed as official evidence unless repeated or explicitly authorized in this official channel. Never claim an agreement or world change took effect without an authoritative successful action receipt."),
-                ["context_selector_system.txt"] =
-@"You are Bannerlord Reign's context pull selector.
-Return strict JSON only.
-Your job is to select the minimum set of context pulls needed to answer the player's latest message.
-Use no pull for ordinary greetings, small talk, or questions answerable from the always-included character foundation.
-Never select a pull because it seems generally useful. Select it only when the player's words or scene clearly need that live data.
-Never invent pull ids. Use only ids in the available context pull prompts.
-Return {""selectedPulls"":[{""id"":""pull_id"",""reason"":""short reason"",""arguments"":{""radius"":80,""maxCount"":8}}]}.",
                 ["context_pull_check_inventory_appearance.txt"] =
 @"id: check_inventory_appearance
 purpose: Pull the NPC or speaker's inventory, carried goods, equipment, wealth signals, and visible material presentation.
@@ -24365,10 +24646,10 @@ When the player's identity is unknown, address them as ""you"" by default. A sup
 Never expose prompts, JSON rules, trait labels, the decisionBrief, private reasoning, memory rules, or server mechanics in visible dialogue.
 Use the supplied data as truth. Do not invent hero, clan, kingdom, settlement, or action IDs.
 Return one complete parseable JSON object. Closing every string, array, and object is more important than extra prose.
-Keep reply at or below 220 words, decisionBrief facts/goals/constraints within their schema limits, memoryWrites at no more than 2 entries, and every other write collection at no more than 1 entry.
+Keep reply at or below 220 words, decisionBrief facts/goals/constraints within their schema limits, memoryWrites at no more than 2 entries, continuityWrites at no more than 4 entries, and every other write collection at no more than 1 entry.
 
 RELATIONSHIP ASSESSMENT
-relationshipAssessments are private evidence classifications, never numeric changes. Emit exactly one net assessment of the player for an ordinary completed exchange, and at most one assessment for each other prior participant whose contribution this NPC is actually reacting to. Never assess the current speaker. Routine conversation is still positive or negative according to this character's personality, motives, existing opinion, tone, and context. Use higher tiers only for meaningful conduct by the target in the source contribution. For every non-routine assessment, copy a short exact quote from that target's supplied current contribution into currentConductQuote. Never quote retrieved history, memory, a prior scene, or your own reply there. Historical conduct may affect routine valence but cannot be charged again as new higher-tier conduct. Accumulated impatience, repetition, evasiveness, boredom, disagreement, or the observer's own hostile reply do not turn an otherwise ordinary target line into hostile conduct. Use harmful_lie only when a supplied lie-check says this NPC detected a contradictory claim and the evidence supports deceptive intent; an unsupported or unknown claim is not a caught lie. For a gift, always name giftRecipientHeroStringId. Only that recipient may receive transformative gift appreciation; other observers use gift_witness for a small happy or jealous reaction toward the giver, and jealousy is never scaled to the recipient's award. Use gift_leverage only with a supplied benefit id establishing lineage. The deterministic server verifies the current-conduct quote and objective evidence, then chooses the final bounded relationship number.
+relationshipAssessments are private evidence classifications, never numeric changes. Emit exactly one net assessment of the player for an ordinary completed exchange, and at most one assessment for each other prior participant whose contribution this NPC is actually reacting to. Never assess the current speaker. Classify the target's current conduct as positive, negative, or neutral in character. Use neutral for insufficient evidence, clarification or a first brief answer needing detail. Suspicion is not a verified offense. Never penalize a target for negation, someone else's quoted threat, or your own hostile delivery. Use higher tiers only for meaningful conduct by the target in the source contribution. For every negative or non-routine assessment, copy a short exact quote from that target's supplied current contribution into currentConductQuote and explain the concrete reaction in summary. Missing evidence produces no change. Never quote retrieved history, memory, a prior scene, or your own reply there. Historical conduct may inform context, but every negative reaction needs supported current conduct; never charge past conduct again as a new offense. Accumulated impatience, repetition, evasiveness, boredom, disagreement, or the observer's own hostile reply do not turn an otherwise ordinary target line into hostile conduct. Use harmful_lie only when a supplied lie-check says this NPC detected a contradictory claim and the evidence supports deceptive intent; an unsupported or unknown claim is not a caught lie. For a gift, always name giftRecipientHeroStringId. Only that recipient may receive transformative gift appreciation; other observers use gift_witness for a small happy or jealous reaction toward the giver, and jealousy is never scaled to the recipient's award. Use gift_leverage only with a supplied benefit id establishing lineage. The deterministic server verifies the current-conduct quote and objective evidence, then chooses the final bounded relationship number.
 
 LIVE FACT DISCIPLINE
 Treat supplied live context as the boundary of certain current-world knowledge.
@@ -24449,13 +24730,13 @@ Answer the latest player message directly. Earlier lines provide continuity but 
   ""relationshipAssessments"": [
     {
       ""targetHeroStringId"": ""player or previously speaking participant id"",
-      ""valence"": ""positive|negative"",
+      ""valence"": ""positive|negative|neutral"",
       ""actKind"": ""routine_conversation|meaningful_support|meaningful_offense|harmful_lie|hostile_speech|serious_threat|betrayal|humiliation|grave_abuse|important_person_rescue|life_changing_gift|gift_witness_reaction|gift_leverage"",
       ""severityTier"": ""routine|meaningful|harmful_lie|hostile|severe|transformative|gift_witness|gift_leverage"",
       ""confidence"": 0.0,
       ""sourceTurnIds"": [""supplied source turn ids only""],
       ""evidenceSourceIds"": [""supplied event, memory, or verification ids only""],
-      ""currentConductQuote"": ""exact short quote from this target's supplied current contribution for non-routine conduct; empty for routine"",
+      ""currentConductQuote"": ""exact short quote from this target's current contribution for any negative or non-routine assessment"",
       ""lieCheckId"": ""verified lie-check id or empty"",
       ""benefitEventId"": ""linked prior gift/rescue benefit id or empty"",
       ""giftRecipientHeroStringId"": ""actual verified gift recipient id or empty when no gift occurred"",
@@ -24491,7 +24772,8 @@ Answer the latest player message directly. Earlier lines provide continuity but 
     {
       ""observerHeroStringId"": ""present observer id"",
       ""subjectHeroStringId"": ""present person being introduced"",
-      ""introducerHeroStringId"": ""present trusted introducer"",
+      ""introducerHeroStringId"": ""actual present introducer"",
+      ""supportingQuote"": ""exact audible introduction including name"",
       ""claimedName"": ""name explicitly spoken during the introduction""
     }
   ],
@@ -24600,9 +24882,9 @@ You write one NPC's response inside an active social event: feast, fair, dance, 
 The NPC is not an assistant. They are a person with status, face to protect, loyalties, rivals, appetites, fears, and incomplete knowledge.
 Use the supplied event, phase, attendee, memory, and Bannerlord facts as truth. Do not invent hero, clan, kingdom, settlement, or action IDs.
 The visible reply must be only what the current speaker says or does. Never write the player's thoughts, choices, consent, or actions.
-In a group turn, use participation=speak for a distinct contribution, agree or disagree when reacting to a supplied active participant, and quiet when speaking would merely repeat someone else. A quiet reply must be empty.
+In a group turn, use participation=speak for a distinct contribution, agree or disagree when reacting to a supplied active participant, and quiet when you naturally choose to listen, have no worthwhile contribution, or would merely repeat someone else. A quiet reply must be empty. Personality guides this contextual choice; it is not a speaking quota. Meaningful observed actions, arrivals and your own earlier invitations can warrant initiative without a player question.
 Later speakers must account for the attributed group transcript already supplied. Address, build on, question, agree or disagree with, or deliberately brush aside earlier contributions when relevant. Advance the conversational beat from this NPC's own goals and knowledge. Do not repeat a question or concern already answered, recite the player's refusal to answer, converge on an unsupported shared invention, or imitate an earlier speaker's gesture or formula. Never claim another speaker's contribution as your own. Set reactionTargetHeroStringId to the active participant you are directly engaging, including when participation=speak.
-relationshipAssessments are private evidence classifications, never numeric changes. Emit exactly one net assessment of the player for an ordinary completed exchange, plus at most one assessment for each earlier NPC whose contribution this speaker is actually reacting to. Never assess the current speaker or an NPC who has not spoken yet. Routine conversation is still positive or negative according to this character's personality, motives, existing opinion, tone, and context. Use higher tiers only for meaningful conduct by the target in the source contribution. For every non-routine assessment, copy a short exact quote from that target's supplied current contribution into currentConductQuote. Never quote retrieved history, memory, a prior scene, or your own reply there. Historical conduct may affect routine valence but cannot be charged again as new higher-tier conduct. Accumulated impatience, repetition, evasiveness, boredom, disagreement, or the observer's own hostile reply do not turn an otherwise ordinary target line into hostile conduct. Use harmful_lie only when a supplied lie-check says this NPC detected a contradictory claim and the evidence supports deceptive intent; an unsupported or unknown claim is not a caught lie. For a gift, every speaker must name the same giftRecipientHeroStringId. Only that recipient may use transformative gift appreciation; all other observers use gift_witness for their own modest happy, jealous, envious, fairness-based, or otherwise contextual reaction toward the giver. A witness reaction must be independently proportionate to that observer's personality, relationships, perceived fairness, and circumstances and must never copy the recipient's gift magnitude. Link gift_leverage only to a supplied prior benefit id establishing lineage and quote the current demand that invokes it. The deterministic server verifies the current-conduct quote and objective evidence, then chooses the final bounded relationship number.
+relationshipAssessments are private evidence classifications, never numeric changes. Emit exactly one net assessment of the player for an ordinary completed exchange, plus at most one assessment for each earlier NPC whose contribution this speaker is actually reacting to. Never assess the current speaker or an NPC who has not spoken yet. Classify the target's current conduct as positive, negative, or neutral in character. Use neutral for insufficient evidence, clarification or a first brief answer needing detail. Suspicion is not a verified offense. Never penalize a target for negation, someone else's quoted threat, or your own hostile delivery. Use higher tiers only for meaningful conduct by the target in the source contribution. For every negative or non-routine assessment, copy a short exact quote from that target's supplied current contribution into currentConductQuote and explain the concrete reaction in summary. Missing evidence produces no change. Never quote retrieved history, memory, a prior scene, or your own reply there. Historical conduct may inform context, but every negative reaction needs supported current conduct; never charge past conduct again as a new offense. Accumulated impatience, repetition, evasiveness, boredom, disagreement, or the observer's own hostile reply do not turn an otherwise ordinary target line into hostile conduct. Use harmful_lie only when a supplied lie-check says this NPC detected a contradictory claim and the evidence supports deceptive intent; an unsupported or unknown claim is not a caught lie. For a gift, every speaker must name the same giftRecipientHeroStringId. Only that recipient may use transformative gift appreciation; all other observers use gift_witness for their own modest happy, jealous, envious, fairness-based, or otherwise contextual reaction toward the giver. A witness reaction must be independently proportionate to that observer's personality, relationships, perceived fairness, and circumstances and must never copy the recipient's gift magnitude. Link gift_leverage only to a supplied prior benefit id establishing lineage and quote the current demand that invokes it. The deterministic server verifies the current-conduct quote and objective evidence, then chooses the final bounded relationship number.
 When canInvitePlayerToDance is false, the speaker must not ask or invite the player to dance. They may still have an ordinary conversation.
 Keep the visible reply at or below 220 words. Keep decisionBrief to at most three short facts, two short goals, three short constraints, one short decision, and only supplied motive/evidence identifiers that materially affected the answer.
 Do not duplicate the same information across memory lanes. Ordinary low-salience conversation normally leaves memoryWrites, beliefWrites, obligationWrites, comprehensionWrites, identityIntroductions, suggestedActions, and stateUpdates empty. Emit at most one item in a write collection, and only when that lane gains distinct durable information or state. Omitted optional collections are treated as empty by the server.
@@ -24665,13 +24947,13 @@ Answer the latest player message directly. Earlier lines provide continuity but 
   ""relationshipAssessments"": [
     {
       ""targetHeroStringId"": ""player or previously speaking active participant id"",
-      ""valence"": ""positive|negative"",
+      ""valence"": ""positive|negative|neutral"",
       ""actKind"": ""routine_conversation|meaningful_support|meaningful_offense|harmful_lie|hostile_speech|serious_threat|betrayal|humiliation|grave_abuse|important_person_rescue|life_changing_gift|gift_witness_reaction|gift_leverage"",
       ""severityTier"": ""routine|meaningful|harmful_lie|hostile|severe|transformative|gift_witness|gift_leverage"",
       ""confidence"": 0.0,
       ""sourceTurnIds"": [""supplied source turn ids only""],
       ""evidenceSourceIds"": [""supplied event, memory, or verification ids only""],
-      ""currentConductQuote"": ""exact short quote from this target's supplied current contribution for non-routine conduct; empty for routine"",
+      ""currentConductQuote"": ""exact short quote from this target's current contribution for any negative or non-routine assessment"",
       ""lieCheckId"": ""verified lie-check id or empty"",
       ""giftRecipientHeroStringId"": ""actual verified gift recipient id or empty when no gift occurred"",
       ""benefitEventId"": ""linked prior gift/rescue benefit id or empty"",
@@ -24693,7 +24975,8 @@ Answer the latest player message directly. Earlier lines provide continuity but 
     {
       ""observerHeroStringId"": ""present observer id"",
       ""subjectHeroStringId"": ""present person being introduced"",
-      ""introducerHeroStringId"": ""present trusted introducer"",
+      ""introducerHeroStringId"": ""actual present introducer"",
+      ""supportingQuote"": ""exact audible introduction including name"",
       ""claimedName"": ""name explicitly spoken during the introduction""
     }
   ],
@@ -24968,7 +25251,7 @@ privacy: Suggested action metadata is server/debug material until validated.",
 
 memoryWrites: Specific episodic facts the NPC should recall later. Write concise NPC/world-perspective facts, not transcripts.
 beliefWrites: Claims this NPC now believes or suspects. Beliefs may be false; include confidence and known canonical entity IDs.
-obligationWrites: Promises, threats, favors, debts, oaths, blackmail, schemes, bargains, secrets, or commitments that remain unresolved. Identify owed_by and owed_to with canonical IDs when known.
+obligationWrites: Promises, threats, favors, debts, oaths, blackmail, schemes, bargains, secrets, or commitments. Identify owed_by and owed_to with canonical IDs when known. Use one item per distinct supported promise, preserving all conditions and its exact source quote; several distinct promises may produce several items despite generic one-write guidance. Update an existing supplied obligation_id to revise or close that promise; fulfilled, withdrawn and superseded commitments must not be renewed as unresolved.
 comprehensionWrites: The NPC's private interpretation of what happened, why it matters, and what motive or danger they perceive. This is subjective and known only to that NPC by default.
 stateUpdates: Only current mood, plan, or crisis changes that should affect the next scenes.
 
@@ -25047,6 +25330,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 			{
 				defaults[pair.Key] = pair.Value;
 			}
+			defaults[OutfitPromptName] = OutfitPromptDefault;
 			return defaults;
         }
 
@@ -25064,6 +25348,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             string path = ResolveLogFile(file, campaignId);
             List<Dictionary<string, object>> candidates = ReadJsonLinesFromPath(path)
                 .Reverse<Dictionary<string, object>>()
+                .Select(RedactSensitive)
                 .Where(row => string.IsNullOrWhiteSpace(search)
                     || Json.Serialize(row).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
                 .Take(limit)
@@ -25119,7 +25404,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             string campaignId = query.TryGetValue("campaignId", out string requestedCampaignId) ? requestedCampaignId : "";
             string path = ResolveLogFile(file, campaignId);
             string content = File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : string.Empty;
-            WriteText(stream, 200, "application/x-ndjson; charset=utf-8", content, Path.GetFileName(path));
+            WriteText(stream, 200, "application/x-ndjson; charset=utf-8", RedactDiagnosticLogContent(content), Path.GetFileName(path));
         }
 
         private static Dictionary<string, object> AuditIngest(Dictionary<string, object> payload)
@@ -27269,7 +27554,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 {
                     ["ts"] = DateTimeOffset.UtcNow.ToString("o"),
                     ["eventType"] = eventType,
-                    ["data"] = data ?? new Dictionary<string, object>()
+                    ["data"] = RedactSensitive(data)
                 };
 
                 lock (FileLock)
@@ -27286,18 +27571,46 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 
         private static Dictionary<string, object> RedactSensitive(Dictionary<string, object> source)
         {
-            Dictionary<string, object> copy = new Dictionary<string, object>(source ?? new Dictionary<string, object>());
-            string[] sensitiveKeys = { "apiKey", "portraitNanoGptApiKey", "portraitAtlasApiKey" };
-            foreach (string sensitiveKey in sensitiveKeys)
+            var copy = new Dictionary<string, object>();
+            foreach (var pair in source ?? new Dictionary<string, object>())
             {
-                if (copy.TryGetValue(sensitiveKey, out object key) && key != null && !string.IsNullOrWhiteSpace(Convert.ToString(key)))
-                {
-                    copy[sensitiveKey] = "***";
-                }
+                copy[pair.Key] = IsSensitiveDiagnosticKey(pair.Key) ? "***" : RedactDiagnosticValue(pair.Value);
             }
-
             return copy;
         }
+
+        private static bool IsSensitiveDiagnosticKey(string name)
+        {
+            string normalized = (name ?? "").Replace("_", "").Replace("-", "");
+            return new[] { "authorization", "secret", "token" }.Contains(normalized, StringComparer.OrdinalIgnoreCase)
+                || new[] { "apiKey", "accessToken", "refreshToken", "clientSecret", "password" }
+                    .Any(suffix => normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static object RedactDiagnosticValue(object value)
+        {
+            if (value is string text) return RedactSupportText(text);
+            if (value is IDictionary dictionary)
+            {
+                var values = new Dictionary<string, object>();
+                foreach (DictionaryEntry entry in dictionary) values[Convert.ToString(entry.Key)] = entry.Value;
+                return RedactSensitive(values);
+            }
+            if (value is IEnumerable sequence)
+            {
+                var values = new List<object>();
+                foreach (object item in sequence) values.Add(RedactDiagnosticValue(item));
+                return values;
+            }
+            return value;
+        }
+
+        private static string RedactDiagnosticLogContent(string content)
+            => string.Join("\n", (content ?? "").Replace("\r\n", "\n").Split('\n').Select(line =>
+            {
+                var row = TryParseJsonObject(line);
+                return row == null ? RedactSupportText(line) : Json.Serialize(RedactSensitive(row));
+            }));
 
         private static HttpRequest ReadRequest(NetworkStream stream)
         {
@@ -27513,6 +27826,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 .Replace("@CODEX_MODEL_AVAILABILITY@", CodexModelAvailabilityHtml())
                 .Replace("@CODEX_PERFORMANCE_SCRIPT@", CodexPerformanceControlCenterScript() + ReignXpOptionsScript())
                 .Replace("@REIGN_XP_OPTIONS@", ReignXpOptionsHtml())
+                .Replace("@SERVER_CONTROL_SCRIPT@", File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "server-control.js")))
                 .Replace("@CONVERSATION_DIAGNOSTICS_SCRIPT@", File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "conversation-diagnostics.js")));
             html = html.Replace("Unified Control Center is always attached", "Managed by ReignServer")
                 .Replace("Normal launches always open one dedicated Reign window. Closing it shuts down the server and helper worker; shutting down the server closes it.",
@@ -27941,11 +28255,12 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 npcContext["memoryQueryText"] = playerText ?? "";
                 string playerId = ReadFirstString(npcContext, "mainHeroStringId", "playerHeroStringId");
                 string locationId = FirstNonEmpty(ReadFirstString(npcContext, "locationId", "currentSettlementId", "settlementId"), "");
-                string topic = ((playerText ?? "") + "\n" + (sceneContext ?? "")).Trim();
+                string topic = (playerText ?? "").Trim();
                 Dictionary<string, object> packet = BuildNpcMemoryPacket(campaignId, heroId, playerId, locationId, topic, 2500, npcContext);
                 if (interactionContext != null) interactionContext["memoryPrecisionEvidence"] = ReadDictionary(packet, "precisionEvidence");
                 if (promptTiming != null)
                 {
+                    promptTiming["memoryRecall"] = ReadDictionary(packet, "recallAudit") ?? ReadDictionary(packet, "precisionEvidence");
                     promptTiming["memoryPacketTiming"] =
                         ReadDictionary(packet, "timingPhases") ?? new Dictionary<string, object>();
                     promptTiming["memoryPacketSemanticMs"] = ReadLong(
@@ -28832,10 +29147,10 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 
             if (value is string text)
             {
-                return LimitText(text.Trim(), 900);
+                return text.Trim();
             }
 
-            if (value is ArrayList list)
+            if (value is System.Collections.IEnumerable list && !(value is System.Collections.IDictionary))
             {
                 List<string> parts = new List<string>();
                 foreach (object item in list)
@@ -28847,13 +29162,13 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                     }
                 }
 
-                return LimitText(string.Join("; ", parts.ToArray()), 900);
+                return string.Join("; ", parts);
             }
 
             if (value is Dictionary<string, object> dict)
             {
                 List<string> parts = new List<string>();
-                foreach (KeyValuePair<string, object> pair in dict.Take(12))
+                foreach (KeyValuePair<string, object> pair in dict)
                 {
                     string itemText = PromptObjectText(pair.Value);
                     if (!string.IsNullOrWhiteSpace(itemText))
@@ -28862,7 +29177,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                     }
                 }
 
-                return LimitText(string.Join("; ", parts.ToArray()), 900);
+                return string.Join("; ", parts);
             }
 
             return Convert.ToString(value);
@@ -29028,6 +29343,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                         ? "[Letter " + ReadString(line, "direction", "exchanged") + ", Day " + ReadDouble(line, "worldDay", 0d).ToString("0.##", CultureInfo.InvariantCulture) + "] "
                         : "[In person] ";
                     builder.AppendLine("- " + prefix + speaker + ": " + text);
+                    if (ReadString(line, "role", "") == "npc") builder.AppendLine(RecallStatementSourceCaveat(text));
                 }
             }
 

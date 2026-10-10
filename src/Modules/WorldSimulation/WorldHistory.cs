@@ -12,7 +12,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const int PostgreSqlWorldHistorySchemaRevision = 3;
+        private const int PostgreSqlWorldHistorySchemaRevision = 4;
         private static readonly object WorldHistoryCacheLock = new object();
         private static readonly Dictionary<string, Dictionary<string, object>> WorldHistoryClaimCache =
             new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
@@ -151,6 +151,7 @@ AND NOT EXISTS (
             }
             else ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
             EnsureImmediateTournamentKnowledge(connection);
+            EnsurePlayerPerformanceSchema(connection);
             string storedCampaignId = ReadString(QuerySql(connection,
                 "SELECT campaign_id FROM world_history_events WHERE campaign_id<>'' LIMIT 1;").FirstOrDefault(), "campaign_id", "");
             if (!string.IsNullOrWhiteSpace(storedCampaignId))
@@ -243,6 +244,9 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                 // advisory lock. Complete them before the ingest transaction so
                 // retention compaction cannot retain that lock for its entire batch.
                 EnsureWorldHistorySchema(connection);
+                EnsureSharedActivityMemorySchema(connection);
+                if (!SharedActivityGenerationMatches(connection, payload))
+                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Stale activity upload from an obsolete save generation." };
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     HashSet<string> seenEventIds =
@@ -341,6 +345,19 @@ AND event_type IN ('battle_completed','raid_completed','siege_completed');",
 VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_id) DO UPDATE SET last_sequence=MAX(world_history_ingest_state.last_sequence,$sequence),last_event_id=$event,updated_utc=$now;",
                         new Dictionary<string, object> { ["client"] = clientId, ["timeline"] = timelineId, ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now });
                 }
+                    // Preserve original native participation before lossy history compaction.
+                    foreach (var item in events)
+                    {
+                        ProjectSharedActivity(connection, timelineId, item);
+                        string performanceKind = ReadFirstString(item, "eventType", "event_type", "type");
+                        if (performanceKind != "battle_completed" && performanceKind != "tournament_finished"
+                            && !(performanceKind == "social_outcome" && ReadString(item, "source", "") == "reign_social"
+                                && (ReadDictionary(item, "payload") ?? TryParseJsonObject(ReadString(item, "payload_json", "{}"))).ContainsKey("duelMode"))) continue;
+                        string performanceEventId = ReadFirstString(item, "eventId", "event_id", "id");
+                        foreach (var performanceEvent in QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));",
+                            TestDict("id", performanceEventId, "timeline", timelineId)))
+                            ProjectPlayerPerformanceEvent(connection, performanceEvent);
+                    }
                     transaction.Commit();
                 }
 
@@ -473,10 +490,16 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
                 });
                 ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$id THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
                     new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
+                if (historyMissing || branched)
+                {
+                    BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
+                    BindRecoveredMemorySources(connection, requested, timelineId, savedSequence, savedHead);
+                }
                 result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["branched"] = branched,
                     ["historyMissing"] = historyMissing,
+                    ["sharedActivityGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""),
                     ["parentTimelineId"] = branched ? requested : ReadString(existing, "parent_timeline_id", ""),
                     ["savedSequence"] = savedSequence, ["previousServerHeadSequence"] = serverHead, ["historyCompleteFromWorldDay"] = completeFrom
                 };
@@ -689,7 +712,11 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                 Dictionary<string, object> timeline = QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 long head = ReadLong(timeline, "head_sequence", 0);
-                string cacheKey = NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head + "|" + Math.Floor(worldDay) + "|lookup=" + lookupOnly;
+                string cacheKey = "source_claim_v3|" + campaignId + "|" + NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
+                    + "|" + worldDay.ToString("R", CultureInfo.InvariantCulture) + "|lookup=" + lookupOnly
+                    + "|" + ReadDouble(payload, "fromDay", -1d).ToString("R", CultureInfo.InvariantCulture)
+                    + "|" + ReadDouble(payload, "toDay", worldDay > 0 ? worldDay : double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
+                    + "|" + ReadFirstString(payload, "locationId", "settlementId") + "|" + Json.Serialize(ReadStringList(payload, "entityIds"));
                 lock (WorldHistoryCacheLock)
                 {
                     if (WorldHistoryClaimCache.TryGetValue(cacheKey, out Dictionary<string, object> cached))
@@ -699,6 +726,18 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                 }
 
                 Dictionary<string, object> route = ClassifyWorldHistoryClaim(claim);
+                var claimSpans = ExtractAssertedWorldHistorySpans(claim);
+                if (!lookupOnly && claimSpans.Count != 1)
+                    return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId,
+                        ["timelineId"] = timelineId, ["claimFamily"] = ReadString(route, "claimFamily", "generic_participation"),
+                        ["objectiveVerdict"] = "insufficient_evidence", ["speakerVerdict"] = "unknown",
+                        ["explanation"] = "No single source-bound completed deed by this claimant was established.",
+                        ["sourceEvidence"] = claimSpans, ["recorded"] = false };
+                if (!lookupOnly)
+                {
+                    claim = ReadString(claimSpans[0], "quote", "");
+                    route = ClassifyWorldHistoryClaim(claim);
+                }
                 string purpose = ReadString(route, "purpose", "casual_recall");
                 string family = ReadString(route, "claimFamily", "generic_participation");
                 Dictionary<string, object> minimeRoute = TryMinimeHistoryRoute(claim, purpose, family);
@@ -774,7 +813,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                 {
                     ["ok"] = true, ["checkId"] = checkId, ["campaignId"] = campaignId, ["timelineId"] = timelineId,
                     ["claim"] = claim, ["claimantId"] = claimantId, ["speakerId"] = speakerId, ["purpose"] = lookupOnly ? "historical_lookup" : purpose, ["claimFamily"] = family,
-                    ["lookupOnly"] = lookupOnly,
+                    ["lookupOnly"] = lookupOnly, ["claimSourceEvidence"] = claimSpans,
                     ["objectiveVerdict"] = objectiveVerdict, ["speakerVerdict"] = speakerVerdict,
                     ["explanation"] = ReadString(verdict, "explanation", ""), ["evidenceEventIds"] = evidenceIds,
                     ["speakerEvidenceEventIds"] = speakerIds, ["matchedComponents"] = ReadStringList(verdict, "matchedComponents"),
@@ -862,7 +901,8 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             List<string> matched = new List<string>();
             List<string> mismatched = new List<string>();
             double bestDeterministic = candidates.Count == 0 ? 0d : candidates.Max(x => ReadDouble(x, "deterministicScore", 0d));
-            List<Dictionary<string, object>> familyMatches = candidates.Where(x => EventMatchesFamily(ReadString(x, "event_type", ""), ReadDictionaryList(x, "entities"), family)
+            List<Dictionary<string, object>> familyMatches = candidates.Where(x => HistoryClaimMatchesNamedLocation(claim, x)
+                && EventMatchesFamily(ReadString(x, "event_type", ""), ReadDictionaryList(x, "entities"), family)
                 && ReadDouble(x, "deterministicScore", 0d) >= Math.Max(1d, bestDeterministic - 4d)).ToList();
             List<Dictionary<string, object>> claimantMatches = familyMatches.Where(x => ReadDictionaryList(x, "entities").Any(e => string.Equals(ReadString(e, "entity_id", ""), claimantId, StringComparison.OrdinalIgnoreCase))).ToList();
             string verdict;
@@ -881,7 +921,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             else if (family == "presence")
             {
                 bool present = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "participant", "leader", "commander", "attacker", "defender", "winner", "loser"));
-                verdict = present ? "verified" : familyMatches.All(x => ReadBool(x, "is_complete", false)) ? "contradicted" : "insufficient_evidence";
+                verdict = present ? "verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
                 explanation = present ? "The claimant appears in the complete participant roster." : verdict == "contradicted" ? "Complete matching event rosters do not include the claimant." : "Matching events exist, but their participant evidence is incomplete.";
                 (present ? matched : mismatched).Add("battle presence");
             }
@@ -889,10 +929,11 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             {
                 bool led = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "leader", "commander", "army_leader", "side_leader"));
                 bool participated = claimantMatches.Any();
-                verdict = led ? "verified" : participated ? "partially_verified" : familyMatches.All(x => ReadBool(x, "is_complete", false)) ? "contradicted" : "insufficient_evidence";
+                verdict = led ? "verified" : !familyMatches.All(HistoryEventRosterComplete) ? "insufficient_evidence"
+                    : participated ? "partially_verified" : "contradicted";
                 explanation = led ? "The claimant is recorded as the relevant leader or commander." : participated ? "The claimant participated but is not recorded as the leader." : "No complete matching record assigns the claimant a command role.";
                 if (participated) matched.Add("participation");
-                if (!led) mismatched.Add("leadership");
+                if (!led && verdict != "insufficient_evidence") mismatched.Add("leadership");
             }
             else if (family == "rescue" || family == "release")
             {
@@ -900,7 +941,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 bool assisted = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "assisting_rescuer", "rescuing_side_participant", "participant"));
                 int beneficiaries = claimantMatches.SelectMany(x => ReadDictionaryList(x, "entities")).Where(x => RoleContains(ReadString(x, "role", ""), "beneficiary", "rescued_prisoner", "released_prisoner")).Select(x => ReadString(x, "entity_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
                 bool severalClaim = ContainsAny(NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
-                verdict = direct && (!severalClaim || beneficiaries >= 3) ? "verified" : direct || assisted ? "partially_verified" : familyMatches.All(x => ReadBool(x, "is_complete", false)) ? "contradicted" : "insufficient_evidence";
+                verdict = direct && (!severalClaim || beneficiaries >= 3) ? "verified" : direct || assisted ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
                 explanation = direct ? "The claimant is connected to a direct release; beneficiary quantity was checked." : assisted ? "The claimant assisted the rescuing side but is not the direct recorded rescuer." : "No complete matching event credits the claimant with the rescue.";
                 if (direct || assisted) matched.Add("rescue participation");
                 if (severalClaim && beneficiaries < 3) mismatched.Add("several beneficiaries");
@@ -909,7 +950,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             else
             {
                 bool involved = claimantMatches.Any(x => HasFamilyRole(x, claimantId, family));
-                verdict = involved ? "verified" : claimantMatches.Any() ? "partially_verified" : familyMatches.All(x => ReadBool(x, "is_complete", false)) ? "contradicted" : "insufficient_evidence";
+                verdict = involved ? "verified" : claimantMatches.Any() ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
                 explanation = involved ? "Canonical event roles support the material claim." : claimantMatches.Any() ? "The claimant is connected to the event, but the claimed role is not fully supported." : "No complete matching event assigns the claimed role to the claimant.";
                 (involved ? matched : mismatched).Add(family);
             }
@@ -920,32 +961,32 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
         private static Dictionary<string, object> ClassifyWorldHistoryClaim(string claim)
         {
             string q = NormalizeLookup(claim);
-            string purpose = ContainsAny(q, "i did", "i was", "i fought", "i rescued", "i captured", "i killed") ? "self_claim"
-                : ContainsAny(q, "because of me", "my victory", "my doing", "credit", "hero") ? "credit_or_boast"
-                : ContainsAny(q, "was not there", "wasnt there", "elsewhere", "alibi") ? "alibi"
-                : ContainsAny(q, "he did", "she did", "they did", "accuse", "blame") ? "accusation"
-                : ContainsAny(q, "who was", "who did", "which lord") ? "identity_check" : "casual_recall";
-            string family = ContainsAny(q, "rescued", "rescue", "freed", "saved the prisoners") ? "rescue"
-                : ContainsAny(q, "released", "set free") ? "release"
-                : ContainsAny(q, "led", "commanded", "my army") ? "leadership"
-                : ContainsAny(q, "was at", "present at", "fought at", "took part") ? "presence"
-                : ContainsAny(q, "won", "victory", "defeated") ? "victory"
-                : ContainsAny(q, "lost", "defeat") ? "defeat"
-                : ContainsAny(q, "captured", "took prisoner") ? "capture"
-                : ContainsAny(q, "killed", "slew", "executed") ? "killing"
-                : ContainsAny(q, "wounded", "injured") ? "wounding"
-                : ContainsAny(q, "raided", "burned", "looted the village") ? "raid"
-                : ContainsAny(q, "besieged", "siege") ? "siege"
-                : ContainsAny(q, "conquered", "took the city", "captured the castle") ? "conquest"
-                : ContainsAny(q, "defended", "held the walls") ? "defense"
-                : ContainsAny(q, "owned", "owner", "gave me the fief") ? "ownership"
-                : ContainsAny(q, "married", "wedding") ? "marriage"
-                : ContainsAny(q, "declared war", "made peace", "alliance", "treaty") ? "diplomacy"
-                : ContainsAny(q, "paid", "gave gold") ? "payment"
-                : ContainsAny(q, "traded", "sold", "bought") ? "trade"
-                : ContainsAny(q, "tournament", "champion") ? "tournament"
-                : ContainsAny(q, "traveled", "went to", "arrived", "left the city") ? "travel"
-                : ContainsAny(q, "met", "spoke with") ? "meeting" : "generic_participation";
+            string purpose = HistoryClaimContainsTerm(q, "i did", "i was", "i fought", "i rescued", "i captured", "i killed") ? "self_claim"
+                : HistoryClaimContainsTerm(q, "because of me", "my victory", "my doing", "credit", "hero") ? "credit_or_boast"
+                : HistoryClaimContainsTerm(q, "was not there", "wasnt there", "elsewhere", "alibi") ? "alibi"
+                : HistoryClaimContainsTerm(q, "he did", "she did", "they did", "accuse", "blame") ? "accusation"
+                : HistoryClaimContainsTerm(q, "who was", "who did", "which lord") ? "identity_check" : "casual_recall";
+            string family = HistoryClaimContainsTerm(q, "rescued", "rescue", "freed", "saved the prisoners") ? "rescue"
+                : HistoryClaimContainsTerm(q, "released", "set free") ? "release"
+                : HasMilitaryLeadershipClaim(q) ? "leadership"
+                : HistoryClaimContainsTerm(q, "was at", "present at", "fought at", "took part") ? "presence"
+                : HistoryClaimContainsTerm(q, "tournament", "champion") ? "tournament"
+                : HistoryClaimContainsTerm(q, "won", "victory", "defeated") ? "victory"
+                : HistoryClaimContainsTerm(q, "lost", "defeat") ? "defeat"
+                : HistoryClaimContainsTerm(q, "conquered", "took the city", "captured the castle") ? "conquest"
+                : HistoryClaimContainsTerm(q, "captured", "took prisoner") ? "capture"
+                : HistoryClaimContainsTerm(q, "killed", "slew", "executed") ? "killing"
+                : HistoryClaimContainsTerm(q, "wounded", "injured") ? "wounding"
+                : HistoryClaimContainsTerm(q, "raided", "burned", "looted the village") ? "raid"
+                : HistoryClaimContainsTerm(q, "besieged", "siege") ? "siege"
+                : HistoryClaimContainsTerm(q, "defended", "held the walls") ? "defense"
+                : HistoryClaimContainsTerm(q, "owned", "owner", "gave me the fief") ? "ownership"
+                : HistoryClaimContainsTerm(q, "married", "wedding") ? "marriage"
+                : HistoryClaimContainsTerm(q, "declared war", "made peace", "alliance", "treaty") ? "diplomacy"
+                : HistoryClaimContainsTerm(q, "paid", "gave gold") ? "payment"
+                : HistoryClaimContainsTerm(q, "traded", "sold", "bought") ? "trade"
+                : HistoryClaimContainsTerm(q, "traveled", "travelled", "went to", "arrived", "entered", "left the city") ? "travel"
+                : HistoryClaimContainsTerm(q, "met", "spoke with") ? "meeting" : "generic_participation";
             return new Dictionary<string, object> { ["purpose"] = purpose, ["claimFamily"] = family, ["method"] = "deterministic" };
         }
 

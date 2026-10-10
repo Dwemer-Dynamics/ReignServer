@@ -82,13 +82,17 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             }
             foreach (Dictionary<string, object> item in raw)
             {
-                string text = LimitText(ReadFirstString(item, "text", "fact", "characteristic", "summary").Trim(), 500);
+                string text = ReadFirstString(item, "text", "fact", "characteristic", "summary").Trim();
                 string category = NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
                 if (!DynamicCharacteristicCategories.Contains(category)) category = "personal_history";
                 string topicKey = NormalizeDynamicTopicKey(ReadFirstString(item, "topicKey", "topic_key"), category, text);
                 string sourceBasis = NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
                 if (string.IsNullOrWhiteSpace(sourceBasis)) sourceBasis = "npc_generated_personal_history";
                 string rejection = DynamicCharacteristicRejectionReason(text, heroId, profile, payload, visibleReply);
+                var evidence = BindConversationSource(item, CurrentConversationSources("", heroId, "", visibleReply,
+                    ReadString(payload, "sceneTurnId", "")), heroId, ReadString(payload, "sceneTurnId", ""));
+                if (ReadDictionary(item, "sourceEvidence") != null && ReadString(evidence, "status", "") != "supported_span")
+                    rejection = "unverified_source_span";
                 var development = NormalizeNarrativeDevelopmentProposal(ReadDictionary(item, "narrativeDevelopment"), visibleReply);
                 if (development != null)
                     development["compatibilityValidated"] = string.IsNullOrWhiteSpace(rejection)
@@ -102,6 +106,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     ["confidence"] = ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
                     ["importance"] = ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
                     ["sourceBasis"] = sourceBasis,
+                    ["sourceEvidence"] = evidence,
                     ["narrativeDevelopment"] = development,
                     ["status"] = string.IsNullOrWhiteSpace(rejection) ? "active" : "rejected",
                     ["compatibilityStatus"] = string.IsNullOrWhiteSpace(rejection) ? "compatible_soft_canon" : "rejected_conflict_or_scope",
@@ -280,6 +285,9 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
         {
             string clean = (text ?? "").Trim();
             if (clean.Length < 12) return "too_short";
+            if (clean.Length > 500) return "oversize_detail_retained_without_clipping";
+            if (Regex.IsMatch(clean, @"\b(?:hates?|dislikes?|resents?)\s+(?:that\b|having to\b)|\b(?:tonight|right now|in this moment|this particular conversation)\b", RegexOptions.IgnoreCase))
+                return "temporary_reaction_is_not_stable_characterization";
             if (string.IsNullOrWhiteSpace(visibleReply)
                 || visibleReply.IndexOf(FirstDynamicEvidencePhrase(clean), StringComparison.OrdinalIgnoreCase) < 0
                     && !HasDynamicTextEvidence(clean, visibleReply))
@@ -470,6 +478,7 @@ WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_ke
                     Dictionary<string, object> rowPayload = new Dictionary<string, object>
                     {
                         ["sourceBasis"] = ReadString(write, "sourceBasis", "npc_generated_personal_history"),
+                        ["sourceEvidence"] = ReadDictionary(write, "sourceEvidence"),
                         ["sourceCorrelationId"] = ReadFirstString(payload, "correlationId", "requestId"),
                         ["audienceIds"] = knownBy
                     };
@@ -542,17 +551,21 @@ payload_json=$payload;",
             Dictionary<string, object> document,
             string relevanceQuery)
         {
-            List<Dictionary<string, object>> active = SelectNaturalDynamicCharacteristics(document, relevanceQuery);
+            List<Dictionary<string, object>> active = SelectNaturalDynamicCharacteristics(document, relevanceQuery)
+                .Where(row => ReadString(row, "category", "") != "life_transition").ToList();
             if (active.Count == 0) return "";
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("These compatible details were generated through prior roleplay and are now soft personal canon.");
             builder.AppendLine("Use a detail only when it helps this exchange; it is not an instruction to repeat its wording, metaphor or attitude. Authoritative native or world-history evidence overrides them. They prove only this character's own established self-story, not external claims about other people or world events.");
+            int remaining = 5200 - builder.Length;
             foreach (Dictionary<string, object> row in active)
             {
-                builder.Append("- [").Append(ReadString(row, "category", "personal_history")).Append("] ")
-                    .AppendLine(LimitText(ReadString(row, "text", ""), 360));
+                string line = "- [" + ReadString(row, "category", "personal_history") + "] " + ReadString(row, "text", "");
+                if (line.Length + Environment.NewLine.Length > remaining) continue;
+                builder.AppendLine(line);
+                remaining -= line.Length + Environment.NewLine.Length;
             }
-            return LimitText(builder.ToString().Trim(), 5200);
+            return builder.ToString().Trim();
         }
 
         private static List<Dictionary<string, object>> RunDynamicCharacteristicsSelfTests()

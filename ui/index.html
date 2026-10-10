@@ -300,8 +300,9 @@
       <div class='topActions'>
         <button type='button' onclick='openSupportBundle()'>Download Logs</button>
         <button onclick='loadSettings()'>Reload</button>
-        <button onclick='saveSettings()'>Save Settings</button>
-        <button class='danger' onclick='shutdownServer()'>Shut Down</button>
+        <button id='saveChangesButton' onclick='saveSettings()'>Save Changes</button>
+        <button id='serverPowerButton' type='button' role='switch' aria-checked='false' disabled onclick='toggleServerPower()'>Checking Server...</button>
+        <span id='serverPowerStatus' class='hint' role='status' aria-live='polite'></span>
         <div id='status' class='pill'>Checking...</div>
         <div id='settingsInfo' class='settingsInfo'>Settings path: loading...</div>
       </div>
@@ -453,10 +454,9 @@
         <label>Fast LLM <input id='fastModel' list='llmModelOptions' placeholder='blank = events model'></label>
         <p class='hint'>Used for tiny direct helper calls such as Political Pressure trait selection and incident narration. Reasoning is always disabled for these calls.</p>
         <label>Memory <input id='memoryModel' list='llmModelOptions'></label>
+        <p class='hint'>Memory creates conversation summaries. Recall uses local search and source validation.</p>
         <label>Relationships <input id='relationshipModel' list='llmModelOptions'></label>
         <label>Correspondence <input id='correspondenceModel' list='llmModelOptions'></label>
-        <label>Legacy context-selector model <input id='selectorModel' placeholder='unused: foreground routing is deterministic' disabled></label>
-        <p class='hint'>Context-helper routing is now local and deterministic so dialogue requires only one foreground model call.</p>
         <label>Strategy <input id='strategyModel' list='llmModelOptions'></label>
         <hr>
         <h3>Reasoning</h3>
@@ -481,15 +481,6 @@
         <label>Unsupported-provider fallback cooldown seconds <input id='reasoningFallbackCooldownSeconds' type='number' min='30' max='3600' step='30'></label>
         <div id='reasoningPolicyHint' class='editorStatus'>Selective reasoning is enabled.</div>
         <hr>
-        <details><summary>Retired synchronous Minime controls</summary>
-          <p class='hint'>These values are retained for configuration compatibility but are not used by the live prompt path. Topic routing is local; ranking uses persisted semantic vectors plus deterministic scores.</p>
-          <label><input id='enableMinimeMemoryWorker' type='checkbox' disabled> Legacy helper enabled</label>
-          <label>Legacy Topic URL <input id='minimeTopicUrl' disabled></label><label>Legacy Max Topics <input id='minimeMaxTopics' type='number' disabled></label>
-          <label>Legacy Timeout Ms <input id='minimeTimeoutMs' type='number' disabled></label><label>Legacy Retry Cooldown <input id='minimeRetryCooldownSeconds' type='number' disabled></label>
-          <label><input id='enableMinimeMemoryReranking' type='checkbox' disabled> Legacy synchronous reranking</label>
-          <label>Legacy Rerank URL <input id='minimeRerankUrl' disabled></label><label>Legacy Candidate Limit <input id='minimeRerankCandidateCount' type='number' disabled></label>
-          <label>Legacy Rerank Timeout <input id='minimeRerankTimeoutMs' type='number' disabled></label><label>Legacy Weight <input id='minimeRerankWeight' type='number' disabled></label>
-        </details>
       </div>
     </section>
 
@@ -546,7 +537,7 @@
       </div>
       <div class='card'>
           <h3>Native Identity Source</h3>
-          <p class='hint'>Every portrait model receives Reign's packaged 768x1024 native source instead of a dialogue-screen capture. The background worker renders from the saved character roster without opening Bannerlord.</p>
+          <p class='hint'>Reign builds a native identity source from the saved character roster. Text based generation describes this source with vision; Image based generation passes it directly to the portrait model. The background worker renders without opening Bannerlord.</p>
           <label>Native source enforcement
             <select id='portraitNativeSourceMode'>
               <option value='required'>Required (recommended)</option>
@@ -559,7 +550,7 @@
       @IMAGE_PROFILE_CARDS@
       <div class='card'>
         <h2>OpenRouter</h2>
-        <p class='hint'>Uses the OpenRouter key saved in API Settings, independently of your selected chat provider. Requests include the source image. Available matching models: GPT Image 1, Gemini 3 Pro Image, Seedream 4.5, Seedream 5 Pro and Grok Imagine Image Quality.</p>
+        <p class='hint'>Uses the OpenRouter key saved in API Settings, independently of your selected chat provider. Character portraits follow the selected generation method; image edits retain their reference. Available matching models: GPT Image 1, Gemini 3 Pro Image, Seedream 4.5, Seedream 5 Pro and Grok Imagine Image Quality.</p>
       </div>
       <div class='card'>
         <h2>Shared Provider Connections</h2>
@@ -592,6 +583,7 @@
         <div class='actions'>
           <button onclick='loadPrompts()'>Reload Prompts</button>
           <button onclick='saveSelectedPrompt("image")'>Save Selected Image Prompt</button>
+          <button onclick='discardSelectedPrompt("image")'>Discard Selected Edits</button>
           <button class='danger' onclick='resetPrompts()'>Reset Defaults</button>
         </div>
         <div id='imagePromptStatus' class='hint'>Prompt templates not loaded yet.</div>
@@ -706,6 +698,7 @@
         <div class='actions'>
           <button onclick='loadPrompts()'>Reload Prompts</button>
           <button onclick='saveSelectedPrompt("general")'>Save Selected Prompt</button>
+          <button onclick='discardSelectedPrompt("general")'>Discard Selected Edits</button>
           <button class='danger' onclick='resetPrompts()'>Reset Defaults</button>
         </div>
         <div id='promptStatus' class='hint'>Prompt templates not loaded yet.</div>
@@ -719,6 +712,7 @@
         <div class='actions'>
           <button onclick='loadPrompts()'>Reload Prompts</button>
           <button onclick='saveSelectedPrompt("context")'>Save Selected Context Prompt</button>
+          <button onclick='discardSelectedPrompt("context")'>Discard Selected Edits</button>
           <button class='danger' onclick='resetPrompts()'>Reset Defaults</button>
         </div>
         <div id='contextPromptStatus' class='hint'>Context prompt templates not loaded yet.</div>
@@ -732,6 +726,7 @@
         <div class='actions'>
           <button onclick='loadPrompts()'>Reload Prompts</button>
           <button onclick='saveSelectedPrompt("action")'>Save Selected Action Prompt</button>
+          <button onclick='discardSelectedPrompt("action")'>Discard Selected Edits</button>
           <button class='danger' onclick='resetPrompts()'>Reset Defaults</button>
         </div>
         <div id='actionPromptStatus' class='hint'>Action prompt templates not loaded yet.</div>
@@ -745,6 +740,7 @@
         <div class='actions'>
           <button onclick='loadPrompts()'>Reload Prompts</button>
           <button onclick='saveSelectedPrompt("relationship")'>Save Selected Relationship Prompt</button>
+          <button onclick='discardSelectedPrompt("relationship")'>Discard Selected Edits</button>
           <button class='danger' onclick='resetPrompts()'>Reset Defaults</button>
         </div>
         <div id='relationshipPromptStatus' class='hint'>Relationship prompt templates not loaded yet.</div>
@@ -1312,22 +1308,24 @@
         submit.disabled = false;
       }
     });
-    const ids = ['host','port','apiUrl','apiKey','siteUrl','appTitle','promptCacheMode','promptCacheFallbackCooldownSeconds','dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel','memoryModel','relationshipModel','correspondenceModel','strategyModel','selectorModel','reasoningMode','reasoningEffort','reasoningFallbackCooldownSeconds','enableMinimeMemoryWorker','minimeTopicUrl','minimeMaxTopics','minimeTimeoutMs','minimeRetryCooldownSeconds','enableMinimeMemoryReranking','minimeRerankUrl','minimeRerankCandidateCount','minimeRerankTimeoutMs','minimeRerankWeight','enableSemanticMemory','vectorProvider','embeddingModel','vectorWorkerUrl','vectorSearchTopK','vectorScoreWeight','vectorQueryTimeoutMs','embeddingBatchSize','qdrantUrl','qdrantApiKey','enableMemoryConsolidation','useMemoryLlmForConsolidation','memoryConsolidationMinItems','memoryConsolidationWindowMinutes','memoryConsolidationMaxGroups','memoryConsolidationMaxSourceItems','memoryConsolidationMaxSummaryChars','actionPlannerModel','enableHiddenActionPlanner','showActionGateDebug','actionPlannerMaxTokens','actionRouterModel','enableActionRouterLlm','enableActionRouterRepair','actionRouterAlwaysRun','actionRouterCandidateCount','actionRouterMaxTokens','temperature','maxTokens','characterConstructionMaxTokens','promptWarningCharacterLimit','promptHardCharacterLimit','portraitProvider','portraitNanoGptImageGenerationsUrl','portraitNanoGptChatCompletionsUrl','portraitNanoGptApiKey','portraitNanoGptImageModel','portraitAtlasGenerateImageUrl','portraitAtlasUploadMediaUrl','portraitAtlasPredictionUrlPrefix','portraitAtlasApiKey','portraitAtlasImageModel','portraitAtlasWanNegativePrompt','portraitImageStrength','adultPortraitInferenceSteps','adultSceneryInferenceSteps','portraitInferenceSteps','portraitGuidanceScale','portraitNativeSourceMode','portraitNativeSourceGeneratorPath','sceneryProvider','sceneryNanoGptImageModel','sceneryAtlasImageModel','sceneryAtlasWanNegativePrompt','sceneryImageStrength','sceneryInferenceSteps','sceneryGuidanceScale','enableLiveLog','enableRequestLogging','enableLlmLogging','prettyJsonLogs','openTelemetryOtlpEndpoint','providerMaxConcurrency','providerQueueTimeoutMs','providerRequestTimeoutMs','providerCircuitFailureThreshold','providerCircuitBreakSeconds','autoCaptureReplayCorpus','textureTraceEnabled','maxContextMemories','memoryTags','saveSyncEnabled','autoOpenBrowser'];
-    const boolIds = new Set(['enableMinimeMemoryWorker','enableMinimeMemoryReranking','enableSemanticMemory','enableMemoryConsolidation','useMemoryLlmForConsolidation','enableHiddenActionPlanner','showActionGateDebug','enableActionRouterLlm','enableActionRouterRepair','actionRouterAlwaysRun','enableLiveLog','enableRequestLogging','enableLlmLogging','prettyJsonLogs','autoCaptureReplayCorpus','textureTraceEnabled','saveSyncEnabled','autoOpenBrowser']);
+    const ids = ['host','port','apiUrl','apiKey','siteUrl','appTitle','promptCacheMode','promptCacheFallbackCooldownSeconds','dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel','memoryModel','relationshipModel','correspondenceModel','strategyModel','reasoningMode','reasoningEffort','reasoningFallbackCooldownSeconds','enableSemanticMemory','vectorProvider','embeddingModel','vectorWorkerUrl','vectorSearchTopK','vectorScoreWeight','vectorQueryTimeoutMs','embeddingBatchSize','qdrantUrl','qdrantApiKey','enableMemoryConsolidation','useMemoryLlmForConsolidation','memoryConsolidationMinItems','memoryConsolidationWindowMinutes','memoryConsolidationMaxGroups','memoryConsolidationMaxSourceItems','memoryConsolidationMaxSummaryChars','actionPlannerModel','enableHiddenActionPlanner','showActionGateDebug','actionPlannerMaxTokens','actionRouterModel','enableActionRouterLlm','enableActionRouterRepair','actionRouterAlwaysRun','actionRouterCandidateCount','actionRouterMaxTokens','temperature','maxTokens','characterConstructionMaxTokens','promptWarningCharacterLimit','promptHardCharacterLimit','portraitProvider','portraitNanoGptImageGenerationsUrl','portraitNanoGptChatCompletionsUrl','portraitNanoGptApiKey','portraitNanoGptImageModel','portraitAtlasGenerateImageUrl','portraitAtlasUploadMediaUrl','portraitAtlasPredictionUrlPrefix','portraitAtlasApiKey','portraitAtlasImageModel','portraitAtlasWanNegativePrompt','portraitImageStrength','adultPortraitInferenceSteps','adultSceneryInferenceSteps','portraitInferenceSteps','portraitGuidanceScale','portraitNativeSourceMode','portraitNativeSourceGeneratorPath','sceneryProvider','sceneryNanoGptImageModel','sceneryAtlasImageModel','sceneryAtlasWanNegativePrompt','sceneryImageStrength','sceneryInferenceSteps','sceneryGuidanceScale','enableLiveLog','enableRequestLogging','enableLlmLogging','prettyJsonLogs','openTelemetryOtlpEndpoint','providerMaxConcurrency','providerQueueTimeoutMs','providerRequestTimeoutMs','providerCircuitFailureThreshold','providerCircuitBreakSeconds','autoCaptureReplayCorpus','textureTraceEnabled','maxContextMemories','memoryTags','saveSyncEnabled','autoOpenBrowser'];
+    const boolIds = new Set(['enableSemanticMemory','enableMemoryConsolidation','useMemoryLlmForConsolidation','enableHiddenActionPlanner','showActionGateDebug','enableActionRouterLlm','enableActionRouterRepair','actionRouterAlwaysRun','enableLiveLog','enableRequestLogging','enableLlmLogging','prettyJsonLogs','autoCaptureReplayCorpus','textureTraceEnabled','saveSyncEnabled','autoOpenBrowser']);
     const secretIds = new Set(['nanoGptApiKey','openRouterApiKey','apiKey','portraitNanoGptApiKey','portraitAtlasApiKey','qdrantApiKey']);
     const imageProfiles = ['portrait','scenery','adultPortrait','adultScenery'];
+    ids.push('portraitGenerationMethod','portraitVisionProvider','portraitVisionModel','portraitVisionNanoGptModel');
     ids.push('nanoGptApiKey','openRouterApiKey');
     imageProfiles.forEach(prefix => ids.push(prefix + 'OpenRouterImageModel'));
     @CHAT_PROVIDER_SCRIPT@
     @CODEX_PERFORMANCE_SCRIPT@
     ['adultPortrait','adultScenery'].forEach(prefix => ['Provider','NanoGptImageModel','AtlasImageModel','AtlasWanNegativePrompt','ImageStrength','InferenceSteps','GuidanceScale'].forEach(suffix => ids.push(prefix + suffix)));
-    const intIds = new Set(['port','promptCacheFallbackCooldownSeconds','reasoningFallbackCooldownSeconds','maxContextMemories','maxTokens','characterConstructionMaxTokens','promptWarningCharacterLimit','promptHardCharacterLimit','minimeMaxTopics','minimeTimeoutMs','minimeRetryCooldownSeconds','minimeRerankCandidateCount','minimeRerankTimeoutMs','minimeRerankWeight','vectorSearchTopK','vectorScoreWeight','vectorQueryTimeoutMs','embeddingBatchSize','memoryConsolidationMinItems','memoryConsolidationWindowMinutes','memoryConsolidationMaxGroups','memoryConsolidationMaxSourceItems','memoryConsolidationMaxSummaryChars','actionRouterCandidateCount','actionRouterMaxTokens','actionPlannerMaxTokens','adultPortraitInferenceSteps','adultSceneryInferenceSteps','portraitInferenceSteps','sceneryInferenceSteps','providerMaxConcurrency','providerQueueTimeoutMs','providerRequestTimeoutMs','providerCircuitFailureThreshold','providerCircuitBreakSeconds']);
+    const intIds = new Set(['port','promptCacheFallbackCooldownSeconds','reasoningFallbackCooldownSeconds','maxContextMemories','maxTokens','characterConstructionMaxTokens','promptWarningCharacterLimit','promptHardCharacterLimit','vectorSearchTopK','vectorScoreWeight','vectorQueryTimeoutMs','embeddingBatchSize','memoryConsolidationMinItems','memoryConsolidationWindowMinutes','memoryConsolidationMaxGroups','memoryConsolidationMaxSourceItems','memoryConsolidationMaxSummaryChars','actionRouterCandidateCount','actionRouterMaxTokens','actionPlannerMaxTokens','adultPortraitInferenceSteps','adultSceneryInferenceSteps','portraitInferenceSteps','sceneryInferenceSteps','providerMaxConcurrency','providerQueueTimeoutMs','providerRequestTimeoutMs','providerCircuitFailureThreshold','providerCircuitBreakSeconds']);
     ids.push('recentRawConversationTurns','recentRawConversationCharBudget');
     ids.push('llmProvider','codexExecutable','codexHome');
     intIds.add('recentRawConversationTurns');
     intIds.add('recentRawConversationCharBudget');
-    const floatIds = new Set(['reignXpMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
-    const promptState = { files:{}, catalog:[], loaded:false };
+    const floatIds = new Set(['reignXpMultiplier','reignXpConversationMultiplier','reignXpSocialCharmMultiplier','reignXpSocialBonusMultiplier','reignXpPetitionMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
+    const promptState = { files:{}, catalog:[], loaded:false, drafts:{}, selected:{}, saving:false, revision:0, loading:0 };
+    const promptCategories = ['general','context','action','relationship','image'];
     const nanoPresetHints = {
       'gpt-image-1.5': 'Preset request shape: 1024x1536 via NanoGPT image reference route.',
       'gpt-image-1': 'Preset request shape: 1024x1536 via NanoGPT image reference route.',
@@ -1448,6 +1446,13 @@
         const el = document.getElementById(id);
         if (!el) return;
         if (boolIds.has(id)) el.checked = !!s[id];
+        else if (id === 'portraitGenerationMethod') el.value = s[id] || 'text';
+        else if (id === 'portraitVisionProvider') el.value = s[id] || 'Codex';
+        else if (id === 'portraitVisionModel' || id === 'portraitVisionNanoGptModel') {
+          const value = s[id] || (id === 'portraitVisionModel' ? 'runtime-default' : 'deepseek/deepseek-v4.1-flash');
+          if (![...el.options].some(x => x.value === value)) el.add(new Option(value + ' (saved)', value));
+          el.value = value;
+        }
         else if (imageProfiles.some(prefix => id === prefix + 'Provider')) el.value = s[id] || (id.startsWith('adult') ? 'AtlasCloud' : 'NanoGPT');
         else if (secretIds.has(id)) {
           const present = !!s[id + 'Present'];
@@ -1468,6 +1473,8 @@
       await loadCodexStatus();
       updateImagePresetHints();
       updateImageProfileUi();
+      updatePortraitGenerationUi();
+      await loadPortraitVisionModels();
       updateReasoningPolicyHint();
       await checkHealth();
       await loadPromptCacheStatus();
@@ -1543,6 +1550,7 @@
     async function refreshCodexModels() {
       const result = await codexPost('/api/codex/models/refresh');
       if (result.ok) renderCodexModels(result.models);
+      await loadPortraitVisionModels();
     }
 
     async function logoutCodex() {
@@ -1584,6 +1592,13 @@
     }
 
     async function saveSettings() {
+      const status = document.getElementById('status');
+      const button = document.getElementById('saveChangesButton');
+      if (button.disabled) return;
+      button.disabled = true;
+      status.textContent = 'Saving changes...';
+      let settingsSaved = false;
+      try {
       captureChatModels();
       const s = {llmModelProfiles: chatModelProfiles};
       ids.forEach(id => {
@@ -1597,17 +1612,17 @@
       });
       Object.assign(s, codexPerformanceLegacyReasoningForSave());
       s.codexOptions = codexPerformanceSettingsForSave();
-      const r = await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) });
-      const j = await r.json();
-      document.getElementById('status').textContent = j.ok ? 'Saved' : 'Save failed';
-      if (j.ok) {
-        await loadSettings();
-        await loadSharedPortraitCatalog();
-        await loadSharedPortraitGenerationStatus();
-        document.getElementById('status').textContent = 'Saved';
-      }
+      await controlCenterJson('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) });
+      settingsSaved = true;
+      await savePromptDrafts();
+      try { await loadSettings(); }
+      catch (e) { status.textContent = 'Changes saved; settings refresh failed: ' + e.message; return; }
+      status.textContent = 'Changes saved';
       updateImagePresetHints();
       updateReasoningPolicyHint();
+      } catch (e) {
+        status.textContent = (settingsSaved ? 'Settings saved; prompts not saved: ' : 'Save failed: ') + e.message;
+      } finally { button.disabled = false; }
     }
 
     function updateReasoningPolicyHint() {
@@ -1648,18 +1663,6 @@
       const campaignId = document.getElementById('charCampaignId')?.value || '';
       const j = await (await fetch('/memory/embeddings/retry-failed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId})})).json();
       document.getElementById('embeddingStatusOutput').textContent = JSON.stringify(j, null, 2);
-    }
-
-    async function shutdownServer() {
-      const status = document.getElementById('status');
-      status.textContent = 'Shutting down...';
-      try {
-        const r = await fetch('/api/shutdown', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
-        const j = await r.json();
-        status.textContent = j.ok ? 'Server stopped' : 'Shutdown failed';
-      } catch (e) {
-        status.textContent = 'Server stopped';
-      }
     }
 
     async function clearKey(key) {
@@ -1981,6 +1984,38 @@
         if (request) request.style.display = provider === 'NanoGPT' ? '' : 'none';
       });
       updateImagePresetHints();
+    }
+
+    function updatePortraitGenerationUi() {
+      const box = document.getElementById('portraitVisionSettings');
+      if (box) box.style.display = document.getElementById('portraitGenerationMethod').value === 'text' ? '' : 'none';
+      const nano = document.getElementById('portraitVisionProvider')?.value === 'NanoGPT';
+      document.getElementById('portraitCodexVisionModelLabel').style.display = nano ? 'none' : '';
+      document.getElementById('portraitNanoVisionModelLabel').style.display = nano ? '' : 'none';
+    }
+
+    async function loadPortraitVisionModels() {
+      const provider = document.getElementById('portraitVisionProvider')?.value || 'Codex';
+      const select = document.getElementById(provider === 'NanoGPT' ? 'portraitVisionNanoGptModel' : 'portraitVisionModel');
+      const status = document.getElementById('portraitVisionCatalogStatus');
+      if (!select) return;
+      const saved = select.value || (provider === 'NanoGPT' ? 'deepseek/deepseek-v4.1-flash' : 'runtime-default');
+      try {
+        const response = await fetch('/portraits/vision/models?provider=' + encodeURIComponent(provider));
+        if (!response.ok) throw new Error('Model catalog request failed');
+        const catalog = await response.json();
+        if (!catalog.ok || !Array.isArray(catalog.models)) throw new Error(catalog.error || 'Model catalog unavailable');
+        if (document.getElementById('portraitVisionProvider').value !== provider) return;
+        select.replaceChildren();
+        if (provider === 'Codex') select.add(new Option('Runtime default', 'runtime-default'));
+        for (const model of catalog.models) if (model.id && model.id !== 'runtime-default')
+          select.add(new Option(model.displayName || model.id, model.id));
+        if (![...select.options].some(x => x.value === saved)) select.add(new Option(saved + ' (saved; refresh catalog)', saved));
+        select.value = saved;
+        if (status) status.textContent = provider === 'NanoGPT' ? catalog.models.length + ' subscription vision models available. Requests use the subscription endpoint.' : 'Image-capable Codex models; refresh in API Settings.';
+      } catch (e) {
+        if (document.getElementById('portraitVisionProvider').value === provider && status) status.textContent = 'Catalog unavailable; saved model retained. ' + e.message;
+      }
     }
 
     let portraitDerivativePollTimer = null;
@@ -2351,9 +2386,48 @@
       document.getElementById('castleChatPromptStatus').textContent = j.ok ? 'Prompt pair restored.' : (j.error || 'Reset failed.');
     }
 
+    async function controlCenterJson(url, options = {}) {
+      const r = await fetch(url, {cache:'no-store', ...options, signal:AbortSignal.timeout(30000)});
+      let j;
+      try { j = await r.json(); }
+      catch { throw new Error(`Server returned HTTP ${r.status} without a valid response.`); }
+      if (!r.ok || j.ok !== true) throw new Error(j.error || `Server returned HTTP ${r.status}.`);
+      return j;
+    }
+
+    function capturePromptDraft(category) {
+      const name = promptState.selected[category];
+      const editor = document.getElementById(promptUiIds(category).editor);
+      if (!name || !editor) return;
+      const draft = promptState.drafts[name];
+      const original = draft ? draft.original : (promptState.files[name] || '');
+      if (editor.value === original) delete promptState.drafts[name];
+      else promptState.drafts[name] = {text:editor.value, original};
+    }
+
+    function capturePromptDrafts() { promptCategories.forEach(capturePromptDraft); }
+
+    document.addEventListener('input', event => {
+      const category = promptCategories.find(x => promptUiIds(x).editor === event.target.id);
+      if (!category) return;
+      capturePromptDraft(category);
+      const name = promptState.selected[category];
+      document.getElementById(promptUiIds(category).status).textContent = promptState.drafts[name]
+        ? 'Unsaved changes. Use Save Changes or Save Selected Prompt.' : 'No unsaved changes.';
+    });
+
+    window.addEventListener('beforeunload', event => {
+      capturePromptDrafts();
+      if (Object.keys(promptState.drafts).length) { event.preventDefault(); event.returnValue = ''; }
+    });
+
     async function loadPrompts() {
-      const r = await fetch('/api/prompts');
-      const j = await r.json();
+      capturePromptDrafts();
+      const request = ++promptState.loading, revision = promptState.revision;
+      try {
+      const j = await controlCenterJson('/api/prompts');
+      if (request !== promptState.loading || revision !== promptState.revision) return;
+      capturePromptDrafts();
       promptState.files = j.files || {};
       promptState.catalog = j.catalog || [];
       promptState.loaded = !!j.ok;
@@ -2362,7 +2436,7 @@
       fillPromptSelect('action');
       fillPromptSelect('relationship');
       fillPromptSelect('image');
-      const text = j.ok ? `Loaded prompt library from ${j.promptsDir}` : 'Prompt load failed';
+      const text = Object.keys(promptState.drafts).length ? 'Prompts loaded. Unsaved edits preserved.' : 'Prompts loaded.';
       const promptStatus = document.getElementById('promptStatus');
       const contextPromptStatus = document.getElementById('contextPromptStatus');
       const actionPromptStatus = document.getElementById('actionPromptStatus');
@@ -2373,6 +2447,12 @@
       if (actionPromptStatus) actionPromptStatus.textContent = text;
       if (relationshipPromptStatus) relationshipPromptStatus.textContent = text;
       if (imagePromptStatus) imagePromptStatus.textContent = text;
+      } catch (e) {
+        if (request !== promptState.loading || revision !== promptState.revision) return;
+        promptCategories.forEach(category => {
+          document.getElementById(promptUiIds(category).status).textContent = 'Prompt load failed: ' + e.message + ' Your edits are preserved.';
+        });
+      }
     }
 
     function promptUiIds(category) {
@@ -2398,18 +2478,20 @@
       });
       if (items.some(x => x.name === prior)) select.value = prior;
       else if (items.length > 0) select.value = items[0].name;
-      selectPrompt(category);
+      selectPrompt(category, false);
     }
 
-    function selectPrompt(category) {
+    function selectPrompt(category, capture = true) {
       const ids = promptUiIds(category);
       const select = document.getElementById(ids.select);
       const editor = document.getElementById(ids.editor);
       const description = document.getElementById(ids.description);
       if (!select || !editor) return;
+      if (capture) capturePromptDraft(category);
       const name = select.value || '';
+      promptState.selected[category] = name;
       const meta = promptState.catalog.find(x => x.name === name) || {};
-      editor.value = name ? (promptState.files[name] || '') : '';
+      editor.value = name ? (promptState.drafts[name]?.text ?? promptState.files[name] ?? '') : '';
       if (description) description.textContent = name ? `${name} - ${meta.description || 'No description.'}` : 'No prompt available in this category.';
     }
 
@@ -2422,21 +2504,64 @@
         if (status) status.textContent = 'No prompt selected.';
         return;
       }
-      const files = {};
-      files[select.value] = editor.value;
-      const r = await fetch('/api/prompts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({files}) });
-      const j = await r.json();
-      if (j.ok) {
-        promptState.files = j.files || promptState.files;
-        promptState.catalog = j.catalog || promptState.catalog;
+      const name = select.value;
+      status.textContent = `Saving ${name}...`;
+      try {
+        await savePromptDrafts(name);
+        status.textContent = promptState.drafts[name] ? `Saved ${name}; newer edits are still unsaved.` : `Saved and verified ${name}.`;
+      } catch (e) { status.textContent = 'Prompt save failed: ' + e.message + ' Your edits are preserved.'; }
+    }
+
+    async function savePromptDrafts(selectedName) {
+      if (promptState.saving) throw new Error('A prompt save is already in progress.');
+      capturePromptDrafts();
+      const names = selectedName ? [selectedName] : Object.keys(promptState.drafts);
+      if (!names.length) return;
+      const files = {}, expectedFiles = {};
+      for (const name of names) {
+        files[name] = promptState.drafts[name]?.text ?? promptState.files[name] ?? '';
+        expectedFiles[name] = promptState.drafts[name]?.original ?? promptState.files[name] ?? '';
       }
-      if (status) status.textContent = j.ok ? `Saved ${select.value}.` : 'Prompt save failed';
+      promptState.saving = true;
+      const buttons = [...document.querySelectorAll('button[onclick^="saveSelectedPrompt"]')];
+      buttons.forEach(button => button.disabled = true);
+      ++promptState.revision;
+      try {
+        const j = await controlCenterJson('/api/prompts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files,expectedFiles})});
+        if (j.saved !== names.length || names.some(name => j.files?.[name] !== files[name]))
+          throw new Error('The server did not confirm the exact prompt text. Reload to review the saved version.');
+        capturePromptDrafts();
+        for (const name of names) {
+          promptState.files[name] = files[name];
+          const draft = promptState.drafts[name];
+          if (draft?.text === files[name]) delete promptState.drafts[name];
+          else if (draft) draft.original = files[name];
+        }
+        capturePromptDrafts();
+      } finally { promptState.saving = false; ++promptState.revision; buttons.forEach(button => button.disabled = false); }
+    }
+
+    async function discardSelectedPrompt(category) {
+      const ids = promptUiIds(category), name = document.getElementById(ids.select).value;
+      if (!name || promptState.saving) return;
+      try {
+        const j = await controlCenterJson('/api/prompts');
+        if (typeof j.files?.[name] !== 'string') throw new Error('The saved prompt is unavailable.');
+        delete promptState.drafts[name];
+        promptState.files[name] = j.files[name];
+        if (document.getElementById(ids.select).value === name) selectPrompt(category, false);
+        document.getElementById(ids.status).textContent = `Reloaded saved ${name}.`;
+      } catch (e) { document.getElementById(ids.status).textContent = 'Reload failed: ' + e.message; }
     }
 
     async function resetPrompts() {
+      if (promptState.saving) return;
       if (!confirm('Reset Bannerlord Reign prompt templates to defaults?')) return;
       const r = await fetch('/api/prompts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reset:true}) });
       const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Prompt reset failed.');
+      promptState.drafts = {};
+      ++promptState.revision;
       promptState.files = j.files || {};
       promptState.catalog = j.catalog || [];
       fillPromptSelect('general');
@@ -3727,5 +3852,6 @@
     loadCampaigns();
   </script>
   <script>@CONVERSATION_DIAGNOSTICS_SCRIPT@</script>
+  <script>@SERVER_CONTROL_SCRIPT@</script>
 </body>
 </html>

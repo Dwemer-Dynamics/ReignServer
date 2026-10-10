@@ -30,6 +30,7 @@
   <ItemGroup>
     <Content Include="services\vector-worker\*.py;services\vector-worker\requirements*.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="release\embedding-model.lock.json" Link="embedding-model.lock.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="release\ThirdParty\ColBERT-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="SkiaSharp" Version="4.152.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.152.0" />
   </ItemGroup>

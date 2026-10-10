@@ -20,7 +20,7 @@ namespace ReignBetaServer
           @CODEX@
           <div id='@PROFILE@OpenRouterProfileSettings' style='display:none'>
             <label>OpenRouter image model <select id='@PROFILE@OpenRouterImageModel'>@OPENROUTER@</select></label>
-            <p class='hint'>Uses your saved OpenRouter key from API Settings and the supplied reference image.</p>
+            <p class='hint'>Uses your saved OpenRouter key from API Settings. Character portraits follow the selected generation method; image edits retain their reference.</p>
           </div>
           <div id='@PROFILE@NanoGptProfileSettings'>
             <label>NanoGPT image model
@@ -53,7 +53,7 @@ namespace ReignBetaServer
         </div>
 "
                 .Replace("@CODEX@", prefix.StartsWith("adult") ? "" : @"<div id='@PROFILE@CodexProfileSettings' style='display:none'>
-            <label>Codex image model <select id='@PROFILE@CodexImageModel' disabled><option value='gpt-image-2'>Image 2 (Codex managed)</option></select></label>
+            <label>Codex image model <select id='@PROFILE@CodexImageModel' disabled><option value='runtime-default'>Runtime default</option></select></label>
             <p class='hint'>Uses your signed-in Codex subscription. Connect Codex in API Settings. Normal images only; one generation at a time.</p>
           </div>")
                 .Replace("@PROFILE@", prefix).Replace("@TITLE@", title).Replace("@HINT@", hint)
@@ -73,7 +73,20 @@ namespace ReignBetaServer
                 .imageProfileCard input:focus,.imageProfileCard select:focus,.imageProfileCard textarea:focus { border-color:#A88A54FF; outline:1px solid #A88A54FF; }
                 .imageProfileCard input:disabled,.imageProfileCard select:disabled { color:#4A4945FF; }
                 @media(max-width:700px) { .imageProfileGrid { grid-template-columns:1fr; } .imageProfileCard label { grid-template-columns:1fr; } }
-                </style><div class='grid2 imageProfileGrid'>"
+                </style><div class='card imageProfileCard' id='portraitGenerationOptions'>
+                  <h2>Character Portrait Generation</h2>
+                  <label>Generation method <select id='portraitGenerationMethod' onchange='updatePortraitGenerationUi()'>
+                    <option value='text'>Text based (recommended)</option><option value='image'>Image based</option></select></label>
+                  <p class='hint'>Text based describes the native face, then creates a photographic portrait from those traits and current age, weight and build. Image based sends the native source to the normal image provider.</p>
+                  <div id='portraitVisionSettings'>
+                    <label>Vision provider <select id='portraitVisionProvider' onchange='updatePortraitGenerationUi();loadPortraitVisionModels()'><option value='Codex'>Codex SDK (ChatGPT)</option><option value='NanoGPT'>NanoGPT subscription</option></select></label>
+                    <label id='portraitCodexVisionModelLabel'>Vision model <select id='portraitVisionModel'><option value='runtime-default'>Runtime default</option></select></label>
+                    <label id='portraitNanoVisionModelLabel' style='display:none'>Vision model <select id='portraitVisionNanoGptModel'><option value='deepseek/deepseek-v4.1-flash'>DeepSeek V4.1 Flash</option></select></label>
+                    <p class='hint'>Codex uses your ChatGPT connection and image-capable model catalog. NanoGPT uses your saved text API key and current subscription-included vision models. Both describe the source before the normal image provider generates from text.</p>
+                    <p id='portraitVisionCatalogStatus' class='hint'></p>
+                  </div>
+                  <p class='hint'>The normal portrait is created first. Adult female portraits with physical confidence 61–100 then receive the configured adult clothing edit. Existing portrait age edits keep their current image as the reference.</p>
+                </div><div class='grid2 imageProfileGrid'>"
                 + ImageProfileCard("portrait", "Normal Portraits", "Character, notable and petitioner portraits. Adult female portraits with confidence 61 or above receive a subsequent clothing-only edit.")
                 + ImageProfileCard("adultPortrait", "Adult Portraits", "Clothing-only second pass for adult female portraits with physical confidence 61–100. If it fails, Reign keeps the normal result and reports a warning.")
                 + ImageProfileCard("scenery", "Normal Scenery &amp; Events", "Memories, castle and family scenes, and event imagery.")

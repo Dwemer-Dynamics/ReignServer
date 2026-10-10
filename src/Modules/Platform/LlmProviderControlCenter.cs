@@ -13,7 +13,7 @@ namespace ReignBetaServer
 
         private static string ChatProviderScript() => @"
     const chatModelKeys = ['dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel',
-      'memoryModel','relationshipModel','correspondenceModel','strategyModel','selectorModel','actionPlannerModel','actionRouterModel'];
+      'memoryModel','relationshipModel','correspondenceModel','strategyModel','actionPlannerModel','actionRouterModel'];
     let chatModelProfiles = {}, displayedChatProvider = '', lastCodexModels = [];
     function captureChatModels() {
       if (!displayedChatProvider) return;

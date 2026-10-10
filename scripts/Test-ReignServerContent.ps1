@@ -76,8 +76,10 @@ foreach ($pair in $mapped.GetEnumerator()) {
 }
 $reignCtl = Get-Content -LiteralPath (Join-Path $source 'scripts/reignctl') -Raw
 foreach ($requiredLifecycleContract in @(
-    'chown root:root "$pidfile"',
-    'chmod 0644 "$pidfile"',
+    '[ ! -L "$pid_directory" ] && [ ! -L "$pidfile" ] &&',
+    'install -d -o root -g root -m 0755 "$pid_directory"',
+    'install -o root -g root -m 0644 /dev/null "$pidfile"',
+    'sh "$executable" "$data" 8>&- > "$pidfile"',
     'find -P "$root/versions/$version" -xdev -type d -exec chmod 0755 {} +',
     'find -P "$root/versions/$version" -xdev -type f -exec chmod 0644 {} +',
     'chmod 0755 "$root/versions/$version/$executable"'
@@ -85,5 +87,13 @@ foreach ($requiredLifecycleContract in @(
     if (-not $reignCtl.Contains($requiredLifecycleContract,[StringComparison]::Ordinal)) {
         throw "The managed service PID file trust contract is missing: $requiredLifecycleContract"
     }
+}
+# The root controller opens the trusted PID file before spawning the unprivileged
+# process. A stale ownership repair after an unprivileged write is insufficient.
+$pidCreation = $reignCtl.IndexOf('install -o root -g root -m 0644 /dev/null "$pidfile"',[StringComparison]::Ordinal)
+$processCreation = $reignCtl.IndexOf('if ! runuser -u reign -- env',[StringComparison]::Ordinal)
+if ($pidCreation -ge $processCreation -or $processCreation -lt 0 -or
+    $reignCtl.Contains('echo $! > "$2"',[StringComparison]::Ordinal)) {
+    throw 'The managed server must retain root ownership of PID creation and writing.'
 }
 Write-Output "Required server content verified: $($mapped.Count) source files; $($manifestFiles.Count) artifact files; $($prompts.Count) classified embedded prompts."

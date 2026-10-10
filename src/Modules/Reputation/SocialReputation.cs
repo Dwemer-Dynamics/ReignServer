@@ -14,6 +14,10 @@ namespace ReignBetaServer
         private const int SocialReputationSchemaVersion = 4;
         private const int BuiltInSocialCatalogRevision = 6;
         private static string SocialCatalogPath => Path.Combine(DataDir, "social_rumor_reputation_catalog.json");
+        // Schema initialization reads this catalog while holding CampaignSchemaLock.
+        // Keep its file access off FileLock: action delivery takes FileLock before
+        // opening a campaign connection, and the opposite order deadlocks.
+        private static readonly object SocialCatalogLock = new object();
         private static string SocialCatalogCachedJson = "";
         private static string SocialCatalogCachedPath = "";
         private static long SocialCatalogCachedWriteTicks = long.MinValue;
@@ -228,7 +232,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
 
         private static Dictionary<string, object> ReadGlobalSocialCatalog()
         {
-            lock (FileLock)
+            lock (SocialCatalogLock)
             {
                 string catalogPath = Path.GetFullPath(SocialCatalogPath);
                 long writeTicks = File.Exists(catalogPath)
@@ -250,7 +254,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
                     // enforce the same invariant rather than bypassing it.
                     if (EnsureExpandedSocialCatalog(cached))
                     {
-                        WriteJsonObject(catalogPath, cached);
+                        WriteSocialCatalog(catalogPath, cached);
                         SocialCatalogCachedJson = Json.Serialize(cached);
                         SocialCatalogCachedWriteTicks = File.Exists(catalogPath)
                             ? File.GetLastWriteTimeUtc(catalogPath).Ticks
@@ -258,17 +262,51 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
                     }
                     return cached;
                 }
-                Dictionary<string, object> catalog = ReadJsonObject(catalogPath);
+                Dictionary<string, object> catalog = ReadSocialCatalog(catalogPath);
                 if (catalog.Count == 0) catalog = DefaultSocialCatalog();
                 bool changed = EnsureExpandedSocialCatalog(catalog);
                 if (changed || !File.Exists(catalogPath))
-                    WriteJsonObject(catalogPath, catalog);
+                    WriteSocialCatalog(catalogPath, catalog);
                 SocialCatalogCachedJson = Json.Serialize(catalog);
                 SocialCatalogCachedPath = catalogPath;
                 SocialCatalogCachedWriteTicks = File.Exists(catalogPath)
                     ? File.GetLastWriteTimeUtc(catalogPath).Ticks
                     : 0L;
                 return catalog;
+            }
+        }
+
+        private static Dictionary<string, object> ReadSocialCatalog(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return new Dictionary<string, object>();
+                string contents = File.ReadAllText(path, Encoding.UTF8);
+                return string.IsNullOrWhiteSpace(contents)
+                    ? new Dictionary<string, object>()
+                    : Json.Deserialize<Dictionary<string, object>>(contents)
+                        ?? new Dictionary<string, object>();
+            }
+            catch
+            {
+                return new Dictionary<string, object>();
+            }
+        }
+
+        private static void WriteSocialCatalog(string path, Dictionary<string, object> catalog)
+        {
+            ThrowIfCampaignRequestReplaced();
+            string directory = Path.GetDirectoryName(path);
+            Directory.CreateDirectory(directory);
+            string temporary = Path.Combine(directory, "~" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            try
+            {
+                File.WriteAllText(temporary, Json.Serialize(catalog), new UTF8Encoding(false));
+                File.Move(temporary, path, true);
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
             }
         }
 
@@ -301,10 +339,10 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
                     return new Dictionary<string, object> { ["ok"] = false, ["errors"] = errors };
                 int revision = ReadInt(current, "revision", 1) + 1;
                 proposed["revision"] = revision;
-                lock (FileLock)
+                lock (SocialCatalogLock)
                 {
                     string catalogPath = Path.GetFullPath(SocialCatalogPath);
-                    WriteJsonObject(catalogPath, proposed);
+                    WriteSocialCatalog(catalogPath, proposed);
                     SocialCatalogCachedJson = Json.Serialize(proposed);
                     SocialCatalogCachedPath = catalogPath;
                     SocialCatalogCachedWriteTicks =
@@ -1464,6 +1502,25 @@ VALUES($campaign,$timeline,$observer,$subject,$rumorTotal,$reputationTotal,$char
                 ["caseId"] = id, ["name"] = id, ["summary"] = summary,
                 ["data"] = data ?? new Dictionary<string, object>(), ["durationMs"] = 0
             });
+            using (var started = new System.Threading.ManualResetEventSlim())
+            {
+                System.Threading.Tasks.Task<Dictionary<string, object>> catalogRead;
+                bool completedWithoutFileLock;
+                lock (FileLock)
+                {
+                    catalogRead = System.Threading.Tasks.Task.Run(() =>
+                    {
+                        started.Set();
+                        return ReadGlobalSocialCatalog();
+                    });
+                    completedWithoutFileLock = started.Wait(2000) && catalogRead.Wait(2000);
+                }
+                catalogRead.Wait(5000);
+                add("social_catalog_read_does_not_take_global_file_lock",
+                    completedWithoutFileLock && catalogRead.IsCompletedSuccessfully
+                        && catalogRead.Result.Count > 0,
+                    "Schema-time social catalog reads remain independent of the action queue's global file lock.", null);
+            }
             add("social_fixture_missing_enrollment_rejected",
                 !ValidateSocialBalanceLiveEnrollment(new Dictionary<string, object>(), "__missing_enrollment", out string missingEnrollmentError)
                 && !string.IsNullOrWhiteSpace(missingEnrollmentError),

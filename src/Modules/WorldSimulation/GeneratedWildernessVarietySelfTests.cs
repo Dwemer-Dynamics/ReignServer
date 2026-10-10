@@ -45,6 +45,60 @@ namespace ReignBetaServer
                 Require(seen.Count == 36, "The seeded long run did not reach every scene direction.");
                 Require(WildernessDirections.Select(item => item[1]).Distinct().Count() == 12, "The catalog lost theme breadth.");
             });
+            Check("native_gender_survives_brief_and_prompt", () =>
+            {
+                var female = new Dictionary<string, object> { ["heroStringId"] = "female", ["name"] = "Mira", ["isFemale"] = true };
+                var male = new Dictionary<string, object> { ["heroStringId"] = "male", ["name"] = "Arven", ["isFemale"] = false };
+                var unknown = new Dictionary<string, object> { ["heroStringId"] = "unknown", ["name"] = "Taren" };
+                var empty = new Dictionary<string, object>();
+                var femaleBrief = WildernessCharacterBrief(empty, female);
+                Require(ReadBool(femaleBrief, "isFemale", false) && ReadString(femaleBrief, "pronouns", "") == "she/her", "Female native identity was discarded.");
+                Require(WildernessCharacterBrief(empty, male).ContainsKey("isFemale") && ReadString(WildernessCharacterBrief(empty, male), "pronouns", "") == "he/him", "Explicit male identity was lost.");
+                Require(!WildernessCharacterBrief(empty, unknown).ContainsKey("isFemale") && ReadString(WildernessCharacterBrief(empty, unknown), "pronouns", "").StartsWith("they/them"), "Unknown gender defaulted to male.");
+                foreach (object invalid in new object[] { null, "invalid" })
+                {
+                    unknown["isFemale"] = invalid;
+                    Require(!WildernessCharacterBrief(empty, unknown).ContainsKey("isFemale"), "Invalid identity defaulted to male.");
+                }
+                unknown.Remove("isFemale");
+                var payload = new Dictionary<string, object> { ["wildernessInitiatorHeroStringId"] = "female" };
+                string prompt = BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, new List<Dictionary<string, object>> { female, male, unknown }, WildernessDirections[0], (id, p) => empty);
+                Require(prompt.Contains("she/her") && prompt.Contains("he/him") && prompt.Contains("they/them") && prompt.Contains("Initiating participant id: female"), "Writer lost identity or initiator.");
+                Require(prompt.Contains("occupation Lord") && prompt.Contains("never override native identity"), "Writer rule permits title/name to override identity.");
+            });
+            Check("saved_event_writer_keeps_native_pronouns_over_old_prose", () =>
+            {
+                var empty = new Dictionary<string, object>();
+                var female = new Dictionary<string, object> { ["name"] = "Mira", ["occupation"] = "Lord", ["isFemale"] = true };
+                string foundation = BuildStableCharacterPrompt("female", "Mira", female, empty);
+                Require(foundation.Contains("female; she/her") && foundation.Contains("earlier event descriptions and transcript wording never override native identity"), "Saved scene wording or a Lord title can override native female identity.");
+                female["isFemale"] = false;
+                Require(BuildStableCharacterPrompt("male", "Mira", female, empty).Contains("male; he/him"), "Known male foundation lost native pronouns.");
+                foreach (object unknown in new object[] { null, "invalid" })
+                {
+                    female["isFemale"] = unknown;
+                    Require(BuildStableCharacterPrompt("unknown", "Mira", female, empty).Contains("unknown; they/them"), "Invalid foundation identity defaulted to male.");
+                }
+                female.Remove("isFemale");
+                Require(BuildStableCharacterPrompt("missing", "Mira", female, empty).Contains("unknown; they/them"), "Missing foundation identity defaulted to male.");
+            });
+            Check("obvious_named_gender_conflict_rejected_without_rewriting", () =>
+            {
+                var female = new List<Dictionary<string, object>> { new Dictionary<string, object> { ["heroStringId"] = "wilderness_a", ["name"] = "Mira", ["isFemale"] = true } };
+                var bad = Opening("Mira has reined his horse to a walk.", "A fox rests in the grass.");
+                string before = Json.Serialize(bad);
+                Require(WildernessOpeningRejection(bad, new Dictionary<string, object>(), female) == "participant_gender_conflict", "Wrong native gender was accepted.");
+                Require(Json.Serialize(bad) == before, "Guard rewrote provider text.");
+                Require(WildernessOpeningRejection(Opening("Mira has reined her horse to a walk.", "A fox rests in the grass."), new Dictionary<string, object>(), female) == "", "Correct female pronoun rejected.");
+                Require(WildernessOpeningRejection(Opening("Mira has reined their horse to a walk.", "A fox rests in the grass."), new Dictionary<string, object>(), female) == "", "Neutral pronoun rejected.");
+                Require(WildernessOpeningRejection(Opening("Mira reads a note: \"Mira has reined his horse.\"", "A fox rests in the grass."), new Dictionary<string, object>(), female) == "", "Quoted material treated as native narration.");
+                var male = female.Select(p => new Dictionary<string, object>(p) { ["isFemale"] = false }).ToList();
+                Require(WildernessOpeningRejection(Opening("Mira raises her hand.", "A fox rests in the grass."), new Dictionary<string, object>(), male) == "participant_gender_conflict", "Male identity control missed.");
+                var unknown = female.Select(p => new Dictionary<string, object> { ["heroStringId"] = "wilderness_a", ["name"] = "Mira" }).ToList();
+                Require(WildernessOpeningRejection(bad, new Dictionary<string, object>(), unknown) == "", "Unknown gender was invented.");
+                var hidden = Opening("Mira has reined her horse to a walk.", "A fox rests in the grass."); hidden["hiddenContext"] = "Mira folds his arms.";
+                Require(WildernessOpeningRejection(hidden, new Dictionary<string, object>(), female) == "participant_gender_conflict", "Hidden scene context can poison later writer.");
+            });
             Check("legacy_missing_and_unknown_keys", () =>
             {
                 foreach (string key in new[] { "", "retired_direction" })
@@ -154,6 +208,10 @@ namespace ReignBetaServer
                 Require(!behavior.Contains("BuildFallbackGeneratedWildernessScenario") && !behavior.Contains("Something Ahead"), "The repeated success-shaped fallback remains reachable.");
                 Require(behavior.Contains("!recentWilderness.Contains(x)") && behavior.Contains("RecentEvents = _events.Where"), "Recent event history is pruned or not projected.");
                 Require(System.Text.RegularExpressions.Regex.IsMatch(record, @"\[SaveableField\(27\)\]\s+public string GeneratedVarietyKey;"), "The direction key is not saveable with its additive field id.");
+                Require(System.Text.RegularExpressions.Regex.IsMatch(record, @"\[SaveableField\(28\)\]\s+public string GeneratedInitiatorHeroStringId;"), "Initiator lacks additive native save field 28.");
+                Require(adapter.Contains("result.InitiatorHeroStringId = response.Value<string>(\"initiatorHeroStringId\")")
+                    && adapter.Contains("[\"wildernessInitiatorHeroStringId\"] = record.IsGeneratedWildernessEvent")
+                    && behavior.Contains("scenario.InitiatorHeroStringId"), "Initiator is not wired from generator through saved record to speaking floor.");
                 var ids = System.Text.RegularExpressions.Regex.Matches(record, @"SaveableField\((\d+)\)").Cast<System.Text.RegularExpressions.Match>().Select(match => match.Groups[1].Value).ToList();
                 Require(ids.Distinct().Count() == ids.Count, "A saveable field id was reused.");
                 Require(adapter.Contains("[JsonProperty(\"varietyKey\")]") && adapter.Contains("payload[\"recentEvents\"] = JArray.FromObject"), "The wire history no longer has the server's expected names.");
