@@ -80,6 +80,24 @@ namespace ReignBetaServer
                 && ReadInt(bounded.Diagnostics, "targetInputTokens", 0) <= 32000
                 && ReadBool(bounded.Diagnostics, "targetMet", false));
 
+            string largeContext = string.Join("\n\n", Enumerable.Range(0, 12).Select(i => RenderContinuityRecord(
+                "fitting_history_" + i, "reported_exchange", "npc", "earlier", i, 80, false,
+                "Complete witnessed context " + i + ": " + new string('h', 18000))));
+            PromptLiveTurnBudgetResult LargeContextCase(bool verified) => BuildBudgetedConversationLiveTurn(
+                "dialogue_live_turn_template.txt", "priorDialogueText", new Dictionary<string, string> {
+                    ["playerText"] = "How are you?", ["contextPullText"] = largeContext, ["priorDialogueText"] = "" },
+                "Current camp.", "Speak for yourself.", "", "Rules.", "Profile.",
+                capacity: TestDict("inputAllowance", verified ? 990976 : 48000, "outputFits", true, "capacityVerified", verified));
+            var fitting = LargeContextCase(true);
+            Check("verified_capacity_grows_for_complete_optional_context", fitting.ContextPullText == largeContext
+                && !ReadBool(fitting.Diagnostics, "compacted", true)
+                && ReadInt(fitting.Diagnostics, "targetInputTokens", 0) > 48000
+                && ReadBool(fitting.Diagnostics, "targetMet", false));
+            var unknownCapacity = LargeContextCase(false);
+            Check("unverified_route_keeps_its_bounded_allowance", unknownCapacity.ContextPullText.Length < largeContext.Length
+                && ReadInt(unknownCapacity.Diagnostics, "targetInputTokens", 0) <= 48000
+                && ReadBool(unknownCapacity.Diagnostics, "targetMet", false));
+
             // A newer lexical hit must not displace the reranker's better answer
             // when its original score is larger. Exercise both allocation passes.
             var bestEvidence = new MemoryEvidence { SourceId = "ranked_answer", Kind = "reported_exchange", Owner = "npc", Session = "older",

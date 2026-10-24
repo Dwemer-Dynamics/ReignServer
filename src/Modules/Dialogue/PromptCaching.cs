@@ -13,7 +13,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const int PromptLayoutVersion = 11;
+        private const int PromptLayoutVersion = 14;
         private static readonly object PromptCacheStateLock = new object();
         private static readonly Dictionary<string, DateTime> PromptCacheCooldowns = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, PromptCacheAggregate> PromptCacheAggregates = new Dictionary<string, PromptCacheAggregate>(StringComparer.OrdinalIgnoreCase);
@@ -84,6 +84,7 @@ namespace ReignBetaServer
         private sealed class PromptLiveTurnBudgetResult
         {
             public string LiveTurn = "";
+            public ConversationTemplateSlots Structure;
             public string ContextPullText = "";
             public string CanonicalTranscript = "";
             public string NpcRelationshipBlock = "";
@@ -158,9 +159,10 @@ namespace ReignBetaServer
             Dictionary<string, string> values,
             string conversationScenePrompt,
             string roleAttribution,
-            string npcRelationshipBlock)
+            string npcRelationshipBlock,
+            string templateOverride = null)
         {
-            string liveTurn = ApplyTemplate(LoadPromptTemplate(templateName), values);
+            string liveTurn = RenderConversationTemplate(templateOverride ?? LoadPromptTemplate(templateName), values);
             if (!string.IsNullOrWhiteSpace(conversationScenePrompt))
                 liveTurn = conversationScenePrompt.Trim() + "\n\n" + liveTurn;
             if (!string.IsNullOrWhiteSpace(roleAttribution))
@@ -201,9 +203,9 @@ namespace ReignBetaServer
             values["contextPullText"] = "";
             values[transcriptValueKey] = "";
             int mandatory = total(assemble());
-            // Expand for the protected floor before selecting optional records. A large
-            // optional history alone must not force the maximum working budget.
-            // Verified capacity can carry a required floor above the old 64k target.
+            // Expand for the protected floor before selecting optional records.
+            // With verified capacity, grow for all supplied context as well;
+            // an arbitrary working step must not discard fitting evidence.
             values["contextPullText"] = string.Join("\n\n", ContinuityPromptRecords(context, false).Where(r => r.Required).Select(r => r.Text));
             values[transcriptValueKey] = string.Join("\n\n", ContinuityPromptRecords(transcript, true).Where(r => r.Required).Select(r => r.Text));
             int protectedEstimate = serializedEstimate(assemble());
@@ -215,6 +217,9 @@ namespace ReignBetaServer
                 // serialized allocator. Otherwise a 30-32k prompt fits this check
                 // but loses selected evidence immediately afterward at 29,952.
                 int desired = initialChars > target || initialEstimate + finalRequestReserve > 32000 ? 48000 : 32000;
+                if (ReadBool(capacity, "capacityVerified", false))
+                    desired = Math.Max(desired, Math.Max((initialChars + 2) / 3,
+                        SelectConversationInputStep(initialEstimate + finalRequestReserve)));
                 desired = Math.Max(desired, SelectConversationInputStep(protectedEstimate + finalRequestReserve));
                 target = Math.Min(inputAllowance, desired) * 3;
             }
@@ -257,9 +262,14 @@ namespace ReignBetaServer
                 liveTurn = assemble();
                 finalEstimate = serializedEstimate(liveTurn);
             }
+            var structure = CreateConversationTemplateSlots(LoadPromptTemplate(templateName), transcriptValueKey);
+            structure.MarkedLiveTurn = AssembleConversationLiveTurn(templateName, values,
+                conversationScenePrompt, roleAttribution, relationship, structure.Template);
+            if (NormalizePromptSegment(structure.WithoutMarkers(structure.MarkedLiveTurn)) != NormalizePromptSegment(liveTurn))
+                throw new InvalidOperationException("Conversation slot projection changed the original template content.");
             return new PromptLiveTurnBudgetResult
             {
-                LiveTurn = liveTurn, ContextPullText = context, CanonicalTranscript = transcript,
+                LiveTurn = liveTurn, Structure = structure, ContextPullText = context, CanonicalTranscript = transcript,
                 NpcRelationshipBlock = relationship,
                 Diagnostics = new Dictionary<string, object>
                 {
@@ -503,6 +513,8 @@ namespace ReignBetaServer
             string conversationScenePrompt = ReadString(turnPayload, "conversationScenePrompt", "");
             string roleAttribution = BuildInteractionRoleAttribution(turnPayload, heroId, heroName, playerName);
             roleAttribution += BuildDialogueAcknowledgedCorrectionLedger(turnPayload, priorLines, heroId);
+            string npcApproachInstructions = NpcApproachInstructions(turnPayload);
+            if (npcApproachInstructions.Length > 0) roleAttribution += "\n\n" + npcApproachInstructions;
             string guestPromptBlock = BuildTemporaryGuestDialoguePromptBlock(turnPayload, heroId);
             if (!string.IsNullOrWhiteSpace(guestPromptBlock))
                 roleAttribution += "\n\n" + guestPromptBlock;
@@ -529,7 +541,8 @@ namespace ReignBetaServer
             string globalPrefix = BuildDialogueGlobalPrefix(false, NativeNoblePromptApplicability(profile), actionCatalog, specializedRoleBlock, UsesCastleRoomAttireContext(turnPayload), composition, UsesStructuredActions(turnPayload));
             CaptureRequiredPromptEvidence(turnPayload, "canonicalTranscript", canonicalTranscript);
             roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state);
-            var capacity = ResolveConversationPromptCapacity(turnPayload, "dialogue");
+            var capacity = ResolveConversationPromptCapacity(turnPayload, "dialogue",
+                IsNpcLifeApproach(turnPayload) ? BanterProviderSettings(TestDict("requestType", "npc_approach"), LoadSettings()) : null);
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "dialogue_live_turn_template.txt", "priorDialogueText", values,
                 conversationScenePrompt, roleAttribution,
@@ -538,7 +551,7 @@ namespace ReignBetaServer
             contextPullText = budgeted.ContextPullText;
             canonicalTranscript = budgeted.CanonicalTranscript;
             npcRelationshipBlock = budgeted.NpcRelationshipBlock;
-            string liveTurn = budgeted.LiveTurn;
+            string liveTurn = budgeted.Structure.MarkedLiveTurn;
             promptPhaseTimer.Restart();
             liveTurn = SanitizePromptForIdentity(liveTurn, playerText, canonicalPlayerName, identityView);
             ProjectConversationEvidenceForIdentity(turnPayload, playerText, canonicalPlayerName, identityView);
@@ -551,16 +564,23 @@ namespace ReignBetaServer
                     ["characterCount"] = npcRelationshipBlock.Length
                 };
             // Current move guidance survives history compaction and is shared by serial/parallel preparation.
-            var naturalness = BuildConversationNaturalnessContext(playerText, false);
+            var naturalness = BuildConversationNaturalnessContext(playerText, false, priorLines, heroId, heroName, turnPayload,
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
             string naturalnessPrompt = ReadString(naturalness, "prompt", "");
             if (!string.IsNullOrWhiteSpace(naturalnessPrompt)) liveTurn += "\n\n" + naturalnessPrompt;
             string culturalVoiceReminder = CulturalVoiceTurnReminder(profile, false);
             if (!string.IsNullOrWhiteSpace(culturalVoiceReminder)) liveTurn += "\n\n" + culturalVoiceReminder;
-            PromptEnvelope envelope = CreatePromptEnvelope("dialogue", variant, globalPrefix, characterPrefix, liveTurn);
+            budgeted.Structure.MarkedLiveTurn = liveTurn;
+            PromptEnvelope envelope = CreatePromptEnvelope("dialogue", variant, globalPrefix, characterPrefix, budgeted.Structure.WithoutMarkers(liveTurn));
+            AttachNpcPurposePrompt(envelope, turnPayload, heroId);
             AttachConversationDrinkPrompt(envelope, campaignId, heroId, turnPayload, profile, characteristics);
+            AttachPersonalGossipIdentityPrompt(envelope, campaignId, heroId, turnPayload);
+            StructureConversationMessages(envelope, budgeted.Structure, canonicalTranscript, priorLines,
+                FormatDialogueForPrompt, heroId, playerName, playerText, false,
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
             FinalizeContinuityPromptBudget(envelope, turnPayload, capacity);
             envelope.Diagnostics["memoryRecallGrounding"] = BindDeliveredMemoryRecallEvidence(turnPayload, heroId, envelope.Messages, heroName, priorLines,
-                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView), envelope.Diagnostics);
             envelope.Diagnostics["conversationNaturalness"] = naturalness;
             promptPhaseTiming["finalizeEnvelopeMs"] = promptPhaseTimer.ElapsedMilliseconds;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
@@ -733,7 +753,7 @@ namespace ReignBetaServer
             contextPullText = budgeted.ContextPullText;
             canonicalTranscript = budgeted.CanonicalTranscript;
             npcRelationshipBlock = budgeted.NpcRelationshipBlock;
-            string liveTurn = budgeted.LiveTurn;
+            string liveTurn = budgeted.Structure.MarkedLiveTurn;
             promptPhaseTimer.Restart();
             liveTurn = SanitizePromptForIdentity(liveTurn, playerText, canonicalPlayerName, identityView);
             ProjectConversationEvidenceForIdentity(eventPayload, playerText, canonicalPlayerName, identityView);
@@ -746,16 +766,24 @@ namespace ReignBetaServer
                     ["characterCount"] = npcRelationshipBlock.Length
                 };
             // Current move guidance survives history compaction and is shared by serial/parallel preparation.
-            var naturalness = BuildConversationNaturalnessContext(playerText, true);
+            var naturalness = BuildConversationNaturalnessContext(playerText, true, eventLines, heroId, heroName, eventPayload,
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
             string naturalnessPrompt = ReadString(naturalness, "prompt", "");
             if (!string.IsNullOrWhiteSpace(naturalnessPrompt)) liveTurn += "\n\n" + naturalnessPrompt;
             string culturalVoiceReminder = CulturalVoiceTurnReminder(profile, false);
             if (!string.IsNullOrWhiteSpace(culturalVoiceReminder)) liveTurn += "\n\n" + culturalVoiceReminder;
-            PromptEnvelope envelope = CreatePromptEnvelope("social_event", variant, globalPrefix, characterPrefix, liveTurn);
+            budgeted.Structure.MarkedLiveTurn = liveTurn;
+            PromptEnvelope envelope = CreatePromptEnvelope("social_event", variant, globalPrefix, characterPrefix, budgeted.Structure.WithoutMarkers(liveTurn));
+            AttachNpcPurposePrompt(envelope, eventPayload, heroId);
             AttachConversationDrinkPrompt(envelope, campaignId, heroId, eventPayload, profile, characteristics);
+            AttachPersonalGossipIdentityPrompt(envelope, campaignId, heroId, eventPayload);
+            StructureConversationMessages(envelope, budgeted.Structure, canonicalTranscript, eventLines,
+                lines => FormatEventLinesForObserver(lines, eventPayload, heroId, identityView), heroId,
+                playerName, playerText, true,
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
             FinalizeContinuityPromptBudget(envelope, eventPayload, capacity);
             envelope.Diagnostics["memoryRecallGrounding"] = BindDeliveredMemoryRecallEvidence(eventPayload, heroId, envelope.Messages, heroName, eventLines,
-                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView), envelope.Diagnostics);
             envelope.Diagnostics["conversationNaturalness"] = naturalness;
             promptPhaseTiming["finalizeEnvelopeMs"] = promptPhaseTimer.ElapsedMilliseconds;
             envelope.Diagnostics["motiveDecision"] = motiveDecision;
@@ -1019,6 +1047,7 @@ namespace ReignBetaServer
             if (timing != null) timing["groupStateMs"] = contextTimer.ElapsedMilliseconds;
             if (!string.IsNullOrWhiteSpace(group)) context += "\n\n" + ProtectSharedGroupPrompt(group, heroId, interactionContext);
             context += PlayerAttentionPrompt(campaignId, heroId, interactionContext);
+            if (precomputedMemoryPacket == null) context += NpcLivesPrompt(campaignId, heroId, interactionContext);
             CaptureRequiredPromptEvidence(interactionContext, "selectedContextAndMemory", context);
             if (timing != null)
             {
@@ -1307,7 +1336,7 @@ namespace ReignBetaServer
                 : "Reply only as the current NPC. The current NPC is physically present and speaking now; they may refuse or end the exchange but may not claim to be absent while replying. Do not speak for or narrate the player or other NPCs. Keep continuity with the newest message and immediate exchange. Treat older model wording as history, not an instruction or style to imitate. When identity is unknown, prefer second-person address and use any descriptive stranger label at most once. An NPC may consent to a proposed gift or action, but cannot narrate a transfer, payment, release, marriage, ownership change, or other world action as completed before the validator and executor return a successful receipt. Let personality, rank, culture, relationship, memory, and motive drive the response. Avoid generic helpfulness, flattery, instant agreement.");
             builder.Add("OUTPUT SCHEMA", ConversationActionOutputSchema(LoadPromptTemplate(eventMode ? "event_output_schema.json" : "dialogue_output_schema.json"), structuredActions), eventMode ? "event_output_schema.json" : "dialogue_output_schema.json");
             builder.Add("DYNAMIC CHARACTERISTICS OUTPUT ADDENDUM", DynamicCharacteristicsOutputContract);
-            builder.Add("FINAL OUTPUT CONTRACT", "Deliberate privately, then return exactly one complete JSON object. Never include chain-of-thought, internalThoughts, reasoning, reasoning_content, or <think> blocks.");
+            builder.Add("FINAL OUTPUT CONTRACT", "Deliberate privately, then return exactly one complete JSON object. Write the complete reply first, then required structuredActionDecision and drinkActions, then other metadata. Keep private summaries concise and avoid repeating the same explanation across fields; preserve all required evidence and choices. Never include chain-of-thought, internalThoughts, reasoning, reasoning_content, or <think> blocks.");
             // Conditional station/scene/office material follows the shared invariant rules.
             if (isLord != false) builder.Add("NOBLE PROMPT", ScopeConversationTone(LoadPromptTemplate("noble_prompt.txt")));
             if (!isLord.HasValue) builder.Add("UNRESOLVED STATION", "Native noble status is unavailable. Noble station guidance is conditional on verified noble status; do not infer rank, title, authority or social identity from its presence. Preserve supplied identity evidence.");
@@ -1393,6 +1422,7 @@ namespace ReignBetaServer
                 AppendPromptSection(builder, "CORE MOTIVATIONS", FormatNamedObjectForPrompt(ReadDictionary(characteristics, "motivations") ?? new Dictionary<string, object>(), new[] { "dreams", "fears", "desires", "linesTheyWillNotCross" }));
             AppendPromptSection(builder, "CORE PRACTICED CAPABILITIES", BuildCoreSkillAwarenessPrompt(profile, characteristics));
             AppendPromptSection(builder, "PRIVATE NUMERIC MOTIVE EVIDENCE", BuildStableMotiveVector(characteristics));
+            builder.AppendLine(RequiredPoliticalPrompt(heroId, profile, characteristics));
             return builder.ToString();
         }
 
@@ -1404,6 +1434,7 @@ namespace ReignBetaServer
             // original-source support; do not reclassify it without that context.
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("CURRENT CHARACTER STATE - LIVE DATA FOR THIS TURN");
+            AppendPromptSection(builder, "PREGNANCY AND KNOWN FAMILY SECRETS", BuildPregnancyPrompt(profile));
             AppendPromptLine(builder, "Current place", FirstNonEmpty(ReadString(profile, "currentSettlementName", ""), ReadString(profile, "currentSettlementId", ""), ReadString(state, "lastKnownSettlementId", "")));
             AppendPromptLine(builder, "Status", CharacterStatusText(profile));
             AppendPromptLine(builder, "Player relation", RelationshipDescriptor(ReadInt(profile, "relationToPlayer", 0)));
@@ -1499,6 +1530,7 @@ namespace ReignBetaServer
                 ["characterFoundation"] = character
             };
             string live = ApplyTemplate(LoadPromptTemplate("correspondence_live_turn_template.txt"), values) + "\n\n" + ReadString(motiveDecision, "prompt", "");
+            live = BuildCurrentPregnancyPrompt(campaignId, ContinuityTimeline(continuityContext), senderId, worldDay, profile) + "\n\n" + live;
             if (UsesStructuredActions(continuityContext)) live = StructuredActionTurnPrompt(continuityContext) + "\n" + live;
             if (!string.IsNullOrWhiteSpace(relevantDynamicCharacteristics))
                 live = "RELEVANT DYNAMIC CHARACTERISTICS\n" + relevantDynamicCharacteristics + "\n\n" + live;
@@ -1716,14 +1748,25 @@ namespace ReignBetaServer
             string model,
             string requestType)
         {
-            string effort = EffectiveReasoningEffort(settings, payload, requestType);
+            string requestedEffort = EffectiveReasoningEffort(settings, payload, requestType);
+            bool mandatoryReasoning = RequiresGlm53Reasoning(apiUrl, model);
+            string effort = mandatoryReasoning ? Glm53ReasoningEffort(requestedEffort) : requestedEffort;
             bool requested = effort != "none";
             bool nano = IsNanoGptApiUrl(apiUrl);
             string key = ReasoningRouteKey(apiUrl, model);
             DateTime cooldownUntil = ReasoningFallbackCooldownUntil(key);
             bool coolingDown = cooldownUntil > DateTime.UtcNow;
             bool openrouter = IsOpenRouterApiUrl(apiUrl);
-            bool applied = (nano || openrouter) && !coolingDown;
+            bool applied = (nano || openrouter) && (!coolingDown || mandatoryReasoning);
+            if (mandatoryReasoning)
+            {
+                // Never let stale extra controls or a generic fallback cooldown
+                // disable an always-thinking model or default it to max effort.
+                requestBody.Remove("reasoning_effort");
+                requestBody.Remove("thinking");
+                requestBody.Remove("enable_thinking");
+                requestBody.Remove("thinking_budget");
+            }
             if (!requested && (nano || openrouter))
             {
                 // NanoGPT's top-level effort overrides the nested control.
@@ -1746,6 +1789,8 @@ namespace ReignBetaServer
                 ["mode"] = ReadString(settings, "reasoningMode", "selective"),
                 ["requestType"] = requestType ?? "",
                 ["requested"] = requested,
+                ["requestedEffort"] = requestedEffort,
+                ["modelRequiresReasoning"] = mandatoryReasoning,
                 ["effort"] = effort,
                 ["nanoGpt"] = nano,
                 ["openRouter"] = IsOpenRouterApiUrl(apiUrl),
@@ -1796,7 +1841,8 @@ namespace ReignBetaServer
 
         private static bool ShouldRetryWithoutReasoning(Dictionary<string, object> routing, string error)
         {
-            if (!ReadBool(routing, "providerControlsApplied", false)) return false;
+            if (!ReadBool(routing, "providerControlsApplied", false)
+                || ReadBool(routing, "modelRequiresReasoning", false)) return false;
             string lower = (error ?? "").ToLowerInvariant();
             if (lower.Contains("invalid_api_key") || lower.Contains("unauthorized") || lower.Contains("rate_limit") || lower.Contains("timeout") || lower.Contains("context_length")) return false;
             bool mentionsReasoning = lower.Contains("reasoning") || lower.Contains("reasoning_effort") || lower.Contains("thinking");
@@ -1873,9 +1919,16 @@ namespace ReignBetaServer
         private static string SanitizeReasoningContent(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return text ?? "";
-            string clean = Regex.Replace(text, "<think>[\\s\\S]*?</think>", "", RegexOptions.IgnoreCase).Trim();
-            clean = Regex.Replace(clean, "<think>[\\s\\S]*$", "", RegexOptions.IgnoreCase).Trim();
-            Dictionary<string, object> parsed = TryParseJsonObject(clean);
+            // Only a provider preamble is removable. Literal tags inside a JSON
+            // string belong to the authored reply and cannot be regex-stripped.
+            string clean = text.Trim();
+            while (clean.StartsWith("<think>", StringComparison.OrdinalIgnoreCase))
+            {
+                int end = clean.IndexOf("</think>", StringComparison.OrdinalIgnoreCase);
+                if (end < 0) return "";
+                clean = clean.Substring(end + "</think>".Length).Trim();
+            }
+            Dictionary<string, object> parsed = TryParseStrictJsonObject(clean);
             if (parsed == null) return clean;
             RemovePrivateReasoningFields(parsed);
             return Json.Serialize(parsed);
@@ -2063,6 +2116,30 @@ namespace ReignBetaServer
             }
         }
 
+        // Status is a bounded summary. The immutable full prompt/continuity
+        // evidence remains in conversation diagnostics, never in this UI poll.
+        private static Dictionary<string, object> PromptCachePrefixStatus(Dictionary<string, object> prefix)
+        {
+            prefix = prefix ?? TestDict();
+            var result = TestDict("statusSchema", "reign-prompt-cache-prefix-status-v1",
+                "detailLocation", "Conversation Diagnostics contains complete request evidence.");
+            foreach (string key in new[] { "layoutVersion", "requestType", "variant", "cacheEligible", "globalPrefixChars",
+                "characterPrefixChars", "liveTurnChars", "messageCount", "globalPrefixHash", "characterPrefixHash", "liveTurnHash" })
+                if (prefix.ContainsKey(key)) result[key] = prefix[key] is string text ? LimitText(text, 160) : prefix[key];
+            foreach (string section in new[] { "continuityPreflight", "providerPreflight" })
+            {
+                var source = ReadDictionary(prefix, section);
+                if (source == null) continue;
+                var selected = TestDict();
+                foreach (string key in new[] { "capacityVerified", "verifiedContextTokens", "inputAllowance", "inputTokenEstimate",
+                    "estimatedPromptTokens", "requestCharacters", "messageCharacters", "fits", "physicalCapacityFits",
+                    "requiredSourceCoverageComplete", "capacityAccounting", "hardCharacterLimit", "hardLimitExceeded" })
+                    if (source.ContainsKey(key)) selected[key] = source[key] is string text ? LimitText(text, 160) : source[key];
+                result[section] = selected;
+            }
+            return result;
+        }
+
         private static Dictionary<string, object> PromptCacheStatusApi()
         {
             Dictionary<string, object> settings = LoadSettings();
@@ -2095,7 +2172,7 @@ namespace ReignBetaServer
                     ["averageDurationMs"] = x.Calls > 0 ? Math.Round((double)x.DurationMs / x.Calls, 1) : 0d,
                     ["lastSuccessUtc"] = x.LastSuccessUtc,
                     ["lastError"] = x.LastError,
-                    ["lastPrefix"] = x.LastPrefix
+                    ["lastPrefix"] = PromptCachePrefixStatus(x.LastPrefix)
                 }).ToList();
                 cooldowns = PromptCacheCooldowns.Where(x => x.Value > DateTime.UtcNow).Select(x => new Dictionary<string, object> { ["route"] = PromptHash(x.Key).Substring(0, 16), ["untilUtc"] = x.Value.ToString("o") }).ToList();
                 calls = PromptCacheAggregates.Values.Sum(x => x.Calls);
@@ -2178,7 +2255,9 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object> { ["caseId"] = id, ["passed"] = passed, ["summary"] = summary, ["data"] = data });
+            results.AddRange(RunProviderResponseRecoverySelfTests());
             results.AddRange(RunPromptCompositionSelfTests());
+            results.AddRange(RunConversationMessageStructureSelfTests());
             results.AddRange(RunConversationNaturalnessSelfTests());
             results.AddRange(RunRoleplayContinuitySelfTests());
             results.AddRange(RunTemporaryGuestDialogueSelfTests());

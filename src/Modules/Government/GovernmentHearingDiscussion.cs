@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
@@ -19,7 +20,7 @@ namespace ReignBetaServer
             if (businessId.Length == 0 || string.IsNullOrWhiteSpace(message) || speakers.Count == 0)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An open hearing, player statement and real participants are required.", ["providerCallCount"] = 0 };
             var prompt = new StringBuilder();
-            prompt.AppendLine("Respond to the ruler during a public government hearing in a fictional medieval realm. Return JSON {statements:[{speakerHeroId,text}]}, at most three short responses by supplied participants only.");
+            prompt.AppendLine("Respond to the identified attending player in their verified role during a public government hearing in a fictional medieval realm. Return JSON {statements:[{speakerHeroId,text}]}, at most three short responses by supplied participants only.");
             prompt.AppendLine("Use only supplied evidence. This is public discussion: never change a vote, enact or cancel a decision, make a private deal, pay money, register consent, or claim that a spoken request executed an action. Those require separate controls or real private conversations.");
             prompt.AppendLine("Do not state or infer numeric relationships, loyalty, trust, secret vote scores or predicted support. Only actual recorded votes, declared positions and public facts may be described. Do not invent undisclosed intelligence. A ruler's recommendation at authority level five is subject to the government's binding individual vote.");
             prompt.AppendLine("In character, describe constitutional powers in ordinary words, never as numerical authority levels or game mechanics.");
@@ -34,9 +35,10 @@ namespace ReignBetaServer
                 { ["heroId"] = ReadString(x, "heroId", ""), ["name"] = LimitText(ReadString(x, "name", ""), 120), ["role"] = LimitText(ReadString(x, "role", "member"), 40) }).ToList()));
             prompt.AppendLine("Recent discussion: " + Json.Serialize(ReadDictionaryList(payload, "transcript").Take(12).Select(x => new Dictionary<string, object>
                 { ["speakerName"] = LimitText(ReadString(x, "speakerName", ""), 120), ["text"] = LimitText(ReadString(x, "text", ""), 1200) }).ToList()));
-            prompt.AppendLine("The ruler says: " + message);
+            prompt.AppendLine("The attending " + ReadString(payload, "playerOffice", "member") + " says: " + message);
             var request = new Dictionary<string, object> { ["requestType"] = "government_hearing_discussion",
                 ["campaignId"] = ReadString(payload, "campaignId", "default"), ["correlationId"] = EnsureCorrelationId(payload),
+                ["politicalAuthors"] = speakers.Select(x => ReadDictionary(x, "profile") ?? ReadJsonObject(CharacterFile(ReadString(payload, "campaignId", "default"), ReadString(x, "heroId", ""), "profile.json"))).ToList(),
                 ["messages"] = BuildSimplePromptEnvelope("government_hearing_discussion", businessId, "Return bounded public hearing dialogue as JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" } };
             var llm = ChatWithLlm(request);
@@ -67,9 +69,10 @@ namespace ReignBetaServer
         // Called only while assembling the individual in-person dialogue prompt.
         private static string BuildGovernmentPrivateConversationPrompt(Dictionary<string, object> payload)
         {
+            string publicRecord = BuildGovernmentConversationRecordPrompt(payload);
             var context = ReadDictionary(payload, "governmentPrivateContext") ?? new Dictionary<string, object>();
-            if (!ReadBool(context, "enabled", false)) return "";
-            return "PRIVATE GOVERNMENT BUSINESS. "
+            if (!ReadBool(context, "enabled", false)) return publicRecord;
+            return publicRecord + "\nPRIVATE GOVERNMENT BUSINESS. "
                 + "You may freely accept or refuse the player's offer. Mere discussion, a request, a hypothetical or public speech is not mutual consent. "
                 + "Only if BOTH parties explicitly agree to the same named matter, option and terms in this exchange, include top-level governmentCommitment "
                 + "{accepted:true,receiptId,sessionId,memberHeroId,rulerHeroId,businessId,optionId,method,gold,obligationId,playerConsentQuote,memberConsentQuote}. "
@@ -78,6 +81,49 @@ namespace ReignBetaServer
                 + "A deal requires a listed verifiable obligation and remains conditional until it is fulfilled. If consent or terms are unclear, ask in dialogue and omit governmentCommitment. "
                 + "Do not emit a generic world action for the promise. Do not expose relationship values or secret vote scores; no promise guarantees the final vote. "
                 + LimitText(Json.Serialize(context), 18000);
+        }
+
+        // A public decision record is available even on arrival, when there is no
+        // bargaining turn. Project only public facts and this speaker's ballot.
+        private static string BuildGovernmentConversationRecordPrompt(Dictionary<string, object> payload)
+        {
+            var political = ReadDictionary(payload, "nativePoliticalContext") ?? TestDict();
+            var government = ReadDictionary(political, "observerGovernment") ?? TestDict();
+            string speaker = ReadFirstString(payload, "heroStringId", "heroId");
+            if (speaker.Length == 0 || !ReadBool(political, "authoritative", false)
+                || !ReadBool(government, "authoritative", false) || !ReadBool(government, "available", false)
+                || ReadString(government, "knowledgeHolderHeroId", "") != speaker) return "";
+            var business = ReadDictionaryList(government, "governmentBusiness").Take(24).Select(row => {
+                string status = LimitText(ReadString(row, "status", ""), 40);
+                var ownBallot = ReadDictionaryList(row, "ballots").FirstOrDefault(vote =>
+                    ReadString(vote, "memberHeroId", "") == speaker);
+                return TestDict("businessId", LimitText(ReadString(row, "businessId", ""), 120),
+                    "title", LimitText(ReadString(row, "title", ""), 180), "status", status,
+                    "closed", GovernmentBusinessRules.IsClosed(status),
+                    "presentationDay", ReadDouble(row, "presentationDay", -1),
+                    "decisionDay", ReadDouble(row, "decisionDay", -1),
+                    "decisionDate", LimitText(ReadString(row, "decisionDate", ""), 80),
+                    "resolvedDay", ReadDouble(row, "resolvedDay", -1),
+                    "winningOptionId", LimitText(ReadString(row, "winningOptionId", ""), 120),
+                    "executedOptionId", LimitText(ReadString(row, "executedOptionId", ""), 120),
+                    "outcome", LimitText(GovernmentBusinessRules.PublicText(ReadString(row, "outcome", "")), 600),
+                    "options", ReadDictionaryList(row, "options").Take(12).Select(option =>
+                        TestDict("id", LimitText(ReadString(option, "id", ""), 120),
+                            "label", LimitText(ReadString(option, "label", ""), 180))).ToList(),
+                    "ownRecordedBallot", ownBallot == null ? null : TestDict(
+                        "optionId", LimitText(ReadString(ownBallot, "optionId", ""), 120),
+                        "abstain", ReadString(ownBallot, "optionId", "").Length == 0));
+            }).ToList();
+            if (business.Count == 0) return "";
+            return "\nCURRENT PUBLIC GOVERNMENT RECORD — native recorded facts, not a request or consent. "
+                + "Closed matters stay closed: do not describe their vote as upcoming or a recorded ballot as still to be cast. "
+                + "Reconcile an old stored plan or historical promise with this record and the current calendar; "
+                + "a season/day mentioned in old dialogue is not automatically this year's next session. "
+                + "A ballot proves only that individual's recorded choice, not that the motion passed or its remedy was executed. "
+                + "Winning and executed outcomes are separate. Missing records or ballots prove neither failure nor completion. "
+                + "These public facts reveal no private deals, relations or secret voting scores and grant no new action authority. "
+                + Json.Serialize(TestDict("observedWorldDay", ReadDouble(political, "observedWorldDay", ReadDouble(payload, "worldDay", 0)),
+                    "kingdomId", LimitText(ReadString(government, "kingdomId", ""), 120), "business", business)) + "\n";
         }
     }
 }

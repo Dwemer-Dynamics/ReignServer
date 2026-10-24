@@ -10,6 +10,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunReignXpOptionsSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
+            results.AddRange(RunCorrespondenceOptionsAssertions());
             void Check(string id, bool passed, string summary) => results.Add(TestDict(
                 "caseId", "xp_options_" + id, "suite", "interaction_architecture", "passed", passed, "summary", summary));
 

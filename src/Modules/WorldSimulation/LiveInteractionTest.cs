@@ -20,7 +20,7 @@ namespace ReignBetaServer
         private const int LiveTestLeaseSeconds = 45;
         private static readonly object LiveTestLock = new object();
         private static readonly HashSet<string> LiveTestModes = new HashSet<string>(
-            new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions" },
+            new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip" },
             StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LiveTestOperations = new HashSet<string>(
             new[]
@@ -32,11 +32,11 @@ namespace ReignBetaServer
                 "prepare_authority_fixture",
                 "prepare_manipulation_fixture", "restore_manipulation_fixture", "confirm", "deny",
                 "gauntlet_snapshot", "gauntlet_apply_fixture", "gauntlet_restore_fixture",
-                "action_probe_wait", "structured_action_test",
+                "action_probe_wait", "structured_action_test", "npc_lives_test", "personal_gossip_test",
                 "gauntlet_advance_time", "gauntlet_arrive", "gauntlet_depart",
                 "gauntlet_save", "gauntlet_reload", "gauntlet_fault",
                 "ui_open", "ui_status", "ui_snapshot", "ui_action", "ui_back", "ui_close",
-                "spymaster_test", "spymaster_organic", "arrest_test", "rebellion_test", "capital_ambassador_test", "royal_council_test", "ruler_docket_test", "kingdom_event_test", "government_test", "campaign_command_test", "party_agency_test",
+                "spymaster_test", "spymaster_organic", "arrest_test", "rebellion_test", "capital_ambassador_test", "royal_council_test", "ruler_docket_test", "kingdom_event_test", "government_test", "clan_accords_test", "campaign_command_test", "party_agency_test",
                 "prepare_party_agency_fixture", "party_agency_advance_time",
                 "party_agency_aggregate_fixtures", "party_agency_review_provider_result",
                 "party_agency_recovery_fixture", "party_agency_verify_unrelated_state",
@@ -152,6 +152,8 @@ namespace ReignBetaServer
                 WriteJsonObject(LiveTestRuntimePath(campaignId), payload);
                 WriteJsonObject(LiveTestLatestRuntimePath(), payload);
                 Dictionary<string, object> arm = ReadJsonObject(LiveTestArmPath());
+                if (TryRenewPersonalGossipConversationLease(active, payload, DateTimeOffset.UtcNow, IsLiveTestArmed(arm)))
+                    SaveLiveTestRun(active);
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true,
@@ -530,6 +532,7 @@ namespace ReignBetaServer
                 }
                 command["status"] = "leased";
                 command["leaseId"] = Guid.NewGuid().ToString("N");
+                command["leaseStartedUtc"] = now.ToString("o");
                 command["leaseExpiresUtc"] = now.AddSeconds(LiveTestLeaseSeconds).ToString("o");
                 command["attempt"] = ReadInt(command, "attempt", 0) + 1;
                 command["updatedUtc"] = now.ToString("o");
@@ -3390,6 +3393,22 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && current.Length > 0 && baseline.Length > 0 && !string.Equals(current, baseline, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool NpcLivesEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
+        {
+            if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_npc_lives"
+                || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
+            var contract = CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            return StructuredActionEnrollmentValid(contract, campaignId);
+        }
+
+        private static bool PersonalGossipEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
+        {
+            if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_personal_gossip"
+                || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
+            var contract = CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            return StructuredActionEnrollmentValid(contract, campaignId);
+        }
+
         private static Dictionary<string, object> NormalizeLiveTestCommand(Dictionary<string, object> run, Dictionary<string, object> input)
         {
             input = input ?? new Dictionary<string, object>();
@@ -3398,6 +3417,24 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             if (!LiveTestOperations.Contains(operation)) return null;
             string mode = NormalizeLiveTestMode(ReadString(input, "mode", ReadString(run, "mode", "individual_chat")));
             if (!LiveTestModes.Contains(mode)) return null;
+            if (operation == "clan_accords_test")
+            {
+                // This fixed diagnostic runs only isolated math/JSON contracts.
+                // Do not turn its registration into a general accord mutation route.
+                if (mode != "individual_chat" || ReadString(run, "mode", "") != "individual_chat"
+                    || !string.Equals(ReadString(input, "profile", "contracts"), "contracts", StringComparison.OrdinalIgnoreCase)
+                    || ReadString(input, "fixtureRunId", "").Length > 128) return null;
+            }
+            if (operation == "personal_gossip_test" || mode == "personal_gossip")
+            {
+                if (mode != "personal_gossip" || ReadString(run, "mode", "") != "personal_gossip" || operation != "personal_gossip_test"
+                    || !PersonalGossipEnrollmentValid(ReadDictionary(run, "enrollment"), ReadString(run, "campaignId", ""))) return null;
+            }
+            if (operation == "npc_lives_test" || mode == "npc_lives")
+            {
+                if (mode != "npc_lives" || ReadString(run, "mode", "") != "npc_lives" || operation != "npc_lives_test"
+                    || !NpcLivesEnrollmentValid(ReadDictionary(run, "enrollment"), ReadString(run, "campaignId", ""))) return null;
+            }
             if (operation == "structured_action_test" || mode == "structured_actions")
             {
                 if (mode != "structured_actions" || ReadString(run, "mode", "") != "structured_actions" || operation != "structured_action_test"
@@ -3437,6 +3474,12 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             }
             if (operation == "send" && string.IsNullOrWhiteSpace(ReadString(command, "text", ""))) return null;
             if (operation == "structured_action_test") command["enrollment"] = ReadDictionary(run, "enrollment");
+            if (operation == "npc_lives_test" || operation == "personal_gossip_test") command["enrollment"] = ReadDictionary(run, "enrollment");
+            if (operation == "clan_accords_test")
+            {
+                command["profile"] = "contracts";
+                command["timeoutSeconds"] = Math.Min(120, ReadInt(command, "timeoutSeconds", 120));
+            }
             return command;
         }
 
@@ -3550,6 +3593,45 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             var structuredRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "structured_actions", ["enrollment"] = structuredEnrollment };
             var structuredInput = new Dictionary<string, object> { ["operation"] = "structured_action_test", ["enrollment"] = new Dictionary<string, object>() };
             var structuredCommand = NormalizeLiveTestCommand(structuredRun, structuredInput);
+            var lifeEnrollment = CloneDictionary(structuredEnrollment);
+            lifeEnrollment["source"] = "reign_mcp_npc_lives"; lifeEnrollment["recoveryCheckpointVerified"] = true;
+            var lifeRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "npc_lives", ["enrollment"] = lifeEnrollment };
+            var lifeInput = TestDict("operation", "npc_lives_test", "enrollment", TestDict("source", "forged"));
+            var lifeCommand = NormalizeLiveTestCommand(lifeRun, lifeInput);
+            add("npc_lives_enrollment", lifeCommand != null && ReferenceEquals(lifeCommand["enrollment"], lifeEnrollment)
+                && NormalizeLiveTestCommand(fakeRun, lifeInput) == null, "NPC native checks inherit enrollment from their isolated run.");
+            lifeEnrollment["recoveryCheckpointVerified"] = false;
+            add("npc_lives_checkpoint", NormalizeLiveTestCommand(lifeRun, lifeInput) == null, "Native combat controls require a retained recovery checkpoint.");
+            var gossipEnrollment = CloneDictionary(structuredEnrollment);
+            gossipEnrollment["source"] = "reign_mcp_personal_gossip"; gossipEnrollment["recoveryCheckpointVerified"] = true;
+            var gossipRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "personal_gossip", ["enrollment"] = gossipEnrollment };
+            var gossipInput = TestDict("operation", "personal_gossip_test", "enrollment", TestDict("source", "forged"));
+            var gossipCommand = NormalizeLiveTestCommand(gossipRun, gossipInput);
+            add("personal_gossip_enrollment", gossipCommand != null && ReferenceEquals(gossipCommand["enrollment"], gossipEnrollment)
+                && NormalizeLiveTestCommand(fakeRun, gossipInput) == null, "Gossip leases inherit exact run enrollment and reject a normal dialogue route.");
+            gossipEnrollment["recoveryCheckpointVerified"] = false;
+            add("personal_gossip_checkpoint", NormalizeLiveTestCommand(gossipRun, gossipInput) == null, "Gossip setup requires retained recovery.");
+            gossipEnrollment["recoveryCheckpointVerified"] = true; gossipEnrollment["disposableSaveName"] = "Baseline";
+            add("personal_gossip_baseline", NormalizeLiveTestCommand(gossipRun, gossipInput) == null, "Protected baseline cannot be enrolled as gossip Current.");
+            bool badPhase = false;
+            try { ValidatePersonalGossipTestCase(TestDict("caseId", "self", "phase", "snapshot", "draws", TestDict("share", 1))); }
+            catch (ArgumentException) { badPhase = true; }
+            add("personal_gossip_wrong_phase", badPhase, "Observation cannot smuggle fixture controls.");
+            add("personal_gossip_draw_default", GossipDecisionRoll(TestDict(), "self", "share") == GossipRoll("self", "share")
+                && GossipDecisionDraw(TestDict(), "self", "friendly_recipient") == GossipDraw("self", "friendly_recipient"), "No fixture preserves the exact production draw.");
+            add("personal_gossip_saved_control", GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 1))), "self", "share") == 1
+                && GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 0))), "self", "share") == GossipRoll("self", "share"), "Only bounded persisted stage values are accepted.");
+            var gossipNow = DateTimeOffset.UtcNow;
+            var gossipJournal = TestDict("activeSaveName", "Current", "gameInstanceId", "one", "restoreGeneration", 0L, "memoryRestoreGeneration", "before");
+            var gossipRuntime = TestDict("activeSaveName", "Current", "gameInstanceId", "one");
+            add("personal_gossip_control_generation", GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow, gossipNow)
+                && !GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "after", gossipNow, gossipNow)
+                && !GossipTestControlsMatch(gossipJournal, gossipRuntime, 1, "before", gossipNow, gossipNow),
+                "A server restart cannot resurrect uncaptured controls after a persisted restore, even if the process counter returns to zero.");
+            add("personal_gossip_control_scope", !GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Baseline", "gameInstanceId", "one"), 0, "before", gossipNow, gossipNow)
+                && !GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Current", "gameInstanceId", "other"), 0, "before", gossipNow, gossipNow)
+                && !GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow.AddHours(-13), gossipNow),
+                "Captured saved decisions are separate; uncaptured controls expire and cannot cross Current or native instance.");
             add("structured_action_enrollment", structuredCommand != null && ReferenceEquals(structuredCommand["enrollment"], structuredEnrollment)
                 && NormalizeLiveTestCommand(fakeRun, structuredInput) == null,
                 "Structured commands inherit the verified run enrollment; a per-command replacement or dialogue-mode route cannot bypass isolation.");
@@ -3618,7 +3700,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 ReadInt(socialProfileTimeout, "timeoutSeconds", 0) == 3600
                 && ReadInt(unrelatedSocialTimeout, "timeoutSeconds", 0) == 1800,
                 "Only a Social Reputation profile command may retain the one-hour deadline; unrelated social commands keep the ordinary thirty-minute ceiling.");
-            add("modes", LiveTestModes.SetEquals(new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions" }), "Only implemented production interaction adapters and isolated deterministic harness adapters are registered in the transport contract.");
+            add("modes", LiveTestModes.SetEquals(new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip" }), "Only implemented production interaction adapters and isolated deterministic harness adapters are registered in the transport contract.");
             string retrievalFixtureText = LiveTestRetrievedEvidenceText(
                 new[]
                 {
@@ -4215,11 +4297,9 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "{\"reply\":\"abandoned prefix "
                 + "{\"reply\":\"complete answer\",\"decisionBrief\":{\"goals\":[\"g\"],\"constraints\":[\"c\"]},"
                 + "\"actionGate\":{\"needed\":false,\"commitment\":\"roleplay_only\"}}");
-            add("provider_restarted_json_prefers_complete_object",
-                restartedJson != null
-                && ReadString(restartedJson, "reply", "") == "complete answer"
-                && ReadDictionary(restartedJson, "actionGate") != null,
-                "When a provider abandons a partial JSON object and restarts, the later complete object is parsed instead of clipping the abandoned reply.");
+            add("provider_ambiguous_restart_cannot_promote_nested_object",
+                restartedJson == null,
+                "An ambiguous restart inside an unterminated reply is rejected; nested or quoted objects cannot replace the outer response.");
             add("fatal_provider_pause_contract",
                 IsFatalLiveTestInfrastructureFailure("{\"code\":\"insufficient_balance\",\"status\":402}")
                 && IsFatalLiveTestInfrastructureFailure("HTTP 401 unauthorized API key")

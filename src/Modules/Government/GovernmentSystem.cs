@@ -73,6 +73,7 @@ namespace ReignBetaServer
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "government_party_speaker_statement",
+                ["politicalAuthors"] = new[] { speaker },
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
                 ["correlationId"] = EnsureCorrelationId(payload),
                 ["messages"] = BuildSimplePromptEnvelope(

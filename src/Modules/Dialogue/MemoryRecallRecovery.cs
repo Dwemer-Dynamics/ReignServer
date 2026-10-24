@@ -33,10 +33,11 @@ namespace ReignBetaServer
         // message content so selection alone never proves actual delivery.
         private static Dictionary<string, object> BindDeliveredMemoryRecallEvidence(Dictionary<string, object> payload,
             string observer, List<Dictionary<string, object>> messages, string observerName = "",
-            List<Dictionary<string, object>> canonicalLines = null, Func<string, string> identityProjection = null)
+            List<Dictionary<string, object>> canonicalLines = null, Func<string, string> identityProjection = null,
+            Dictionary<string, object> promptDiagnostics = null)
         {
             var receipt = new DeliveredMemoryRecallEvidence { Signature = MemoryRecallTurnSignature(payload, observer), ObserverName = observerName ?? "" };
-            string final = NormalizePromptSegment(string.Join("\n", messages.Select(m => ReadString(m, "content", ""))));
+            string final = NormalizePromptSegment(ConversationEvidenceText(promptDiagnostics, messages));
             var query = MemoryRecallTerms(ReadFirstString(payload, "playerText", "text", "message"));
             foreach (var expected in CapturedRequiredPromptEvidence(payload))
             {

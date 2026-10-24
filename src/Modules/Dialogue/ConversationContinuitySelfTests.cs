@@ -9,6 +9,7 @@ namespace ReignBetaServer
 
         private static void RunConversationCapacitySelfTests(Action<string, bool, object> add)
         {
+            RunCodexConversationCapacitySelfTests(add);
             add("capacity_lab_metadata_io_disabled", !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
                 && FetchConversationModelCatalog() == null, null);
             const string model = "z-ai/glm-5.2";
@@ -97,7 +98,7 @@ namespace ReignBetaServer
             var envelope = CreatePromptEnvelope("social_event", "capacity_fixture", "GLOBAL", "CHARACTER", selected.LiveTurn);
             var turn = TestDict("continuityEvidence", TestDict("sourceIds", new[] { "required_topical_capacity", "required_latest" }));
             FinalizeContinuityPromptBudget(envelope, turn, sharedCapacity);
-            var finalBody = TestDict("model", model, "messages", envelope.Messages, "max_tokens", 8000,
+            var finalBody = TestDict("model", model, "messages", envelope.Messages, "max_tokens", 16000,
                 "response_format", TestDict("type", "json_object"), "tools", new string('z', 3000));
             var final = BuildContinuityProviderPreflight(settings, TestDict("promptEnvelope", envelope.Diagnostics), finalBody,
                 NanoGptChatCompletionsUrl, model, catalog);
@@ -170,6 +171,63 @@ namespace ReignBetaServer
                 "contextTokens", 1048576, "source", "fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o"))));
             add("capacity_expired_explicit_certificate_not_overridden", !ReadBool(BuildContinuityProviderPreflight(explicitSettings, payload,
                 body, NanoGptChatCompletionsUrl, model, catalog), "capacityVerified", true), null);
+        }
+
+        private static void RunCodexConversationCapacitySelfTests(Action<string, bool, object> add)
+        {
+            var previous = CodexCapacityMetadataOverride.Value;
+            string Catalog(int context, int percent = 95) => Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"),
+                "client_version", "0.162.0", "models", new[] { TestDict("slug", "gpt-capacity-fixture", "context_window", context,
+                    "effective_context_window_percent", percent) }));
+            var settings = TestDict("llmProvider", CodexSubscriptionProvider, "dialogueModel", "gpt-capacity-fixture", "eventsModel", "gpt-capacity-fixture");
+            const string endpoint = "codex-app-server://local";
+            try
+            {
+                foreach (int context in new[] { 272000, 500000 })
+                {
+                    CodexCapacityMetadataOverride.Value = Catalog(context);
+                    foreach (int size in new[] { 279768, 450000, 600000 })
+                    {
+                        var body = TestDict("model", "gpt-capacity-fixture", "messages", new[] {
+                            TestDict("role", "system", "content", "COMPLETE_RULES " + new string('x', size)),
+                            TestDict("role", "user", "content", "LATEST_PLAYER_AND_REQUIRED_EVIDENCE") }, "max_tokens", 8000);
+                        string original = Json.Serialize(body);
+                        var policy = BuildContinuityProviderPreflight(settings, TestDict(), body, endpoint, "gpt-capacity-fixture");
+                        add("codex_capacity_complete_prompt_" + context + "_" + size,
+                            ReadBool(policy, "capacityVerified", false) && ReadBool(policy, "fits", false)
+                            && ReadInt(policy, "verifiedContextTokens", 0) == context * 95 / 100
+                            && ReadInt(policy, "runtimeReserve", 0) == CodexConversationRuntimeReserve
+                            && original.Length <= ConversationPromptHardCharacterLimit(settings, policy)
+                            && Json.Serialize(body) == original, TestDict("estimate", ReadInt(policy, "inputTokenEstimate", 0), "allowance", ReadInt(policy, "inputAllowance", 0)));
+                    }
+                    var oversized = TestDict("messages", new[] { TestDict("role", "user", "content", new string('z', context * 3)) }, "max_tokens", 8000);
+                    add("codex_capacity_oversized_rejected_" + context, !ReadBool(BuildContinuityProviderPreflight(settings, TestDict(), oversized,
+                        endpoint, "gpt-capacity-fixture"), "fits", true), null);
+                    add("codex_capacity_assembly_matches_provider_" + context,
+                        CanonicalJson(ResolveConversationPromptCapacity(TestDict(), "dialogue", settings)) ==
+                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
+                }
+                var smallBody = TestDict("messages", new[] { TestDict("role", "user", "content", new string('x', 300000)) }, "max_tokens", 8000);
+                foreach (string metadata in new[] { "{", "null", Catalog(0), Catalog(500000, 101), Catalog(500000, 0),
+                    Catalog(500000).Replace("gpt-capacity-fixture", "different-model"),
+                    Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.AddHours(-7).ToString("o"), "client_version", "fixture", "models", new[] {
+                        TestDict("slug", "gpt-capacity-fixture", "context_window", 500000) })) })
+                {
+                    CodexCapacityMetadataOverride.Value = metadata;
+                    var policy = BuildContinuityProviderPreflight(settings, TestDict(), smallBody, endpoint, "gpt-capacity-fixture");
+                    add("codex_capacity_invalid_metadata_" + PromptHash(metadata).Substring(0, 8), !ReadBool(policy, "capacityVerified", true)
+                        && !ReadBool(policy, "fits", true), null);
+                }
+                CodexCapacityMetadataOverride.Value = Catalog(500000);
+                add("codex_capacity_route_isolation", !ReadBool(BuildContinuityProviderPreflight(settings, TestDict(), smallBody,
+                    "https://different.invalid", "gpt-capacity-fixture"), "capacityVerified", true)
+                    && !ReadBool(BuildContinuityProviderPreflight(TestDict("llmProvider", "openai_compatible"), TestDict(), smallBody,
+                    endpoint, "gpt-capacity-fixture"), "capacityVerified", true), null);
+                var duplicate = TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"), "client_version", "fixture", "models", new[] {
+                    TestDict("slug", "gpt-capacity-fixture", "context_window", 500000), TestDict("slug", "gpt-capacity-fixture", "context_window", 272000) });
+                add("codex_capacity_duplicate_model_rejected", ParseCodexCapacityCertificate(Json.Serialize(duplicate), "gpt-capacity-fixture", DateTimeOffset.UtcNow) == null, null);
+            }
+            finally { CodexCapacityMetadataOverride.Value = previous; }
         }
 
         private static List<Dictionary<string, object>> RunConversationContinuitySelfTests()
@@ -430,12 +488,108 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                 catch { letterRolledBack = true; }
                 add("letter_and_author_continuity_commit_atomically", letterRolledBack && QuerySql(connection,"SELECT letter_id FROM letters;").Count == lettersBefore
                     && QuerySql(connection,"SELECT record_id FROM conversation_continuity WHERE record_id='atomic_letter';").Count == 0,null);
+                RunPendingContinuityPromptTests(campaign, connection, id, add);
             }
             RunContinuityPromptAndPresenceTests(campaign, add);
             RunConversationCapacitySelfTests(add);
             RunSharedActivityMemorySelfTests(add);
             RunContinuityProductionEnvelopeTests(campaign, add);
             return results;
+        }
+
+        private static void RunPendingContinuityPromptTests(string campaign, ReignDbConnection connection,
+            string recordId, Action<string, bool, object> add)
+        {
+            const string sourceTurn = "party_chat_pending_fixture_turn_2_npc";
+            const string sourceEvent = "pending_source_event";
+            const string quote = "The blue cup belongs on the shelf by the window.";
+            InsertConversationTurn(connection, sourceTurn, "old_tournament", sourceEvent, 4, "pending_source_exchange",
+                "npc", "npc_a", "Speaker", quote, "party", 19.5d, 9, "town_a",
+                new List<string> { "npc_a", "player" }, TestDict("timelineId", "timeline_a"));
+            var payload = PromptParityPayload("in_person", false);
+            payload["timelineId"] = "timeline_a"; payload["worldDay"] = 20.5d;
+            payload["playerHeroStringId"] = "player"; payload["locationId"] = "town_a";
+            payload["officialMemoryFirewall"] = false;
+            var write = TestDict("id", recordId, "evidenceQuote", quote);
+            var retained = RetainPendingContinuityWrite(connection, payload, "npc_a", "player", sourceEvent,
+                quote, recordId, write, AcceptedContinuityEvidenceSpans(write, quote), 1, 3, 9);
+            string pendingId = ReadString(retained, "pendingId", "");
+            var before = QuerySql(connection, "SELECT * FROM conversation_continuity_pending WHERE pending_id=$id;", TestDict("id", pendingId)).Single();
+            var sourceBefore = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceTurn)).Single();
+            var recordBefore = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", recordId)).Single();
+            CaptureContinuityReadSnapshot(connection, payload, "npc_a");
+            var ids = new List<string>();
+            string pending = BuildPendingContinuityPrompt(connection, payload, "npc_a", "player", ids);
+            add("pending_recovery_renders_every_required_source", pendingId.Length > 0 && ids.Count == 2
+                && ids.All(id => pending.Contains(id, StringComparison.Ordinal))
+                && pending.Contains("Accepted source turn: " + sourceTurn, StringComparison.Ordinal)
+                && pending.Contains(quote) && pending.Contains("not a successfully resolved record"), null);
+            add("pending_recovery_repeated_read_is_stable", pending == BuildPendingContinuityPrompt(connection,
+                payload, "npc_a", "player", new List<string>()), null);
+            var profile = PromptParityProfile(); profile["heroStringId"] = "npc_a";
+            var empty = TestDict(); var noLines = new List<Dictionary<string, object>>();
+            const string latest = "Good morning. How are you?";
+            foreach (string mode in new[] { "in_person", "party_chat" })
+            {
+                var turn = CloneDictionary(payload); turn["mode"] = mode;
+                PromptEnvelope envelope = mode == "in_person"
+                    ? BuildDialoguePromptEnvelope(campaign, "npc_a", "Speaker", "Traveler", "Traveler", latest,
+                        "A quiet market street.", profile, PromptParityCharacteristics(), empty, empty, empty,
+                        noLines, noLines, noLines, noLines, PromptParityIdentity(), turn, "", "")
+                    : BuildEventPromptEnvelope(campaign, "fixture_event", "npc_a", "Speaker", "Traveler", "Traveler",
+                        latest, "A quiet market street.", turn, profile, PromptParityCharacteristics(), empty, empty, empty,
+                        noLines, noLines, noLines, noLines, PromptParityIdentity(), "", "",
+                        TestDict("sanitizedState", empty, "prompt", "Consider the road."));
+                string rendered = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
+                var preflight = BuildContinuityProviderPreflight(TestDict("llmProvider", "openai_compatible"),
+                    TestDict("promptEnvelope", envelope.Diagnostics), TestDict("messages", envelope.Messages, "max_tokens", 8000),
+                    "https://fixture.invalid/chat", "fixture");
+                add("pending_recovery_final_envelope_and_provider_" + mode, rendered.Contains(pendingId)
+                    && rendered.Contains(sourceTurn) && rendered.Contains(quote)
+                    && ReadBool(ReadDictionary(envelope.Diagnostics, "continuityPreflight"), "requiredSourceCoverageComplete", false)
+                    && ReadBool(preflight, "requiredSourceCoverageComplete", false), null);
+                if (mode != "in_person") continue;
+                string sourceLine = "Accepted source turn: " + sourceTurn;
+                foreach (var mutation in new[] {
+                    TestDict("id", "missing_source", "text", rendered.Replace(sourceLine, "")),
+                    TestDict("id", "prefix_cannot_mask_missing_line", "text", rendered.Replace(sourceLine, "") + "\n" + sourceTurn + "_other"),
+                    TestDict("id", "quoted_id_cannot_mask_missing_line", "text", rendered.Replace(sourceLine, "") + "\nQuoted historical data: " + sourceLine),
+                    TestDict("id", "changed_quote", "text", rendered.Replace(quote, "An unsupported account of the cup.")) })
+                {
+                    bool rejected = false;
+                    try { FinalizeContinuityPromptBudget(CreatePromptEnvelope("dialogue", "pending_tampered", "rules", "character",
+                        ReadString(mutation, "text", "")), turn); }
+                    catch (InvalidOperationException) { rejected = true; }
+                    add("pending_recovery_guard_" + ReadString(mutation, "id", ""), rejected, null);
+                }
+            }
+            foreach (string exclusion in new[] { "hash", "span", "inactive", "branch", "observer", "future" })
+            {
+                var current = CloneDictionary(payload);
+                try
+                {
+                    if (exclusion == "hash") ExecuteSql(connection, "UPDATE conversation_continuity_pending SET source_hash='invalid' WHERE pending_id=$id;", TestDict("id", pendingId));
+                    if (exclusion == "span") ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id=$id;", TestDict("id", sourceTurn, "text", "Unrelated altered speech."));
+                    if (exclusion == "inactive") ExecuteSql(connection, "UPDATE conversation_turns SET status='superseded' WHERE turn_id=$id;", TestDict("id", sourceTurn));
+                    if (exclusion == "branch") current["timelineId"] = "unrelated_timeline";
+                    if (exclusion == "future") current["worldDay"] = 19d;
+                    string observer = exclusion == "observer" ? "npc_b" : "npc_a";
+                    CaptureContinuityReadSnapshot(connection, current, observer);
+                    var excludedIds = new List<string>();
+                    string excluded = BuildPendingContinuityPrompt(connection, current, observer, "player", excludedIds);
+                    add("pending_recovery_excludes_" + exclusion, excluded.Length == 0 && excludedIds.Count == 0, null);
+                }
+                finally
+                {
+                    ExecuteSql(connection, "UPDATE conversation_continuity_pending SET source_hash=$hash WHERE pending_id=$id;", TestDict("id", pendingId, "hash", ReadString(before, "source_hash", "")));
+                    ExecuteSql(connection, "UPDATE conversation_turns SET text=$text,status=$status WHERE turn_id=$id;",
+                        TestDict("id", sourceTurn, "text", quote, "status", ReadString(sourceBefore, "status", "")));
+                }
+            }
+            add("pending_recovery_does_not_apply_or_rewrite_state", Json.Serialize(before) == Json.Serialize(QuerySql(connection,
+                "SELECT * FROM conversation_continuity_pending WHERE pending_id=$id;", TestDict("id", pendingId)).Single())
+                && Json.Serialize(sourceBefore) == Json.Serialize(QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceTurn)).Single())
+                && Json.Serialize(recordBefore) == Json.Serialize(QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", recordId)).Single()), null);
         }
 
         private static void RunContinuityProductionEnvelopeTests(string campaign, Action<string, bool, object> add)
@@ -575,6 +729,18 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             payload["playerText"]="Where is your father?";
             Func<string,Dictionary<string,object>> response=text=>TestDict("reply",text,"actionGate",TestDict("needed",false,"commitment","none"),"emotion","neutral","intent","answer",
                 "relationshipSignal",empty,"relationshipAssessments",noLines,"decisionBrief",empty);
+            add("continuity_repair_keeps_small_explicit_allowance",
+                ContinuityRepairOutputAllowance(TestDict("maxTokens",3000),response("A short correction."))==3000,null);
+            var longStructuredReply=response(new string('x',26114));
+            int largeRepairAllowance=ContinuityRepairOutputAllowance(TestDict("maxTokens",8000),longStructuredReply);
+            add("continuity_repair_has_headroom_for_native_26k_response",
+                largeRepairAllowance>11000 && largeRepairAllowance<=24000
+                && largeRepairAllowance>EstimateContinuityTokens(Json.Serialize(longStructuredReply))+1024,null);
+            add("continuity_repair_does_not_shrink_existing_larger_allowance",
+                ContinuityRepairOutputAllowance(TestDict("maxTokens",16000),response("A short correction."))==16000,null);
+            add("continuity_repair_unicode_and_extreme_outputs_remain_bounded",
+                ContinuityRepairOutputAllowance(TestDict("maxTokens",8000),response(new string('界',6000)))>8000
+                && ContinuityRepairOutputAllowance(TestDict("maxTokens",8000),response(new string('x',200000)))==24000,null);
             var unresolved=RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),TestDict("requestType","dialogue","maxTokens",3000),payload,
                 PromptParityIdentity(),noLines,campaign,"continuity-absent","dialogue","npc_a","Speaker","Traveler","",request=>TestDict("ok",true,"content",Json.Serialize(response("My father is here."))));
             var unresolvedVisible=TryParseJsonObject(ReadString(unresolved,"content",""));

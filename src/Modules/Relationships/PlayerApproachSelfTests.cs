@@ -58,6 +58,9 @@ namespace ReignBetaServer
             var wrongSpokenDays = CloneDictionary(valid); wrongSpokenDays["reply"] = "You gave Caladog eight days of attention and overlooked me.";
             Check("spoken_days_not_hidden_by_proof", ApproachOpeningViolations(wrongSpokenDays, opening).Count > 0,
                 "Correct hidden evidence cannot authorize a different day count in spoken dialogue.");
+            var missingProof = CloneDictionary(valid); missingProof.Remove("approachOpeningEvidence");
+            Check("named_rival_without_hidden_evidence_is_rejected", ApproachOpeningViolations(missingProof, opening).Count >= 2,
+                "Naming the rival does not substitute for the required hidden evidence, as in the Temurtai repair failure.");
             var politicalOpening = CloneDictionary(opening); politicalOpening["authoritativeApproachKind"] = "keep";
             Check("political_approach_retains_its_reason", ApproachOpeningViolations(TestDict("reply", "Your recent standing has caught my interest. May we discuss supporting my cause?"), politicalOpening).Count == 0,
                 "A keep invitation keeps its political purpose even if that noble has also witnessed neglected attention.");
@@ -68,6 +71,24 @@ namespace ReignBetaServer
                 _ => TestDict("ok", true, "content", "{\"reply\":\"Hello again.\"}"));
             Check("bounded_repair", repairCalls == 1 && ReadBool(repaired, "ok", false) && !ReadBool(failed, "ok", true),
                 "One isolated repair can recover an invalid opening; exhausted failure publishes no speech and applies no contact reset.");
+            bool repairContractDelivered = false;
+            var contractRepair = EnforceApproachOpening(TestDict("ok", true, "content", Json.Serialize(missingProof)), TestDict(), opening,
+                repairRequest => {
+                    string instructions = ReadString(ReadDictionaryList(repairRequest, "messages").Last(), "content", "");
+                    repairContractDelivered = instructions.Contains("approachOpeningEvidence") && instructions.Contains("primaryRivalId")
+                        && instructions.Contains("severityLevel") && instructions.Contains("rivalDays") && instructions.Contains("Caladog")
+                        && instructions.Contains(IndividualNpcOpeningCue) && instructions.Contains("never inside reply or decisionBrief");
+                    return TestDict("ok", true, "content", Json.Serialize(valid));
+                });
+            Check("repair_delivers_explicit_hidden_output_contract", repairContractDelivered && ReadBool(contractRepair, "ok", false),
+                "The one repair receives the complete opening instructions and exact additional top-level evidence shape.");
+            Check("exhausted_repair_retains_actual_rejection_reasons", ReadStringList(failed, "approachOpeningViolations").Count >= 2
+                && LlmFailureForDisplay(failed).Contains("NPC's approach") && !LlmFailureForDisplay(failed).Contains("provider"),
+                "Operational failure retains specific approach violations instead of losing the reason behind a generic provider message.");
+            var unsafeRepair = EnforceApproachOpening(TestDict("ok", true, "content", Json.Serialize(missingProof)), TestDict(), opening,
+                _ => TestDict("ok", true, "content", Json.Serialize(valid)), _ => false);
+            Check("opening_repair_cannot_bypass_ordinary_conversation_checks", !ReadBool(unsafeRepair, "ok", true),
+                "Correct jealousy evidence cannot bypass failed ordinary conversation validation.");
             var rescue = TestDict("rescueOpening", true, "rescueContext", TestDict("eventId", "rescued", "kind", "prison_rescue"));
             Check("rescue_specific_opening", ApproachOpeningViolations(TestDict("reply", "Thank you for helping me escape that prison.",
                 "rescueOpeningEvidence", TestDict("eventId", "rescued", "kind", "prison_rescue")), rescue).Count == 0
@@ -101,6 +122,29 @@ namespace ReignBetaServer
                         && ReadString(individualOpening, "turnType", "") == "npc_approach_opening"
                         && ReadString(ReadDictionary(ReadDictionary(individualOpening, "authoritativeApproachBrief"), "primaryRival"), "heroId", "") == "rival",
                         "An accepted individual invitation permits an empty player contribution and binds the saved opening brief without manufacturing player speech.");
+                    // Reproduce the empty immutable original that replaced the old
+                    // playerText cue, then exercise real prompt packing and message separation.
+                    ApplyPlayerInputAudienceToPayload(individualOpening, "npc", allowInterpretation: false);
+                    string emptyOriginal = ProjectCurrentPlayerPromptText(IndividualNpcOpeningCue, "npc", individualOpening);
+                    string attentionPrompt = PlayerAttentionPrompt(campaign, "npc", individualOpening);
+                    var packed = BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText",
+                        new Dictionary<string, string> { ["playerText"] = emptyOriginal, ["contextPullText"] = attentionPrompt,
+                            ["priorDialogueText"] = "" }, "Current camp.", "Speak for yourself.", "", "Rules.", "Profile.",
+                        targetOverride: 1000, capacity: TestDict("inputAllowance", 990976, "outputFits", true, "capacityVerified", true));
+                    var packedEnvelope = CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", packed.LiveTurn);
+                    StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), FormatDialogueForPrompt,
+                        "npc", "Player", emptyOriginal, false, text => text);
+                    string outbound = string.Join("\n", packedEnvelope.Messages.Select(message => ReadString(message, "content", "")));
+                    Check("saved_brief_and_cue_survive_empty_original_and_budget_pressure", emptyOriginal == ""
+                        && outbound.Contains(IndividualNpcOpeningCue) && outbound.Contains("Caladog")
+                        && outbound.Contains("approachOpeningEvidence") && outbound.Contains("rivalDays")
+                        && packed.ContextPullText.Contains("required=true") && ReadString(individualOpening, "playerText", "missing") == "",
+                        "Required saved authority and NPC-first instructions reach the outbound messages despite an empty player source and a full working budget.");
+                    var protectedRecords = ContinuityPromptRecords(attentionPrompt, false).Where(record => record.Required).ToList();
+                    Check("frozen_approach_brief_is_one_complete_required_record", protectedRecords.Count == 1
+                        && protectedRecords[0].Text.Contains(Json.Serialize(individualBrief))
+                        && protectedRecords[0].Text.Contains(JealousyOpeningInstructions(individualBrief)),
+                        "All individual rival counts, severity and hidden-field instructions remain together as protected authority.");
                     foreach (string invalid in new[] { "missing_request", "wrong_player", "wrong_hero", "wrong_timeline", "unaccepted", "forged_flags" })
                     {
                         var attempt = CloneDictionary(individualOpening);
@@ -147,6 +191,12 @@ namespace ReignBetaServer
                     RecordAcceptedPlayerAttention(c, Unit("npc", "again", 10), Sources("npc", "source2"));
                     Check("daily_observer_deduplication", QuerySql(c, "SELECT * FROM player_attention_events;").Count == 1,
                         "Two successful conversations create one generic event for the present observer and none for the absent observer.");
+                    var historyInput = TestDict("campaignId", campaign, "timelineId", "attention_test", "playerId", "player", "heroStringId", "observer");
+                    var visibleHistory = DialogueHistory(historyInput);
+                    Check("saved_attention_never_appears_in_visible_conversation_history", PlayerAttentionHistory(campaign, "observer", historyInput).Count == 1
+                        && ReadDictionaryList(visibleHistory, "lines").All(line => ReadString(line, "channel", "") != "witnessed_player_attention")
+                        && PlayerAttentionPrompt(campaign, "observer", Unit("observer", "prompt", 10).Payload).Contains("spent time talking"),
+                        "Already saved attention remains available to internal prompts while the visible history endpoint excludes it.");
                     var newcomer = people.Concat(new[] { TestDict("heroId", "newcomer", "alive", true, "scopes", new[] { "settlement:town" }) }).ToList();
                     var afterArrival = Unit("npc", "new-arrival", 10); afterArrival.Payload["playerAttentionPresence"] = newcomer;
                     RecordAcceptedPlayerAttention(c, afterArrival, Sources("npc", "source3"));

@@ -4,7 +4,7 @@ namespace ReignBeta.Shared
 {
     public static class CorrespondenceTransitPolicy
     {
-        public const int Version = 1;
+        public const int Version = 2;
         public const double Multiplier = 0.25d;
         public const double LegacyMinimumDays = 0.25d;
         public const double LegacyDefaultDays = 3d;
@@ -16,11 +16,16 @@ namespace ReignBeta.Shared
             return Math.Max(LegacyMinimumDays, legacyDays);
         }
 
-        public static double NewTransitDays(double legacyDays, bool immediate = false)
-            => immediate ? 0d : NormalizeBaseDays(legacyDays) * Multiplier;
+        public static bool IsValidTravelMultiplier(double value)
+            => !double.IsNaN(value) && !double.IsInfinity(value) && value >= .25d && value <= 4d
+                && Math.Abs(value * 4d - Math.Round(value * 4d)) < 1e-8d;
+
+        public static double NewTransitDays(double legacyDays, bool immediate = false, double travelTimeMultiplier = 1d)
+            => immediate ? 0d : NormalizeBaseDays(legacyDays) * Multiplier
+                * (IsValidTravelMultiplier(travelTimeMultiplier) ? travelTimeMultiplier : 1d);
 
         public static double ReplyBaseDays(int parentPolicyVersion, double parentBaseDays, double parentActualDays)
-            => NormalizeBaseDays(parentPolicyVersion == Version && parentBaseDays > 0d
+            => NormalizeBaseDays(parentPolicyVersion >= 1 && parentPolicyVersion <= Version && parentBaseDays > 0d
                 ? parentBaseDays : parentActualDays);
 
         public static bool ShouldPollAtHour(double currentHour, double previousHour)

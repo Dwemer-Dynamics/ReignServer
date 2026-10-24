@@ -13,9 +13,9 @@ const html = await fs.readFile(path.join(fixtureDirectory, 'control-center.html'
 const palette = JSON.parse(await fs.readFile(path.resolve(process.env.REIGN_WORKSPACE || process.cwd(), 'ReignBeta/artwork/ui-modern-style-kit/palette.json'), 'utf8')).tokens;
 const sourceHash = crypto.createHash('sha256').update(html).digest('hex');
 const main = ['general','options','campaigns','llm','models','router','images','characters','memory','prompting','castlechat','diagnostic-tools'];
-const diagnostics = ['diagnostics','conversationdiagnostics','logging','logs','audit','dialogueaudit','history','npclab','directorlab','worldtest','testlab','livebridge','verification'];
+const diagnostics = ['diagnostics','conversationdiagnostics','npclivesdiagnostics','logging','logs','audit','dialogueaudit','history','npclab','directorlab','worldtest','testlab','livebridge','verification'];
 const loaders = {
-  general: [], options: [], models: [], router: [], logging: [], conversationdiagnostics: ['loadConversationDiagnostics'],
+  general: [], options: [], models: [], router: [], logging: [], npclivesdiagnostics: [], conversationdiagnostics: ['loadConversationDiagnostics'],
   prompting: ['loadPrompts'], castlechat: ['loadCastleChatPrompts'], campaigns: ['loadCampaignManager'],
   images: ['loadPrompts','loadPortraitDerivativeStatus','loadSharedPortraitCatalog','loadSharedPortraitGenerationStatus'],
   memory: ['loadEmbeddingStatus'], llm: ['loadPromptCacheStatus'], logs: ['loadCampaigns','loadLogs'],

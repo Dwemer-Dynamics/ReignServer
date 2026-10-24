@@ -13,6 +13,7 @@ namespace ReignBetaServer
     {
         private static readonly ConcurrentDictionary<string, object> PersonalGossipLocks = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, byte> PersonalGossipWorkers = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly string PersonalGossipClockBoot = Guid.NewGuid().ToString("N");
         private static object GossipGate(string campaign) => PersonalGossipLocks.GetOrAdd(campaign, _ => new object());
 
         private static void EnsurePersonalGossipSchema(ReignDbConnection c)
@@ -51,15 +52,48 @@ CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(t
         private static Dictionary<string, object> GossipSnapshot(ReignDbConnection c, string timeline) =>
             TryParseJsonObject(ReadString(GossipClock(c, timeline), "snapshot_json", "{}")) ?? new Dictionary<string, object>();
 
+        private static string GossipClockEpoch(ReignDbConnection c) => PersonalGossipClockBoot + ":"
+            + Interlocked.Read(ref CampaignReplacementGeneration).ToString(CultureInfo.InvariantCulture) + ":"
+            + (TableExists(c, "memory_precision_state") ? ReadString(QuerySql(c,
+                "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "") : "");
+
+        private static Dictionary<string, object> GossipPlayerReference(ReignDbConnection c, string observer, string player,
+            Dictionary<string, object> main, Dictionary<string, object> payload)
+        {
+            var context = new Dictionary<string, object>(payload ?? new Dictionary<string, object>());
+            context["canonicalName"] = ReadString(main, "name", "");
+            context["subject"] = ReadDictionary(payload, "playerIdentity") ?? main;
+            var row = TableExists(c, "acquaintances") ? ReadAcquaintance(c, observer, player) : null;
+            var view = BuildIdentityView(row, context);
+            return GossipFields("label", ReadString(view, "usableName", "the stranger"),
+                "identityState", ReadString(view, "identityState", "encountered_unknown"),
+                "named", ReadBool(view, "knowsIdentity", false), "originalObserverId", observer);
+        }
+
+        private static bool GossipSubjectRecognized(ReignDbConnection c, Dictionary<string, object> reference,
+            string observer, string player, bool originalEncounter)
+        {
+            if (originalEncounter && GossipSameId(ReadString(reference, "originalObserverId", ""), observer)) return true;
+            if (!ReadBool(reference, "named", false) || !TableExists(c, "acquaintances")) return false;
+            var view = BuildIdentityView(ReadAcquaintance(c, observer, player), new Dictionary<string, object>());
+            return ReadBool(view, "knowsIdentity", false) && string.Equals(ReadString(reference, "label", ""),
+                ReadString(view, "usableName", ""), StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool GossipAcceptPresence(ReignDbConnection c, Dictionary<string, object> payload)
         {
             var snapshot = ReadDictionary(payload, "gossipPresence");
             double day = ReadDouble(payload, "worldDay", -1), captured = ReadDouble(snapshot, "worldDay", -2);
             string timeline = GossipTimeline(payload);
             if (snapshot == null || ReadString(snapshot, "schema", "") != "reign-gossip-presence-v1"
+                || !ReadBool(snapshot, "rosterComplete", false)
                 || !double.IsFinite(day) || !double.IsFinite(captured) || day < 0 || Math.Abs(day - captured) > 1d / 1440
                 || GossipTimeline(snapshot) != timeline || ReadDictionaryList(snapshot, "people").Count > 8192) return false;
             if (ActiveWorldHistoryTimeline(c) != timeline) return false;
+            // A clock proof belongs to this process and exact restored campaign generation.
+            // Reject an old in-flight pump before it can advance the replacement's clock.
+            string epoch = ReadString(payload, "gossipClockEpoch", "");
+            if (epoch.Length > 0 && epoch != GossipClockEpoch(c)) return false;
             var old = GossipClock(c, timeline);
             if (old != null && ReadDouble(old, "world_day", 0) > day) return false;
             ExecuteSql(c, @"INSERT INTO personal_gossip_clock(timeline_id,world_day,snapshot_json) VALUES($timeline,$day,$json)
@@ -79,6 +113,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             {
                 EnsurePersonalGossipSchema(c);
                 if (!GossipAcceptPresence(c, payload)) return GossipFields("ok", false, "error", "A current native gossip presence snapshot is required.");
+                PublishReadyPersonalGossip(c, campaign, payload);
                 delivered = DeliverPersonalGossip(c, campaign, GossipTimeline(payload), ReadDouble(payload, "worldDay", 0));
             }
             SchedulePersonalGossip(campaign);
@@ -110,19 +145,57 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             Dictionary<string, object> player, IEnumerable<Dictionary<string, object>> people)
         {
             var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var names in people.Where(p => !string.IsNullOrWhiteSpace(GossipHeroId(p)))
-                .GroupBy(p => ReadString(p, "name", ""), StringComparer.OrdinalIgnoreCase))
+            var roster = people.Where(p => !string.IsNullOrWhiteSpace(GossipHeroId(p))).ToList();
+            IEnumerable<string> AmbiguityNames(Dictionary<string, object> person)
             {
-                string name = names.Key;
-                var identities = names.Select(GossipHeroId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                if (identities.Count == 1 && name.Length >= 2 && Regex.IsMatch(spoken ?? "", @"(?<![\p{L}\p{N}])" + Regex.Escape(name) + @"(?![\p{L}\p{N}])", RegexOptions.IgnoreCase))
-                    result.Add(identities[0]);
+                string name = ReadString(person, "name", "").Trim();
+                if (name.Length >= 2) yield return name;
+                foreach (string separator in new[] { " the ", " of " })
+                {
+                    int title = name.IndexOf(separator, StringComparison.OrdinalIgnoreCase);
+                    if (title >= 2) yield return name.Substring(0, title);
+                }
             }
+            // Shortened titled names are ambiguity guards, never new travel permission.
+            // "Eupitor" in narration about Eupitor the Vintner cannot select an
+            // unrelated exact-name Eupitor. Include both current participants even
+            // when a bounded operator roster omits them.
+            var aliasOwners = roster.Concat(new[] { speaker, player }).Where(p => p != null && !string.IsNullOrWhiteSpace(GossipHeroId(p)))
+                .SelectMany(p => AmbiguityNames(p).Select(name => new { Name = name, Id = GossipHeroId(p) }))
+                .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Select(p => p.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
+            var matches = roster.GroupBy(p => ReadString(p, "name", "").Trim(), StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Key.Length >= 2).SelectMany(g => Regex.Matches(spoken ?? "",
+                    @"(?<![\p{L}\p{N}])" + Regex.Escape(g.Key) + @"(?![\p{L}\p{N}])", RegexOptions.IgnoreCase)
+                    .Cast<Match>().Select(m => new { Start = m.Index, End = m.Index + m.Length, Ids = aliasOwners[g.Key] })).ToList();
+            foreach (var match in matches)
+                // Prefer the complete name in an actual spoken span; its embedded
+                // short name is not a second person, even when the full name is ambiguous.
+                if (match.Ids.Count == 1 && !matches.Any(other => other.Start <= match.Start && other.End >= match.End
+                    && other.End - other.Start > match.End - match.Start)) result.Add(match.Ids[0]);
             // Resolve possessives separately for the NPC and player lines at the call site.
             foreach (var kin in new[] { ("mother", "motherId"), ("father", "fatherId"), ("wife", "spouseId"), ("husband", "spouseId"), ("spouse", "spouseId") })
             {
                 if (Regex.IsMatch(spoken ?? "", @"\bmy\s+" + kin.Item1 + @"\b", RegexOptions.IgnoreCase)) result.Add(ReadString(speaker, kin.Item2, ""));
                 if (Regex.IsMatch(spoken ?? "", @"\byour\s+" + kin.Item1 + @"\b", RegexOptions.IgnoreCase)) result.Add(ReadString(player, kin.Item2, ""));
+            }
+            // A child's name can be shared by unrelated native characters. The
+            // spoken possessive and actual parent IDs disambiguate that person;
+            // the model's proposed recipient ID is never the identity evidence.
+            foreach (var relation in new[] { ("my", speaker), ("your", player) })
+            {
+                string parent = GossipHeroId(relation.Item2);
+                if (parent.Length == 0) continue;
+                var children = roster.Where(p => GossipSameId(ReadString(p, "motherId", ""), parent)
+                    || GossipSameId(ReadString(p, "fatherId", ""), parent)).ToList();
+                string prefix = @"\b" + relation.Item1 + @"\s+(?:(?:only|eldest|youngest|elder|younger)\s+)?(?:daughter|son|child)\b";
+                foreach (var named in children.GroupBy(p => ReadString(p, "name", "").Trim(), StringComparer.OrdinalIgnoreCase))
+                    if (named.Key.Length >= 2 && named.Select(GossipHeroId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1
+                        && Regex.IsMatch(spoken ?? "", prefix + @"\s*(?:,\s*|named\s+)?" + Regex.Escape(named.Key) + @"(?![\p{L}\p{N}])", RegexOptions.IgnoreCase))
+                        result.Add(GossipHeroId(named.First()));
+                if (children.Count == 1 && Regex.IsMatch(spoken ?? "", prefix
+                    + @"(?=\s*(?:[,.!?;:]|$|\b(?:about|that|how|what|whether|when|where|to|will|would|can|shall|should|has|is|was|and|as|the)\b))", RegexOptions.IgnoreCase))
+                    result.Add(GossipHeroId(children[0]));
             }
             result.RemoveWhere(string.IsNullOrWhiteSpace);
             return result.OrderBy(x => x, StringComparer.Ordinal).ToList();
@@ -163,11 +236,16 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                     mentioned.RemoveAll(id => GossipSameId(id, speaker) || GossipSameId(id, player));
                     var signals = ReadDictionaryList(parsed, "gossipSignals").Take(8)
                         .Where(s => ReadDouble(s, "confidence", 0) >= .80
-                            && GossipQuoteSupported(ReadString(s, "evidenceQuote", ""), playerText + "\n" + reply)).ToList();
-                    // Receipt-only impressions still work when a provider omits optional metadata.
-                    if (signals.Count == 0) signals.Add(GossipFields("topic", "impression", "evidenceQuote", "", "confidence", 1d));
+                            && GossipQuoteSupported(ReadString(s, "evidenceQuote", ""), playerText + "\n" + reply)
+                            && GossipSourcePrivacyClassified(s)).ToList();
+                    // A relationship receipt proves a feeling, not permission to reveal
+                    // that an encounter occurred. Retain the decision without disclosure
+                    // until accepted source-linked metadata classifies its privacy.
+                    if (signals.Count == 0) signals.Add(GossipFields("topic", "impression", "evidenceQuote", "", "confidence", 1d,
+                        "privacyUnclassified", true));
                     foreach (var signal in signals)
                     {
+                        signal["confidenceOwnerIds"] = GossipResolveConfidenceOwners(signal, speaker, player, mentioned, playerText);
                         // Identities are resolved from the accepted words, never model-proposed
                         // names in background context. Keep the accepted source references.
                         signal["resolvedMentionedIds"] = mentioned;
@@ -183,7 +261,7 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                         var topic = GossipFields("id", id, "timelineId", timeline, "speakerId", speaker, "playerId", player,
                             "sessionId", session, "createdDay", prior == null ? day : ReadDouble(prior, "created_day", day),
                             "worldDay", day, "category", category, "subjectId", subject, "signal", signal,
-                            "playerName", ReadString(main, "name", "the traveler"),
+                            "playerReference", GossipPlayerReference(c, speaker, player, main, payload),
                             "mentionedIds", mentioned, "sourceTurnIds", ReadStringList(exchange, "turnIds"),
                             "sourceExchangeId", ReadString(episode, "exchangeId", ""), "sourceText", playerText + "\n" + reply,
                             "sourceSessionId", ReadString(exchange, "sessionId", ""), "sourceEvidenceExchangeId", ReadString(exchange, "exchangeId", ""),
@@ -191,6 +269,8 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                             "policy", prior == null ? PersonalGossipSettings() : ReadDictionary(GossipJson(prior), "policy") ?? PersonalGossipSettings(),
                             "rootId", id, "hop", 1, "holders", new List<string> { speaker },
                             "presenceComplete", ReadBool(ReadDictionary(payload, "gossipPresence"), "rosterComplete", false));
+                        topic["playerName"] = ReadString(ReadDictionary(topic, "playerReference"), "label", "the stranger");
+                        CapturePersonalGossipTestControls(c, campaign, topic, prior);
                         EvaluatePersonalGossip(c, campaign, topic, people);
                     }
                     MarkPersonalGossipRaised(c, timeline, speaker, session, parsed, reply, payload);
@@ -200,6 +280,12 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
             }
             catch (Exception ex) { LogOperational("gossip.accept_failed", GossipFields("campaignId", campaign, "error", LimitText(ex.Message, 500))); }
         }
+
+        private static bool GossipSourcePrivacyClassified(Dictionary<string, object> signal) =>
+            new[] { "public", "personal", "intimate", "secret" }.Contains(ReadString(signal, "privacy", ""))
+            && new[] { "public", "personal", "intimate", "secret" }.Contains(ReadString(signal, "existencePrivacy", ""))
+            && signal.TryGetValue("promisedSecrecy", out object promised) && promised is bool
+            && signal.TryGetValue("ownCompromising", out object compromising) && compromising is bool;
 
         private static void PersonalGossipRelationshipApplied(string campaign, Dictionary<string, object> payload)
         {
@@ -283,9 +369,10 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
             { SavePersonalGossipTopic(c, topic, "expired_or_hop_limit"); return; }
             if (!ReadBool(topic, "presenceComplete", true)) { SavePersonalGossipTopic(c, topic, "presence_incomplete"); return; }
             topic["policyVersion"] = ReadString(policy, "policyVersion", PersonalGossipVersion);
-            topic["savedRolls"] = GossipFields("share", GossipRoll(id, "share"), "negative", GossipRoll(id, "negative"),
-                "disclosure", GossipRoll(id, "disclosure"), "distortion", GossipRoll(id, "distortion"), "severity", GossipRoll(id, "severity"),
-                "negativeRecipient", GossipDraw(id, "negative_recipient"), "friendlyRecipient", GossipDraw(id, "friendly_recipient"));
+            topic["savedRolls"] = GossipFields("share", GossipDecisionRoll(topic, id, "share"), "negative", GossipDecisionRoll(topic, id, "negative"),
+                "disclosure", GossipDecisionRoll(topic, id, "disclosure"), "distortion", GossipDecisionRoll(topic, id, "distortion"), "severity", GossipDecisionRoll(topic, id, "severity"),
+                "negativeRecipient", GossipDecisionDraw(topic, id, "negative_recipient"), "friendlyRecipient", GossipDecisionDraw(topic, id, "friendly_recipient"));
+            if (ReadBool(signal, "privacyUnclassified", false)) { SavePersonalGossipTopic(c, topic, "privacy_unclassified"); return; }
             double delta = GossipConversationDelta(c, timeline, session, speaker, player);
             int positiveFeeling = Math.Max(GossipFeeling(signal, "excitement"), GossipFeeling(signal, "curiosity"));
             double supportedHurt = ReadDictionaryList(signal, "targets")
@@ -307,10 +394,11 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
             if (friendly.Count + negative.Count == 0) { SavePersonalGossipTopic(c, topic, ReadBool(topic, "presenceComplete", true) ? "no_audience" : "presence_incomplete"); return; }
             int share = GossipShareChance(emotion, traits);
             bool retell = ReadInt(topic, "hop", 1) > 1;
-            if (retell) share = GossipRetellChance(share, ReadInt(topic, "credibility", 50));
-            topic["shareChance"] = share; topic["shareRoll"] = GossipRoll(id, "share");
-            if (GossipRoll(id, "share") > share) { SavePersonalGossipTopic(c, topic, "sharing_declined"); return; }
-            var selected = GossipChooseRecipient(negative, GossipDraw(id, "negative_recipient"));
+            share = retell ? GossipAdjustedChance(GossipRetellChance(share, ReadInt(topic, "credibility", 50)), "retell", policy)
+                : GossipAdjustedChance(share, "share", policy);
+            topic["shareChance"] = share; topic["shareRoll"] = GossipDecisionRoll(topic, id, "share");
+            if (GossipDecisionRoll(topic, id, "share") > share) { SavePersonalGossipTopic(c, topic, "sharing_declined"); return; }
+            var selected = GossipChooseRecipient(negative, GossipDecisionDraw(topic, id, "negative_recipient"));
             string type = "";
             int negativeChance = 0;
             if (selected != null)
@@ -318,11 +406,12 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
                 var target = ReadDictionaryList(signal, "targets").FirstOrDefault(t => GossipSameId(ReadString(t, "heroId", ""), selected.Id));
                 negativeChance = GossipNegativeChance(traits, selected.Hurt, selected.Affinity, selected.Grievance,
                     ReadBool(target, "knownJealousy", false), ReadBool(target, "knownEnvy", false));
-                if (GossipRoll(id, "negative") <= negativeChance) type = "negative";
+                negativeChance = GossipAdjustedChance(negativeChance, "negative", policy);
+                if (GossipDecisionRoll(topic, id, "negative") <= negativeChance) type = "negative";
             }
             if (type.Length == 0)
             {
-                selected = GossipChooseRecipient(friendly, GossipDraw(id, "friendly_recipient"));
+                selected = GossipChooseRecipient(friendly, GossipDecisionDraw(topic, id, "friendly_recipient"));
                 negativeChance = 0;
                 if (selected != null && GossipEmotionEligible(positiveFeeling, traits) && ReadString(topic, "category", "") != "impression") type = "positive";
                 else if (selected != null && delta != 0) type = "impression";
@@ -331,17 +420,19 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
             topic["attemptRecipientId"] = selected.Id; topic["attemptType"] = type; topic["negativeChance"] = negativeChance;
             if (retell && type != "negative" && ReadInt(topic, "credibility", 50) < 25
                 && GossipTrait(traits, "curiosity") < 60) { SavePersonalGossipTopic(c, topic, "doubtful_retelling_declined"); return; }
-            double bond = GossipConfidenceBond(c, ReadDictionary(topic, "speaker"), people, ReadStringList(signal, "confidenceOwnerIds"));
+            double bond = GossipConfidenceBond(c, ReadDictionary(topic, "speaker"), people, ReadStringList(signal, "confidenceOwnerIds"), ReadString(topic, "playerId", ""));
             string privacy = GossipPrivacy(ReadString(signal, "privacy", "personal"));
             if (type == "impression") privacy = GossipPrivacy(ReadString(signal, "existencePrivacy", "personal"));
             int detail = GossipDetailChance(traits, privacy, emotion, selected.Affinity, bond,
                 ReadBool(signal, "ownCompromising", false), ReadBool(signal, "promisedSecrecy", false), negativeChance);
-            int disclosureRoll = GossipRoll(id, "disclosure");
+            detail = GossipAdjustedChance(detail, "disclosure", policy);
+            int disclosureRoll = GossipDecisionRoll(topic, id, "disclosure");
             topic["detailChance"] = detail; topic["disclosureRoll"] = disclosureRoll;
             if (disclosureRoll > detail)
             {
                 int existence = GossipDetailChance(traits, GossipPrivacy(ReadString(signal, "existencePrivacy", privacy)), emotion,
                     selected.Affinity, bond, ReadBool(signal, "ownCompromising", false), ReadBool(signal, "promisedSecrecy", false), 0);
+                existence = GossipAdjustedChance(existence, "disclosure", policy);
                 if (type == "negative" || delta == 0 || disclosureRoll > existence) { SavePersonalGossipTopic(c, topic, "privacy_declined"); return; }
                 type = "impression";
             }
@@ -352,8 +443,11 @@ AND (m.created_day>$day OR t.session_id=$session);", GossipFields("timeline", ti
                 || !retell && capRows.Count(r => ReadString(r, "session_id", "") == session && ReadInt(r, "hop", 1) == 1) >= ReadInt(policy, "maximumOriginalsPerConversation", 2))
             { SavePersonalGossipTopic(c, topic, "capacity_reached"); return; }
             string distortion = "none";
-            if (type == "negative" && GossipRoll(id, "distortion") <= GossipDistortionChance(traits, selected.Hurt))
-                distortion = GossipDistortionSeverity(GossipDistortionScore(traits, selected.Hurt), GossipRoll(id, "severity"));
+            int distortionChance = GossipTrait(traits, "honesty") >= 100 ? 0
+                : GossipAdjustedChance(GossipDistortionChance(traits, selected.Hurt), "distortion", policy);
+            topic["distortionChance"] = distortionChance;
+            if (type == "negative" && GossipDecisionRoll(topic, id, "distortion") <= distortionChance)
+                distortion = GossipDistortionSeverity(GossipDistortionScore(traits, selected.Hurt), GossipDecisionRoll(topic, id, "severity"));
             topic["type"] = type; topic["distortion"] = distortion; topic["negativeChance"] = negativeChance;
             topic["detailChance"] = detail; topic["disclosureRoll"] = disclosureRoll; topic["recipient"] = selected.Person;
             topic["recipientId"] = selected.Id; topic["local"] = selected.Local;
@@ -373,10 +467,39 @@ AND (m.created_day>$day OR t.session_id=$session);", GossipFields("timeline", ti
             }
         }
 
+        private static string GossipConfidenceOwnerId(string id, string speaker, string player)
+        {
+            id = (id ?? "").Trim();
+            return GossipSameId(id, "player") ? player : GossipSameId(id, "self") ? speaker : id;
+        }
+
+        private static List<string> GossipResolveConfidenceOwners(Dictionary<string, object> signal, string speaker,
+            string player, IEnumerable<string> mentioned, string playerText)
+        {
+            var allowed = new HashSet<string>((mentioned ?? Enumerable.Empty<string>()).Concat(new[] { speaker, player }), StringComparer.OrdinalIgnoreCase);
+            var owners = new HashSet<string>(ReadStringList(signal, "confidenceOwnerIds").Take(16)
+                .Select(id => GossipConfidenceOwnerId(id, speaker, player)).Where(id => !string.IsNullOrWhiteSpace(id) && allowed.Contains(id)), StringComparer.OrdinalIgnoreCase);
+            // A player-authored private source entrusts the player's confidence even
+            // when the classifier incorrectly names only the NPC receiving it.
+            // NPC-only words and background context cannot supply this provenance.
+            string quote = ReadString(signal, "evidenceQuote", "");
+            if (GossipSourcePrivacyClassified(signal) && !string.IsNullOrWhiteSpace(player)
+                && (ReadString(signal, "privacy", "public") != "public" || ReadString(signal, "existencePrivacy", "public") != "public"
+                    || ReadBool(signal, "promisedSecrecy", false))
+                && quote.Length > 0 && GossipQuoteSupported(quote, playerText)) owners.Add(player);
+            return owners.OrderBy(id => id, StringComparer.Ordinal).ToList();
+        }
+
         private static double GossipConfidenceBond(ReignDbConnection c, Dictionary<string, object> self,
-            List<Dictionary<string, object>> people, List<string> owners) => owners.Where(id => !GossipSameId(id, GossipHeroId(self)))
+            List<Dictionary<string, object>> people, List<string> owners, string player = "") => owners
+            .Select(id => GossipConfidenceOwnerId(id, GossipHeroId(self), player)).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(id => !string.IsNullOrWhiteSpace(id) && !GossipSameId(id, GossipHeroId(self)))
             .Select(id => { var person = people.FirstOrDefault(p => GossipSameId(GossipHeroId(p), id));
-                return person == null ? 0 : Math.Max(0, GossipAffinity(c, GossipHeroId(self), id, self, person)); }).DefaultIfEmpty(0).Max();
+                // Confidence owners need not be living, available recipients. A
+                // persisted bond remains relevant when its owner is off this roster.
+                bool knownBond = person != null || QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
+                    GossipFields("pair", AmbientPairKey(GossipHeroId(self), id))).Count > 0;
+                return knownBond ? Math.Max(0, GossipAffinity(c, GossipHeroId(self), id, self, person)) : 0; }).DefaultIfEmpty(0).Max();
 
         private static void InsertPersonalGossipMessage(ReignDbConnection c, Dictionary<string, object> data, string id, bool reply)
         {

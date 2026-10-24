@@ -205,6 +205,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;");
             Dictionary<string, object> unchaste = CourtCatalogTag(tags, "the_unchaste");
             if (unchaste != null)
             {
+                unchaste["directReputationProducers"] = new List<object> { "pregnancy_exposure" };
                 unchaste["genderVariants"] = new Dictionary<string, object>
                 {
                     ["male"] = new Dictionary<string, object>
@@ -358,6 +359,15 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;");
                 && !string.IsNullOrWhiteSpace(directProducer)
                 && ReadStringList(definition, "directReputationProducers").Contains(
                     directProducer, StringComparer.OrdinalIgnoreCase);
+            bool pregnancyExposure = tagId == "the_unchaste" && directProducer == "pregnancy_exposure";
+            if (pregnancyExposure)
+            {
+                bool mother = subjectId == ReadString(evidence, "motherId", "") && value == -50;
+                bool father = ReadBool(evidence, "fatherNamed", false) && subjectId == ReadString(evidence, "biologicalFatherId", "") && value == -5;
+                if (!ReadBool(evidence, "illicit", false) || ReadString(evidence, "pregnancyId", "").Length == 0 || (!mother && !father)) return false;
+                // This producer is code-owned and supports old installed catalog revisions.
+                directProducerAllowed = definition != null;
+            }
             if (definition == null
                 || (!ReadBool(definition, "derived", false) && !directProducerAllowed))
                 return false;
@@ -397,7 +407,7 @@ VALUES($id,$campaign,$timeline,$subject,$tag,'derived_requirement_lost',$event,$
             }
 
             int boundedValue = Math.Max(-50, Math.Min(50,
-                ReadBool(definition, "dynamicValue", false) ? value : ReadInt(definition, "reputationValue", value)));
+                pregnancyExposure || ReadBool(definition, "dynamicValue", false) ? value : ReadInt(definition, "reputationValue", value)));
             string description = FirstNonEmpty(descriptionOverride, ReadString(definition, "description", ""));
             Dictionary<string, object> snapshot = new Dictionary<string, object>(definition, StringComparer.OrdinalIgnoreCase)
             {

@@ -1,0 +1,1650 @@
+{
+  "schema": "reign-npc-retrieval-benchmark-v1",
+  "description": "Authored synthetic development fixture; no campaign/player data. Test topics are disjoint from development; bilingual queries share sources and are correlated, not independent samples.",
+  "memories": [
+    {
+      "id": "rescue",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "rescue-forbidden-private",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "rescue-forbidden-future",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "rescue-forbidden-timeline",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "rescue-forbidden-campaign",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "rescue-forbidden-generation",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "rescue-forbidden-inactive",
+      "text": "Corein remembers that the player pulled her from the flooded river near Marunath and wrapped her in a green cloak.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal",
+      "active": false
+    },
+    {
+      "id": "gift",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "gift-forbidden-private",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "gift-forbidden-future",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "gift-forbidden-timeline",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "gift-forbidden-campaign",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "gift-forbidden-generation",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "gift-forbidden-inactive",
+      "text": "Корин хранит серебряную заколку, которую игрок подарил ей после турнира в Сеононе.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal",
+      "active": false
+    },
+    {
+      "id": "brother",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "brother-forbidden-private",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "brother-forbidden-future",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "brother-forbidden-timeline",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "brother-forbidden-campaign",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "brother-forbidden-generation",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "brother-forbidden-inactive",
+      "text": "Corein distrusts Ergeon because he abandoned her brother during an ambush; her brother survived with a broken arm.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships",
+      "active": false
+    },
+    {
+      "id": "promise",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "promise-forbidden-private",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "promise-forbidden-future",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "promise-forbidden-timeline",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "promise-forbidden-campaign",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "promise-forbidden-generation",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "promise-forbidden-inactive",
+      "text": "Корин обещала игроку встретиться у западных ворот Маруната на рассвете, если дорога будет безопасной.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships",
+      "active": false
+    },
+    {
+      "id": "siege",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "siege-forbidden-private",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "siege-forbidden-future",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "siege-forbidden-timeline",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "siege-forbidden-campaign",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "siege-forbidden-generation",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "siege-forbidden-inactive",
+      "text": "A public herald announced that the defenders of Epicrotea broke the siege on day 40 after grain wagons arrived through the northern pass.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical",
+      "active": false
+    },
+    {
+      "id": "treaty",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "treaty-forbidden-private",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "treaty-forbidden-future",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "treaty-forbidden-timeline",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "treaty-forbidden-campaign",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "treaty-forbidden-generation",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "treaty-forbidden-inactive",
+      "text": "Глашатай объявил: мир между Вландией и Баттанией подписан на 45-й день; спорный замок остался у Баттании.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical",
+      "active": false
+    },
+    {
+      "id": "childhood",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "childhood-forbidden-private",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "childhood-forbidden-future",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "childhood-forbidden-timeline",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "childhood-forbidden-campaign",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "childhood-forbidden-generation",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "childhood-forbidden-inactive",
+      "text": "Corein once told the player that as a child she hid in her grandmother's orchard during thunderstorms and counted the pear trees.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal",
+      "active": false
+    },
+    {
+      "id": "injury",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "injury-forbidden-private",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "injury-forbidden-future",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "injury-forbidden-timeline",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "injury-forbidden-campaign",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "injury-forbidden-generation",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal"
+    },
+    {
+      "id": "injury-forbidden-inactive",
+      "text": "После падения с лошади у Пен-Каннока Корин повредила левое колено; игрок шесть дней менял повязку.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "personal",
+      "active": false
+    },
+    {
+      "id": "reconcile",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "reconcile-forbidden-private",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "reconcile-forbidden-future",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "reconcile-forbidden-timeline",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "reconcile-forbidden-campaign",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "reconcile-forbidden-generation",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "reconcile-forbidden-inactive",
+      "text": "Corein and Liena reconciled after Liena returned a stolen family ring and apologized in private. They agreed to keep the apology secret.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships",
+      "active": false
+    },
+    {
+      "id": "debt",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "debt-forbidden-private",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "debt-forbidden-future",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "debt-forbidden-timeline",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "debt-forbidden-campaign",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "debt-forbidden-generation",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "debt-forbidden-inactive",
+      "text": "Корин вернула игроку долг в 700 динаров на 75-й день. Старое обещание заплатить после урожая больше не является непогашенным долгом.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships",
+      "active": false
+    },
+    {
+      "id": "succession",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "succession-forbidden-private",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "succession-forbidden-future",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "succession-forbidden-timeline",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "succession-forbidden-campaign",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "succession-forbidden-generation",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "succession-forbidden-inactive",
+      "text": "A public royal proclamation named Rhagaea's daughter Ira as successor on day 60, after the council confirmed the old ruler's death.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical",
+      "active": false
+    },
+    {
+      "id": "famine",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "famine-forbidden-private",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "liena"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "famine-forbidden-future",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 110,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "famine-forbidden-timeline",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "synthetic",
+      "timeline": "discarded",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "famine-forbidden-campaign",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "other",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "famine-forbidden-generation",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g0",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical"
+    },
+    {
+      "id": "famine-forbidden-inactive",
+      "text": "Городские записи гласят: голод в Аскаре закончился на 80-й день после прибытия трёх караванов с зерном; налоги не повышали.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 80,
+      "observers": [
+        "corein"
+      ],
+      "category": "historical",
+      "active": false
+    },
+    {
+      "id": "debt-old",
+      "text": "Corein borrowed 700 denars from the player on day 20 and promised to repay the loan after harvest.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 20,
+      "observers": [
+        "corein"
+      ],
+      "category": "relationships"
+    },
+    {
+      "id": "irrelevant-0",
+      "text": "Corein bought six loaves of bread at the market yesterday.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-1",
+      "text": "Liena won a tournament near Sargot and received a blue cloak.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-2",
+      "text": "A merchant polished a bronze ring before opening his stall.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-3",
+      "text": "The garrison counted its arrows and repaired the northern gate.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-4",
+      "text": "Ergeon praised his own brother for winning a horse race.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-5",
+      "text": "A traveler recalled a storm far away on the coast.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-6",
+      "text": "A herald announced lower wool prices in a different town.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-7",
+      "text": "The player discussed pear prices with a caravan guard.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-8",
+      "text": "Корин купила мешок овса для лошади.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-9",
+      "text": "Купец обсуждал налоги на соль в Ортиссии.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-10",
+      "text": "Игрок выиграл серебряную монету в таверне.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    },
+    {
+      "id": "irrelevant-11",
+      "text": "Караван прибыл без зерна и привёз только шерсть.",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observers": [
+        "corein"
+      ],
+      "category": "irrelevant"
+    }
+  ],
+  "queries": [
+    {
+      "id": "rescue-en",
+      "text": "Who pulled you out of the river when you nearly drowned?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "personal",
+      "language": "en",
+      "judgments": {
+        "rescue": 3
+      }
+    },
+    {
+      "id": "rescue-ru",
+      "text": "Кто вытащил тебя из реки, когда ты едва не утонула?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "personal",
+      "language": "ru",
+      "judgments": {
+        "rescue": 3
+      }
+    },
+    {
+      "id": "gift-en",
+      "text": "What keepsake did I give you after the Seonon tournament?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "personal",
+      "language": "en",
+      "judgments": {
+        "gift": 3
+      }
+    },
+    {
+      "id": "gift-ru",
+      "text": "Какую памятную вещь я подарил тебе после турнира в Сеононе?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "personal",
+      "language": "ru",
+      "judgments": {
+        "gift": 3
+      }
+    },
+    {
+      "id": "brother-en",
+      "text": "Why do you refuse to trust Ergeon after what happened to your brother?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "relationships",
+      "language": "en",
+      "judgments": {
+        "brother": 3
+      }
+    },
+    {
+      "id": "brother-ru",
+      "text": "Почему ты не доверяешь Эргеону после того, что случилось с твоим братом?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "relationships",
+      "language": "ru",
+      "judgments": {
+        "brother": 3
+      }
+    },
+    {
+      "id": "promise-en",
+      "text": "Where did you promise to meet me, and under what condition?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "relationships",
+      "language": "en",
+      "judgments": {
+        "promise": 3
+      }
+    },
+    {
+      "id": "promise-ru",
+      "text": "Где ты обещала встретиться со мной и при каком условии?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "relationships",
+      "language": "ru",
+      "judgments": {
+        "promise": 3
+      }
+    },
+    {
+      "id": "siege-en",
+      "text": "What ended the siege of Epicrotea?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "historical",
+      "language": "en",
+      "judgments": {
+        "siege": 3
+      }
+    },
+    {
+      "id": "siege-ru",
+      "text": "Что положило конец осаде Эпикротеи?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "historical",
+      "language": "ru",
+      "judgments": {
+        "siege": 3
+      }
+    },
+    {
+      "id": "treaty-en",
+      "text": "Who kept the disputed castle in the peace agreement?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "historical",
+      "language": "en",
+      "judgments": {
+        "treaty": 3
+      }
+    },
+    {
+      "id": "treaty-ru",
+      "text": "Кому остался спорный замок после заключения мира?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "historical",
+      "language": "ru",
+      "judgments": {
+        "treaty": 3
+      }
+    },
+    {
+      "id": "childhood-en",
+      "text": "Where did you shelter when thunder frightened you as a child?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "personal",
+      "language": "en",
+      "judgments": {
+        "childhood": 3
+      }
+    },
+    {
+      "id": "childhood-ru",
+      "text": "Где ты пряталась в детстве, когда боялась грома?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "personal",
+      "language": "ru",
+      "judgments": {
+        "childhood": 3
+      }
+    },
+    {
+      "id": "injury-en",
+      "text": "Which knee did you hurt, and how long did I tend the bandage?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "personal",
+      "language": "en",
+      "judgments": {
+        "injury": 3
+      }
+    },
+    {
+      "id": "injury-ru",
+      "text": "Какое колено ты повредила и сколько дней я менял повязку?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "personal",
+      "language": "ru",
+      "judgments": {
+        "injury": 3
+      }
+    },
+    {
+      "id": "reconcile-en",
+      "text": "What finally repaired your friendship with Liena?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "relationships",
+      "language": "en",
+      "judgments": {
+        "reconcile": 3
+      }
+    },
+    {
+      "id": "reconcile-ru",
+      "text": "Что в итоге восстановило твою дружбу с Лиеной?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "relationships",
+      "language": "ru",
+      "judgments": {
+        "reconcile": 3
+      }
+    },
+    {
+      "id": "debt-en",
+      "text": "Do you still owe me those seven hundred denars?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "relationships",
+      "language": "en",
+      "judgments": {
+        "debt": 3,
+        "debt-old": 1
+      }
+    },
+    {
+      "id": "debt-ru",
+      "text": "Ты всё ещё должна мне те семьсот динаров?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "relationships",
+      "language": "ru",
+      "judgments": {
+        "debt": 3,
+        "debt-old": 1
+      }
+    },
+    {
+      "id": "succession-en",
+      "text": "Who succeeded the ruler after the council confirmed the death?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "historical",
+      "language": "en",
+      "judgments": {
+        "succession": 3
+      }
+    },
+    {
+      "id": "succession-ru",
+      "text": "Кто унаследовал власть после того, как совет подтвердил смерть правителя?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "historical",
+      "language": "ru",
+      "judgments": {
+        "succession": 3
+      }
+    },
+    {
+      "id": "famine-en",
+      "text": "How was the Askar famine relieved, and were taxes raised?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "historical",
+      "language": "en",
+      "judgments": {
+        "famine": 3
+      }
+    },
+    {
+      "id": "famine-ru",
+      "text": "Как прекратился голод в Аскаре и повысили ли налоги?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "historical",
+      "language": "ru",
+      "judgments": {
+        "famine": 3
+      }
+    },
+    {
+      "id": "negative-dev-0-0",
+      "text": "Which dragon taught you to fly?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "irrelevant",
+      "language": "en",
+      "judgments": {}
+    },
+    {
+      "id": "negative-dev-0-1",
+      "text": "Какой дракон научил тебя летать?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "irrelevant",
+      "language": "ru",
+      "judgments": {}
+    },
+    {
+      "id": "negative-dev-1-0",
+      "text": "What is the secret password of the imperial observatory?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "irrelevant",
+      "language": "en",
+      "judgments": {}
+    },
+    {
+      "id": "negative-dev-1-1",
+      "text": "Каков тайный пароль имперской обсерватории?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "dev",
+      "category": "irrelevant",
+      "language": "ru",
+      "judgments": {}
+    },
+    {
+      "id": "negative-test-0-0",
+      "text": "Where did you bury the enchanted crown on the moon?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "irrelevant",
+      "language": "en",
+      "judgments": {}
+    },
+    {
+      "id": "negative-test-0-1",
+      "text": "Где ты спрятала зачарованную корону на Луне?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "irrelevant",
+      "language": "ru",
+      "judgments": {}
+    },
+    {
+      "id": "negative-test-1-0",
+      "text": "What medicine cured my mother's illness?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "irrelevant",
+      "language": "en",
+      "judgments": {}
+    },
+    {
+      "id": "negative-test-1-1",
+      "text": "Какое лекарство вылечило болезнь моей матери?",
+      "campaign": "synthetic",
+      "timeline": "main",
+      "generation": "g1",
+      "day": 90,
+      "observer": "corein",
+      "split": "test",
+      "category": "irrelevant",
+      "language": "ru",
+      "judgments": {}
+    }
+  ]
+}

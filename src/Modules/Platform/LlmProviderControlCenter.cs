@@ -33,6 +33,8 @@ namespace ReignBetaServer
       const provider = document.getElementById('llmProvider')?.value || 'openai_compatible';
       const compatible = document.getElementById('openAiCompatibleSettings');
       const subscription = document.getElementById('codexSubscriptionSettings');
+      const lookup = document.getElementById('codexLookupSettings');
+      if (lookup) lookup.hidden = provider !== 'codex_subscription';
       if (compatible) compatible.style.display = provider === 'openai_compatible' ? 'block' : 'none';
       if (subscription) subscription.style.display = provider === 'codex_subscription' ? 'block' : 'none';
       const probe = document.getElementById('promptCacheProbeButton');
@@ -50,7 +52,10 @@ namespace ReignBetaServer
       const options = document.getElementById('llmModelOptions');
       if (options && provider !== 'codex_subscription') options.innerHTML = provider === 'openrouter'
         ? '<option value=\'openai/gpt-5.5\'></option><option value=\'openai/gpt-5.6-terra\'></option><option value=\'~openai/gpt-latest\'></option>' : '';
-      if (provider === 'codex_subscription') renderCodexModels(lastCodexModels);
+      if (provider === 'codex_subscription') {
+        renderCodexModels(lastCodexModels);
+        if (!lastCodexModels.length) void refreshCodexModels();
+      }
     }
 ";
     }

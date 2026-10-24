@@ -179,6 +179,7 @@ namespace ReignBetaServer
                 ["schema"] = OptionsSchema,
                 ["reasoningMode"] = "selective",
                 ["reasoningEffort"] = "",
+                ["lookupMode"] = "auto",
                 ["fastMode"] = false
             };
             foreach (string key in OptionKeys) result[key] = false;
@@ -194,6 +195,7 @@ namespace ReignBetaServer
                     || pair.Key.Equals("reasoningMode", StringComparison.OrdinalIgnoreCase)
                     || pair.Key.Equals("reasoningEffort", StringComparison.OrdinalIgnoreCase)
                     || pair.Key.Equals("fastMode", StringComparison.OrdinalIgnoreCase)
+                    || pair.Key.Equals("lookupMode", StringComparison.OrdinalIgnoreCase)
                     || OptionKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
                     result[pair.Key] = pair.Value;
             }
@@ -202,6 +204,7 @@ namespace ReignBetaServer
             result["fastMode"] = ToBool(result, "fastMode", false);
             result["reasoningMode"] = FirstNonEmpty(ToString(result, "reasoningMode"), "selective");
             result["reasoningEffort"] = ToString(result, "reasoningEffort");
+            result["lookupMode"] = ToString(result, "lookupMode").Equals("direct", StringComparison.OrdinalIgnoreCase) ? "direct" : "auto";
             return result;
         }
 
@@ -501,8 +504,8 @@ namespace ReignBetaServer
         {
             bool correspondence = (requestType ?? "").IndexOf("correspondence", StringComparison.OrdinalIgnoreCase) >= 0;
             var preserve = correspondence
-                ? new[] { "shouldReply", "body", "reason", "actionGate", "structuredActionDecision", "proposalDecisions", "rebellionDecision", "campaignOrder", "continuityWrites", "evidenceSourceIds", "uncertainty" }
-                : new[] { "reply", "participation", "reactionTargetHeroStringId", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "structuredActionDecision", "proposalDecisions", "conceptionGate", "socialSignals", "identityIntroductions", "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "courtKnowledgeWrites", "sceneStateUpdates", "stateUpdates", "continuityWrites", "suggestedActions", "evidenceSourceIds", "uncertainty" };
+                ? new[] { "shouldReply", "body", "reason", "actionGate", "structuredActionDecision", "proposalDecisions", "rebellionDecision", "campaignOrder", "pregnancyDisclosures", "continuityWrites", "evidenceSourceIds", "uncertainty" }
+                : new[] { "reply", "participation", "reactionTargetHeroStringId", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "structuredActionDecision", "proposalDecisions", "conceptionGate", "pregnancyDisclosures", "socialSignals", "identityIntroductions", "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "courtKnowledgeWrites", "sceneStateUpdates", "stateUpdates", "continuityWrites", "communicationPlans", "suggestedActions", "evidenceSourceIds", "uncertainty" };
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 ["schema"] = "reign-codex-compact-metadata-v1",

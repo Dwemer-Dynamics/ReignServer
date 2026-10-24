@@ -7,6 +7,7 @@ namespace ReignBetaServer
         // provider switch therefore cannot accidentally expose or apply Codex-only settings.
         private static string CodexPerformanceControlCenterHtml() => @"
         <section id='codexPerformanceControls' class='codexPerformanceControls' hidden aria-label='Codex performance controls'>
+          <p id='codexReasoningModelHint' class='hint' aria-live='polite'></p>
           <label>Fast mode
             <select id='codexFastMode' aria-describedby='codexFastModeHint'>
               <option value='off'>Off</option>
@@ -27,7 +28,8 @@ namespace ReignBetaServer
             <p class='hint'>Reuse the existing stable rule, character, and current-turn segments when the runtime reports compatible cache support.</p>
             <label><input id='codexParallelContextPreparation' type='checkbox' data-codex-option='parallelContextPreparation'> Parallel context preparation</label>
             <p class='hint'>Prepare independent context reads concurrently with a maximum of four isolated workers when a consistent snapshot is available.</p>
-            <label><input id='codexReuseThreads' type='checkbox' data-codex-option='reuseThreads'> Reuse short conversation threads</label>
+            <label><input id='codexReuseThreads' type='checkbox' data-codex-option='reuseThreads'> Reuse threads for other eligible requests</label>
+            <p class='hint'>Structured character conversations already retain context in Auto and Direct lookup modes.</p>
             <p class='hint'>Reuse only ordinary conversation threads with compatible authoritative context. Repairs, private scopes, and invalidated identities use fresh threads.</p>
             <label><input id='codexAsyncThreadCleanup' type='checkbox' data-codex-option='asyncThreadCleanup'> Clean up threads asynchronously</label>
             <p class='hint'>Return the validated result without waiting for bounded deletion of inactive Reign-owned threads.</p>
@@ -40,14 +42,14 @@ namespace ReignBetaServer
         private static string CodexModelAvailabilityHtml() => @"
           <div id='codexModelAvailability' class='card codexModelAvailabilityCard'>
             <h3>Codex model availability</h3>
-            <p class='hint'>Discovery is free and reads the paginated runtime catalog, including hidden entries. Verification is separate, consumes Codex usage, and sends one explicitly bounded test request. GPT-5.4 remains unverified until you run that action.</p>
-            <label>Candidate model
-              <input id='codexModelCandidate' value='gpt-5.4' spellcheck='false' autocomplete='off' aria-describedby='codexModelCandidateHint'>
+            <p class='hint'>Discovery is free and reads the paginated runtime catalog, including hidden entries. Checking availability consumes Codex usage and sends one explicitly bounded test request.</p>
+            <label>Model to check
+              <input id='codexModelCandidate' spellcheck='false' autocomplete='off' aria-describedby='codexModelCandidateHint'>
             </label>
             <div class='actions'>
               <button id='codexModelAvailabilityButton' onclick='checkCodexModelAvailability()'>Check model availability</button>
             </div>
-            <p id='codexModelCandidateHint' class='hint'>Use an exact runtime model ID. Refreshing the catalog and saving settings never runs verification.</p>
+            <p id='codexModelCandidateHint' class='hint'>Availability check only. Choose the game conversation model on the Models tab. This field remembers your choice in this browser. Saving settings and refreshing the catalog never runs a check.</p>
             <pre id='codexCatalogStatus'>Catalog status has not been loaded.</pre>
             <pre id='codexModelVerificationStatus'>No model verification has been run.</pre>
           </div>";
@@ -60,12 +62,43 @@ namespace ReignBetaServer
     const codexPerformanceDefaults = {
       schema: 'reign-codex-options-v1', version: 1, reasoningMode: 'selective', reasoningEffort: 'medium', fastMode: false,
       structuredOutputs: false, compactMetadata: false, stablePromptMapping: false,
-      parallelContextPreparation: false, reuseThreads: false, asyncThreadCleanup: false
+      parallelContextPreparation: false, reuseThreads: false, asyncThreadCleanup: false, lookupMode: 'auto'
     };
     let codexPerformanceOptions = {...codexPerformanceDefaults};
     let codexPerformanceNonCodexReasoning = null;
     let codexPerformanceProvider = '';
     const codexPerformanceReasoningEfforts = ['none','minimal','low','medium','high','xhigh','max','ultra'];
+    const codexPerformanceLegacyEffortOptions = document.getElementById('reasoningEffort')?.innerHTML || '';
+
+    function codexPerformanceUpdateReasoningChoices() {
+      if (!codexPerformanceIsSelected()) return;
+      const effort = document.getElementById('reasoningEffort');
+      if (!effort) return;
+      const requested = effort.value || codexPerformanceOptions.reasoningEffort;
+      const model = document.getElementById('dialogueModel')?.value.trim() || '';
+      const catalog = typeof lastCodexModels === 'undefined' ? [] : lastCodexModels;
+      const entry = catalog.find(row => (row.model || row.id || row.slug || '') === model);
+      const raw = entry?.supportedReasoningEfforts || entry?.reasoningEfforts || [];
+      const advertised = [...new Set(raw.map(row => typeof row === 'string' ? row : row.reasoningEffort || row.effort || '')
+        .filter(value => codexPerformanceReasoningEfforts.includes(value)))];
+      const choices = codexPerformanceReasoningEfforts.filter(value => !advertised.length || advertised.includes(value));
+      const lower = choices.filter(value => codexPerformanceReasoningEfforts.indexOf(value) <= codexPerformanceReasoningEfforts.indexOf(requested));
+      const selected = choices.includes(requested) ? requested : lower.at(-1) || choices[0];
+      effort.replaceChildren(...choices.map(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value === 'none' ? 'None' : value === 'xhigh' ? 'Extra high' : value.charAt(0).toUpperCase() + value.slice(1);
+        return option;
+      }));
+      effort.value = selected;
+      codexPerformanceOptions.reasoningEffort = selected;
+      const hint = document.getElementById('codexReasoningModelHint');
+      if (hint) hint.textContent = advertised.length
+        ? 'Dialogue model ' + model + ' supports: ' + choices.join(', ') + '. Other request models use their own supported levels.'
+          + (selected !== requested ? ' Previous level ' + requested + ' is unavailable; selected ' + selected + '.' : '')
+        : 'Supported reasoning levels are not known for ' + (model || 'the Dialogue model') + '; your requested level is retained until the runtime reports its capabilities.';
+      if (typeof updateReasoningPolicyHint === 'function') updateReasoningPolicyHint();
+    }
 
     function codexPerformanceBool(value) {
       return value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true' || String(value || '').toLowerCase() === 'on';
@@ -77,6 +110,7 @@ namespace ReignBetaServer
       result.reasoningMode = ['selective','off','all'].includes(String(source.reasoningMode || old.reasoningMode || result.reasoningMode)) ? String(source.reasoningMode || old.reasoningMode || result.reasoningMode) : result.reasoningMode;
       result.reasoningEffort = codexPerformanceReasoningEfforts.includes(String(source.reasoningEffort || old.reasoningEffort || result.reasoningEffort)) ? String(source.reasoningEffort || old.reasoningEffort || result.reasoningEffort) : result.reasoningEffort;
       result.fastMode = codexPerformanceBool(source.fastMode);
+      result.lookupMode = source.lookupMode === 'direct' ? 'direct' : 'auto';
       codexPerformanceOptionKeys.forEach(key => { result[key] = codexPerformanceBool(source[key]); });
       return result;
     }
@@ -89,6 +123,7 @@ namespace ReignBetaServer
       codexPerformanceOptions.reasoningMode = ['selective','off','all'].includes(mode) ? mode : 'selective';
       codexPerformanceOptions.reasoningEffort = codexPerformanceReasoningEfforts.includes(effort) ? effort : 'medium';
       const fast = document.getElementById('codexFastMode');
+      codexPerformanceOptions.lookupMode = document.getElementById('codexLookupMode')?.value === 'direct' ? 'direct' : 'auto';
       codexPerformanceOptions.fastMode = fast ? fast.value === 'on' : !!codexPerformanceOptions.fastMode;
       codexPerformanceOptionKeys.forEach(key => {
         const input = document.getElementById('codex' + key.charAt(0).toUpperCase() + key.slice(1));
@@ -112,12 +147,15 @@ namespace ReignBetaServer
         effort.value = value;
       }
       const fast = document.getElementById('codexFastMode');
+      const lookup = document.getElementById('codexLookupMode');
+      if (lookup) lookup.value = codexPerformanceOptions.lookupMode;
       if (fast) fast.value = codexPerformanceOptions.fastMode ? 'on' : 'off';
       codexPerformanceOptionKeys.forEach(key => {
         const id = 'codex' + key.charAt(0).toUpperCase() + key.slice(1);
         const input = document.getElementById(id);
         if (input) input.checked = !!codexPerformanceOptions[key];
       });
+      codexPerformanceUpdateReasoningChoices();
       codexPerformanceRenderStatus();
     }
     function codexPerformanceCaptureBeforeProviderChange() {
@@ -150,11 +188,17 @@ namespace ReignBetaServer
         const mode = document.getElementById('reasoningMode');
         const effort = document.getElementById('reasoningEffort');
         if (mode) mode.value = codexPerformanceNonCodexReasoning.reasoningMode;
-        if (effort) effort.value = codexPerformanceNonCodexReasoning.reasoningEffort;
+        if (effort) {
+          effort.innerHTML = codexPerformanceLegacyEffortOptions;
+          const value = codexPerformanceNonCodexReasoning.reasoningEffort;
+          if (![...effort.options].some(option => option.value === value)) effort.add(new Option(value, value));
+          effort.value = value;
+        }
       }
     }
     function codexPerformanceSetLoadedSettings(settings) {
       const s = settings && typeof settings === 'object' ? settings : {};
+      codexModelCheckRestore(s);
       codexPerformanceOptions = codexPerformanceNormalize(s.codexOptions, s);
       codexPerformanceNonCodexReasoning = {
         reasoningMode: s.reasoningMode || 'selective', reasoningEffort: s.reasoningEffort || 'medium'
@@ -215,9 +259,26 @@ namespace ReignBetaServer
       const button = document.getElementById('codexModelAvailabilityButton');
       if (button) button.disabled = false;
     }
+    const codexModelCheckStorageKey = 'reign.codex.modelToCheck';
+    function codexModelCheckRemember() {
+      const input = document.getElementById('codexModelCandidate');
+      if (!input) return;
+      input.dataset.initialized = 'true';
+      try { localStorage.setItem(codexModelCheckStorageKey, input.value.trim()); } catch (_) { }
+    }
+    function codexModelCheckRestore(settings) {
+      const input = document.getElementById('codexModelCandidate');
+      if (!input || input.dataset.initialized === 'true') return;
+      let remembered = null;
+      try { remembered = localStorage.getItem(codexModelCheckStorageKey); } catch (_) { }
+      input.value = remembered ?? settings.llmModelProfiles?.codex_subscription?.dialogueModel
+        ?? (settings.llmProvider === 'codex_subscription' ? settings.dialogueModel : '') ?? '';
+      input.dataset.initialized = 'true';
+    }
     async function checkCodexModelAvailability() {
       const candidate = (document.getElementById('codexModelCandidate')?.value || '').trim();
       if (!candidate) return;
+      codexModelCheckRemember();
       if (!window.confirm('Check availability by sending one bounded Codex model request? This consumes Codex usage.')) return;
       const output = document.getElementById('codexModelVerificationStatus');
       const button = document.getElementById('codexModelAvailabilityButton');
@@ -237,6 +298,8 @@ namespace ReignBetaServer
         codexPerformanceRenderStatus();
       });
     });
+    document.getElementById('dialogueModel')?.addEventListener('change', codexPerformanceUpdateReasoningChoices);
+    document.getElementById('codexModelCandidate')?.addEventListener('input', codexModelCheckRemember);
 ";
 
     }

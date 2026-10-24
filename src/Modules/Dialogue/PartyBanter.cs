@@ -187,10 +187,16 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
             var fresh = topicPool.Where(x => !lastTopics.Contains(x)).ToList(); if (fresh.Count > 0) topicPool = fresh;
             if (topicPool.Count == 0) topicPool = BanterTopicSeeds.Split('\n').Take(55).Select(x => x.Trim()).ToList();
             string topic = topicPool[Convert.ToInt32(PromptHash(requestedId).Substring(0, 6), 16) % topicPool.Count];
-            string prompt = BuildBanterPrompt(c, campaign, chosen, topic, options, shared, p, includeOptional: true);
-            if (prompt.Length + BanterRules.Length > 6000) prompt = BuildBanterPrompt(c, campaign, chosen, topic, options, new(), p, includeOptional: false);
-            if (prompt.Length + BanterRules.Length > 8800 && chosen.Count > 2) { chosen.RemoveAt(2); prompt = BuildBanterPrompt(c, campaign, chosen, topic, options, new(), p, includeOptional: false); }
-            if (prompt.Length + BanterRules.Length > 8800) return TestDict("ok", true, "eligible", false, "reason", "protected_prompt_floor_exceeds_budget");
+            string prompt = BuildBanterPrompt(c, campaign, chosen, topic, options, shared, p, true, out int politicalCharacters);
+            if (BanterPromptExceedsBaseBudget(prompt, politicalCharacters, 6000))
+                prompt = BuildBanterPrompt(c, campaign, chosen, topic, options, new(), p, false, out politicalCharacters);
+            if (BanterPromptExceedsBaseBudget(prompt, politicalCharacters, 8800, includeGrace: true) && chosen.Count > 2)
+            {
+                chosen.RemoveAt(2);
+                prompt = BuildBanterPrompt(c, campaign, chosen, topic, options, new(), p, false, out politicalCharacters);
+            }
+            if (BanterPromptExceedsBaseBudget(prompt, politicalCharacters, 8800, includeGrace: true))
+                return TestDict("ok", true, "eligible", false, "reason", "protected_prompt_floor_exceeds_budget");
             if (!Regex.IsMatch(requestedId, "^banter_[a-f0-9]{32}$")) return TestDict("ok", false, "error", "A stable banter request ID is required.");
             string player = ReadString(p, "playerHeroStringId", ""); var ids = chosen.Select(CharacterIdFrom).ToList();
             var start = ConversationStartApi(TestDict("campaignId", campaign, "timelineId", timeline, "sessionId", requestedId, "npcId", ids[0],
@@ -228,7 +234,24 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
         }
         private static string BuildBanterPrompt(ReignDbConnection c, string campaign, List<Dictionary<string, object>> heroes, string topic,
             Dictionary<string, object> options, List<Dictionary<string, object>> shared, Dictionary<string, object> p, bool includeOptional)
+            => BuildBanterPrompt(c, campaign, heroes, topic, options, shared, p, includeOptional, out _);
+
+        // Political beliefs are a required addition to the original bounded prompt,
+        // not optional memory or room to enlarge any other character context.
+        private static bool BanterPromptExceedsBaseBudget(string prompt, int politicalCharacters, int baseCharacters, bool includeGrace = false)
         {
+            long allowance = (long)baseCharacters + politicalCharacters;
+            // A bounded ten-percent margin absorbs small growth in required context.
+            // The optional-context target still trims at its original allowance.
+            if (includeGrace) allowance += (allowance + 9) / 10;
+            return (long)prompt.Length + BanterRules.Length > allowance;
+        }
+
+        private static string BuildBanterPrompt(ReignDbConnection c, string campaign, List<Dictionary<string, object>> heroes, string topic,
+            Dictionary<string, object> options, List<Dictionary<string, object>> shared, Dictionary<string, object> p, bool includeOptional,
+            out int politicalCharacters)
+        {
+            politicalCharacters = 0;
             EnsureIdentitySchema(c); EnsureMbtiRelationshipSchema(c);
             var b = new StringBuilder(); b.AppendLine("Topic: " + (topic.StartsWith("events|", StringComparison.Ordinal) && shared.Count == 0 ? "the road's weather" : topic.Split('|').Last()));
             b.AppendLine("Maximum " + ReadInt(options, "maxResponses", 6) + " individual spoken responses; " + ReadInt(options, "maxCharacters", 360) + " characters each. Player is listening silently.");
@@ -241,7 +264,18 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                     "culture", ReadString(h, "cultureId", ""), "clan", ReadString(h, "clanName", ""), "kingdom", ReadString(h, "kingdomName", ""),
                     "occupation", ReadString(h, "occupation", ""), "partyRole", ReadString(h, "banterPartyRole", "fellow traveler"));
                 b.AppendLine(Json.Serialize(identity));
+                b.AppendLine("PRIVATE CONTEXT FOR " + id + " ONLY; other speakers may not use or disclose these facts unless their own context establishes knowledge:");
+                b.AppendLine(BuildPregnancyPrompt(h));
+                if (ReadBool(h, "isPregnant", false) || ReadString(h, "pregnancyPrompt", "").Length > 0)
+                    b.AppendLine("Put optional pregnancyDisclosures on the same JSONL object as this speaker's text; quote only facts actually disclosed in that spoken line. Drafts are not disclosures.");
                 b.AppendLine(ReadString(traits, "basePersonalitySummary", "")); // Protected complete core, never sliced.
+                string political = RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
+                    TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(EnsurePoliticalProfile(campaign, id, h, traits)))));
+                b.AppendLine(political);
+                politicalCharacters += political.Length + Environment.NewLine.Length;
+                foreach (var fact in ReadNpcLives(c, campaign, ContinuityTimeline(p)).Characters.Where(n => n.HeroId == id)
+                    .SelectMany(n => n.Facts).Where(f => f.Active && !f.Private))
+                    b.AppendLine("Established personal fact for " + id + ": " + fact.Text);
                 var voice = ReadDictionary(ReadJsonObject(CharacterFile(campaign, id, "narrative.json")), "voice") ?? ReadJsonObject(CharacterFile(campaign, id, "voice.json"));
                 b.AppendLine("Voice: " + LimitText(ReadString(voice, "speechStyle", ""), 140));
                 var persistentSources = new List<string>();
@@ -335,7 +369,8 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             if (prior.Count > 0 && ReadString(prior.Last(), "speakerId", "") == speaker) return null;
             var spoken = prior.Select(x => ReadString(x, "speakerId", "")).Distinct().ToList();
             if (spoken.Count < ids.Count && spoken.Contains(speaker)) return null;
-            return TestDict("speakerId", speaker, "text", text, "reactions", ReadDictionaryList(row, "reactions").Take(6).ToList());
+            return TestDict("speakerId", speaker, "text", text, "reactions", ReadDictionaryList(row, "reactions").Take(6).ToList(),
+                "pregnancyDisclosures", ReadDictionaryList(row, "pregnancyDisclosures").Take(6).ToList());
         }
         private static bool BanterUsesForbiddenHonorific(string text) => Regex.IsMatch(text,
             @"\b(?:my\s+(?:lord|lady)|milord|milady)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -385,7 +420,8 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = hero, Player = ReadString(e, "playerHeroStringId", ""),
                 HeroName = ReadString(profile, "name", ""), PlayerName = ReadString(e, "playerName", "Player"), Location = ReadString(e, "locationId", ""),
                 EventId = AcceptedConversationEventId(campaign, hero, payload), EventType = "party_chat_turn", PlayerText = "", Reply = text,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Generation = ReadString(e, "generation", ""), Payload = payload, Parsed = TestDict(), Motive = TestDict(),
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Generation = ReadString(e, "generation", ""), Payload = payload,
+                Parsed = TestDict("pregnancyDisclosures", ReadDictionaryList(draft, "pregnancyDisclosures")), Motive = TestDict(),
                 Profile = profile, Characteristics = TestDict(), CommitEffects = false, GroupConversation = true, Participants = ReadStringList(payload, "participants"),
                 Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new(), Continuity = new() };
             PublishAcceptedConversationUnit(unit, accept => StorePartyConversationExchange(campaign, payload, hero, unit.Player, unit.PlayerName,

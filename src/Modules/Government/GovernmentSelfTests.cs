@@ -438,6 +438,48 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["hostile"] = hostile, ["friendly"] = friendly,
                     ["lowPartyPower"] = lowPower, ["highPartyPower"] = highPower });
 
+            var historicalGovernment = TestDict("available", true, "authoritative", true,
+                "knowledgeHolderHeroId", "senator", "kingdomId", "empire",
+                "memberLoyalty", "PRIVATE_LOYALTY_SENTINEL", "bribes", "PRIVATE_DEAL_SENTINEL",
+                "governmentBusiness", new[] {
+                    TestDict("businessId", "old-mandate", "title", "Civic mandate", "status", "decided",
+                        "decisionDate", "Summer 30", "decisionDay", 110d, "resolvedDay", 110.1d,
+                        "winningOptionId", "grant", "executedOptionId", "reject",
+                        "options", new[] { TestDict("id", "grant", "label", "Grant the mandate") },
+                        "ballots", new[] { TestDict("memberHeroId", "senator", "optionId", "grant", "score", "PRIVATE_SCORE_SENTINEL"),
+                            TestDict("memberHeroId", "OTHER_MEMBER_SENTINEL", "optionId", "reject") }),
+                    TestDict("businessId", "current-relief", "title", "Support families", "status", "presented",
+                        "decisionDay", 204d, "ballots", Array.Empty<Dictionary<string, object>>()) });
+            var governmentArrival = TestDict("heroStringId", "senator", "worldDay", 200d,
+                "nativePoliticalContext", TestDict("authoritative", true, "observedWorldDay", 200d,
+                    "observerGovernment", historicalGovernment));
+            string chronologyPrompt = BuildGovernmentPrivateConversationPrompt(governmentArrival);
+            var chronologyFacts = TryParseJsonObject(chronologyPrompt.Substring(chronologyPrompt.IndexOf("{\"observedWorldDay\"", StringComparison.Ordinal)));
+            var chronologyRows = ReadDictionaryList(chronologyFacts, "business");
+            var oldMandate = chronologyRows.First(x => ReadString(x, "businessId", "") == "old-mandate");
+            add("government.conversation_records_distinguish_ballot_winner_execution_and_pending",
+                chronologyRows.Count == 2 && ReadBool(oldMandate, "closed", false)
+                && ReadDouble(oldMandate, "resolvedDay", -1) == 110.1d
+                && ReadString(ReadDictionary(oldMandate, "ownRecordedBallot"), "optionId", "") == "grant"
+                && ReadString(oldMandate, "winningOptionId", "") == "grant"
+                && ReadString(oldMandate, "executedOptionId", "") == "reject"
+                && !ReadBool(chronologyRows[1], "closed", true)
+                && ReadDictionary(chronologyRows[1], "ownRecordedBallot") == null
+                && chronologyPrompt.Contains("do not describe their vote as upcoming", StringComparison.Ordinal)
+                && !chronologyPrompt.Contains("PRIVATE GOVERNMENT BUSINESS", StringComparison.Ordinal),
+                "An arrival with no bargaining turn receives closed historical decisions and genuinely pending business; own ballot, winner and execution remain distinct.",
+                TestDict("oldDecisionDay", 110d, "observedWorldDay", 200d, "pendingDecisionDay", 204d));
+            add("government.conversation_record_withholds_private_and_other_member_data",
+                !chronologyPrompt.Contains("SENTINEL", StringComparison.Ordinal)
+                && !chronologyPrompt.Contains("governmentCommitment", StringComparison.Ordinal)
+                && Json.Serialize(governmentArrival).Contains("PRIVATE_LOYALTY_SENTINEL", StringComparison.Ordinal),
+                "The public chronology projection drops private political values and every other member's ballot without mutating native input or enabling commitments.", null);
+            historicalGovernment["knowledgeHolderHeroId"] = "different-observer";
+            add("government.conversation_record_requires_matching_native_observer",
+                BuildGovernmentPrivateConversationPrompt(governmentArrival) == ""
+                && BuildGovernmentPrivateConversationPrompt(TestDict("heroStringId", "senator")) == "",
+                "Missing or differently attributed knowledge never supplies a borrowed government record.", null);
+
             string root = FindVerificationSourceRoot();
             string governmentPrefabPath = Path.Combine(root, "ReignBeta", "GUI", "Prefabs",
                 "ReignGovernmentScreen.xml");
@@ -455,9 +497,9 @@ namespace ReignBetaServer
                     "@RulerRelation", "@PartyLoyalty", "@SupportPercent", "@Forecast" }
                     .Any(marker => governmentPrefab.Contains(marker, StringComparison.Ordinal))
                 && governmentPrefab.Contains("ExecuteCallVote", StringComparison.Ordinal)
-                && governmentPrefab.Contains("ExecutePostpone", StringComparison.Ordinal)
+                && !governmentPrefab.Contains("ExecutePostpone", StringComparison.Ordinal)
                 && governmentPrefab.Contains("ExecuteSpeak", StringComparison.Ordinal),
-                "The actual hearing prefab binds public discussion and explicit voting/recess controls, with no instant private lobbying, live relationship/loyalty predictions or retired Trust display. Rendered/native evidence separately proves artwork and live bindings.",
+                "The actual hearing prefab binds public discussion and weighted voting with no manual recess, instant private lobbying, live relationship/loyalty predictions or retired Trust display. Rendered/native evidence separately proves artwork and live bindings.",
                 new Dictionary<string, object> { ["prefab"] = governmentPrefabPath });
             string governmentClientRoot = Path.Combine(root, "ReignBeta", "src", "Modules", "Government");
             string governmentText = Directory.Exists(governmentClientRoot)
@@ -500,6 +542,8 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["manifest"] = manifestPath, ["mcp"] = mcpPath,
                     ["clientLiveHost"] = liveHostPath, ["serverLiveTransport"] = serverLivePath });
             AddGovernmentHearingSelfTests(add);
+            AddGovernmentSessionSelfTests(add);
+            AddGovernmentEdictSelfTests(add);
             return rows;
         }
     }

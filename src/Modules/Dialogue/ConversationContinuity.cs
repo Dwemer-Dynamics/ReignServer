@@ -377,6 +377,7 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
                 {
                     CaptureContinuityReadSnapshot(activityConnection, payload, heroId);
                     text.Append(BuildPendingContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
+                    text.AppendLine().Append(BuildCommunicationPrompt(activityConnection, heroId, payload, sourceIds));
                     var mailAccess = BuildKnowledgeAccessContext(heroId, peer, "", payload);
                     foreach (var letter in LoadCorrespondenceMemory(activityConnection, heroId, peer,
                         ReadFirstString(payload, "playerText", "text", "message"), payload, mailAccess))
@@ -743,16 +744,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
         private static string FormatContinuityTranscript(List<Dictionary<string, object>> lines,
             Func<List<Dictionary<string, object>>, string> render)
         {
-            var groups = new List<List<Dictionary<string, object>>>();
-            foreach (var line in lines ?? new List<Dictionary<string, object>>())
-            {
-                string exchange = ReadFirstString(line, "exchangeId", "exchange_id");
-                string previous = groups.Count == 0 ? "" : ReadFirstString(groups.Last().Last(), "exchangeId", "exchange_id");
-                bool player = ReadString(line, "role", "").Equals("player", StringComparison.OrdinalIgnoreCase);
-                if (groups.Count == 0 || (exchange.Length > 0 && exchange != previous) || (exchange.Length == 0 && player))
-                    groups.Add(new List<Dictionary<string, object>>());
-                groups.Last().Add(line);
-            }
+            var groups = GroupContinuityTranscriptLines(lines);
             // Keep the most recent 30 individual messages, including the complete
             // exchange that crosses the boundary. Memory deduplication relies on
             // this content remaining in the actual provider request.
@@ -844,8 +836,9 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             // The final request is independently checked again after all adapters.
             int estimated = EstimateContinuityTokens(Json.Serialize(envelope.Messages));
             var expectedSources = ReadStringList(ReadDictionary(payload, "continuityEvidence"), "sourceIds").Distinct().ToList();
-            string rendered = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
+            string rendered = ConversationEvidenceText(envelope.Diagnostics, envelope.Messages);
             var missingSources = expectedSources.Where(id => !rendered.Contains(id, StringComparison.Ordinal)).ToList();
+            if (!ConversationStructureMatches(envelope.Diagnostics, envelope.Messages)) missingSources.Add("conversation_message_structure");
             missingSources.AddRange(MissingContinuityContent(rendered, ReadDictionary(payload, "continuityEvidence")));
             var memoryEvidence = ReadDictionary(payload, "memoryPrecisionEvidence");
             missingSources.AddRange(MissingPrecisionEvidence(rendered, memoryEvidence));
@@ -867,7 +860,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 ["memoryPrecisionEvidence"] = memoryEvidence,
                 ["tokenAccounting"] = new Dictionary<string, object> {
                     ["fixedRules"] = EstimateContinuityTokens(ReadString(envelope.Messages.FirstOrDefault(), "content", "")),
-                    ["characterProfile"] = EstimateContinuityTokens(ReadString(envelope.Messages.Skip(1).FirstOrDefault(m => ReadString(m, "role", "") == "system"), "content", "")),
+                    ["characterProfile"] = EstimateContinuityTokens(ReadString(envelope.Messages.Skip(1).FirstOrDefault(m => PromptHash(ReadString(m, "content", "")) == ReadString(envelope.Diagnostics, "characterPrefixHash", "")), "content", "")),
                     ["dynamicMemory"] = ReadInt(memoryEvidence, "dynamicMemoryTokenEstimate", 0),
                     ["drinkSubsystem"] = ReadInt(ReadDictionary(envelope.Diagnostics, "drinkPromptBudget"), "inputTokenEstimate", 0),
                     ["coreSerializedInput"] = ReadInt(ReadDictionary(envelope.Diagnostics, "drinkPromptBudget"), "coreInputTokenEstimate", estimated),
@@ -943,8 +936,11 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             var missingSources = expectedSources.Where(id => !serialized.Contains(id, StringComparison.Ordinal)).ToList();
             // Diagnostics, source IDs or tool metadata cannot stand in for actual
             // speaker-labeled evidence in the provider's messages.
-            missingSources.AddRange(MissingContinuityContent(Json.Serialize(ReadDictionaryList(body, "messages")),
-                ReadDictionary(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "continuityEvidence"), true));
+            var promptDiagnostics = ReadDictionary(payload, "promptEnvelope");
+            var finalMessages = ReadDictionaryList(body, "messages");
+            if (!ConversationStructureMatches(promptDiagnostics, finalMessages)) missingSources.Add("conversation_message_structure");
+            missingSources.AddRange(MissingContinuityContent(ConversationEvidenceText(promptDiagnostics, finalMessages),
+                ReadDictionary(ReadDictionary(promptDiagnostics, "continuityPreflight"), "continuityEvidence")));
             missingSources.AddRange(MissingPrecisionEvidence(Json.Serialize(ReadDictionaryList(body, "messages")),
                 ReadDictionary(ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight"), "memoryPrecisionEvidence"), true));
             if (!PrecisionEvidenceGenerationCurrent(ReadDictionary(ReadDictionary(ReadDictionary(payload,"promptEnvelope"),"continuityPreflight"),"memoryPrecisionEvidence")))
@@ -952,11 +948,18 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             int estimate = EstimateContinuityTokens(serialized);
             int output = ReadInt(policy, "outputReserve", 0);
             int safety = ReadInt(policy, "safetyReserve", ConversationCapacitySafetyReserve);
+            int runtimeReserve = ReadInt(policy, "runtimeReserve", 0);
+            bool runtimeManaged = ReadBool(policy, "runtimeManagedContext", false);
             int allowance = ReadInt(policy, "inputAllowance", ConversationUnverifiedInputLimit);
             // A byte ceiling is used for the physical capacity when no certified
             // tokenizer is available. The estimate only chooses our working budget.
             int byteBound = Encoding.UTF8.GetByteCount(serialized) + 128;
-            bool capacityFits = !verified || (long)byteBound + output + safety <= capacity;
+            // Codex's own tokenizer and compaction enforce its model window. UTF-8
+            // bytes are not tokens: treating each byte as a token falsely rejects
+            // ordinary 100k-token prompts on 272k models. HTTP routes retain their
+            // existing byte bound; Codex uses our disclosed conservative estimate
+            // plus a separate reserve for runtime instructions and Direct tools.
+            bool capacityFits = !verified || (long)(runtimeManaged ? estimate : byteBound) + output + safety + runtimeReserve <= capacity;
             return new Dictionary<string, object>(policy) {
                 ["schema"] = "reign-continuity-provider-preflight-v1",
                 ["finalSerializedRequestHash"] = PromptHash(serialized), ["requestCharacters"] = serialized.Length,
@@ -964,6 +967,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 ["selectedInputAllowance"] = Math.Min(allowance, SelectConversationInputStep(estimate)),
                 ["fits"] = estimate <= allowance && capacityFits && ReadBool(policy, "outputFits", false) && missingSources.Count == 0,
                 ["physicalCapacityFits"] = capacityFits,
+                ["capacityAccounting"] = runtimeManaged ? "conservative_estimate_with_codex_runtime_enforcement" : "utf8_byte_upper_bound",
                 ["missingSourceIds"] = missingSources, ["requiredSourceCoverageComplete"] = missingSources.Count == 0,
                 ["estimator"] = "ascii_divided_by_three_plus_unicode_utf8_bytes_plus_128; not an exact tokenizer",
                 ["requiredSources"] = ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight")

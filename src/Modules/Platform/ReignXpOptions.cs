@@ -51,7 +51,10 @@ namespace ReignBetaServer
                 ["ok"] = true,
                 ["reignXpEnabled"] = ReadBool(settings, "reignXpEnabled", true),
                 ["reignXpMultiplier"] = multiplier,
-                ["playerApproaches"] = PlayerApproachOptionsForClient(settings)
+                ["playerApproaches"] = PlayerApproachOptionsForClient(settings),
+                ["npcLives"] = NpcLivesOptionsForClient(settings),
+                ["rulers"] = RulerOptionsForClient(settings),
+                ["announcements"] = AnnouncementOptionsForClient(settings)
             };
             foreach (string key in ReignXpCategoryOptionKeys)
             {
@@ -64,20 +67,21 @@ namespace ReignBetaServer
                 }
                 result[key] = category;
             }
+            foreach (string key in CorrespondenceOptionKeys) result[key] = CorrespondenceOption(settings, key);
             return result;
         }
 
         private static string ReignXpOptionsHtml() => @"
     <section id='options' class='page'>
       <style>
-        #options .xpOptions{max-width:760px;background:#121211;color:#C5BDAF;border:1px solid #7E6A4D;padding:24px}
-        #options h2,#options h3{color:#A88A54} #options .xpHelp{color:#8A8883}
-        #options .xpRow{display:flex;align-items:center;gap:12px;margin:20px 0;flex-wrap:wrap}
-        #options input{accent-color:#A88A54} #options input[type=range]{flex:1;min-width:140px;width:100%;max-width:440px}
-        #options output{color:#C5AC83;min-width:4em} #options input:disabled{opacity:.55}
-        #options button{background:#1A1917;color:#C5BDAF;border:1px solid #7E6A4D}
-        #options button:disabled{color:#4A4945} #options :focus-visible{outline:2px solid #A88A54;outline-offset:3px}
-        #options .xpError{color:#C35B32} #options #reignXpStatus{min-height:1.5em;margin-top:12px}
+        :is(#options,#npclivesdiagnostics) .xpOptions{max-width:760px;background:#121211;color:#C5BDAF;border:1px solid #7E6A4D;padding:24px}
+        :is(#options,#npclivesdiagnostics) h2,:is(#options,#npclivesdiagnostics) h3{color:#A88A54} :is(#options,#npclivesdiagnostics) .xpHelp{color:#8A8883}
+        :is(#options,#npclivesdiagnostics) .xpRow{display:flex;align-items:center;gap:12px;margin:20px 0;flex-wrap:wrap}
+        :is(#options,#npclivesdiagnostics) input{accent-color:#A88A54} :is(#options,#npclivesdiagnostics) input[type=range]{flex:1;min-width:140px;width:100%;max-width:440px}
+        :is(#options,#npclivesdiagnostics) output{color:#C5AC83;min-width:4em} :is(#options,#npclivesdiagnostics) input:disabled{opacity:.55}
+        :is(#options,#npclivesdiagnostics) button{background:#1A1917;color:#C5BDAF;border:1px solid #7E6A4D}
+        :is(#options,#npclivesdiagnostics) button:disabled{color:#4A4945} :is(#options,#npclivesdiagnostics) :focus-visible{outline:2px solid #A88A54;outline-offset:3px}
+        :is(#options,#npclivesdiagnostics) .xpError{color:#C35B32} :is(#options,#npclivesdiagnostics) #reignXpStatus{min-height:1.5em;margin-top:12px}
       </style>
       <h2>Options</h2>
       <div class='xpOptions'>
@@ -106,7 +110,7 @@ namespace ReignBetaServer
         <button id='saveReignXpOptions' onclick='saveReignXpOptions()'>Save XP options</button>
         <div id='reignXpStatus' role='status' aria-live='polite'></div>
       </div>
-" + BanterOptionsHtml() + PlayerApproachOptionsHtml() + @"    </section>";
+" + CorrespondenceOptionsHtml() + BanterOptionsHtml() + PlayerApproachOptionsHtml() + NpcLivesOptionsHtml() + RulerOptionsHtml() + AnnouncementOptionsHtml() + PersonalGossipOptionsHtml() + @"    </section>";
 
         private static string ReignXpOptionsScript() => @"
     ids.push('reignXpEnabled','reignXpMultiplier');
@@ -128,8 +132,12 @@ namespace ReignBetaServer
         : 'Reign participation rewards are off. Your multipliers are retained.';
     }
     function loadReignXpOptions(settings){
+      loadCorrespondenceOptions(settings);
       loadBanterOptions(settings);
       loadPlayerApproachOptions(settings);
+      loadNpcLivesOptions(settings);
+      loadAnnouncementOptions(settings);
+      loadPersonalGossipOptions(settings);
       const status=document.getElementById('reignXpStatus');status.className='';status.textContent='';
       document.getElementById('reignXpEnabled').checked=settings.reignXpEnabled!==false;
       const m=Number(settings.reignXpMultiplier??1);
@@ -152,6 +160,6 @@ namespace ReignBetaServer
       }catch(error){status.className='xpError';status.textContent=error.message;}
       finally{button.disabled=false;}
     }
-    renderReignXpOptions();" + BanterOptionsScript() + PlayerApproachOptionsScript();
+    renderReignXpOptions();" + CorrespondenceOptionsScript() + BanterOptionsScript() + PlayerApproachOptionsScript() + NpcLivesOptionsScript() + RulerOptionsScript() + AnnouncementOptionsScript() + PersonalGossipOptionsScript();
     }
 }

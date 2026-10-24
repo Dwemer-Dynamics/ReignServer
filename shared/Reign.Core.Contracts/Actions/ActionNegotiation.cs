@@ -133,10 +133,34 @@ namespace Reign.Core.Contracts.Actions
             }
             else if (decision.Kind == "propose" || decision.Kind == "counter")
             {
-                try { errors.AddRange(AgreementRules.Validate(CreateProposal(offered, decision, playerId, npcId, conversationId, now), ReignActionCatalog.Find, now)); }
+                try
+                {
+                    var proposal = CreateProposal(offered, decision, playerId, npcId, conversationId, now);
+                    errors.AddRange(AgreementRules.Validate(proposal, ReignActionCatalog.Find, now));
+                    if (decision.Kind == "counter" && offered != null && RepeatsOfferedTerms(offered, proposal))
+                        errors.Add("A counteroffer must change the offered terms. Include every requested payment or supported condition; use none while still negotiating, or accept only for unconditional consent to the exact offer.");
+                }
                 catch (ArgumentException ex) { errors.Add(ex.Message); }
             }
             return errors.Distinct().ToList();
+        }
+
+        private static bool RepeatsOfferedTerms(ActionAgreement offered, ActionAgreement proposal)
+        {
+            if (offered.Clauses.Count != proposal.Clauses.Count) return false;
+            for (int index = 0; index < offered.Clauses.Count; index++)
+            {
+                var before = offered.Clauses[index]; var after = proposal.Clauses[index];
+                if (before.ActionId != after.ActionId || before.ActorId != after.ActorId || before.RecipientId != after.RecipientId
+                    || before.Timing != after.Timing || before.DueDay != after.DueDay || before.DurationDays != after.DurationDays
+                    || before.Installments != after.Installments || before.IntervalDays != after.IntervalDays
+                    || before.ConditionKind != after.ConditionKind || before.ConditionTargetId != after.ConditionTargetId
+                    || !before.Arguments.OrderBy(x => x.Key, StringComparer.Ordinal)
+                        .SequenceEqual(after.Arguments.OrderBy(x => x.Key, StringComparer.Ordinal))) return false;
+            }
+            // Generated clause IDs, display wording and the new revision cannot turn
+            // an unchanged package into revised terms or supply missing consent.
+            return true;
         }
 
         public static ActionAgreement CreateProposal(ActionAgreement? offered, ActionDecision decision,

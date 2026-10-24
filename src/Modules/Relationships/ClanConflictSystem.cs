@@ -786,6 +786,8 @@ AND notice_status IN ('ready','fetched') ORDER BY world_day,incident_id LIMIT "
                         ["campaign"] = campaignId, ["timeline"] = timelineId
                     });
                 foreach (Dictionary<string, object> notice in notices)
+                {
+                    notice["news_description"] = ClanConflictCatalog.FirstOrDefault(a => a.Id == ReadString(notice, "archetype_id", ""))?.Description ?? "";
                     ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
 notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;",
                         new Dictionary<string, object>
@@ -793,6 +795,7 @@ notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;",
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             ["incident"] = ReadString(notice, "incident_id", "")
                         });
+                }
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["count"] = notices.Count,

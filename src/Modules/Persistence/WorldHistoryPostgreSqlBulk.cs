@@ -149,6 +149,12 @@ namespace ReignBetaServer
                 : supplied.Select(rule =>
                     new Dictionary<string, object>(rule,
                         StringComparer.OrdinalIgnoreCase)).ToList();
+            // Conception is private self-knowledge, not automatic realm news.
+            if (eventType == "child_conceived")
+            {
+                dissemination = "participants";
+                rules.RemoveAll(rule => ReadString(rule, "audienceType", "") != "entity");
+            }
             bool publicTournament = IsPublicTournamentHistory(eventType, dissemination);
             if (rules.Count > 0)
             {

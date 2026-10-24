@@ -1,0 +1,1391 @@
+{
+  "schema": "reign-personal-gossip-launch-manifest-v1",
+  "version": "2026-10-19.1",
+  "plan": "docs/agent/testing/PERSONAL_GOSSIP_LAUNCH_PLAN_2026-10-04.md",
+  "baseline": "user-selected exact test",
+  "scheduling": {
+    "policy": "pass_once",
+    "retestRequires": [
+      "relevant_dependency_change",
+      "missing_evidence",
+      "worthwhile_distinct_variation"
+    ],
+    "coalesceSharedProof": true,
+    "nativeCommandsAreNotPasses": true
+  },
+  "proofLayers": [
+    "offline_contract",
+    "native_policy_probe",
+    "production_native_flow",
+    "real_provider_semantics",
+    "default_play",
+    "persistence_fault",
+    "native_input",
+    "soak_performance"
+  ],
+  "criticalRequiredAccuracy": 1,
+  "contextualAccuracy": 0.98,
+  "languageQuality": 0.95,
+  "perStyleQuality": 0.9,
+  "nativeRequirements": [
+    {
+      "id": "G01",
+      "functionId": "friendship_below",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G02",
+      "functionId": "friendship_boundary",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G03",
+      "functionId": "family_below",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G04",
+      "functionId": "family_boundary",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G05",
+      "functionId": "dislike_below",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G06",
+      "functionId": "dislike_boundary",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G07",
+      "functionId": "hurt_below",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G08",
+      "functionId": "hurt_boundary",
+      "family": "eligibility",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G09",
+      "functionId": "same_settlement",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G10",
+      "functionId": "same_party",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G11",
+      "functionId": "army_only",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G12",
+      "functionId": "nearby_clan_kingdom_only",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G13",
+      "functionId": "unnamed_remote",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G14",
+      "functionId": "unavailable_unknown_empty",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G15",
+      "functionId": "no_audience_no_arrival_retry",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G16",
+      "functionId": "substantive_reassessment_saved_roll",
+      "family": "audience",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G17",
+      "functionId": "single_named_weights",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G18",
+      "functionId": "multiple_named_weights",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G19",
+      "functionId": "negative_named_weights",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G20",
+      "functionId": "ordinary_weights",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G21",
+      "functionId": "sole_candidate_not_guaranteed_share",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G22",
+      "functionId": "ineligible_named",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G23",
+      "functionId": "candidate_cap_stable_order",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G24",
+      "functionId": "kin_ambiguity_background_names",
+      "family": "mentions_weights",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G25",
+      "functionId": "local_hour",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G26",
+      "functionId": "departure_frozen_local",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G27",
+      "functionId": "same_kingdom_distance",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G28",
+      "functionId": "different_kingdom_distance",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G29",
+      "functionId": "distance_unavailable",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G30",
+      "functionId": "unknown_kingdom",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G31",
+      "functionId": "recipient_route_frozen",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G32",
+      "functionId": "actual_late_acquisition",
+      "family": "transit",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G33",
+      "functionId": "public_details",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G34",
+      "functionId": "personal_disclosure",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G35",
+      "functionId": "intimate_disclosure",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G36",
+      "functionId": "secrets_promises_shame",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G37",
+      "functionId": "impression_fallback",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G38",
+      "functionId": "negative_disclosure_no_redraw",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G39",
+      "functionId": "distortion_truth_separation",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G40",
+      "functionId": "positive_hidden_feeling_reaction",
+      "family": "discretion_intent",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G41",
+      "functionId": "account_credibility",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G42",
+      "functionId": "questions_not_facts",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G43",
+      "functionId": "bounded_own_reply_memory",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G44",
+      "functionId": "conclusive_vs_hearsay",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G45",
+      "functionId": "exposed_liar_vs_hidden_honesty",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G46",
+      "functionId": "independent_corroboration",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G47",
+      "functionId": "reply_discretion",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G48",
+      "functionId": "observer_isolation",
+      "family": "belief_reply",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G49",
+      "functionId": "native_save_roundtrip",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G50",
+      "functionId": "server_restart_lease",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G51",
+      "functionId": "late_result_restore_generation",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G52",
+      "functionId": "duplicate_identity",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G53",
+      "functionId": "provider_fault_attempt_limit",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G54",
+      "functionId": "timeline_rewind",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G55",
+      "functionId": "presence_timeline_validation",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G56",
+      "functionId": "policy_disable_resume",
+      "family": "durability",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G57",
+      "functionId": "original_conversation_cap",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G58",
+      "functionId": "rolling_day_cap",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G59",
+      "functionId": "same_topic_saved_decision",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G60",
+      "functionId": "hop_and_loop_limit",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G61",
+      "functionId": "retell_recipient_name_provenance",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G62",
+      "functionId": "propagation_expiry",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G63",
+      "functionId": "single_reply_no_pingpong",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G64",
+      "functionId": "spontaneous_raise_limit",
+      "family": "limits_retelling",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G65",
+      "functionId": "native_individual_input",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G66",
+      "functionId": "party_speaker_ownership",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G67",
+      "functionId": "private_whisper_parent",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G68",
+      "functionId": "social_full_audience",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G69",
+      "functionId": "applied_impression_receipts",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G70",
+      "functionId": "memory_official_recall_boundaries",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G71",
+      "functionId": "roster_performance",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    },
+    {
+      "id": "G72",
+      "functionId": "restoration_baseline_protection",
+      "family": "integration",
+      "required": true,
+      "status": "pending",
+      "proofMustBeObserved": true,
+      "source": "approved plan phase4; expand distinct boundary variants before execution"
+    }
+  ],
+  "playstyles": [
+    "warm_social",
+    "reserved_private",
+    "curious_family",
+    "flirtatious_romantic",
+    "provocative_rivalrous",
+    "practical_roaming"
+  ],
+  "stories": [
+    "N1_family_local",
+    "N2_family_remote",
+    "N3_excited_sharing",
+    "N4_confidences",
+    "N5_malicious_account",
+    "N6_impressions",
+    "N7_ambiguous_speech",
+    "N8_uncertain_report"
+  ],
+  "memoryModes": [
+    "normal",
+    "high_memory"
+  ],
+  "providerCandidateVariants": [
+    {
+      "id": "N1_family_local_warm_social_normal",
+      "story": "N1_family_local",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N1_family_local_warm_social_high_memory",
+      "story": "N1_family_local",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N1_family_local_reserved_private_normal",
+      "story": "N1_family_local",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N1_family_local_reserved_private_high_memory",
+      "story": "N1_family_local",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N1_family_local_curious_family_normal",
+      "story": "N1_family_local",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N1_family_local_curious_family_high_memory",
+      "story": "N1_family_local",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N1_family_local_flirtatious_romantic_normal",
+      "story": "N1_family_local",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N1_family_local_flirtatious_romantic_high_memory",
+      "story": "N1_family_local",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N1_family_local_provocative_rivalrous_normal",
+      "story": "N1_family_local",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N1_family_local_provocative_rivalrous_high_memory",
+      "story": "N1_family_local",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N1_family_local_practical_roaming_normal",
+      "story": "N1_family_local",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N1_family_local_practical_roaming_high_memory",
+      "story": "N1_family_local",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N2_family_remote_warm_social_normal",
+      "story": "N2_family_remote",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N2_family_remote_warm_social_high_memory",
+      "story": "N2_family_remote",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N2_family_remote_reserved_private_normal",
+      "story": "N2_family_remote",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N2_family_remote_reserved_private_high_memory",
+      "story": "N2_family_remote",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N2_family_remote_curious_family_normal",
+      "story": "N2_family_remote",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N2_family_remote_curious_family_high_memory",
+      "story": "N2_family_remote",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N2_family_remote_flirtatious_romantic_normal",
+      "story": "N2_family_remote",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N2_family_remote_flirtatious_romantic_high_memory",
+      "story": "N2_family_remote",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N2_family_remote_provocative_rivalrous_normal",
+      "story": "N2_family_remote",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N2_family_remote_provocative_rivalrous_high_memory",
+      "story": "N2_family_remote",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N2_family_remote_practical_roaming_normal",
+      "story": "N2_family_remote",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N2_family_remote_practical_roaming_high_memory",
+      "story": "N2_family_remote",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N3_excited_sharing_warm_social_normal",
+      "story": "N3_excited_sharing",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N3_excited_sharing_warm_social_high_memory",
+      "story": "N3_excited_sharing",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N3_excited_sharing_reserved_private_normal",
+      "story": "N3_excited_sharing",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N3_excited_sharing_reserved_private_high_memory",
+      "story": "N3_excited_sharing",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N3_excited_sharing_curious_family_normal",
+      "story": "N3_excited_sharing",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N3_excited_sharing_curious_family_high_memory",
+      "story": "N3_excited_sharing",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N3_excited_sharing_flirtatious_romantic_normal",
+      "story": "N3_excited_sharing",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N3_excited_sharing_flirtatious_romantic_high_memory",
+      "story": "N3_excited_sharing",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N3_excited_sharing_provocative_rivalrous_normal",
+      "story": "N3_excited_sharing",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N3_excited_sharing_provocative_rivalrous_high_memory",
+      "story": "N3_excited_sharing",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N3_excited_sharing_practical_roaming_normal",
+      "story": "N3_excited_sharing",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N3_excited_sharing_practical_roaming_high_memory",
+      "story": "N3_excited_sharing",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N4_confidences_warm_social_normal",
+      "story": "N4_confidences",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N4_confidences_warm_social_high_memory",
+      "story": "N4_confidences",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N4_confidences_reserved_private_normal",
+      "story": "N4_confidences",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N4_confidences_reserved_private_high_memory",
+      "story": "N4_confidences",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N4_confidences_curious_family_normal",
+      "story": "N4_confidences",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N4_confidences_curious_family_high_memory",
+      "story": "N4_confidences",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N4_confidences_flirtatious_romantic_normal",
+      "story": "N4_confidences",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N4_confidences_flirtatious_romantic_high_memory",
+      "story": "N4_confidences",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N4_confidences_provocative_rivalrous_normal",
+      "story": "N4_confidences",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N4_confidences_provocative_rivalrous_high_memory",
+      "story": "N4_confidences",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N4_confidences_practical_roaming_normal",
+      "story": "N4_confidences",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N4_confidences_practical_roaming_high_memory",
+      "story": "N4_confidences",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N5_malicious_account_warm_social_normal",
+      "story": "N5_malicious_account",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N5_malicious_account_warm_social_high_memory",
+      "story": "N5_malicious_account",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N5_malicious_account_reserved_private_normal",
+      "story": "N5_malicious_account",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N5_malicious_account_reserved_private_high_memory",
+      "story": "N5_malicious_account",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N5_malicious_account_curious_family_normal",
+      "story": "N5_malicious_account",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N5_malicious_account_curious_family_high_memory",
+      "story": "N5_malicious_account",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N5_malicious_account_flirtatious_romantic_normal",
+      "story": "N5_malicious_account",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N5_malicious_account_flirtatious_romantic_high_memory",
+      "story": "N5_malicious_account",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N5_malicious_account_provocative_rivalrous_normal",
+      "story": "N5_malicious_account",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N5_malicious_account_provocative_rivalrous_high_memory",
+      "story": "N5_malicious_account",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N5_malicious_account_practical_roaming_normal",
+      "story": "N5_malicious_account",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N5_malicious_account_practical_roaming_high_memory",
+      "story": "N5_malicious_account",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N6_impressions_warm_social_normal",
+      "story": "N6_impressions",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N6_impressions_warm_social_high_memory",
+      "story": "N6_impressions",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N6_impressions_reserved_private_normal",
+      "story": "N6_impressions",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N6_impressions_reserved_private_high_memory",
+      "story": "N6_impressions",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N6_impressions_curious_family_normal",
+      "story": "N6_impressions",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N6_impressions_curious_family_high_memory",
+      "story": "N6_impressions",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N6_impressions_flirtatious_romantic_normal",
+      "story": "N6_impressions",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N6_impressions_flirtatious_romantic_high_memory",
+      "story": "N6_impressions",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N6_impressions_provocative_rivalrous_normal",
+      "story": "N6_impressions",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N6_impressions_provocative_rivalrous_high_memory",
+      "story": "N6_impressions",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N6_impressions_practical_roaming_normal",
+      "story": "N6_impressions",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N6_impressions_practical_roaming_high_memory",
+      "story": "N6_impressions",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N7_ambiguous_speech_warm_social_normal",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N7_ambiguous_speech_warm_social_high_memory",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N7_ambiguous_speech_reserved_private_normal",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N7_ambiguous_speech_reserved_private_high_memory",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N7_ambiguous_speech_curious_family_normal",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N7_ambiguous_speech_curious_family_high_memory",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N7_ambiguous_speech_flirtatious_romantic_normal",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N7_ambiguous_speech_flirtatious_romantic_high_memory",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N7_ambiguous_speech_provocative_rivalrous_normal",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N7_ambiguous_speech_provocative_rivalrous_high_memory",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N7_ambiguous_speech_practical_roaming_normal",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N7_ambiguous_speech_practical_roaming_high_memory",
+      "story": "N7_ambiguous_speech",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N8_uncertain_report_warm_social_normal",
+      "story": "N8_uncertain_report",
+      "playstyle": "warm_social",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N8_uncertain_report_warm_social_high_memory",
+      "story": "N8_uncertain_report",
+      "playstyle": "warm_social",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N8_uncertain_report_reserved_private_normal",
+      "story": "N8_uncertain_report",
+      "playstyle": "reserved_private",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N8_uncertain_report_reserved_private_high_memory",
+      "story": "N8_uncertain_report",
+      "playstyle": "reserved_private",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N8_uncertain_report_curious_family_normal",
+      "story": "N8_uncertain_report",
+      "playstyle": "curious_family",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N8_uncertain_report_curious_family_high_memory",
+      "story": "N8_uncertain_report",
+      "playstyle": "curious_family",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N8_uncertain_report_flirtatious_romantic_normal",
+      "story": "N8_uncertain_report",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N8_uncertain_report_flirtatious_romantic_high_memory",
+      "story": "N8_uncertain_report",
+      "playstyle": "flirtatious_romantic",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N8_uncertain_report_provocative_rivalrous_normal",
+      "story": "N8_uncertain_report",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N8_uncertain_report_provocative_rivalrous_high_memory",
+      "story": "N8_uncertain_report",
+      "playstyle": "provocative_rivalrous",
+      "memoryMode": "high_memory"
+    },
+    {
+      "id": "N8_uncertain_report_practical_roaming_normal",
+      "story": "N8_uncertain_report",
+      "playstyle": "practical_roaming",
+      "memoryMode": "normal"
+    },
+    {
+      "id": "N8_uncertain_report_practical_roaming_high_memory",
+      "story": "N8_uncertain_report",
+      "playstyle": "practical_roaming",
+      "memoryMode": "high_memory"
+    }
+  ],
+  "initialProviderSelection": [
+    {
+      "id": "N1_family_local_warm_social_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N1_family_local_curious_family_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N1_family_local_provocative_rivalrous_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N2_family_remote_reserved_private_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N2_family_remote_flirtatious_romantic_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N2_family_remote_practical_roaming_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N3_excited_sharing_curious_family_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N3_excited_sharing_provocative_rivalrous_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N3_excited_sharing_warm_social_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N4_confidences_flirtatious_romantic_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N4_confidences_practical_roaming_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N4_confidences_reserved_private_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N5_malicious_account_provocative_rivalrous_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N5_malicious_account_warm_social_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N5_malicious_account_curious_family_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N6_impressions_practical_roaming_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N6_impressions_reserved_private_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N6_impressions_flirtatious_romantic_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N7_ambiguous_speech_warm_social_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N7_ambiguous_speech_curious_family_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N7_ambiguous_speech_provocative_rivalrous_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N8_uncertain_report_reserved_private_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N8_uncertain_report_flirtatious_romantic_normal",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    },
+    {
+      "id": "N8_uncertain_report_practical_roaming_high_memory",
+      "reason": "Balanced risk-based initial matrix: each story in both memory modes, all six playstyles in both modes; additional variants require a concrete coverage reason."
+    }
+  ],
+  "defaultJourneys": [
+    "sociable_court",
+    "private_family",
+    "mobile_pragmatic"
+  ],
+  "journeyDays": 20,
+  "limits": {
+    "providerAttempts": 5000,
+    "inputTokens": 60000000,
+    "outputTokens": 3000000,
+    "billedUsd": 75
+  },
+  "coverageNote": "72 logical requirements are not 72 mandatory duplicate conversations. Native policy probes prove pure boundary functions with actual native snapshots; production flows and real-provider semantics require their own evidence. Never count a probe or completed command as an end-to-end or language pass."
+}

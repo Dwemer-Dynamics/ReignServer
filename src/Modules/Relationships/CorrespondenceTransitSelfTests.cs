@@ -17,6 +17,10 @@ namespace ReignBetaServer
             Check("quarter_floor_and_default", Near(CorrespondenceTransitPolicy.NewTransitDays(0.25d), 0.0625d)
                 && Near(CorrespondenceTransitPolicy.NewTransitDays(3d), 0.75d));
             Check("urgent_stays_immediate", CorrespondenceTransitPolicy.NewTransitDays(3d, true) == 0d);
+            Check("travel_control_range_and_relative_speed", Near(CorrespondenceTransitPolicy.NewTransitDays(3d, false, .25d), .1875d)
+                && Near(CorrespondenceTransitPolicy.NewTransitDays(3d, false, 4d), 3d)
+                && CorrespondenceTransitPolicy.NewTransitDays(3d, true, 4d) == 0d);
+            Check("version_one_parent_retains_unscaled_base", Near(CorrespondenceTransitPolicy.ReplyBaseDays(1, 3d, .75d), 3d));
             Check("invalid_estimate_has_finite_fallback", Near(CorrespondenceTransitPolicy.NewTransitDays(double.NaN), 0.75d)
                 && Near(CorrespondenceTransitPolicy.NewTransitDays(double.PositiveInfinity), 0.75d));
             double hour = 91133d * 24d;
@@ -67,6 +71,20 @@ namespace ReignBetaServer
                     var urgent = InsertLetter(connection, "commander", "Commander", "player", "Player", "Urgent report.",
                         "campaign_command_urgent_report", "urgent", "", "a", "b", 200d, 203d, TestDict());
                     Check("central_policy_urgent", ReadDouble(urgent, "deliveryDay", -1d) == 200d);
+                    var scaled = InsertLetter(connection, "scaled", "Scaled", "player", "Player", "Slower courier.",
+                        "npc_initiated", "scaled", "", "a", "b", 300d, 303d, TestDict(), 2d);
+                    var persistedScaled = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;",
+                        TestDict("id", ReadString(scaled, "letterId", ""))).Single();
+                    double scaledBase = CorrespondenceTransitPolicy.ReplyBaseDays(ReadInt(persistedScaled, "transit_policy_version", 0),
+                        ReadDouble(persistedScaled, "base_transit_days", 0), 1.5d);
+                    var fasterReply = InsertLetter(connection, "player", "Player", "scaled", "Scaled", "Faster return.",
+                        "npc_reply", "scaled", ReadString(scaled, "letterId", ""), "b", "a", 302d, 302d + scaledBase, TestDict(), .5d);
+                    var scaledReplay = InsertLetter(connection, "player", "Player", "scaled", "Scaled", "Retry.",
+                        "npc_reply", "scaled", ReadString(scaled, "letterId", ""), "b", "a", 303d, 306d, TestDict(), 4d);
+                    Check("new_multiplier_persists_without_compounding_or_retiming", Near(ReadDouble(scaled, "deliveryDay", 0), 301.5d)
+                        && Near(ReadDouble(fasterReply, "deliveryDay", 0), 302.375d)
+                        && Near(ReadDouble(scaledReplay, "deliveryDay", 0), 302.375d)
+                        && ReadBool(scaledReplay, "replayed", false));
                 }
                 var reportPayload = TestDict("campaignId", campaign, "senderId", "commander",
                     "senderName", "Lucon", "recipientId", "player", "recipientName", "Nal",
@@ -109,7 +127,56 @@ namespace ReignBetaServer
                         && Near(ReadDouble(original, "delivery_day", 0d), 105.3893225703d)
                         && ReadInt(reply, "transit_policy_version", 0) == CorrespondenceTransitPolicy.Version
                         && Near(ReadDouble(reply, "delivery_day", 0d), 103.347330642575d));
+                    ExecuteSql(reopened, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts)
+SELECT 'bulk_'||i,'bulk_thread','player','bulk','Fixture read body','read','player',400+i,i,i FROM generate_series(1,1001) AS i;
+INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
+('old_unread','old_thread','old_contact','player','Old unread body','delivered','npc_initiated',1,1,1),
+('hidden_mail','hidden_thread','hidden_contact','player','Unseen body','in_transit','npc_introduction',5000,5000,5000),
+('foreign_mail','foreign_thread','other_npc','other_player','Private body','delivered','npc_initiated',6000,6000,6000);");
                 }
+                var archive = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
+                    "contactIds", new[] { "bulk", "old_contact" }));
+                var summaries = ReadDictionaryList(archive, "contactStates");
+                Check("full_history_summary_survives_body_limit", ReadDictionaryList(archive, "letters").Count == 1000
+                    && ReadDictionaryList(archive, "letters").All(row => ReadString(row, "sender_id", "") == "player")
+                    && summaries.Any(row => ReadString(row, "contactId", "") == "old_contact" && ReadInt(row, "unreadCount", 0) == 1)
+                    && !summaries.Any(row => ReadString(row, "contactId", "") == "hidden_contact")
+                    && !summaries.Any(row => ReadString(row, "contactId", "") == "other_npc"));
+                var oldThread = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
+                    "contactIds", new[] { "bulk", "old_contact" }, "correspondentId", "old_contact"));
+                Check("selected_old_contact_loads_its_own_letters", ReadDictionaryList(oldThread, "letters").Count == 1
+                    && ReadString(ReadDictionaryList(oldThread, "letters")[0], "letter_id", "") == "old_unread");
+                using (var connection = OpenCampaignConnection(campaign))
+                    ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id IN ('old_unread','bulk_1001');",
+                        TestDict("payload", System.Text.Json.JsonSerializer.Serialize(TestDict("privatePrompt", new string('x', 1000000)))));
+                var summariesOnly = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
+                    "contactIds", new[] { "bulk", "old_contact" }, "summaryOnly", true));
+                Check("opening_mailbox_returns_summaries_without_bodies", ReadDictionaryList(summariesOnly, "letters").Count == 0
+                    && ReadInt(summariesOnly, "unreadCount", 0) == 1
+                    && ReadDictionaryList(summariesOnly, "contactStates").Count == summaries.Count
+                    && System.Text.Json.JsonSerializer.Serialize(summariesOnly).Length < 10000);
+                var slimThread = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
+                    "contactIds", new[] { "bulk", "old_contact" }, "correspondentId", "old_contact"));
+                var slimLetter = ReadDictionaryList(slimThread, "letters").Single();
+                Check("display_projection_excludes_large_private_payload", !slimLetter.ContainsKey("payload_json")
+                    && ReadString(slimLetter, "body", "") == "Old unread body"
+                    && slimLetter.ContainsKey("read_day") && slimLetter.ContainsKey("delivered_day")
+                    && System.Text.Json.JsonSerializer.Serialize(slimThread).Length < 10000);
+                var batchRead = CorrespondenceReadApi(TestDict("campaignId", campaign, "playerId", "player", "worldDay", 7000d,
+                    "letterIds", new[] { "old_unread", "old_unread", "hidden_mail", "foreign_mail", "missing", "bulk_1001" }));
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    var statuses = QuerySql(connection, "SELECT letter_id,status,read_day,payload_json FROM letters WHERE letter_id IN ('old_unread','hidden_mail','foreign_mail','bulk_1001');");
+                    Check("batch_read_is_idempotent_and_recipient_scoped", ReadBool(batchRead, "ok", false)
+                        && statuses.Any(row => ReadString(row, "letter_id", "") == "old_unread" && ReadString(row, "status", "") == "read" && ReadDouble(row, "read_day", 0) == 7000d)
+                        && statuses.Any(row => ReadString(row, "letter_id", "") == "hidden_mail" && ReadString(row, "status", "") == "in_transit")
+                        && statuses.Any(row => ReadString(row, "letter_id", "") == "foreign_mail" && ReadString(row, "status", "") == "delivered")
+                        && statuses.Any(row => ReadString(row, "letter_id", "") == "old_unread" && ReadString(row, "payload_json", "").Length > 1000000));
+                }
+                CorrespondenceReadApi(TestDict("campaignId", campaign, "playerId", "player", "worldDay", 7001d, "letterIds", new[] { "old_unread" }));
+                using (var connection = OpenCampaignConnection(campaign))
+                    Check("batch_read_retry_preserves_original_read_day", ReadDouble(QuerySql(connection,
+                        "SELECT read_day FROM letters WHERE letter_id='old_unread';").Single(), "read_day", 0) == 7000d);
             }
             catch (Exception ex) { Check("suite_exception", false, LimitText(ex.ToString(), 2000)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }

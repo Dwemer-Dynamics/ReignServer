@@ -49,6 +49,24 @@ namespace ReignBetaServer
             return text.ToString();
         }
 
+        private static void CollectNpcPartyAssertionValues(object value, List<string> output)
+        {
+            if (value == null) return;
+            if (value is string text) { output.Add(text); return; }
+            if (value is Dictionary<string, object> dictionary)
+            {
+                foreach (var field in dictionary)
+                {
+                    // A quoted player request is evidence of what was requested,
+                    // not an NPC assertion about present native membership.
+                    if (field.Key.Equals("playerQuote", StringComparison.OrdinalIgnoreCase)) continue;
+                    CollectNpcPartyAssertionValues(field.Value, output);
+                }
+            }
+            else if (value is System.Collections.IEnumerable enumerable)
+                foreach (object child in enumerable) CollectNpcPartyAssertionValues(child, output);
+        }
+
         private static IEnumerable<string> PartyAssertionsForNamedPerson(IEnumerable<string> values, string name)
         {
             foreach (string value in values)
@@ -93,7 +111,7 @@ namespace ReignBetaServer
             var knownPeople = ReadDictionaryList(CurrentContinuityPresence(payload), "people")
                 .Concat(MergedInteractionParticipantProfiles(payload)).Concat(ReadDictionaryList(party, "members"))
                 .GroupBy(p => ReadString(p, "heroStringId", ""), StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
-            var assertions = new List<string>(); CollectConversationStringValues(parsed, assertions);
+            var assertions = new List<string>(); CollectNpcPartyAssertionValues(parsed, assertions);
             foreach (var person in knownPeople)
             {
                 string name = ReadString(person, "name", ""), id = ReadString(person, "heroStringId", "");
@@ -107,7 +125,12 @@ namespace ReignBetaServer
                     var member = ReadDictionaryList(party, "members").FirstOrDefault(m => ReadString(m, "heroStringId", "") == id);
                     if (!past && roleClaim.Success && !ReadStringList(member, "roleEvidence").Contains(roleClaim.Groups["role"].Value, StringComparer.OrdinalIgnoreCase))
                         Issue("party_role", name + " has no supplied native evidence for the current " + roleClaim.Groups["role"].Value + " role. Membership alone does not establish a job.");
-                    if (!past && !members.Contains(id) && Regex.IsMatch(sentence, @"\b(?:our (?:party|scout|column|camp|travell?ing companion)|with (?:our party|us)|rides? ahead|riding ahead|scouting for us|front of (?:the|our) column)\b", RegexOptions.IgnoreCase))
+                    // "Review the accounts with us" describes a conversation,
+                    // not party membership. Require an explicit party claim or
+                    // a present-tense claim of travelling together.
+                    bool partyClaim = Regex.IsMatch(sentence, @"\b(?:our (?:party|scout|column|camp|travell?ing companion)|with our party|rides? ahead|riding ahead|scouting for us|front of (?:the|our) column)\b", RegexOptions.IgnoreCase);
+                    bool currentTravel = Regex.IsMatch(sentence, @"\b(?:(?:is|are)\s+(?:currently\s+)?(?:travell?ing|riding|marching|campaigning)|travels|rides|marches|campaigns)\s+with\s+us\b", RegexOptions.IgnoreCase);
+                    if (!past && !members.Contains(id) && (partyClaim || currentTravel))
                         Issue("party_membership", name + (ReadBool(party, "complete", false) ? " is outside the complete current party roster." : " has no supplied current membership evidence.")
                             + " Town presence or prior conversation does not establish membership, scouting work or days of shared travel. Correct: " + sentence);
                 }
@@ -238,8 +261,12 @@ namespace ReignBetaServer
         private static bool FinalizeConversationGrounding(Dictionary<string, object> payload, string observer,
             Dictionary<string, object> parsed, ref string reply)
         {
+            ConstrainNpcLeaveReply(payload, observer, parsed, ref reply);
             var candidate = CloneDictionary(parsed ?? TestDict()); candidate["reply"] = reply;
             var issues = FindCriticalConversationContinuityViolations(candidate, payload, observer);
+            // Run after any continuity rewrite. A conditional NPC choice cannot
+            // safely be repaired by retaining accept and deleting its condition.
+            issues.AddRange(StructuredActionAcceptanceContradictions(candidate, payload));
             bool ok = issues.Count == 0 && ReadBool(ReadDictionary(candidate, "repairStatus"), "allChecksCleared", true);
             payload["conversationGrounding"] = TestDict("schema", "reign-conversation-grounding-v1", "status", ok ? "checked" : "unresolved",
                 "issues", issues, "originalSourceId", ReadString(payload, "inputSourceId", ""), "replyHash", ConversationExactTextHash(reply),

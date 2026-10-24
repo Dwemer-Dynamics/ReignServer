@@ -1098,7 +1098,7 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             return string.Empty;
         }
 
-        private static Dictionary<string, object> InsertLetter(ReignDbConnection connection, string senderId, string senderName, string recipientId, string recipientName, string body, string source, string reason, string parentLetterId, string originId, string destinationId, double dispatchDay, double deliveryDay, Dictionary<string, object> payload)
+        private static Dictionary<string, object> InsertLetter(ReignDbConnection connection, string senderId, string senderName, string recipientId, string recipientName, string body, string source, string reason, string parentLetterId, string originId, string destinationId, double dispatchDay, double deliveryDay, Dictionary<string, object> payload, double? travelTimeMultiplier = null)
         {
             // Accept the letter and its author's continuity changes together. A
             // failed projection must not leave a sent letter that a retry duplicates.
@@ -1129,7 +1129,8 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             bool immediate = string.Equals(source, "campaign_command_urgent_report", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(source, "campaign_command_report", StringComparison.OrdinalIgnoreCase);
             double baseTransit = immediate ? 0d : CorrespondenceTransitPolicy.NormalizeBaseDays(deliveryDay - dispatchDay);
-            deliveryDay = dispatchDay + CorrespondenceTransitPolicy.NewTransitDays(baseTransit, immediate);
+            deliveryDay = dispatchDay + CorrespondenceTransitPolicy.NewTransitDays(baseTransit, immediate,
+                travelTimeMultiplier ?? CorrespondenceOption(LoadSettings(), "correspondenceTravelTimeMultiplier"));
             ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,parent_letter_id,origin_id,destination_id,dispatch_day,delivery_day,payload_json,created_ts,updated_ts,transit_policy_version,base_transit_days)
 VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_transit',$source,$reason,$parent,$origin,$destination,$dispatch,$delivery,$payload,$ts,$ts,$policy,$baseTransit);",
                 new Dictionary<string, object> { ["id"] = letterId, ["thread"] = threadId, ["sender"] = senderId, ["senderName"] = senderName, ["recipient"] = recipientId, ["recipientName"] = recipientName, ["body"] = body, ["source"] = source, ["reason"] = reason, ["parent"] = parentLetterId, ["origin"] = originId, ["destination"] = destinationId, ["dispatch"] = dispatchDay, ["delivery"] = deliveryDay, ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts,
@@ -1172,17 +1173,37 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
             HashSet<string> contacts = new HashSet<string>(ReadStringList(payload, "contactIds"), StringComparer.OrdinalIgnoreCase);
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                List<Dictionary<string, object>> letters = QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$player OR recipient_id=$player ORDER BY dispatch_day ASC,created_ts ASC LIMIT 1000;", new Dictionary<string, object> { ["player"] = playerId })
-                    .Where(row => ReadString(row, "sender_id", "").Equals(playerId, StringComparison.OrdinalIgnoreCase)
-                        || !ReadString(row, "status", "").Equals("in_transit", StringComparison.OrdinalIgnoreCase))
-                    .Where(row => contacts.Count == 0
-                        || contacts.Contains(ReadString(row, "sender_id", ""))
-                        || contacts.Contains(ReadString(row, "recipient_id", ""))
-                        || ReadString(row, "source", "").Equals("campaign_command_urgent_report", StringComparison.OrdinalIgnoreCase)
-                        || ReadString(row, "source", "").Equals("campaign_command_report", StringComparison.OrdinalIgnoreCase)
-                        || ReadString(row, "source", "").Equals("npc_introduction", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                return new Dictionary<string, object> { ["ok"] = true, ["letters"] = letters, ["unreadCount"] = letters.Count(row => ReadString(row, "recipient_id", "").Equals(playerId, StringComparison.OrdinalIgnoreCase) && ReadString(row, "status", "") == "delivered") };
+                // Contact priority must cover the complete visible history, even
+                // when an old thread falls outside the bounded body snapshot.
+                var parameters = TestDict("player", playerId);
+                string where = "(sender_id=$player OR recipient_id=$player) AND (sender_id=$player OR status<>'in_transit')";
+                if (contacts.Count > 0)
+                {
+                    var placeholders = contacts.Select((id, i) => { parameters["contact" + i] = id; return "$contact" + i; }).ToList();
+                    string allowed = string.Join(",", placeholders);
+                    where += " AND (sender_id IN (" + allowed + ") OR recipient_id IN (" + allowed
+                        + ") OR source IN ('campaign_command_urgent_report','campaign_command_report','npc_introduction'))";
+                }
+                var states = QuerySql(connection, @"SELECT DISTINCT ON (contact_id) contact_id,
+SUM(CASE WHEN recipient_id=$player AND status='delivered' THEN 1 ELSE 0 END) OVER (PARTITION BY contact_id) AS unread_count,status
+FROM (SELECT sender_id,recipient_id,status,dispatch_day,created_ts,letter_id,CASE WHEN sender_id=$player THEN recipient_id ELSE sender_id END AS contact_id
+FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,created_ts DESC,letter_id DESC;", parameters)
+                    .Select(row => TestDict("contactId", ReadString(row, "contact_id", ""), "hasCorrespondence", true,
+                        "unreadCount", ReadInt(row, "unread_count", 0), "status", ReadString(row, "status", ""))).ToList();
+                string correspondent = ReadString(payload, "correspondentId", "");
+                if (correspondent.Length > 0)
+                {
+                    parameters["correspondent"] = correspondent;
+                    where += " AND (sender_id=$correspondent OR recipient_id=$correspondent)";
+                }
+                // The mailbox never needs generation prompts, profiles or action
+                // diagnostics stored in payload_json. Keep those in the ledger.
+                const string displayColumns = "letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,dispatch_day,delivery_day,delivered_day,read_day,created_ts";
+                var letters = ReadBool(payload, "summaryOnly", false) ? new List<Dictionary<string, object>>()
+                    : QuerySql(connection, "SELECT * FROM (SELECT " + displayColumns + " FROM letters WHERE " + where
+                        + " ORDER BY dispatch_day DESC,created_ts DESC,letter_id DESC LIMIT 1000) recent ORDER BY dispatch_day ASC,created_ts ASC,letter_id ASC;", parameters);
+                return TestDict("ok", true, "letters", letters, "contactStates", states,
+                    "unreadCount", states.Sum(row => ReadInt(row, "unreadCount", 0)));
             }
         }
 
@@ -1388,10 +1409,21 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string letterId = ReadFirstString(payload, "letterId", "letter_id");
+            var letterIds = ReadStringList(payload, "letterIds").Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).Take(1000).ToList();
             double day = ReadDouble(payload, "worldDay", 0d);
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE letter_id=$id AND status='delivered';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = letterId });
+                if (letterIds.Count == 0)
+                    ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE letter_id=$id AND status='delivered';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = letterId });
+                else
+                {
+                    string playerId = ReadString(payload, "playerId", "");
+                    if (playerId.Length == 0) return TestDict("ok", false, "error", "A recipient is required for a batch read acknowledgment.");
+                    var parameters = TestDict("day", day, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "player", playerId);
+                    var ids = letterIds.Select((id, i) => { parameters["id" + i] = id; return "$id" + i; });
+                    ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE recipient_id=$player AND status='delivered' AND letter_id IN ("
+                        + string.Join(",", ids) + ");", parameters);
+                }
             }
             return new Dictionary<string, object> { ["ok"] = true, ["letterId"] = letterId, ["status"] = "read" };
         }
@@ -1568,6 +1600,10 @@ ORDER BY priority DESC,updated_ts ASC LIMIT 1;", new Dictionary<string, object> 
             line["direction"] = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "sent" : "received";
             AppendJsonLineToPath(CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
             StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
+            using (var pregnancyConnection = OpenCampaignConnection(campaignId))
+                AcceptPregnancyDisclosures(pregnancyConnection, ReadString(letter, "timeline_id", "main"), senderId,
+                    ReadString(letter, "body", ""), TryParseJsonObject(ReadString(letter, "payload_json", "{}")),
+                    new[] { recipientId }, "delivered_letter:" + ReadString(letter, "letter_id", ""), day);
         }
 
         private static Dictionary<string, object> RelationshipFacetSnapshot(Dictionary<string, object> row)

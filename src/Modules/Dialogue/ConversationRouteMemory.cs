@@ -82,6 +82,9 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
         {
             context.Request = request;
             request["heroStringId"] = context.Observer;
+            var politicalActor = ReadDictionary(context.Payload, "hero") ?? ReadDictionary(context.Payload, "speaker")
+                ?? ReadJsonObject(CharacterFile(context.Campaign, context.Observer, "profile.json"));
+            if (politicalActor.Count > 0) request["politicalAuthors"] = new[] { politicalActor };
             request["model"] = FirstNonEmpty(ReadString(request, "model", ""), ModelForRequest(context.Settings, ReadString(request, "requestType", "dialogue")));
             request["routeMemoryContract"] = domainContract;
             using (var connection = OpenCampaignConnection(context.Campaign))
@@ -149,7 +152,12 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
                     && !Reign.Core.Contracts.Court.ReignRulerDocketRules.ContainsForbiddenNobleDocketStatistics(reply);
             }
             var call = responder ?? ChatWithLlm;
-            Dictionary<string, object> Counted(Dictionary<string, object> input) { context.ProviderCalls++; return call(input); }
+            Dictionary<string, object> Counted(Dictionary<string, object> input)
+            {
+                input["politicalAuthors"] = request.TryGetValue("politicalAuthors", out object authors) ? authors : new object[0];
+                input["messages"] = RequiredPoliticalMessages(input, ReadDictionaryList(input, "messages"));
+                context.ProviderCalls++; return call(input);
+            }
             Dictionary<string, object> Failed(Dictionary<string, object> failure)
             {
                 context.Result = EnsureConversationDelivery(failure);

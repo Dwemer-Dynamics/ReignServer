@@ -329,6 +329,7 @@
       <nav class='tabs' aria-label='Diagnostic pages'>
       <button class='tab' data-tab='diagnostics'>Overview</button>
       <button class='tab' data-tab='conversationdiagnostics'>Conversation Diagnostics</button>
+      <button class='tab' data-tab='npclivesdiagnostics'>NPC Lives and Story Editor</button>
       <button class='tab' data-tab='logging'>Logging</button>
       <button class='tab' data-tab='logs'>Log Viewer</button>
       <button class='tab' data-tab='audit'>Audit Viewer</button>
@@ -392,6 +393,15 @@
             <option value='codex_subscription'>ChatGPT Codex subscription</option>
           </select>
         </label>
+        <div id='codexLookupSettings' hidden>
+          <label>Character memory lookups
+            <select id='codexLookupMode'>
+              <option value='auto'>Auto</option>
+              <option value='direct'>Direct lookups</option>
+            </select>
+          </label>
+          <p class='hint'>Auto supplies relevant memories with each turn. Direct lookups also lets the character search and read its full accessible record as needed. Conversations keep their context between turns.</p>
+        </div>
         @CHAT_PROVIDER_KEYS@
         <div id='openAiCompatibleSettings'>
           <label>API URL <input id='apiUrl'></label>
@@ -408,7 +418,7 @@
           <div class='actions'>
             <button onclick='startCodexAppServer()'>Start / Check account</button>
             <button onclick='startCodexLogin()'>Sign in with ChatGPT</button>
-            <button onclick='refreshCodexModels()'>Refresh all GPT models</button>
+            <button id='codexModelsRefreshButton' onclick='refreshCodexModels()'>Refresh all GPT models</button>
             <button class='danger' onclick='logoutCodex()'>Sign out</button>
           </div>
           @CODEX_MODEL_AVAILABILITY@
@@ -806,6 +816,7 @@
       </div>
     </section>
 
+    @NPC_LIVES_DIAGNOSTICS@
     <section id='conversationdiagnostics' class='page'>
       <div class='card'>
         <h2>Conversation Diagnostics</h2>
@@ -1323,7 +1334,7 @@
     ids.push('llmProvider','codexExecutable','codexHome');
     intIds.add('recentRawConversationTurns');
     intIds.add('recentRawConversationCharBudget');
-    const floatIds = new Set(['reignXpMultiplier','reignXpConversationMultiplier','reignXpSocialCharmMultiplier','reignXpSocialBonusMultiplier','reignXpPetitionMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
+    const floatIds = new Set(['correspondenceFrequencyMultiplier','correspondenceTravelTimeMultiplier','reignXpMultiplier','reignXpConversationMultiplier','reignXpSocialCharmMultiplier','reignXpSocialBonusMultiplier','reignXpPetitionMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
     const promptState = { files:{}, catalog:[], loaded:false, drafts:{}, selected:{}, saving:false, revision:0, loading:0 };
     const promptCategories = ['general','context','action','relationship','image'];
     const nanoPresetHints = {
@@ -1487,6 +1498,7 @@
       lastCodexModels = rows;
       const picker = document.getElementById('codexModelPicker');
       const datalist = document.getElementById('llmModelOptions');
+      const selected = picker?.value || '';
       if (picker) {
         picker.innerHTML = '';
         const placeholder = document.createElement('option');
@@ -1497,7 +1509,7 @@
       const showCodexOptions = document.getElementById('llmProvider')?.value === 'codex_subscription';
       if (datalist && showCodexOptions) datalist.innerHTML = '';
       rows.forEach(model => {
-        const id = model.id || '';
+        const id = model.model || model.id || model.slug || '';
         if (!id) return;
         if (picker) {
           const option = document.createElement('option');
@@ -1512,19 +1524,22 @@
           datalist.appendChild(option);
         }
       });
+      if (picker && Array.from(picker.options).some(option => option.value === selected)) picker.value = selected;
+      codexPerformanceUpdateReasoningChoices();
     }
 
     function renderCodexStatus(status) {
       codexPerformanceRenderCatalogStatus(status);
       const output = document.getElementById('codexStatus');
       if (output) output.textContent = JSON.stringify(status, null, 2);
-      renderCodexModels(status?.models || []);
+      if (Array.isArray(status?.models) && (status.models.length || status.running === false || status.account?.signedIn === false)) renderCodexModels(status.models);
     }
 
     async function loadCodexStatus() {
       try {
         const status = await (await fetch('/api/codex/status')).json();
         renderCodexStatus(status);
+        if (document.getElementById('llmProvider')?.value === 'codex_subscription' && status.running && !lastCodexModels.length) await refreshCodexModels();
       } catch (e) {
         const output = document.getElementById('codexStatus');
         if (output) output.textContent = e.message;
@@ -1539,7 +1554,8 @@
     }
 
     async function startCodexAppServer() {
-      await codexPost('/api/codex/start');
+      const result = await codexPost('/api/codex/start');
+      if (result.ok) await refreshCodexModels();
     }
 
     async function startCodexLogin() {
@@ -1547,10 +1563,27 @@
       if (result.authUrl) window.open(result.authUrl, '_blank', 'noopener');
     }
 
+    let codexModelRefreshPending = null;
     async function refreshCodexModels() {
-      const result = await codexPost('/api/codex/models/refresh');
-      if (result.ok) renderCodexModels(result.models);
-      await loadPortraitVisionModels();
+      if (codexModelRefreshPending) return codexModelRefreshPending;
+      const button = document.getElementById('codexModelsRefreshButton');
+      if (button) button.disabled = true;
+      codexModelRefreshPending = (async () => {
+        try {
+          const response = await fetch('/api/codex/models/refresh', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+          const result = await response.json();
+          if (!response.ok || !result.ok) throw new Error(result.error || 'Codex model discovery failed');
+          renderCodexStatus(result.status || result);
+          renderCodexModels(result.models);
+          await loadPortraitVisionModels();
+          return result;
+        } catch (e) {
+          const output = document.getElementById('codexStatus');
+          if (output) output.textContent = 'Could not refresh models: ' + e.message + '. Previously loaded models are retained. Check Codex sign-in and try Refresh again.';
+          return {ok:false,error:e.message};
+        } finally { if (button) button.disabled = false; codexModelRefreshPending = null; }
+      })();
+      return codexModelRefreshPending;
     }
 
     async function logoutCodex() {
@@ -1564,6 +1597,7 @@
         const input = document.getElementById(id);
         if (input) input.value = model;
       });
+      codexPerformanceUpdateReasoningChoices();
       document.getElementById('status').textContent = 'Model selected; save settings to apply';
     }
 
@@ -1573,7 +1607,9 @@
       output.textContent = 'Loading prompt-cache status...';
       try {
         const j = await (await fetch('/llm/prompt-cache/status')).json();
-        output.textContent = JSON.stringify(j, null, 2);
+        const display = JSON.stringify(j, null, 2);
+        output.textContent = display.length > 80000
+          ? display.slice(0, 80000) + '\n\nStatus display shortened. Open Conversation Diagnostics for complete request evidence.' : display;
       } catch (e) {
         output.textContent = e.message;
       }
@@ -1610,6 +1646,7 @@
         else if (secretIds.has(id) && el.dataset.hasSavedSecret === 'true' && el.value === el.dataset.savedMask) s[id] = '';
         else s[id] = el.value;
       });
+      Object.assign(s, npcLivesSettingsForSave(true));
       Object.assign(s, codexPerformanceLegacyReasoningForSave());
       s.codexOptions = codexPerformanceSettingsForSave();
       await controlCenterJson('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) });
@@ -1631,7 +1668,9 @@
       const effort = document.getElementById('reasoningEffort')?.value || 'medium';
       if (!output) return;
       if (mode === 'off') {
-        output.textContent = 'Native hidden reasoning is disabled. Compact decision-brief prompts and output sanitization remain active.';
+        output.textContent = document.getElementById('llmProvider')?.value === 'codex_subscription'
+          ? 'Codex requests no hidden reasoning where supported, otherwise the model’s lowest supported level. Decision-brief prompts and output sanitization remain active.'
+          : 'Native hidden reasoning is disabled. Compact decision-brief prompts and output sanitization remain active.';
       } else if (mode === 'all') {
         output.textContent = 'All LLM request types request ' + effort + ' hidden reasoning. Provider reasoning output is always excluded and never stored.';
       } else {

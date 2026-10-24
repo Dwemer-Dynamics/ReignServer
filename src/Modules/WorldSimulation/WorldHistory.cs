@@ -245,6 +245,13 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                 // retention compaction cannot retain that lock for its entire batch.
                 EnsureWorldHistorySchema(connection);
                 EnsureSharedActivityMemorySchema(connection);
+                bool hasSpouseLetter = events.Any(item => ReadString(ReadDictionary(item, "payload"), "source", "") == "explicit_spouse_letter");
+                if (hasSpouseLetter)
+                {
+                    EnsureRelationshipAndCorrespondenceSchema(connection);
+                    EnsureMbtiRelationshipSchema(connection);
+                    EnsureRelationshipLifecycleSchema(connection);
+                }
                 if (!SharedActivityGenerationMatches(connection, payload))
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Stale activity upload from an obsolete save generation." };
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
@@ -349,6 +356,13 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                     foreach (var item in events)
                     {
                         ProjectSharedActivity(connection, timelineId, item);
+                        if (hasSpouseLetter)
+                        {
+                            foreach (var stored in QuerySql(connection,
+                                "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline;",
+                                TestDict("id", ReadFirstString(item, "eventId", "event_id", "id"), "timeline", timelineId)))
+                                ProjectSpouseSeparation(connection, campaignId, timelineId, stored);
+                        }
                         string performanceKind = ReadFirstString(item, "eventType", "event_type", "type");
                         if (performanceKind != "battle_completed" && performanceKind != "tournament_finished"
                             && !(performanceKind == "social_outcome" && ReadString(item, "source", "") == "reign_social"
@@ -493,6 +507,8 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
                 if (historyMissing || branched)
                 {
                     BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
+                    BindRecoveredCommunications(connection, requested, timelineId, savedSequence, savedHead);
+                    BindRecoveredPregnancyKnowledge(connection, requested, timelineId, savedSequence, savedHead);
                     BindRecoveredMemorySources(connection, requested, timelineId, savedSequence, savedHead);
                 }
                 result = new Dictionary<string, object>

@@ -367,6 +367,11 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.personal_gossip", "personal_gossip", RunPersonalGossipSelfTests());
                 return;
             }
+            if (string.Equals(requestedSuite, "communications", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "contracts.communications", "communications", RunCommunicationSelfTests());
+                return;
+            }
             if (requestedSuite == "relationship_throughput_contracts" || requestedSuite == "relationship_throughput_smoke"
                 || requestedSuite == "relationship_throughput")
             {
@@ -440,10 +445,17 @@ namespace ReignBetaServer
             if (ShouldRunVerificationSuite(requestedSuite, "government"))
                 AddSubsystemListSummary(checks, "contracts.government", "government", RunGovernmentSystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
+            if (string.Equals(requestedSuite, "rulers", StringComparison.OrdinalIgnoreCase))
+                AddSubsystemListSummary(checks, "contracts.rulers", "rulers", RunRulerJudgmentSelfTests());
+            if (string.Equals(requestedSuite, "npc_lives", StringComparison.OrdinalIgnoreCase))
+                AddSubsystemListSummary(checks, "contracts.npc_lives", "npc_lives", RunNpcLivesSelfTests());
             if (ShouldRunVerificationSuite(requestedSuite, "contracts") ||
                 string.Equals(requestedSuite, "ui_contracts", StringComparison.OrdinalIgnoreCase))
             {
                 AddSubsystemListSummary(checks, "contracts.structured_actions", "contracts", RunStructuredActionSelfTests());
+                AddSubsystemListSummary(checks, "contracts.npc_lives", "contracts", RunNpcLivesSelfTests());
+                AddSubsystemListSummary(checks, "contracts.communications", "contracts", RunCommunicationSelfTests());
+                AddSubsystemListSummary(checks, "contracts.rulers", "contracts", RunRulerJudgmentSelfTests());
                 RunBuildAndContractChecks(checks, includeExpensiveSubsystems: explicitSuite);
             }
             if (ShouldStop(checks, failFast)) return;
@@ -2234,6 +2246,19 @@ namespace ReignBetaServer
 					["familyButtonPresent"] = castleLayoutFamilyButton != null,
 					["governmentButtonPresent"] = castleLayoutGovernmentButton != null
 				});
+			bool UndistortedCompactPortraitAspect(XmlElement source, bool allowFramedBust)
+			{
+				int width = VerificationXmlIntAttribute(source, "SuggestedWidth", 0);
+				int height = VerificationXmlIntAttribute(source, "SuggestedHeight", 0);
+				if (source == null || width <= 0 || height <= 0) return false;
+				bool framed = VerificationXmlAttributeEquals(source, "UseFramedBust", "true");
+				if (framed && !allowFramedBust) return false;
+				if (!framed && width != height) return false;
+				string declared = source.HasAttribute("TargetAspect") ? source.GetAttribute("TargetAspect") : "1";
+				return double.TryParse(declared, NumberStyles.Float, CultureInfo.InvariantCulture, out double aspect)
+					&& double.IsFinite(aspect) && aspect > 0
+					&& Math.Abs(aspect - (double)width / height) < 0.00001;
+			}
 			var compactSquarePortraitContracts = new[]
 			{
 				(Name: "PartyChat", Path: Path.Combine(clientRoot, "GUI", "Prefabs", "ReignPartyChatScreen.xml"), ExpectedGeneratedSources: 1),
@@ -2242,6 +2267,7 @@ namespace ReignBetaServer
 				(Name: "DiplomacyAnnouncement", Path: Path.Combine(clientRoot, "GUI", "Prefabs", "ReignDiplomacyAnnouncementScreen.xml"), ExpectedGeneratedSources: 2)
 			};
 			List<string> compactSquarePortraitFailures = new List<string>();
+			int framedPortraitNegativeCases = 0;
 			foreach (var contract in compactSquarePortraitContracts)
 			{
 				string xml = File.Exists(contract.Path) ? File.ReadAllText(contract.Path) : "";
@@ -2264,10 +2290,9 @@ namespace ReignBetaServer
 						// The moving Party Chat card owns the aperture above both sources.
 						?? generatedSource?.SelectSingleNode("ancestor::ButtonWidget[@Id='PartyMemberCard'][1]/Children/ImageWidget[@Id='PartyMemberCardPlate'][@Sprite='reign_party_chat_member_card_overlay']") as XmlElement;
 					int generatedWidth = VerificationXmlIntAttribute(generatedSource, "SuggestedWidth", 0);
-					int generatedHeight = VerificationXmlIntAttribute(generatedSource, "SuggestedHeight", 0);
 					bool generatedValid = generatedSource != null
 						&& generatedWidth > 0
-						&& generatedWidth == generatedHeight
+						&& UndistortedCompactPortraitAspect(generatedSource, contract.Name == "DiplomacyAnnouncement")
 						&& VerificationXmlAttributeEquals(generatedSource, "WidthSizePolicy", "Fixed")
 						&& VerificationXmlAttributeEquals(generatedSource, "HeightSizePolicy", "Fixed")
 						&& VerificationXmlAttributeEquals(generatedSource, "HorizontalAlignment", "Center")
@@ -2300,16 +2325,28 @@ namespace ReignBetaServer
 					{
 						compactSquarePortraitFailures.Add(contract.Name + ":source_" + sourceIndex.ToString(CultureInfo.InvariantCulture));
 					}
+					if (contract.Name == "DiplomacyAnnouncement" && generatedSource != null)
+					{
+						foreach (var mutation in new[] { (Name: "TargetAspect", Value: "1"), (Name: "TargetAspect", Value: "NaN"), (Name: "UseFramedBust", Value: "false") })
+						{
+							var invalid = (XmlElement)generatedSource.CloneNode(true);
+							invalid.SetAttribute(mutation.Name, mutation.Value);
+							if (UndistortedCompactPortraitAspect(invalid, true))
+								compactSquarePortraitFailures.Add(contract.Name + ":unsafe_aspect_accepted:" + mutation.Name + "=" + mutation.Value);
+							framedPortraitNegativeCases++;
+						}
+					}
 				}
 			}
 			bool compactSquarePortraitSourcesValid = compactSquarePortraitFailures.Count == 0;
 			AddVerificationCheck(checks, "contracts.compact_portrait_source_aspect", "ui_contracts", compactSquarePortraitSourcesValid,
 				compactSquarePortraitSourcesValid
-					? "Compact circle and headshot-oval contexts preserve direct native/generated portrait sources as centered squares beneath topmost opaque aperture plates."
+					? "Compact portraits use centered square sources or explicitly framed announcement busts with a matching texture aspect, beneath topmost opaque aperture plates; mismatched framing is rejected."
 					: "A compact portrait source can be stretched into an oval/rectangle, pre-colored, or ordered above its aperture plate.",
 				new Dictionary<string, object>
 				{
 					["inspectedPrefabs"] = compactSquarePortraitContracts.Select(item => item.Path).ToArray(),
+					["framedPortraitNegativeCases"] = framedPortraitNegativeCases,
 					["failures"] = compactSquarePortraitFailures
 				});
 			string rectangleOverlayPath = Path.Combine(clientRoot, "GUI", "SpriteParts", "ui_reignbeta_shared", "reign_modern_portrait_rectangle_overlay.png");
@@ -2496,7 +2533,7 @@ namespace ReignBetaServer
 				&& !individualZoomBlock.Contains("reign_modern_portrait_circle_overlay", StringComparison.Ordinal)
 				&& !individualZoomBlock.Contains("reign_modern_portrait_oval_overlay", StringComparison.Ordinal);
 			bool individualChatTransparentTranscriptValid = individualTranscriptBlock.Contains("IsVisible=\"@IsPlayerLine\"", StringComparison.Ordinal)
-				&& individualTranscriptBlock.Contains("IsVisible=\"@IsNpcLine\"", StringComparison.Ordinal)
+				&& individualTranscriptBlock.Contains("IsVisible=\"@IsNonPlayerLine\"", StringComparison.Ordinal)
 				&& !Regex.IsMatch(individualTranscriptBlock, @"\sSprite=""")
 				&& !Regex.IsMatch(individualTranscriptBlock, @"\sColor=""");
 			bool nativeModernPortraitFramesValid = gameMenuPartyRectangularPlateValid
@@ -3416,6 +3453,8 @@ namespace ReignBetaServer
             add("server.lifecycle", "server_lifecycle", new[] { "contracts.http_routes", "pipeline.campaign_backups", "pipeline.save_sync", "faults.interrupted_write" });
             add("characters.construction", "character_construction", new[] { "pipeline.character_profiles", "pipeline.character_editor" });
             add("characters.narrative", "character_narrative", new[] { "contracts.character_narrative" });
+            add("world.rulers", "rulers", new[] { "contracts.rulers" });
+            add("characters.npc_lives", "npc_lives", new[] { "contracts.npc_lives" });
             add("knowledge.identity", "knowledge_identity", new[] { "pipeline.identity", "pipeline.rumors" });
             add("memory.relationships", "memory_relationships", new[] { "pipeline.mbti_relationship_lifecycle", "pipeline.categorized_memory", "pipeline.semantic_memory" });
             add("memory.mbti_relationship_lifecycle", "memory_relationships", new[] { "contracts.mbti_relationship_lifecycle", "pipeline.mbti_relationship_lifecycle" });

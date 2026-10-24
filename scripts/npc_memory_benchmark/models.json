@@ -1,0 +1,131 @@
+{
+  "schema": "reign-npc-benchmark-models-v1",
+  "note": "Public candidate artifacts pinned 2026-10-16. Bekko a8m is a named candidate, not an identification of SkyrimNet's234MB artifact. Downloads must be explicit and local; benchmark inference is offline.",
+  "models": [
+    {
+      "name": "bge",
+      "repository": "qdrant/bge-small-en-v1.5-onnx-q",
+      "revision": "52398278842ec682c6f32300af41344b1c0b0bb2",
+      "backend": "fastembed-bge",
+      "pooling": "cls",
+      "maxTokens": 512,
+      "modelFile": "model_optimized.onnx",
+      "files": [
+        {
+          "file": "model_optimized.onnx",
+          "remote": "model_optimized.onnx",
+          "bytes": 66465124,
+          "sha256": "51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431"
+        },
+        {
+          "file": "tokenizer.json",
+          "remote": "tokenizer.json",
+          "bytes": 711396,
+          "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+        },
+        {
+          "file": "config.json",
+          "remote": "config.json",
+          "bytes": 706,
+          "sha256": "13582bcf2effc85b7bf3d3f5532e686bc1c9ce86bb009d10f0ec33cbe92299dd"
+        },
+        {
+          "file": "tokenizer_config.json",
+          "remote": "tokenizer_config.json",
+          "bytes": 1242,
+          "sha256": "0b29c7bfc889e53b36d9dd3e686dd4300f6525110eaa98c76a5dafceb2029f53"
+        },
+        {
+          "file": "special_tokens_map.json",
+          "remote": "special_tokens_map.json",
+          "bytes": 695,
+          "sha256": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"
+        }
+      ]
+    },
+    {
+      "name": "minilm",
+      "repository": "sentence-transformers/all-MiniLM-L6-v2",
+      "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+      "files": [
+        {
+          "file": "model.onnx",
+          "bytes": 90405214,
+          "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
+          "remote": "onnx/model.onnx"
+        },
+        {
+          "file": "tokenizer.json",
+          "bytes": 466247,
+          "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037",
+          "remote": "tokenizer.json"
+        },
+        {
+          "file": "config.json",
+          "bytes": 612,
+          "sha256": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41",
+          "remote": "config.json"
+        }
+      ],
+      "backend": "onnx",
+      "pooling": "mean",
+      "maxTokens": 256
+    },
+    {
+      "name": "granite",
+      "repository": "ibm-granite/granite-embedding-107m-multilingual",
+      "revision": "d6cffd338414d6a1c1f5decfad5fec62eebc90d5",
+      "files": [
+        {
+          "file": "model.onnx",
+          "bytes": 428102968,
+          "sha256": "387e6f91dce3c651cb3dc06661d74fb1d3947f20ed9c3ecf49d2b3b77086b954",
+          "remote": "model.onnx"
+        },
+        {
+          "file": "tokenizer.json",
+          "bytes": 9081382,
+          "sha256": "7fc9e475f2ac473f070052d92b0c46ec2b91d9cd672935feb6fd837a65d33f78",
+          "remote": "tokenizer.json"
+        },
+        {
+          "file": "config.json",
+          "bytes": 697,
+          "sha256": "aa3b6a5d1d6efeacdb844fb8ba773556463af2195003ad5e70a6f014d11be9cf",
+          "remote": "config.json"
+        }
+      ],
+      "backend": "onnx",
+      "pooling": "cls",
+      "maxTokens": 512
+    },
+    {
+      "name": "bekko-a8m",
+      "repository": "hotchpotch/bekko-embedding-v1-a8m",
+      "revision": "c721113d59a1d91b447450324f51c4b3332c924a",
+      "files": [
+        {
+          "file": "model.onnx",
+          "bytes": 130099079,
+          "sha256": "96d8cc6199e96357b21b2fb12f6d7ffd2d4abc7b182fe94b5468fbd6dc819af7",
+          "remote": "onnx/model.onnx"
+        },
+        {
+          "file": "tokenizer.json",
+          "bytes": 34363442,
+          "sha256": "8bd47075711f75a143d1b78e01a41cc65c1c591b00d3cfeffc23db07adce1392",
+          "remote": "tokenizer.json"
+        },
+        {
+          "file": "config.json",
+          "bytes": 1207,
+          "sha256": "950f344b034bb96a6ac3da045b1cd5ba037c08d8e4978471d407324622f8878e",
+          "remote": "config.json"
+        }
+      ],
+      "backend": "onnx",
+      "pooling": "mean",
+      "maxTokens": 512
+    }
+  ]
+}

@@ -711,7 +711,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 visible.Remove(alias);
             foreach (string key in new[] { "relationshipAssessments", "relationshipUpdates", "memoryWrites", "beliefWrites",
                 "obligationWrites", "comprehensionWrites", "continuityWrites", "dynamicCharacteristicWrites",
-                "courtKnowledgeWrites", "sceneStateUpdates", "identityIntroductions", "suggestedActions",
+                "courtKnowledgeWrites", "pregnancyDisclosures", "sceneStateUpdates", "identityIntroductions", "suggestedActions",
                 "socialSignals", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "proposalDecisions" })
                 visible[key] = new List<Dictionary<string, object>>();
             visible["stateUpdates"] = new Dictionary<string, object>();

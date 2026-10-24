@@ -989,7 +989,7 @@ namespace ReignBetaServer
                             && IsDirectorPeaceCommand(ReadString(x,
                                 "command", ""))))
                     .ToList();
-            string rulerJson = Json.Serialize(ruler);
+            string rulerJson = DirectorRulerPromptJson(ruler);
             string traitsJson = Json.Serialize(traits);
             string stateJson = Json.Serialize(rulerState);
             string actionCatalogJson = Json.Serialize(legalActionCatalog);
@@ -1102,10 +1102,10 @@ namespace ReignBetaServer
                     .ToList()
                 : new List<string>();
             string prompt = role
-                + " Personality and strategic reality must govern the answer. Return JSON only. Never invent IDs or assets.\n\nRESPONDER:\n" + Json.Serialize(responder)
+                + " Personality and strategic reality must govern the answer. Return JSON only. Never invent IDs or assets.\n\nRESPONDER:\n" + DirectorRulerPromptJson(responder)
                 + "\n\nRESPONDER MBTI:\n" + responderMbti
                 + "\n\nRESPONDER COURT VIRTUE GROUPS (0..100):\n" + Json.Serialize(traits)
-                + "\n\nPROPOSER:\n" + Json.Serialize(proposer)
+                + "\n\nPROPOSER:\n" + DirectorRulerPromptJson(proposer)
                 + "\n\nPROPOSAL:\n" + Json.Serialize(candidate)
                 + (string.IsNullOrWhiteSpace(ReadString(candidate,
                         "requiredPolarity", ""))
@@ -2394,6 +2394,50 @@ namespace ReignBetaServer
             };
         }
 
+        private static string DirectorRulerPromptJson(Dictionary<string, object> ruler)
+        {
+            // The native row remains authoritative for execution. Diplomacy needs the
+            // complete public matters and aggregate shares, rather than a second copy
+            // of every participant, member declaration and historical ballot.
+            var projected = new Dictionary<string, object>(ruler
+                ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
+            var government = ReadDictionary(ruler, "government");
+            if (government == null) return Json.Serialize(projected);
+            var publicGovernment = new Dictionary<string, object>(government,
+                StringComparer.OrdinalIgnoreCase);
+            publicGovernment["governmentBusiness"] = new ArrayList(
+                ReadDictionaryList(government, "governmentBusiness").Select(business =>
+                {
+                    var matter = new Dictionary<string, object>(business,
+                        StringComparer.OrdinalIgnoreCase);
+                    foreach (string field in new[] { "participants", "ballots", "publicPositions" })
+                    {
+                        matter[field + "Count"] = ReadDictionaryList(business, field).Count;
+                        matter.Remove(field);
+                    }
+                    var forecast = ReadDictionary(business, "forecast");
+                    if (forecast != null)
+                    {
+                        var aggregate = new Dictionary<string, object>(forecast,
+                            StringComparer.OrdinalIgnoreCase);
+                        aggregate["options"] = new ArrayList(
+                            ReadDictionaryList(forecast, "options").Select(option =>
+                            {
+                                var share = new Dictionary<string, object>(option,
+                                    StringComparer.OrdinalIgnoreCase);
+                                share["namedVoterCount"] = ReadStringList(option, "names").Count;
+                                share.Remove("names");
+                                return share;
+                            }).ToList());
+                        matter["forecast"] = aggregate;
+                    }
+                    return matter;
+                }).ToList());
+            publicGovernment["votingDetailProjection"] = "Aggregate shares and counts only. Individual participants, declarations and ballots remain in the authoritative government record; this summary grants no vote or execution authority.";
+            projected["government"] = publicGovernment;
+            return Json.Serialize(projected);
+        }
+
         private static Dictionary<string, object> CompactDirectorKingdomRow(
             Dictionary<string, object> row, HashSet<string> relevantKingdomIds)
         {
@@ -3420,6 +3464,94 @@ namespace ReignBetaServer
                     && ReadDictionaryList(broadScope,
                         "allianceMarriageOptions").Count == 0,
                 "perspective assets are capped at eight and each possible target at three");
+
+            // A grown government must not turn a compact diplomacy world back into
+            // an oversized request through the separately serialized ruler rows.
+            var governmentPromptRuler = TestDirectorKingdom("prompt_realm", false);
+            governmentPromptRuler["leaderGold"] = 73000;
+            var detailedPeople = new ArrayList(Enumerable.Range(0, 64).Select(index =>
+                (object)new Dictionary<string, object>
+                {
+                    ["memberHeroId"] = "member_" + index,
+                    ["name"] = "Public member " + index + " " + new string('x', 120),
+                    ["optionId"] = "approve", ["weight"] = 1.25d,
+                    ["eligible"] = true
+                }).ToList());
+            var detailedMatters = new ArrayList(Enumerable.Range(0, 24).Select(index =>
+                (object)new Dictionary<string, object>
+                {
+                    ["businessId"] = "matter_" + index, ["status"] = "presented",
+                    ["title"] = "A complete diplomatic motion " + index,
+                    ["summary"] = "The exact tariff cost, fixed expiry and beneficiary remain part of this proposal.",
+                    ["targetKingdomId"] = "other_realm", ["petitionerHeroId"] = "petitioner",
+                    ["sponsorHeroId"] = "sponsor", ["options"] = new ArrayList
+                    {
+                        new Dictionary<string, object> { ["id"] = "approve", ["description"] = "A 42-day trial with a 15% tariff loss." }
+                    },
+                    ["participants"] = detailedPeople, ["ballots"] = detailedPeople,
+                    ["publicPositions"] = detailedPeople,
+                    ["forecast"] = new Dictionary<string, object>
+                    {
+                        ["isFinal"] = false, ["crownWeight"] = 25,
+                        ["undecidedWeight"] = 35d, ["decisionDay"] = 91154d,
+                        ["options"] = new ArrayList
+                        {
+                            new Dictionary<string, object>
+                            {
+                                ["optionId"] = "approve", ["weight"] = 65d,
+                                ["names"] = new ArrayList(Enumerable.Range(0, 64)
+                                    .Select(index => (object)("Public voter " + index)).ToList())
+                            }
+                        }
+                    }
+                }).ToList());
+            governmentPromptRuler["government"] = new Dictionary<string, object>
+            {
+                ["available"] = true, ["authorityLevel"] = 4, ["crownVotingWeight"] = 25,
+                ["decisionRule"] = "Largest frozen share wins without a later veto.",
+                ["parties"] = new ArrayList { new Dictionary<string, object> { ["partyId"] = "trade", ["planks"] = new ArrayList { "Trade", "Revenue" } } },
+                ["activeResolutions"] = new ArrayList { new Dictionary<string, object> { ["resolutionId"] = "obligation", ["requiredAmount"] = 400, ["currentValue"] = 120 } },
+                ["governmentBusiness"] = detailedMatters
+            };
+            string unprojectedRulerJson = Json.Serialize(governmentPromptRuler);
+            string projectedRulerJson = DirectorRulerPromptJson(governmentPromptRuler);
+            var projectedGovernment = ReadDictionary(TryParseJsonObject(projectedRulerJson), "government");
+            var projectedMatters = ReadDictionaryList(projectedGovernment, "governmentBusiness");
+            var projectedForecast = ReadDictionary(projectedMatters[0], "forecast");
+            var projectedShare = ReadDictionaryList(projectedForecast, "options")[0];
+            add("ruler_government_prompt_has_growth_headroom",
+                unprojectedRulerJson.Length > 240000 && projectedRulerJson.Length < 40000
+                    && Json.Serialize(new Dictionary<string, object> { ["content"] = projectedRulerJson }).Length < 80000,
+                "Full government input " + unprojectedRulerJson.Length + " characters; projected ruler " + projectedRulerJson.Length + "; unchanged request ceiling 240000.");
+            add("ruler_government_prompt_preserves_all_matters_and_terms",
+                projectedMatters.Count == 24 && projectedMatters.Select((matter, index) =>
+                    ReadString(matter, "businessId", "") == "matter_" + index
+                    && ReadString(matter, "summary", "").Contains("exact tariff cost")
+                    && ReadString(matter, "targetKingdomId", "") == "other_realm"
+                    && ReadString(ReadDictionaryList(matter, "options")[0], "description", "") == "A 42-day trial with a 15% tariff loss.").All(value => value),
+                "No matter, complete term, beneficiary summary or diplomatic target is clipped.");
+            add("ruler_government_prompt_preserves_authority_and_vote_totals",
+                ReadInt(projectedGovernment, "authorityLevel", 0) == 4
+                    && ReadInt(projectedGovernment, "crownVotingWeight", 0) == 25
+                    && ReadInt(projectedMatters[0], "ballotsCount", 0) == 64
+                    && ReadInt(projectedMatters[0], "participantsCount", 0) == 64
+                    && ReadInt(projectedMatters[0], "publicPositionsCount", 0) == 64
+                    && ReadDouble(projectedShare, "weight", 0d) == 65d
+                    && ReadInt(projectedShare, "namedVoterCount", 0) == 64
+                    && ReadDouble(projectedForecast, "undecidedWeight", 0d) == 35d
+                    && ReadDouble(projectedForecast, "decisionDay", 0d) == 91154d
+                    && !ReadBool(projectedForecast, "isFinal", true)
+                    && ReadInt(TryParseJsonObject(projectedRulerJson), "leaderGold", 0) == 73000
+                    && ReadDictionaryList(projectedGovernment, "activeResolutions").Count == 1
+                    && ReadDictionaryList(projectedGovernment, "parties").Count == 1,
+                "Political structure, pending delivery, actual ruler funds, dates and numerical shares retain their meaning.");
+            add("ruler_government_prompt_does_not_mutate_authoritative_rows",
+                Json.Serialize(governmentPromptRuler) == unprojectedRulerJson
+                    && DirectorRulerPromptJson(governmentPromptRuler) == projectedRulerJson
+                    && !projectedMatters[0].ContainsKey("ballots")
+                    && !projectedMatters[0].ContainsKey("publicPositions")
+                    && !projectedShare.ContainsKey("names"),
+                "Projection is repeatable; the full saved individual evidence remains unchanged outside the prompt.");
 
             int totalSimulatedEvents = 0;
             const int simulatedCampaigns = 200;

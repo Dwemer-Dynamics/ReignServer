@@ -70,6 +70,19 @@ namespace Reign.Core.Contracts.Government
             && type != "DiplomacyTradeEmbargo" && type != "DiplomacyBackRebellion"
             && type != "DiplomacyRecordPromise" && type != "DiplomacyGuaranteeIndependence";
 
+        // Native allocation descriptions address a monarch directly. The same
+        // public record is read by members, petitioners and foreign observers.
+        // Keep economic and diplomatic terms untouched; allocation candidates
+        // and the named fief remain in the title and recorded options.
+        public static string PublicMatterSummary(string kind, string summary)
+        {
+            if (kind == "fief_allocation")
+                return "The government will decide which eligible clan receives this fief.";
+            if (kind == "fief_reassignment")
+                return "The government will decide whether to reopen the allocation of this fief.";
+            return summary ?? string.Empty;
+        }
+
         public static string PublicText(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return string.Empty;
@@ -79,20 +92,36 @@ namespace Reign.Core.Contracts.Government
                 && Regex.IsMatch(clause, @"\d") ? "Private political measurements are withheld." : clause));
         }
 
+        public static string CompleteProposalText(string summary, IEnumerable<KeyValuePair<string, string>> options)
+        {
+            string result = summary ?? string.Empty;
+            foreach (var option in options ?? Enumerable.Empty<KeyValuePair<string, string>>())
+            {
+                string detail = option.Value;
+                if (string.IsNullOrWhiteSpace(detail) || detail.Length <= 52 && !detail.Contains("\n")) continue;
+                string clause = string.IsNullOrWhiteSpace(option.Key) ? detail : option.Key + ": " + detail;
+                // Equal budgets do not make two differently named remedies the same choice.
+                // Paragraph bounds also distinguish labels that are suffixes of another label.
+                if (("\n\n" + result + "\n\n").IndexOf("\n\n" + clause + "\n\n", StringComparison.Ordinal) >= 0) continue;
+                result += (result.Length == 0 ? string.Empty : "\n\n") + clause;
+            }
+            return result;
+        }
+
         public const int RecessDays = 7;
         public const int PetitionExpiryDays = 21;
         public static bool IsClosed(string status) => status == "decided" || status == "invalidated" || status == "expired";
-        public static bool CanPostpone(string status, bool urgent, bool postponed) => status == "hearing" && !urgent && !postponed;
-        public static bool CanRecommend(string status) => status == "hearing" || status == "reconsideration" || status == "awaiting_ruler";
+        public static bool CanPostpone(string status, bool urgent, bool postponed) => false;
+        public static bool CanRecommend(string status) => status == "queued" || status == "presented" || status == "hearing";
         public static bool CanVote(string status) => status == "hearing";
 
         // Seasonal resolutions retain "debate" until their recorded hearing decision executes.
-        // Linked hearings must finish voting; legacy unlinked proposals retain their original path.
+        // Even legacy proposals require a migrated hearing; this predicate never grants execution.
         public static bool CanDecideResolution(string resolutionStatus, string hearingStatus, bool hasHearing)
         {
             if (resolutionStatus != "proposed" && resolutionStatus != "debate") return false;
-            if (!hasHearing) return resolutionStatus == "proposed";
-            return hearingStatus == "awaiting_ruler" || hearingStatus == "reconsideration";
+            if (!hasHearing) return false;
+            return hearingStatus == "hearing";
         }
 
         public static int OptionScore(int interest, int partyAlignment, int rulerRelation, bool recommended,

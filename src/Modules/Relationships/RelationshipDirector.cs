@@ -583,6 +583,15 @@ VALUES($id,$attempt,$mother,$bio,$legal,$day,$due,'pending_game',$secrecy,$paylo
             string status = ReadString(payload, "status", "active");
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
+                EnsureRelationshipDirectorSchema(connection);
+                // Native observations also report births, but never enter the server conception scheduler.
+                if (ReadString(payload, "contextSource", "").StartsWith("bannerlord_native", StringComparison.Ordinal)
+                    && ReadString(payload, "timelineId", "") == ActiveWorldHistoryTimeline(connection))
+                    ExecuteSql(connection, @"INSERT OR IGNORE INTO conceptions(conception_id,mother_id,biological_father_id,legal_father_id,
+conception_day,due_day,status,payload_json,created_ts,updated_ts) VALUES($id,$mother,$father,$legal,$start,$due,$status,$payload,$ts,$ts);",
+                        TestDict("id", id, "mother", ReadString(payload, "motherId", ""), "father", ReadString(payload, "biologicalFatherId", ""),
+                            "legal", ReadString(payload, "legalFatherId", ""), "start", ReadDouble(payload, "conceptionDay", 0),
+                            "due", ReadDouble(payload, "dueDay", 0), "status", status, "payload", Json.Serialize(payload), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                 ExecuteSql(connection, "UPDATE conceptions SET status=$status,child_id=$child,payload_json=$payload,updated_ts=$ts WHERE conception_id=$id;", new Dictionary<string, object>
                 {
                     ["status"] = status,["child"] = ReadFirstString(payload,"childId","childHeroStringId"),["payload"] = Json.Serialize(payload),["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),["id"] = id
@@ -595,7 +604,7 @@ VALUES($id,$attempt,$mother,$bio,$legal,$day,$due,'pending_game',$secrecy,$paylo
                     {
                         bool illegitimate = ReadBool(payload,"isIllegitimate",false) || !ReadString(row,"legal_father_id","").Equals(ReadString(row,"biological_father_id",""),StringComparison.OrdinalIgnoreCase);
                         ExecuteSql(connection,@"INSERT OR REPLACE INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
-VALUES($child,$mother,$bio,$legal,$illegitimate,0,'',$conception,$payload,$ts);",new Dictionary<string, object>{{"child",child},{"mother",ReadString(row,"mother_id","")},{"bio",ReadString(row,"biological_father_id","")},{"legal",ReadString(row,"legal_father_id","")},{"illegitimate",illegitimate?1:0},{"conception",id},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
+VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payload,$ts);",new Dictionary<string, object>{{"child",child},{"mother",ReadString(row,"mother_id","")},{"bio",ReadString(row,"biological_father_id","")},{"legal",ReadString(row,"legal_father_id","")},{"illegitimate",illegitimate?1:0},{"revealed",ReadBool(payload,"fatherExposed",false)?1:0},{"conception",id},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
                         if (illegitimate && !ReadString(row,"legal_father_id","").Equals(ReadString(row,"biological_father_id",""),StringComparison.OrdinalIgnoreCase))
                         {
                             Dictionary<string, object> motherProfile=LoadDirectorHeroProfile(campaignId,ReadString(row,"mother_id",""),null);

@@ -225,6 +225,11 @@ namespace ReignBetaServer
             var previousSettings = CodexPerformanceSettings.Value;
             var previousTransport = CodexRpcTransportOverride;
             var previousProtocol = CodexRuntimeProtocol;
+            var previousCapacityMetadata = CodexCapacityMetadataOverride.Value;
+            var previousFailureStatus = CodexFailureStatus();
+            var previousAccount = DeepCloneProfileDictionary(CodexAccount);
+            bool previousAccountRequired = CodexAccountIdentityVerificationRequired;
+            long previousAccountGeneration = CodexAccountNotificationGeneration;
             var checks = new List<Dictionary<string, object>>();
             Action<string, bool, object> add = (id, ok, evidence) => checks.Add(new Dictionary<string, object>
                 { ["id"] = id, ["passed"] = ok, ["evidence"] = evidence });
@@ -233,36 +238,90 @@ namespace ReignBetaServer
             var efforts = new List<string>();
             var tiers = new List<string>();
             var models = new List<string>();
+            var turnThreads = new List<string>();
+            var turnTexts = new List<string>();
+            var retiredContracts = new List<Dictionary<string, object>>();
             bool malformedFirst = false;
             bool ambiguousFailure = false;
             bool rejectFastOnce = false;
+            int rateLimitFailures = 0;
+            bool partialRateLimitOutput = false, quotaBlocked = false;
+            bool accountNotifications = false, accountReadFails = false;
+            string fixtureAccountId = "offline-account-a", fixturePlan = "pro";
+            int reportedInputTokens = 10;
             var responseContract = new Dictionary<string, object> {
                 ["reply"] = "Good evening.", ["emotion"] = "calm", ["intent"] = "greet", ["relationshipSignal"] = "unchanged",
                 ["relationshipAssessments"] = new List<object>(),
                 ["decisionBrief"] = new Dictionary<string, object> { ["facts"] = new List<string>(), ["goals"] = new List<string>(),
                     ["constraints"] = new List<string>(), ["decision"] = "Return the greeting.", ["confidence"] = 0.9 },
-                ["politicalConduct"] = new Dictionary<string, object> { ["addressMode"] = "neutral", ["defianceTier"] = 0,
-                    ["stance"] = "guarded_neutrality", ["appliedEvidenceKeys"] = new List<string>() },
+                ["politicalConduct"] = new Dictionary<string, object> { ["addressMode"] = "neutral", ["defianceTier"] = 1,
+                    ["stance"] = "counsel", ["appliedEvidenceKeys"] = new List<string> { "authority.peer", "danger.low" } },
                 ["actionGate"] = new Dictionary<string, object> { ["needed"] = false, ["commitment"] = "roleplay_only",
                     ["intent"] = "", ["confidence"] = 1.0, ["reason"] = "A greeting requires no game action." }
             };
+            var observedConduct = TestDict("addressMode", "neutral", "defianceTier", 0, "stance", "guarded_neutrality",
+                "evidenceKeys", new List<string>(), "violations", new List<string>(), "warnings", new List<string>(), "rhetoricalConvergence", false);
+            var normalizationScope = new CodexConversationScope { AcceptedPoliticalConduct = observedConduct, AcceptedPoliticalConductReply = "Good evening." };
+            add("accepted_political_classification_receipt_matches", CodexAcceptedPoliticalConductMatches(normalizationScope, responseContract, "politicalConduct", observedConduct), null);
+            var changedConduct = DeepCloneProfileDictionary(observedConduct); changedConduct["defianceTier"] = 4;
+            var changedSpeech = DeepCloneProfileDictionary(responseContract); changedSpeech["reply"] = "I refuse.";
+            add("political_classification_rejects_unproven_changes",
+                !CodexAcceptedPoliticalConductMatches(normalizationScope, responseContract, "politicalConduct", changedConduct)
+                && !CodexAcceptedPoliticalConductMatches(normalizationScope, changedSpeech, "politicalConduct", observedConduct)
+                && !CodexAcceptedPoliticalConductMatches(new CodexConversationScope(), responseContract, "politicalConduct", observedConduct)
+                && !CodexAcceptedPoliticalConductMatches(normalizationScope, responseContract, "actionGate", observedConduct), null);
             try
             {
                 CodexRuntimeProtocol = new CodexProtocolState { SupportsOutputSchema = true, SupportsFastMode = true,
-                    FastModeField = "serviceTierForTurn", ThreadServiceTierField = "serviceTier", InspectionState = "offline_fixture" };
+                    SupportsThreadResume = true, FastModeField = "serviceTierForTurn", ThreadServiceTierField = "serviceTier", InspectionState = "offline_fixture" };
+                CodexCapacityMetadataOverride.Value = Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"), "client_version", "fixture",
+                    "models", new[] { TestDict("slug", "gpt-offline-contract", "context_window", 500000, "effective_context_window_percent", 95) }));
                 CodexRpcTransportOverride = (method, parameters, timeout) =>
                 {
+                    if (method == "account/read")
+                    {
+                        if (accountReadFails) throw new TimeoutException("Injected account metadata unavailable.");
+                        return TestDict("account", TestDict("type", "chatgpt", "accountId", fixtureAccountId,
+                            "email", "fixture@example.invalid", "planType", fixturePlan));
+                    }
+                    if (method == "account/rateLimits/read") return TestDict("ordinaryUsageAllowed", !quotaBlocked);
                     if (method == "thread/start") return new Dictionary<string, object> { ["thread"] = new Dictionary<string, object> { ["id"] = "contract-thread-" + Guid.NewGuid().ToString("N") } };
-                    if (method == "thread/delete" || method == "turn/interrupt") return new Dictionary<string, object>();
+                    if (method == "thread/resume") return TestDict("thread", TestDict("id", ReadString(parameters, "threadId", "")));
+                    if (method == "thread/delete")
+                    {
+                        var active = ActiveCodexConversationScope.Value;
+                        if (active != null) retiredContracts.Add(TestDict("threadId", ReadString(parameters, "threadId", ""),
+                            "contract", (active.FinalContract ?? TestDict()).Where(pair => responseContract.ContainsKey(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value),
+                            "contexts", active.Results.Select(entry => TestDict("correlationId", ReadString(entry.Item2, "correlationId", ""),
+                                "accepted", ReadBool(entry.Item2, "accepted", false), "substantivelyChanged", ReadBool(entry.Item2, "substantivelyChanged", true),
+                                "changeReason", ReadString(entry.Item2, "threadChangeReason", "unknown"),
+                                "acceptedHistorySignature", ReadString(entry.Item2, "acceptedHistorySignature", ""))).ToList()));
+                        return TestDict();
+                    }
+                    if (method == "turn/interrupt") return new Dictionary<string, object>();
                     if (method != "turn/start") throw new InvalidOperationException("Unexpected offline transport method: " + method);
                     calls++;
                     efforts.Add(ReadString(parameters, "effort", ""));
                     tiers.Add(ReadString(parameters, "serviceTierForTurn", ""));
                     models.Add(ReadString(parameters, "model", ""));
+                    turnThreads.Add(ReadString(parameters, "threadId", ""));
+                    turnTexts.Add(string.Join("\n", ReadDictionaryList(parameters, "input").Select(item => ReadString(item, "text", ""))));
                     if (rejectFastOnce) { rejectFastOnce = false; throw new CodexRpcException("turn/start", -32602, "Unsupported serviceTierForTurn fast."); }
                     if (ambiguousFailure) throw new TimeoutException("Injected serviceTierForTurn fast timeout after dispatch; generation state is unknown.");
                     string id = "contract-turn-" + Guid.NewGuid().ToString("N");
                     var waiter = GetOrCreateCodexTurn(id, ReadString(parameters, "threadId", ""));
+                    if (accountNotifications) HandleCodexMessage(TestDict("method", "account/updated", "params",
+                        TestDict("authMode", "chatgpt", "planType", fixturePlan)));
+                    if (rateLimitFailures > 0)
+                    {
+                        rateLimitFailures--;
+                        if (partialRateLimitOutput) waiter.Accept(TestDict("method", "item/agentMessage/delta", "params",
+                            TestDict("turnId", id, "itemId", "partial", "delta", "unfinished")));
+                        waiter.Accept(TestDict("method", "turn/completed", "params", TestDict("turnId", id, "turn",
+                            TestDict("id", id, "status", "failed", "error", TestDict("message", "exceeded retry limit, last status: 429 Too Many Requests",
+                                "codexErrorInfo", TestDict("responseTooManyFailedAttempts", TestDict("httpStatusCode", 429)))))));
+                        return TestDict("turn", TestDict("id", id));
+                    }
                     string candidate = malformedFirst ? "{\"reply\":\"unfinished" : Json.Serialize(responseContract);
                     malformedFirst = false;
                     var complete = new Dictionary<string, object> { ["method"] = "item/completed", ["params"] = new Dictionary<string, object> {
@@ -271,7 +330,7 @@ namespace ReignBetaServer
                     waiter.Accept(complete); waiter.Accept(complete); // A repeated runtime event must not duplicate the response or state effects.
                     waiter.Accept(new Dictionary<string, object> { ["method"] = "turn/completed", ["params"] = new Dictionary<string, object> {
                         ["turnId"] = id, ["turn"] = new Dictionary<string, object> { ["id"] = id, ["status"] = "completed",
-                            ["usage"] = new Dictionary<string, object> { ["inputTokens"] = 10, ["outputTokens"] = 8, ["totalTokens"] = 18 } } } });
+                            ["usage"] = new Dictionary<string, object> { ["inputTokens"] = reportedInputTokens, ["outputTokens"] = 8, ["totalTokens"] = reportedInputTokens + 8 } } } });
                     return new Dictionary<string, object> { ["turn"] = new Dictionary<string, object> { ["id"] = id } };
                 };
                 var fixtureSettings = DeepCloneProfileDictionary(LoadSettings());
@@ -280,6 +339,48 @@ namespace ReignBetaServer
                 NormalizeCodexOptions(fixtureSettings);
                 foreach (string key in ChatModelKeys) fixtureSettings[key] = "gpt-offline-contract";
                 CodexPerformanceSettings.Value = fixtureSettings;
+                fixtureSettings["llmTransientMaxAttempts"] = 2;
+                ReadDictionary(fixtureSettings, "codexOptions")["fastMode"] = true;
+                foreach (string failureCase in new[] { "recover", "repeated", "quota", "partial", "single" })
+                {
+                    rateLimitFailures = failureCase == "recover" ? 1 : 4;
+                    partialRateLimitOutput = failureCase == "partial";
+                    quotaBlocked = failureCase == "quota";
+                    int recoveryBefore = calls;
+                    string protectedInput = "UNCHANGED_FULL_GAME_PROMPT " + new string('c', 300000) + " END_OF_REQUIRED_CONTEXT";
+                    var result = ChatWithLlm(TestDict("campaignId", campaign, "requestType", "dialogue", "correlationId", "retry_" + failureCase,
+                        "singleProviderAttempt", failureCase == "single",
+                        "messages", new[] { TestDict("role", "system", "content", protectedInput), TestDict("role", "user", "content", "Original words.") }));
+                    int expectedCalls = failureCase == "recover" || failureCase == "repeated" ? 2 : 1;
+                    bool recovered = failureCase == "recover";
+                    add("production_terminal_429_" + failureCase,
+                        calls - recoveryBefore == expectedCalls && ReadBool(result, "ok", false) == recovered
+                        && turnTexts.Skip(recoveryBefore).All(text => text.Contains(protectedInput, StringComparison.Ordinal))
+                        && models.Skip(recoveryBefore).All(value => value == "gpt-offline-contract")
+                        && efforts.Skip(recoveryBefore).All(value => value == "high")
+                        && tiers.Skip(recoveryBefore).All(value => value == "fast")
+                        && (recovered || ReadInt(ReadDictionary(result, "codexFailure"), "httpStatusCode", 0) == 429),
+                        TestDict("calls", calls - recoveryBefore, "ok", ReadBool(result, "ok", false), "failure", ReadDictionary(result, "codexFailure")));
+                    rateLimitFailures = 0; partialRateLimitOutput = false; quotaBlocked = false;
+                }
+                ReadDictionary(fixtureSettings, "codexOptions")["fastMode"] = false;
+                foreach (int characters in new[] { 279768, 450000, 600000 })
+                {
+                    int largeBefore = calls;
+                    string protectedInput = "FULL_CHARACTER_AND_GAME_RULES " + new string('c', characters) + " COMPLETE_REQUIRED_ORIGINAL_END";
+                    var largeRequest = TestDict("campaignId", campaign, "requestType", "dialogue", "correlationId", "large_capacity_" + characters,
+                        "messages", new[] { TestDict("role", "system", "content", protectedInput), TestDict("role", "user", "content", "Keep all my current input.") });
+                    var largeResult = ChatWithLlm(largeRequest);
+                    add("production_large_codex_input_dispatches_" + characters, ReadBool(largeResult, "ok", false) && calls - largeBefore == 1
+                        && ReadString(ReadDictionaryList(largeRequest, "messages").First(), "content", "") == protectedInput
+                        && turnTexts.Last().Contains(protectedInput, StringComparison.Ordinal),
+                        TestDict("calls", calls - largeBefore, "error", ReadString(largeResult, "error", "")));
+                }
+                int oversizedBefore = calls;
+                var oversized = ChatWithLlm(TestDict("campaignId", campaign, "requestType", "memory", "correlationId", "capacity_oversized",
+                    "messages", new[] { TestDict("role", "user", "content", new string('x', 1500000)) }));
+                add("production_oversized_codex_input_blocks_before_dispatch", !ReadBool(oversized, "ok", true) && calls == oversizedBefore
+                    && ReadString(oversized, "errorCode", "") == "prompt_hard_limit_exceeded", null);
                 var request = new Dictionary<string, object> { ["campaignId"] = campaign, ["requestType"] = "dialogue", ["prompt"] = "Good evening.", ["correlationId"] = "primary" };
                 int before = calls;
                 var primary = ChatWithLlm(request);
@@ -330,24 +431,88 @@ namespace ReignBetaServer
                 hero["heroStringId"] = fixtureHeroId;
                 hero["name"] = ReadString(fixtureProfile.Value, "name", fixtureHeroId);
                 MaterializeCharacterProfile(campaign, fixtureHeroId, hero, false, false);
+                CodexAccount = TestDict("type", "chatgpt", "accountId", fixtureAccountId,
+                    "email", "fixture@example.invalid", "planType", fixturePlan);
+                CodexAccountIdentityVerificationRequired = false;
+                accountNotifications = true;
                 for (int attempt = 0; attempt < 2; attempt++)
                 {
+                    // A large first-turn usage receipt must not hit the former fixed
+                    // 128k retirement threshold on a verified 500k model.
+                    reportedInputTokens = attempt == 0 ? 150000 : 10;
                     malformedFirst = attempt == 1;
                     before = calls;
                     var dialoguePayload = new Dictionary<string, object> { ["campaignId"] = campaign, ["heroStringId"] = fixtureHeroId, ["hero"] = hero,
                         ["playerText"] = "Good evening.", ["playerName"] = "Traveler", ["playerHeroStringId"] = "fixture_player",
                         ["conversationSessionId"] = "dialogue_fixture_" + attempt, ["correlationId"] = "dialogue_fixture_" + attempt,
-                        ["sceneContext"] = "A quiet roadside meeting. No other characters are present.", ["worldDay"] = 1 };
+                        ["sceneContext"] = "A quiet roadside meeting. No other characters are present.", ["worldDay"] = 1,
+                        ["sceneParticipants"] = new List<Dictionary<string, object>> {
+                            TestDict("heroStringId", fixtureHeroId, "name", ReadString(hero, "name", fixtureHeroId), "role", "npc", "nativeLocationDescription", "a quiet roadside"),
+                            TestDict("heroStringId", "fixture_player", "name", "Traveler", "role", "player", "nativeLocationDescription", "a quiet roadside") } };
+                    var followupPayload = DeepCloneProfileDictionary(dialoguePayload);
+                    var accountSwitchPayload = DeepCloneProfileDictionary(dialoguePayload);
                     var dialogue = DialogueRespond(dialoguePayload);
                     var lines = ReadDictionaryList(dialogue, "lines");
                     var diag = ReadDictionary(dialogue, "codexDiagnostics");
                     string finalSession = ReadString(ReadDictionary(dialogue, "conversationExchange"), "sessionId", "");
+                    string finalReply = ReadString(dialogue, "reply", "");
+                    var acceptedLines = lines.Where(line => ReadString(line, "sessionId", "") == finalSession).ToList();
+                    // The normal dialogue renderer may prepend the authoritative venue.
+                    // Check the greeting and its exact accepted transcript independently.
+                    string expectedGreeting = attempt == 0 ? "Good evening." : "Good evening.."; // Existing successful-repair marker.
+                    bool greetingPreserved = finalReply == expectedGreeting
+                        || Regex.IsMatch(finalReply, @"\A[^\r\n]{1,180}\n\n" + Regex.Escape(expectedGreeting) + @"\z");
                     add(attempt == 0 ? "dialogue_one_primary_final_effect" : "dialogue_repair_one_final_effect",
-                        ReadBool(dialogue, "ok", false) && ReadString(dialogue, "reply", "") == "Good evening."
+                        ReadBool(dialogue, "ok", false) && greetingPreserved
                         && calls - before == attempt + 1 && finalSession.Length > 0
-                        && lines.Count(line => ReadString(line, "sessionId", "") == finalSession && ReadString(line, "text", "") == "Good evening.") == 2,
+                        && acceptedLines.Count == 2
+                        && acceptedLines.Count(line => ReadString(line, "role", "") == "player" && ReadString(line, "text", "") == "Good evening.") == 1
+                        && acceptedLines.Count(line => ReadString(line, "role", "") == "npc" && ReadString(line, "text", "") == finalReply) == 1,
                         new Dictionary<string, object> { ["calls"] = calls - before, ["lineCount"] = lines.Count,
+                            ["acceptedReply"] = finalReply, ["sessionId"] = finalSession, ["acceptedLines"] = acceptedLines,
                             ["ok"] = ReadBool(dialogue, "ok", false), ["error"] = ReadString(dialogue, "error", ""), ["diagnostics"] = diag });
+                    if (attempt == 0)
+                    {
+                        string firstThread = turnThreads.Last();
+                        accountReadFails = true;
+                        before = calls;
+                        var identityUnavailable = ChatWithLlm(TestDict("campaignId", campaign, "requestType", "memory",
+                            "prompt", "No generation before the account check succeeds.", "correlationId", "account_check_unavailable"));
+                        add("unverified_account_stops_before_generation", !ReadBool(identityUnavailable, "ok", true) && calls == before, calls - before);
+                        accountReadFails = false;
+                        fixturePlan = "plus";
+                        var retired = retiredContracts.LastOrDefault(item => ReadString(item, "threadId", "") == firstThread);
+                        var finalizedContract = ReadDictionary(retired, "contract");
+                        var contractDifferences = finalizedContract == null ? new List<string>() : responseContract.Keys
+                            .Where(key => !finalizedContract.ContainsKey(key) || CanonicalJson(responseContract[key]) != CanonicalJson(finalizedContract[key])).ToList();
+                        var followup = followupPayload;
+                        followup["playerText"] = "How fares your evening?";
+                        followup["correlationId"] = "dialogue_fixture_followup";
+                        before = calls;
+                        var warm = DialogueRespond(followup);
+                        var warmLines = ReadDictionaryList(warm, "lines").Where(line => ReadString(line, "sessionId", "") == finalSession).ToList();
+                        add("dialogue_heading_preserves_warm_thread", ReadBool(warm, "ok", false) && calls - before == 1
+                            && turnThreads.Last() == firstThread && finalReply.Contains("\n\n", StringComparison.Ordinal) && warmLines.Count == 4
+                            && ReadString(CodexAccount, "accountId", "") == fixtureAccountId
+                            && ReadInt(ReadDictionary(ReadDictionary(ReadDictionaryList(diag, "calls").First(), "runtime"), "request"), "contextInputLimitTokens", 0) > reportedInputTokens
+                            && warmLines.Count(line => ReadString(line, "role", "") == "player" && ReadString(line, "text", "") == "How fares your evening?") == 1,
+                            TestDict("firstThread", firstThread, "warmThread", turnThreads.Last(), "calls", calls - before,
+                                "lineCount", warmLines.Count, "firstReply", finalReply, "warmReply", ReadString(warm, "reply", ""),
+                                "reportedInputTokens", reportedInputTokens,
+                                "retiredFirstContract", retired, "changedModelFields", contractDifferences,
+                                "firstDiagnostics", diag, "warmDiagnostics", ReadDictionary(warm, "codexDiagnostics"), "error", ReadString(warm, "error", "")));
+                        fixtureAccountId = "offline-account-b";
+                        var switched = accountSwitchPayload;
+                        switched["playerText"] = "Let us continue after the account change.";
+                        switched["correlationId"] = "dialogue_fixture_new_account";
+                        responseContract["reply"] = "We can continue from there.";
+                        before = calls;
+                        var switchedResult = DialogueRespond(switched);
+                        responseContract["reply"] = "Good evening.";
+                        add("verified_same_auth_mode_account_switch_uses_fresh_thread",
+                            ReadBool(switchedResult, "ok", false) && calls - before == 1 && turnThreads.Last() != firstThread,
+                            TestDict("calls", calls - before, "previousThread", firstThread, "currentThread", turnThreads.Last()));
+                    }
                 }
                 foreach (string provider in new[] { NanoGptProvider, OpenRouterProvider, OpenAiCompatibleProvider })
                 {
@@ -374,6 +539,15 @@ namespace ReignBetaServer
                 CodexPerformanceSettings.Value = previousSettings;
                 CodexRpcTransportOverride = previousTransport;
                 CodexRuntimeProtocol = previousProtocol;
+                CodexCapacityMetadataOverride.Value = previousCapacityMetadata;
+                CodexAccount = previousAccount;
+                CodexAccountIdentityVerificationRequired = previousAccountRequired;
+                CodexAccountNotificationGeneration = previousAccountGeneration;
+                lock (CodexFailureStateLock)
+                {
+                    CodexLastGenerationFailure = ReadDictionary(previousFailureStatus, "lastGenerationFailure") ?? TestDict();
+                    CodexLastRateLimits = ReadDictionary(previousFailureStatus, "rateLimits") ?? TestDict();
+                }
             }
             return new Dictionary<string, object> { ["ok"] = checks.All(check => ReadBool(check, "passed", false)), ["checks"] = checks, ["injectedDispatches"] = calls, ["providerCalls"] = 0 };
         }

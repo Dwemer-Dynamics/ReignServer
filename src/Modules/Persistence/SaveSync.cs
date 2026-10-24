@@ -1008,7 +1008,7 @@ namespace ReignBetaServer
             if (value.StartsWith("acquaintance") || value.StartsWith("identity_")) return "identity";
             if (value.StartsWith("reputation_") || value == "character_reputations"
                 || value == "directional_social_projections") return "reputation";
-            if (value.StartsWith("character_editor_")) return "characterState";
+            if (value.StartsWith("character_editor_") || value == "character_npc_lives_state") return "characterState";
             if (value.StartsWith("embedding_")) return "semantic";
             return "other";
         }

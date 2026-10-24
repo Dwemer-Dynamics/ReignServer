@@ -11,7 +11,8 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunPartyBanterSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
-            void Check(string id, bool pass, object data = null) => results.Add(TestDict("caseId", "party_banter_" + id, "passed", pass, "summary", id, "data", data));
+            void Check(string id, bool pass, object data = null) => results.Add(TestDict("caseId", "party_banter_" + id, "passed", pass,
+                "summary", !pass && data != null ? id + ": " + LimitText(Json.Serialize(data), 1200) : id, "data", data));
             Check("eight_hour_boundary", !PartyBanterPolicy.CanStart(true, true, false, false, 2, 10 + 7.99 / 24, 10, 100, 0)
                 && PartyBanterPolicy.CanStart(true, true, false, false, 2, 10 + 8d / 24, 10, 100, 0));
             Check("travel_and_modal_gates", !PartyBanterPolicy.CanStart(true, false, false, false, 2, 20, 10, 100, 0)
@@ -80,6 +81,23 @@ namespace ReignBetaServer
                 string core = string.Join(" ", Enumerable.Repeat("They are reserved yet generous, proud of their work, slow to trust and quick to defend a friend.", 14));
                 foreach (string id in ids) WriteJsonObject(CharacterFile(campaign, id, "traits.json"), TestDict("basePersonalitySummary", core));
                 string prompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false);
+                var politicalBlocks = heroes.Select(h => {
+                    string id = CharacterIdFrom(h); var traits = ReadJsonObject(CharacterFile(campaign, id, "traits.json"));
+                    return RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
+                        TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(EnsurePoliticalProfile(campaign, id, h, traits)))));
+                }).ToList();
+                string protectedPrompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false, out int politicalCharacters);
+                Check("complete_political_context_has_exact_separate_allowance", politicalCharacters == politicalBlocks.Sum(block => block.Length + Environment.NewLine.Length)
+                    && politicalBlocks.All(block => protectedPrompt.Contains(block, StringComparison.Ordinal))
+                    && !BanterPromptExceedsBaseBudget(protectedPrompt, politicalCharacters, 8800));
+                string boundary = new string('x', 8800 + politicalCharacters - BanterRules.Length);
+                Check("nonpolitical_floor_ceiling_preserved", !BanterPromptExceedsBaseBudget(boundary, politicalCharacters, 8800)
+                    && BanterPromptExceedsBaseBudget(boundary + "x", politicalCharacters, 8800));
+                int graceCharacters = (8800 + politicalCharacters + 9) / 10;
+                string graceBoundary = boundary + new string('x', graceCharacters);
+                Check("hard_allowance_has_bounded_ten_percent_grace", !BanterPromptExceedsBaseBudget(boundary + "x", politicalCharacters, 8800, true)
+                    && !BanterPromptExceedsBaseBudget(graceBoundary, politicalCharacters, 8800, true)
+                    && BanterPromptExceedsBaseBudget(graceBoundary + "x", politicalCharacters, 8800, true));
                 Check("protected_identity_personality_addresses", prompt.Split(new[] { core }, StringSplitOptions.None).Length == 3
                     && prompt.Contains("queen") && prompt.Contains("commoner") && prompt.Contains("Your Majesty") && prompt.Contains("affinity"));
                 var noblePeers = new List<Dictionary<string, object>> { Hero("noble", true), Hero("commoner", true) };
@@ -109,13 +127,17 @@ namespace ReignBetaServer
                     requestContentValid = wireMessages.Count == 2
                         && ReadString(wireMessages[0], "role", "") == "system" && ReadString(wireMessages[0], "content", "") == BanterRules
                         && ReadString(wireMessages[1], "role", "") == "user" && !string.IsNullOrWhiteSpace(ReadString(wireMessages[1], "content", ""))
-                        && ReadString(wireMessages[1], "content", "").Contains(core);
+                        && ReadString(wireMessages[1], "content", "").Contains(core)
+                        && politicalBlocks.All(block => ReadString(wireMessages[1], "content", "").Contains(block, StringComparison.Ordinal));
                     if (!requestContentValid) throw new InvalidOperationException("Provider messages require role and nonempty content.");
                     string content = "{\"speakerId\":\"noble\",\"text\":\"You are a worthless coward.\",\"reactions\":[{\"observer\":\"commoner\",\"target\":\"noble\",\"source\":1,\"quote\":\"worthless coward\",\"valence\":\"negative\",\"tier\":\"hostile\",\"act\":\"insult\",\"reason\":\"Their trust is wounded by the insult.\"}]}\n{\"speakerId\":\"commoner\",\"text\":\"I still wish you well.\"}\n{\"speakerId\":\"noble\",\"text\":\"Thank you, my lady.\"}\n";
                     foreach (string fragment in new[] { content.Substring(0, 15), content.Substring(15, 20), content.Substring(35) }) emit(fragment);
                     return TestDict("ok", true, "content", content);
                 };
                 var started = PartyBanterApi("start", p);
+                if (ReadString(started, "state", "") != "generating")
+                    throw new InvalidOperationException("Banter fixture did not start: " + Json.Serialize(started)
+                        + "; protected prompt characters=" + (BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), p, false).Length + BanterRules.Length));
                 bool completed = SpinWait.SpinUntil(() => { using var probe = OpenCampaignConnection(campaign); return ReadBool(ReadBanter(probe, session), "generationDone", false); }, 10000);
                 var saved = ReadBanter(c, session);
                 Check("provider_messages_include_content", completed && requestContentValid);

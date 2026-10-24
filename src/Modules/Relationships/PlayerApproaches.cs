@@ -325,9 +325,12 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                     if (ReadString(rescue, "heroId", "") != hero || ReadString(rescue, "playerId", "") != player
                         || !new[] { "battle_rescue", "prison_rescue" }.Contains(ReadString(rescue, "kind", "")))
                         throw new InvalidOperationException("The rescue evidence does not match this conversation.");
-                    context += "\n\nNATIVE RESCUE EVIDENCE\n" + Json.Serialize(rescue) + "\n"
+                    string rescuePrompt = "NATIVE RESCUE EVIDENCE\n" + Json.Serialize(rescue) + "\n"
                         + (ReadBool(payload, "rescueOpening", false) ? LoadPromptTemplate("rescue_opening.txt")
                             : "The rescue opening has already been heard. Respond to the player's current contribution; do not restart your thanks or invent further rescue facts.");
+                    if (ReadBool(payload, "rescueOpening", false)) rescuePrompt += "\n" + IndividualNpcOpeningCue;
+                    context += "\n\n" + RenderContinuityRecord("rescue_" + PromptHash(Json.Serialize(rescue)).Substring(0, 24),
+                        "native_rescue", hero, GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, rescuePrompt);
                 }
                 string id = ReadString(payload, "approachRequestId", "");
                 if (id.Length == 0) return context;
@@ -340,14 +343,33 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                 payload["authoritativeApproachOpening"] = opening;
                 string kind = ReadString(request, "kind", "");
                 payload["authoritativeApproachKind"] = kind;
-                context += "\n\nAUTHORITATIVE SAVED APPROACH BRIEF\n" + Json.Serialize(brief) + "\nOpening required: " + opening;
-                if (!opening) context += "\nYour invitation has already been heard. This frozen brief preserves its original reason; answer the player's current contribution and let the grievance evolve or resolve without repeating your opening.";
-                else if (kind == "shared") context += "\n" + LoadPromptTemplate("jealousy_approach.txt")
-                    + "\nEvery named rival in spoken dialogue must have an exact rivalDays entry. If mentioning a number of days, use one separate sentence per rival. Never pool their days.";
-                else context += "\nYou initiated this meeting. Speak first and explain why you wanted their attention, shaped by your actual traits and political interests. "
+                string approachPrompt = "AUTHORITATIVE SAVED APPROACH BRIEF\n" + Json.Serialize(brief) + "\nOpening required: " + opening;
+                if (!opening) approachPrompt += "\nYour invitation has already been heard. This frozen brief preserves its original reason; answer the player's current contribution and let the grievance evolve or resolve without repeating your opening.";
+                else if (kind == "shared") approachPrompt += "\n" + JealousyOpeningInstructions(brief);
+                else approachPrompt += "\nYou initiated this meeting. Speak first and explain why you wanted their attention, shaped by your actual traits and political interests. "
                     + (kind == "keep" ? "You noticed the player's public standing (clan renown " + ReadDouble(request, "playerRenown", 0) + "). Flattery or an invitation to support your cause must fit existing facts. Introduce yourself if not known." : "Your friendly patrolling party stopped to speak with the player. Explain your social or political reason. Do not claim an attack or demand combat.");
+                // These are server event instructions, not captured player speech.
+                // Keep them with the saved authority through whole-record packing;
+                // projecting an empty original player turn must not erase the cue.
+                if (opening) approachPrompt += "\n" + IndividualNpcOpeningCue;
+                context += "\n\n" + RenderContinuityRecord("player_approach_" + PromptHash(id + "|" + hero).Substring(0, 24),
+                    "player_approach_brief", hero, GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, approachPrompt);
                 return context;
             }
+        }
+
+        private static string JealousyOpeningInstructions(Dictionary<string, object> brief)
+        {
+            var primary = ReadDictionary(brief, "primaryRival");
+            string primaryId = ReadString(primary, "heroId", "");
+            int days = ReadInt(primary, "days", ReadInt(ReadDictionaryList(brief, "rivals")
+                .FirstOrDefault(r => ReadString(r, "heroId", "") == primaryId), "days", 0));
+            return LoadPromptTemplate("jealousy_approach.txt")
+                + "\nEvery named rival in spoken dialogue must have an exact rivalDays entry. If mentioning a number of days, use one separate sentence per rival. Never pool their days or infer consecutive days from the count."
+                + "\nREQUIRED ADDITIONAL TOP-LEVEL JSON FIELD (alongside the ordinary output schema, never inside reply or decisionBrief): "
+                + Json.Serialize(TestDict("approachOpeningEvidence", TestDict("primaryRivalId", primaryId,
+                    "severityLevel", ReadInt(brief, "severityLevel", 0), "rivalDays", TestDict(primaryId, days))))
+                + "\nRetain these exact primary values. Add the exact individual count for any other rival you mention. The spoken opening must explain your own unmet wish for time, not only mention the rival.";
         }
 
         private static List<string> ApproachOpeningViolations(Dictionary<string, object> parsed, Dictionary<string, object> payload)
@@ -405,17 +427,27 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
             if (!ReadBool(llm, "ok", false)) return llm;
             var parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             var errors = ApproachOpeningViolations(parsed, payload);
+            DiagnosticValidation("Check approach opening", errors.Count == 0, errors, parsed);
             if (errors.Count == 0) return llm;
             var repair = CloneDictionary(request);
             var messages = ReadDictionaryList(request, "messages").Select(CloneDictionary).ToList();
             messages.Add(TestDict("role", "user", "content", "Repair this opening using the authoritative approach brief. Preserve the complete output schema. "
-                + Json.Serialize(errors) + "\nBRIEF: " + Json.Serialize(ReadDictionary(payload, "authoritativeApproachBrief")) + "\nINVALID RESPONSE: " + ReadString(llm, "content", "")));
+                + Json.Serialize(errors) + "\nBRIEF: " + Json.Serialize(ReadDictionary(payload, "authoritativeApproachBrief"))
+                + (ReadBool(payload, "authoritativeApproachOpening", false) && ReadString(payload, "authoritativeApproachKind", "shared") == "shared"
+                    ? "\n" + JealousyOpeningInstructions(ReadDictionary(payload, "authoritativeApproachBrief")) : "")
+                + "\n" + IndividualNpcOpeningCue + "\nINVALID RESPONSE: " + ReadString(llm, "content", "")));
             repair["messages"] = messages; repair["temperature"] = 0d;
             var result = (responder ?? ChatWithLlm)(repair);
             var repaired = TryParseJsonObject(ReadString(result, "content", ""));
-            if (ReadBool(result, "ok", false) && repaired != null && ApproachOpeningViolations(repaired, payload).Count == 0
-                && (validateRepair == null || validateRepair(repaired))) return result;
-            return TestDict("ok", false, "error", "The approach opening did not match its witnessed attention history. You may retry.", "approachOpeningFailed", true);
+            var repairErrors = ApproachOpeningViolations(repaired, payload);
+            if (!ReadBool(result, "ok", false)) repairErrors.Add(ReadString(result, "error", "The opening repair failed to generate a response."));
+            if (repaired == null) repairErrors.Add("The opening repair did not return a JSON object.");
+            if (repairErrors.Count == 0 && validateRepair != null && !validateRepair(repaired))
+                repairErrors.Add("The repaired opening failed the ordinary conversation checks.");
+            DiagnosticValidation("Recheck approach opening", repairErrors.Count == 0, repairErrors, repaired);
+            if (repairErrors.Count == 0) return result;
+            return TestDict("ok", false, "error", "The approach opening did not match its witnessed attention history. You may retry.",
+                "approachOpeningFailed", true, "approachOpeningViolations", repairErrors);
         }
     }
 }

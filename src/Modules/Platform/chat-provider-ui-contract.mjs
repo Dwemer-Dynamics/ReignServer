@@ -7,6 +7,11 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.REIGN_PLAYWRIGHT_MODULE || 'playwright');
 const [htmlPath, output] = process.argv.slice(2);
 const html = await fs.readFile(htmlPath, 'utf8');
+const reasoningCatalog = process.env.REIGN_CODEX_MODEL_CATALOG
+  ? JSON.parse(await fs.readFile(process.env.REIGN_CODEX_MODEL_CATALOG,'utf8')).models
+  : [{model:'fixture-all',supportedReasoningEfforts:['none','minimal','low','medium','high','xhigh','max','ultra']},
+     {model:'fixture-limited',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}]},
+     {model:'fixture-unknown'}];
 await fs.mkdir(output, { recursive: true });
 const keys = ['dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel','memoryModel',
   'relationshipModel','correspondenceModel','strategyModel','actionPlannerModel','actionRouterModel'];
@@ -19,7 +24,7 @@ let settings = { llmProvider:'nanogpt', nanoGptApiKeyPresent:true, nanoGptApiKey
     structuredOutputs:false,compactMetadata:false,stablePromptMapping:false,parallelContextPreparation:false,reuseThreads:false,asyncThreadCleanup:false},
   codex: {runtimeVersion:'fixture-runtime',catalogFreshness:'fresh',discoveryErrors:[],models:[{id:'gpt-5.5',displayName:'GPT-5.5',supportedReasoningEfforts:['minimal','low','medium','high','xhigh']}],modelVerification:'unverified'} };
 Object.assign(settings, settings.llmModelProfiles.nanogpt);
-let saved, codexCheckCalls = 0, lastCodexCheck;
+let saved, codexCheckCalls = 0, lastCodexCheck, modelRefreshCalls = 0, failModelRefresh = false;
 const results = [], errors = [];
 const browser = await chromium.launch({channel:process.env.REIGN_BROWSER_CHANNEL || 'msedge',headless:true});
 try {
@@ -39,6 +44,12 @@ try {
       body = {...settings,ok:true};
     }
     if (url.pathname === '/api/codex/status') body = {...settings.codex,ok:true,models:settings.codex.models || []};
+    if (url.pathname === '/api/codex/models/refresh') {
+      modelRefreshCalls++;
+      body = failModelRefresh ? {ok:false,error:'fixture discovery unavailable'} : {ok:true,models:[
+        {model:'gpt-6.1-sol',displayName:'GPT-6.1 Sol'}, {slug:'gpt-5.6-terra',displayName:'GPT-5.6 Terra'}]};
+      if (body.ok) settings.codex.models = body.models;
+    }
     if (url.pathname === '/api/codex/models/verify' && route.request().method() === 'POST') {
       codexCheckCalls++;
       lastCodexCheck = route.request().postDataJSON();
@@ -73,6 +84,7 @@ try {
       assert.deepEqual(state.models,keys.map(k => provider + '/' + k));
       assert.equal(state.custom,provider === 'openai_compatible');
       assert.equal(state.codex,provider === 'codex_subscription');
+      assert.equal(await page.locator('#codexLookupSettings').isVisible(),provider === 'codex_subscription');
       assert.equal(state.performance,provider === 'codex_subscription');
       if (provider === 'codex_subscription') {
         assert.equal(state.fastMode,'off');
@@ -99,6 +111,26 @@ try {
     await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
   }
   await page.selectOption('#llmProvider','codex_subscription');
+  assert.deepEqual(await page.locator('#codexLookupMode option').evaluateAll(xs => xs.map(x => x.textContent.trim())),['Auto','Direct lookups']);
+  assert.equal(await page.inputValue('#codexLookupMode'),'auto');
+  assert.ok(await page.evaluate(() => !!(document.getElementById('llmProvider').compareDocumentPosition(document.getElementById('codexLookupMode')) & 4)));
+  await page.evaluate(() => renderCodexModels([]));
+  await page.selectOption('#llmProvider','nanogpt');
+  const beforeDiscovery = modelRefreshCalls;
+  await page.selectOption('#llmProvider','codex_subscription');
+  await page.waitForFunction(() => [...document.getElementById('codexModelPicker').options].some(x => x.value === 'gpt-5.6-terra'));
+  assert.equal(modelRefreshCalls,beforeDiscovery+1,'Selecting Codex automatically loads an empty catalog without generation');
+  await page.selectOption('#codexModelPicker','gpt-5.6-terra');
+  await page.evaluate(() => renderCodexStatus({ok:true,verificationStatus:'unverified'}));
+  assert.equal(await page.inputValue('#codexModelPicker'),'gpt-5.6-terra','Unrelated status updates retain the loaded catalog and selected model');
+  failModelRefresh = true;
+  await page.evaluate(() => refreshCodexModels());
+  assert.equal(await page.inputValue('#codexModelPicker'),'gpt-5.6-terra','Failed discovery retains the prior selection');
+  assert.ok((await page.textContent('#codexStatus')).includes('fixture discovery unavailable'));
+  failModelRefresh = false;
+  await page.evaluate(() => refreshCodexModels());
+  assert.equal(await page.inputValue('#codexModelPicker'),'gpt-5.6-terra','Successful refresh retains selection');
+  await page.selectOption('#codexLookupMode','direct');
   // Provider selection lives on the LLM page while reasoning/Fast controls
   // live on the Models page. Keep the navigation explicit so the contract
   // exercises the same two-page flow as the Control Center.
@@ -116,11 +148,21 @@ try {
   assert.equal(await page.inputValue('#codexFastMode'),'on');
   assert.equal(await page.locator('#codexStablePromptMapping').isChecked(),true);
   assert.equal(codexCheckCalls,0,'Catalog refresh and provider switching must not verify a model');
+  assert.equal(await page.inputValue('#codexModelCandidate'),'codex_subscription/dialogueModel','The initial check target uses the Codex dialogue model');
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.fill('#codexModelCandidate','gpt-6.1-sol');
+  const dialogueBeforeCheck = await page.inputValue('#dialogueModel');
+  await page.evaluate(() => saveSettings());
+  assert.equal(await page.inputValue('#codexModelCandidate'),'gpt-6.1-sol','Saving retains the availability check target');
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('codexModelCandidate').value === 'gpt-6.1-sol');
+  assert.equal(await page.inputValue('#dialogueModel'),dialogueBeforeCheck,'Changing the check target cannot change the game model');
+  assert.equal(codexCheckCalls,0,'Saving or reloading the check target cannot send a provider request');
   await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
   await page.locator('#codexModelAvailabilityButton').click();
   await page.waitForFunction(() => document.getElementById('codexModelVerificationStatus').textContent.includes('unverified'));
   assert.equal(codexCheckCalls,1);
-  assert.equal(lastCodexCheck.model,'gpt-5.4');
+  assert.equal(lastCodexCheck.model,'gpt-6.1-sol');
   assert.equal(lastCodexCheck.bounded,true);
   assert.equal(lastCodexCheck.maxRequests,1);
   assert.equal(lastCodexCheck.confirmation,'verify one Codex model request');
@@ -130,6 +172,7 @@ try {
   assert.equal(saved.codexOptions.reasoningEffort,'high');
   assert.equal(saved.codexOptions.stablePromptMapping,true);
   assert.equal(saved.codexOptions.structuredOutputs,false);
+  assert.equal(saved.codexOptions.lookupMode,'direct');
   assert.equal(saved.reasoningEffort,'medium','Codex save must preserve the legacy/non-Codex reasoning value');
   await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
   await page.selectOption('#llmProvider','nanogpt');
@@ -152,6 +195,7 @@ try {
   assert.equal(saved.nanoGptApiKey,'');
   assert.equal(saved.codexOptions.fastMode,true,'Non-Codex save must preserve the Codex bank');
   assert.equal(saved.codexOptions.stablePromptMapping,true,'Non-Codex save must preserve independent Codex experiments');
+  assert.equal(saved.codexOptions.lookupMode,'direct','Provider switching and non-Codex saves preserve the lookup selection');
   await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('models').classList.add('active'); });
   const retired = ['highMemoryMode','memoryCheckerModel','memoryCheckerTimeoutMs','memoryEvidenceModel',
     'memoryEvidenceTimeoutMs','memoryEvidenceReasoningEffort','memoryEvidencePlanningReasoningEffort',
@@ -173,6 +217,45 @@ try {
     const screenshot=path.join(output,`${width}-local-memory.png`);
     await page.locator('#models').screenshot({path:screenshot});
     results.push({width,retiredControlsAbsent:true,screenshot,passed:true});
+  }
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','codex_subscription');
+  for (const model of reasoningCatalog) {
+    const id=model.model || model.id || model.slug;
+    settings.codex.models=[model];
+    await page.evaluate(model => {
+      renderCodexModels([model]);
+      document.getElementById('codexModelPicker').value=model.model || model.id || model.slug;
+      applyCodexModelToAll();
+    },model);
+    const order=['none','minimal','low','medium','high','xhigh','max','ultra'];
+    const supported=(model.supportedReasoningEfforts || model.reasoningEfforts || []).map(value => typeof value === 'string' ? value : value.reasoningEffort || value.effort);
+    const choices=order.filter(value => !supported.length || supported.includes(value));
+    assert.deepEqual(await page.locator('#reasoningEffort option').evaluateAll(options => options.map(x => x.value)),choices,`${id}: choices must match its advertised levels`);
+    await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('models').classList.add('active'); });
+    for (const effort of choices) {
+      await page.selectOption('#reasoningEffort',effort);
+      await page.evaluate(() => saveSettings());
+      assert.equal(saved.codexOptions.reasoningEffort,effort,`${id}/${effort}: save must retain the exact choice`);
+      assert.equal(saved.dialogueModel,id);
+      assert.equal(saved.reasoningEffort,'medium','Model-specific Codex choices cannot change the other provider reasoning bank');
+    }
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('llmProvider').value === 'codex_subscription');
+    assert.equal(await page.inputValue('#reasoningEffort'),choices.at(-1),`${id}: saved choice survives reload`);
+    results.push({model:id,reasoningEfforts:choices,saveReload:true,passed:true});
+  }
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('llmProvider').value === 'codex_subscription');
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','codex_subscription');
+  assert.equal(await page.inputValue('#codexLookupMode'),'direct','Direct selection survives a full settings reload and provider switch');
+  for (const width of [1672,1024,600]) {
+    await page.setViewportSize({width,height:941});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth>innerWidth+1),false);
+    const screenshot=path.join(output,`${width}-codex-direct.png`);
+    await page.locator('#llm').screenshot({path:screenshot});
+    results.push({width,lookupMode:'direct',reload:true,screenshot,passed:true});
   }
   assert.deepEqual(errors,[]);
   const report=path.join(output,'ui-report.json');

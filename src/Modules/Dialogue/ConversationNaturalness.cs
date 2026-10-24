@@ -15,6 +15,7 @@ namespace ReignBetaServer
             "Read both sides of the recent exchange. An answer already received remains received; a correction already acknowledged remains acknowledged. Distinguish that settled point from any separate outstanding request. Old comprehension, suspicions and summaries are fallible past interpretations; update them from later dialogue instead of treating them as facts about the player's intent. " +
             "Ask for details before judging a brief answer as evasion. Base penalties on current conduct, not clarification, negation, NPC hostility or third-party threats; otherwise use neutral. " +
             "Let an accepted apology close its issue. A refusal can remain firm without repeating the entire accusation or adding another test. Advance the conversation, or end it naturally when there is nothing more to say. " +
+            "Across turns, vary the actual framing as well as the words. Do not keep returning to the same metaphor, reassurance, self-description, sentence pattern or gesture when the current contribution moves on. A brief relevant callback or necessary boundary is allowed; a complaint about repetition asks for a changed response, not a justification of the habit. " +
             "Use quantities when they convey actual requested information, including prices, debts, inventory and troop counts. Do not keep tallying answers, questions, apologies or favors, or repeatedly express conversation as coins, ledgers, tolls and payments. Earlier figurative wording is not a permanent personality rule. " +
             "In a group, respond from this speaker's own knowledge, interests and relationship. Another NPC's accusation is their view, not established fact or a verdict the group must repeat. Agreement may be brief; add a distinct relevant contribution rather than another version of the same lecture. " +
             "These rules scope general tone instructions to the present conversation; they do not override verified facts, character identity, explicit boundaries, or action authority. Apply corrections to private comprehension, state and memory as well as the visible reply.";
@@ -75,7 +76,9 @@ namespace ReignBetaServer
                 : string.Equals(ReadFirstString(line, "speaker", "speaker_name"), heroName, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> BuildConversationNaturalnessContext(string playerText, bool group)
+        private static Dictionary<string, object> BuildConversationNaturalnessContext(string playerText, bool group,
+            List<Dictionary<string, object>> history = null, string heroId = "", string heroName = "",
+            Dictionary<string, object> payload = null, Func<string, string> expressionProjection = null)
         {
             string speech = ConversationSpeech(playerText);
             bool clarification = Regex.IsMatch(speech, @"\b(?:what (?:do|did) you (?:mean|ask)|what did you ask|what are you (?:asking|talking)|(?:do not|don't|dont|didn't|didnt) understand|(?:confused|confusing)|explain (?:that|what|it))\b", RegexOptions.IgnoreCase);
@@ -86,20 +89,28 @@ namespace ReignBetaServer
             if (correction) hints.Add("The latest player message corrects an interpretation. Reconcile it with both sides of the transcript and any earlier acknowledgement; do not promote your older suspicion into an established fact.");
             if (apology) hints.Add("The latest player message includes an apology. Decide whether to accept it in character; avoid adding a new tally, debt or repeated demand merely to continue the exchange.");
             if (group) hints.Add("This is a shared conversation. Treat earlier speakers' opinions as their own; give this NPC a distinct response to the current player message and relevant contributions.");
+            if (IsExpressionCorrection(playerText)) hints.Add("The player is calling attention to repeated expression. Change the recurring theme or phrasing while preserving your facts, feelings and boundaries; do not rationalize repeating it.");
+            var expressionHistory = ConversationExpressionHistory(history, heroId, heroName, payload);
+            string ledger = BuildConversationExpressionLedger(expressionHistory);
+            if (expressionProjection != null) ledger = expressionProjection(ledger);
+            if (ledger.Length > 0) hints.Add(ledger);
             return new Dictionary<string, object>
             {
                 ["schema"] = "reign-conversation-naturalness-v1",
                 ["clarification"] = clarification, ["correction"] = correction, ["apology"] = apology,
                 ["group"] = group,
+                ["expressionSourceIds"] = expressionHistory.Select(row => ReadString(row, "turn_id", "")).ToList(),
                 ["prompt"] = hints.Count == 0 ? "" : "CURRENT CONVERSATION GUIDANCE\n" + string.Join("\n", hints)
             };
         }
 
         private static List<Dictionary<string, object>> FindConversationNaturalnessViolations(
             Dictionary<string, object> parsed, string playerText, List<Dictionary<string, object>> ownHistory,
-            List<Dictionary<string, object>> sharedHistory, string heroId, string heroName)
+            List<Dictionary<string, object>> sharedHistory, string heroId, string heroName,
+            List<Dictionary<string, object>> expressionHistory = null)
         {
-            var result = new List<Dictionary<string, object>>();
+            var result = FindConversationExpressionViolations(parsed, playerText,
+                expressionHistory ?? ConversationExpressionHistory(sharedHistory ?? ownHistory, heroId, heroName), heroName);
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
             bool wordingCritique = Regex.IsMatch(reply ?? "", @"\b(?:say|said|word|saying|learned to say)\s+['""‘’“”]?(?:we|I|our)['""‘’“”]?(?:\s+(?:not|instead|rather)|[.!?,])", RegexOptions.IgnoreCase);
             bool askedAboutWords = Regex.IsMatch(playerText ?? "", @"\b(?:wording|pronouns?|how should I (?:say|phrase)|what word)\b", RegexOptions.IgnoreCase);

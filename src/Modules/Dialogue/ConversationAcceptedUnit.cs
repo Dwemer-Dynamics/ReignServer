@@ -42,6 +42,8 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                 throw new InvalidOperationException("Conversation publication requires its pre-generation restore boundary.");
             var finalOpening = CloneDictionary(unit.Parsed ?? TestDict()); finalOpening["reply"] = unit.Reply;
             bool groundingFailed = ReadBool(unit.Payload, "conversationGroundingFailed", false);
+            bool intentionalSilence = (unit.GroupConversation || unit.EventType == "social_event_turn")
+                && IsIntentionalConversationSilence(unit.Parsed) && string.IsNullOrWhiteSpace(unit.Reply);
             // Recheck exact accepted bytes after every rewrite; never publish a stale
             // successful receipt for a different final response.
             if (!groundingFailed && FindCriticalConversationContinuityViolations(finalOpening, unit.Payload, unit.Hero).Count > 0)
@@ -80,10 +82,17 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                     // Commit methods may update their request-local receipts. Keep
                     // those changes private until the outer source transaction wins.
                     var effectPayload = CloneDictionary(unit.Payload);
+                    if (ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local")
+                    {
+                        unit.Memories = unit.Beliefs = unit.Relationships = unit.Obligations = unit.Comprehensions = unit.Continuity = new List<Dictionary<string, object>>();
+                        unit.PublishScene = unit.PublishSocial = unit.PublishIntroductions = false;
+                    }
                     CopyPlayerInputSource(unit.Payload, effectPayload);
                     var effectParsed = CloneDictionary(unit.Parsed);
                     bool technicalNotice = IsTechnicalConversationNotice(unit.Reply) || groundingFailed;
-                    var effects = unit.CommitEffects && !technicalNotice
+                    bool suppressReplyEffects = technicalNotice || intentionalSilence;
+                    string excludedStatus = intentionalSilence ? "intentional_silence_excluded" : "technical_notice_excluded";
+                    var effects = unit.CommitEffects && !suppressReplyEffects
                         ? CommitFinalConversationEffects(unit.Campaign, unit.Hero, effectPayload, unit.Motive,
                             unit.Profile, unit.Characteristics, effectParsed, unit.Reply, unit.Generation, existingConnection: connection)
                         : TestDict("ok", true, "status", "suppressed_by_route", "scope", "negotiation_and_drinking");
@@ -93,32 +102,47 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                     var audience = unit.PrivateWhisper ? new[] { unit.Hero, unit.Player }
                         : TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
                             "participants_json", "[]")).ToArray();
-                    var scene = unit.PublishScene && !technicalNotice
+                    var scene = unit.PublishScene && !suppressReplyEffects
                         ? FinalizeConversationSceneState(unit.Campaign, unit.Payload, unit.Hero, unit.PlayerText,
                             unit.Reply, unit.SceneMode ?? unit.EventType, unit.Parsed, connection, audience)
                         : TestDict("status", "suppressed_by_route");
-                    var social = unit.PublishSocial && !technicalNotice
+                    var social = unit.PublishSocial && !suppressReplyEffects
                         ? NormalizeAndPersistConversationSocialSignals(unit.Campaign, unit.Parsed, unit.Payload,
                             unit.Hero, unit.Player, unit.PlayerText, unit.Reply, unit.ConceptionGate,
                             unit.EventId, ReadDouble(unit.Payload, "worldDay", 0d), existingConnection: connection)
                         : TestDict("status", "suppressed_by_route", "signals", new List<Dictionary<string, object>>());
-                    var introductions = unit.PublishIntroductions && !technicalNotice
+                    var introductions = unit.PublishIntroductions && !suppressReplyEffects
                         ? ApplyIdentityIntroductionWrites(unit.Campaign, unit.Payload, unit.Parsed, session,
                             unit.Hero, unit.Player, unit.PlayerText, unit.Reply, audience, connection)
                         : new List<Dictionary<string, object>>();
+                    if (!suppressReplyEffects)
+                        AcceptPregnancyDisclosures(connection, ContinuityTimeline(unit.Payload), unit.Hero, unit.Reply, unit.Parsed,
+                            audience, ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero), "turn_id", ""),
+                            ReadDouble(unit.Payload, "worldDay", 0d));
                     boundary?.Invoke("after_context_effects");
                     string group = unit.GroupConversation || unit.EventType == "dialogue_turn"
                         ? "conversation:" + session
                         : BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
-                    var memory = technicalNotice ? TestDict("status", "technical_notice_excluded", "continuity", TestDict("status", "complete"))
+                    var personalState = ReadNpcLives(connection, unit.Campaign, ContinuityTimeline(unit.Payload));
+                    bool personalMatter = NpcLivesOwnsRelationshipReward(personalState, unit.Hero, unit.Payload);
+                    if (personalMatter) unit.Relationships = new List<Dictionary<string, object>>();
+                    // A quiet turn preserves the player's sources and an idempotent
+                    // receipt, but supplies no NPC speech or attention evidence.
+                    var memory = suppressReplyEffects ? TestDict("status", excludedStatus, "continuity", TestDict("status", "complete"))
                         : StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
                         unit.Hero, unit.Player, unit.Location, unit.PlayerText, unit.Reply,
                         (unit.Memories ?? new List<Dictionary<string, object>>()).Select(CloneDictionary).ToList(),
                         unit.Beliefs, unit.Relationships, unit.Obligations, unit.Comprehensions, group, unit.Timestamp,
                         unit.Participants, unit.RetrievalEligible, unit.Payload, unit.Continuity, connection);
                     boundary?.Invoke("after_memory");
-                    var attention = technicalNotice ? TestDict("status", "technical_notice_excluded")
+                    var attention = suppressReplyEffects ? TestDict("status", excludedStatus)
                         : RecordAcceptedPlayerAttention(connection, unit, sourceRows);
+                    var npcLives = suppressReplyEffects ? TestDict("status", excludedStatus)
+                        : RecordAcceptedNpcLives(connection, unit, sourceRows);
+                    var communications = suppressReplyEffects ? TestDict("status", excludedStatus)
+                        : AcceptCommunicationCommitments(connection, unit, source, sourceRows.Concat(
+                            ReadStringList(privateExchange, "turnIds").SelectMany(id => QuerySql(connection,
+                                "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList());
                     bool memoryComplete = !technicalNotice
                         && ReadString(ReadDictionary(memory, "continuity"), "status", "complete") == "complete"
                         && ReadString(memory, "sourceEvidenceStatus", "complete") == "complete";
@@ -127,11 +151,14 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         "scope", "transcript_memory_negotiation_drinking_scene_social_evidence_identity", "responseHash", hash,
                         "acceptedReplyHash", PromptHash(unit.Reply ?? ""), "restoreGeneration", generation,
                         "memory", memory, "effects", effects, "privateExchange", privateExchange,
-                        "scene", scene, "social", social, "introductions", introductions, "playerAttention", attention,
+                        "personalRelationshipOwner", personalMatter ? "npc_lives" : "",
+                        "scene", scene, "social", social, "introductions", introductions, "playerAttention", attention, "npcLives", npcLives,
+                        "communications", communications,
                         "sourceIds", ReadStringList(source, "turnIds").Concat(ReadStringList(privateExchange, "turnIds")).ToArray(),
                         "effectPayload", TestDict("conversationAgencyReceipt", ReadDictionary(effectPayload, "conversationAgencyReceipt"),
                             "intoxicationReceipt", ReadDictionary(effectPayload, "intoxicationReceipt")));
                     boundary?.Invoke("before_unit_receipt");
+                    receipt["politicalReflection"] = AcceptedPoliticalReflection(unit, suppressReplyEffects);
                     ExecuteSql(connection, @"INSERT INTO conversation_accepted_units(unit_id,response_hash,restore_generation,receipt_json,created_ts)
 VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "hash", hash,
                         "generation", generation, "receipt", Json.Serialize(receipt), "ts", unit.Timestamp));
@@ -176,7 +203,9 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 unit.PlayerName, unit.PlayerText, "private_whisper", day, unit.Timestamp, unit.Location, audience, request);
             InsertConversationTurn(connection, npcTurn, session, unit.EventId, 1, exchange, "npc", unit.Hero,
                 unit.HeroName, unit.Reply, "private_whisper", day, unit.Timestamp, unit.Location, audience, request);
-            return TestDict("ok", true, "sessionId", session, "exchangeId", exchange, "turnIds", new[] { playerTurn, npcTurn });
+            return TestDict("ok", true, "sessionId", session, "exchangeId", exchange, "turnIds",
+                new[] { playerTurn, npcTurn }.Where(id => QuerySql(connection,
+                    "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count > 0).ToArray());
         }
     }
 }

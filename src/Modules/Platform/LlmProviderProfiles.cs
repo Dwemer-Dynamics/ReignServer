@@ -65,6 +65,7 @@ namespace ReignBetaServer
             foreach (string key in new[] { "response_format", "tools", "tool_choice", "stop", "seed" }) CopyOptional(payload, body, key);
             var extra = ReadDictionary(payload, "extra");
             if (extra != null) foreach (var pair in extra) body[pair.Key] = pair.Value;
+            body["messages"] = RequiredPoliticalMessages(payload, ReadDictionaryList(body, "messages"));
             return body;
         }
 

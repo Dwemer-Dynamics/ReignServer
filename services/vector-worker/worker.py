@@ -558,7 +558,7 @@ def payload_matches_filters(payload: dict[str, Any], filters: dict[str, Any]) ->
     return True
 
 
-def contextual_chunks(document: dict[str, Any], tokenizer) -> list[dict[str, Any]]:
+def contextual_chunks(document: dict[str, Any], tokenizer, model_window_tokens: int = 512) -> list[dict[str, Any]]:
     """Versioned, overlapping token windows retain the original character span."""
     text = str(document.get("text") or "")
     encoded = tokenizer.encode(text, add_special_tokens=False)
@@ -567,10 +567,13 @@ def contextual_chunks(document: dict[str, Any], tokenizer) -> list[dict[str, Any
         return []
     parent = str(document.get("id") or "")
     chunks = []
+    if model_window_tokens not in (256, 512):
+        raise ValueError("Unsupported certified embedding window.")
+    body_tokens = model_window_tokens - 64
     # 448 body tokens leave room for model special tokens. No character cap or
     # model-side truncation is permitted to discard a source's later outcome.
-    for start in range(0, len(offsets), 416):
-        end = min(start + 448, len(offsets))
+    for start in range(0, len(offsets), body_tokens - 32):
+        end = min(start + body_tokens, len(offsets))
         begin_char, end_char = offsets[start][0], offsets[end - 1][1]
         payload = dict(document.get("payload") or {})
         context = " | ".join(str(payload.get(k) or "") for k in ("sourceType", "ownerId", "timelineId", "worldDay"))
@@ -579,7 +582,7 @@ def contextual_chunks(document: dict[str, Any], tokenizer) -> list[dict[str, Any
         if len(context_tokens.ids) > 48:
             context = context[:context_tokens.offsets[47][1]]
         value = context + "\n" + text[begin_char:end_char]
-        if len(tokenizer.encode(value, add_special_tokens=True).ids) > 512:
+        if len(tokenizer.encode(value, add_special_tokens=True).ids) > model_window_tokens:
             raise ValueError("Embedding chunk exceeds the certified model window.")
         payload = dict(document.get("payload") or {})
         payload.update(documentId=parent, chunkVersion=CHUNK_VERSION, chunkOrdinal=len(chunks),

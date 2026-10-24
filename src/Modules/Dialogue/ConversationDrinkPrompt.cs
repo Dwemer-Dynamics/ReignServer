@@ -39,6 +39,9 @@ namespace ReignBetaServer
                     "schema", "reign-drink-scene-v1", "scope", ReadString(scene, "scope", ""),
                     "hour", ReadDouble(scene, "hour", 0), "vessels", retained,
                     "omittedVessels", source.Count - retained.Count)));
+            // Preserve the original packet allocation. Structure-only role wrapper
+            // overhead is measured by aggregate preflight, never paid for by
+            // dropping another vessel from this independently allocated packet.
             int Tokens(string text) => EstimateContinuityTokens(Json.Serialize(new[] {
                 TestDict("role", "user", "content", rules), TestDict("role", "user", "content", text) }));
             string text = Render();

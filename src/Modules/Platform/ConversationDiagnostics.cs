@@ -488,6 +488,7 @@ namespace ReignBetaServer
                 case "llm.response": return "Processed model result";
                 case "llm.format_retry": return "Repair the answer format";
                 case "llm.schema_completion": return "Complete missing metadata locally";
+                case "llm.response_recovery": return "Recover the outer provider response";
                 case "llm.agency_repair": return "Repair negotiation metadata";
                 case "llm.roleplay_continuity_repair": return "Repair continuity or repeated narration";
                 case "model.parsed": return "Parse the accepted answer";

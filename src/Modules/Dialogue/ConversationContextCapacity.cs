@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 
 namespace ReignBetaServer
 {
@@ -10,6 +12,11 @@ namespace ReignBetaServer
     {
         private const int ConversationUnverifiedInputLimit = 48000;
         private const int ConversationCapacitySafetyReserve = 1024;
+        private const int CodexConversationRuntimeReserve = 16384;
+        private static readonly AsyncLocal<string> CodexCapacityMetadataOverride = new AsyncLocal<string>();
+        private static readonly object CodexCapacityMetadataGate = new object();
+        private static string CodexCapacityRefreshHome = "";
+        private static DateTimeOffset CodexCapacityRefreshAfter;
         private const string NanoConversationModelsUrl = "https://nano-gpt.com/api/v1/models?detailed=true";
         private static readonly HttpClient ConversationCapacityHttp = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
         {
@@ -33,6 +40,69 @@ namespace ReignBetaServer
         {
             return int.TryParse(ReadString(source, key, ""), NumberStyles.None, CultureInfo.InvariantCulture, out int value)
                 && value > 0 ? value : 0;
+        }
+
+        private static Dictionary<string, object> ParseCodexCapacityCertificate(string json, string model, DateTimeOffset now)
+        {
+            if (string.IsNullOrWhiteSpace(json) || json.Length > 8 * 1024 * 1024) return null;
+            Dictionary<string, object> metadata;
+            try { metadata = Json.Deserialize<Dictionary<string, object>>(json); }
+            catch (System.Text.Json.JsonException) { return null; }
+            if (!DateTimeOffset.TryParse(ReadString(metadata, "fetched_at", ""), CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var fetched) || fetched > now.AddMinutes(5) || fetched.AddHours(6) <= now
+                || string.IsNullOrWhiteSpace(ReadString(metadata, "client_version", ""))) return null;
+            var matches = ReadDictionaryList(metadata, "models").Where(row => ReadString(row, "slug", "") == model).ToList();
+            if (matches.Count != 1) return null;
+            var row = matches[0];
+            int reported = PositiveCapacityInteger(row, "context_window");
+            int percent = row.ContainsKey("effective_context_window_percent") ? PositiveCapacityInteger(row, "effective_context_window_percent") : 95;
+            if (reported == 0 || percent < 1 || percent > 100) return null;
+            int effective = (int)((long)reported * percent / 100);
+            var capacity = TestDict("model", model, "contextTokens", effective, "reportedContextTokens", reported,
+                "effectiveContextPercent", percent, "clientVersion", ReadString(metadata, "client_version", ""));
+            capacity["endpoint"] = "codex-app-server://local";
+            capacity["source"] = "codex-runtime:models_cache.json";
+            capacity["sourceHash"] = PromptHash(CanonicalJson(capacity));
+            capacity["validUntilUtc"] = fetched.AddHours(6).ToString("o");
+            capacity["runtimeManagedContext"] = true;
+            return capacity;
+        }
+
+        private static Dictionary<string, object> ReadCodexCapacityCertificate(Dictionary<string, object> settings, string model)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if (CodexCapacityMetadataOverride.Value != null)
+                return ParseCodexCapacityCertificate(CodexCapacityMetadataOverride.Value, model, now);
+            // Isolated verification must never read the signed-in user's model cache,
+            // start their runtime, or discover models. Fixtures inject public metadata.
+            if (!string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+                || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1") return null;
+            string home = ReadString(settings, "codexHome", "").Trim();
+            if (home.Length == 0) home = Environment.GetEnvironmentVariable("CODEX_HOME") ?? "";
+            if (home.Length == 0) home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            string path = Path.Combine(home, "models_cache.json");
+            string ReadMetadata()
+            {
+                try { return new FileInfo(path) is { Exists: true, Length: > 0 and <= 8388608 } ? File.ReadAllText(path) : null; }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return null; }
+            }
+            lock (CodexCapacityMetadataGate)
+            {
+                var certificate = ParseCodexCapacityCertificate(ReadMetadata(), model, now);
+                if (certificate != null) return certificate;
+                if (CodexCapacityRefreshHome == home && now < CodexCapacityRefreshAfter) return null;
+                CodexCapacityRefreshHome = home;
+                CodexCapacityRefreshAfter = now.AddSeconds(30);
+                // A cold/expired cache needs metadata discovery before the very first
+                // large prompt. This bounded RPC never starts an inference turn.
+                try
+                {
+                    EnsureCodexAppServer(settings);
+                    CodexRpc("model/list", TestDict("includeHidden", true), Math.Min(15000, CodexRpcTimeout(settings)));
+                }
+                catch (Exception ex) { LogOperational("codex.capacity_discovery_unavailable", TestDict("error", LimitText(ex.Message, 300))); }
+                return ParseCodexCapacityCertificate(ReadMetadata(), model, DateTimeOffset.UtcNow);
+            }
         }
 
         private sealed class ConversationCapacityCatalog
@@ -118,6 +188,8 @@ namespace ReignBetaServer
             // Expansion is allowed only after the actual serialized request passed
             // exact-route, output, byte-bound and required-content validation.
             if (!ReadBool(preflight, "capacityVerified", false) || !ReadBool(preflight, "fits", false)) return configured;
+            if (ReadBool(preflight, "runtimeManagedContext", false))
+                return (int)Math.Min(int.MaxValue, Math.Max(configured, (long)ReadInt(preflight, "inputAllowance", 0) * 3));
             long available = (long)ReadInt(preflight, "verifiedContextTokens", 0)
                 - ReadInt(preflight, "outputReserve", 0) - ReadInt(preflight, "safetyReserve", ConversationCapacitySafetyReserve) - 128;
             return (int)Math.Min(int.MaxValue, Math.Max(configured, available));
@@ -135,6 +207,8 @@ namespace ReignBetaServer
             if (certificate == null && provider == NanoGptProvider && endpoint == NanoGptChatCompletionsUrl
                 && routing.Count == 0 && !string.IsNullOrWhiteSpace(model) && !model.Contains(':'))
                 certificate = (catalog ?? ConversationModelCapacities).Read(model);
+            if (certificate == null && provider == CodexSubscriptionProvider && endpoint == "codex-app-server://local"
+                && routing.Count == 0 && !string.IsNullOrWhiteSpace(model)) certificate = ReadCodexCapacityCertificate(settings, model);
             bool verified = certificate != null && ReadString(certificate, "endpoint", "") == endpoint
                 && ReadString(certificate, "model", "") == model && !string.IsNullOrWhiteSpace(ReadString(certificate, "source", ""))
                 && DateTimeOffset.TryParse(ReadString(certificate, "validUntilUtc", ""), CultureInfo.InvariantCulture,
@@ -142,14 +216,17 @@ namespace ReignBetaServer
             int context = verified ? PositiveCapacityInteger(certificate, "contextTokens") : 0;
             verified = verified && context > 0;
             int output = PositiveCapacityInteger(body, "max_tokens");
+            bool runtimeManaged = verified && provider == CodexSubscriptionProvider && endpoint == "codex-app-server://local";
+            int runtimeReserve = runtimeManaged ? CodexConversationRuntimeReserve : 0;
             int maxOutput = verified ? PositiveCapacityInteger(certificate, "maxOutputTokens") : 0;
             int allowance = verified
-                ? (int)Math.Min(int.MaxValue / 3, Math.Max(0L, (long)context - output - ConversationCapacitySafetyReserve))
+                ? (int)Math.Min(int.MaxValue / 3, Math.Max(0L, (long)context - output - ConversationCapacitySafetyReserve - runtimeReserve))
                 : ConversationUnverifiedInputLimit;
             return new Dictionary<string, object>
             {
                 ["routeKey"] = routeKey, ["capacityVerified"] = verified, ["verifiedContextTokens"] = verified ? context : 0,
                 ["inputAllowance"] = allowance, ["outputReserve"] = output, ["safetyReserve"] = ConversationCapacitySafetyReserve,
+                ["runtimeManagedContext"] = runtimeManaged, ["runtimeReserve"] = runtimeReserve,
                 ["outputFits"] = output > 0 && (!verified || maxOutput == 0 || output <= maxOutput),
                 ["maxOutputTokens"] = maxOutput, ["capacitySource"] = verified ? ReadString(certificate, "source", "") : "",
                 ["capacitySourceHash"] = verified ? ReadString(certificate, "sourceHash", "") : "",

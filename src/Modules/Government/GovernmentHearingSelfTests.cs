@@ -66,20 +66,20 @@ namespace ReignBetaServer
                 && GovernmentBusinessRules.PublicText(null) == string.Empty,
                 "Production public-business text removes numeric relationship values and deltas while preserving actual payment amounts, deadlines and qualitative political wording in their own clauses.",
                 new { privateMeasurements, sanitizedMeasurements, publicTerms, mixedPublicText });
-            string[] stages = { "awaiting_sponsorship", "hearing", "postponed", "reconsideration", "awaiting_ruler", "voting", "decided", "invalidated", "expired" };
+            string[] stages = { "awaiting_sponsorship", "queued", "presented", "hearing", "postponed", "reconsideration", "awaiting_ruler", "voting", "decided", "invalidated", "expired" };
             var recessCases = (from stage in stages from urgent in new[] { false, true }
                 from used in new[] { false, true } select new
                 {
                     stage, urgent, used,
                     actual = GovernmentBusinessRules.CanPostpone(stage, urgent, used),
-                    expected = stage == "hearing" && !urgent && !used
+                    expected = false
                 }).ToArray();
-            add("government.hearing_single_seven_day_recess",
-                GovernmentBusinessRules.RecessDays == 7 && recessCases.All(x => x.actual == x.expected),
-                "Only an unpostponed nonurgent hearing permits the single seven-day recess; closed, urgent and reconsideration cases cannot postpone.", recessCases);
+            add("government.session_recess_retired",
+                recessCases.All(x => x.actual == x.expected),
+                "Every regular motion follows its published next-session decision date; neither regular nor extraordinary business offers a manual recess.", recessCases);
             add("government.hearing_stage_permissions",
                 stages.All(stage => GovernmentBusinessRules.CanVote(stage) == (stage == "hearing")
-                    && GovernmentBusinessRules.CanRecommend(stage) == (stage == "hearing" || stage == "reconsideration" || stage == "awaiting_ruler")
+                    && GovernmentBusinessRules.CanRecommend(stage) == (stage == "queued" || stage == "presented" || stage == "hearing")
                     && GovernmentBusinessRules.IsClosed(stage) == (stage == "decided" || stage == "invalidated" || stage == "expired"))
                 && !GovernmentBusinessRules.CanVote(null) && !GovernmentBusinessRules.CanRecommend("unknown")
                 && GovernmentBusinessRules.PetitionExpiryDays == 21,
@@ -171,6 +171,7 @@ namespace ReignBetaServer
             AddGovernmentPrivateConversationSelfTests(add);
             AddGovernmentPublicDiscussionSelfTests(add);
             AddGovernmentPaymentOwnershipSelfTests(add);
+            AddGovernmentCrownDecisionSelfTests(add);
         }
 
         private static void AddGovernmentPublicDiscussionSelfTests(Action<string, bool, string, object> add)
@@ -375,5 +376,6 @@ namespace ReignBetaServer
             }
             catch (Exception ex) { error = ex.Message; return false; }
         }
+
     }
 }

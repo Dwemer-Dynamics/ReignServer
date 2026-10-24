@@ -1233,7 +1233,8 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             if (example == null)
                 return source + "\nMemory fields extend the example above. Preserve its other fields. Every lasting write includes sourceEvidence "
                     + Json.Serialize(ConversationSourceEvidenceExample()) + ". continuityWrites uses [] when no question/concern changes; otherwise entries like "
-                    + Json.Serialize(ConversationQuestionExample()) + ". Fill exact source values; never copy example placeholders.";
+                    + Json.Serialize(ConversationQuestionExample()) + ". communicationPlans is required: use [] without a communication commitment, otherwise entries like "
+                    + Json.Serialize(CommunicationPlanExample()) + ". Fill exact source values; never copy example placeholders.";
             string hash = PromptHash(source);
             var defaults = DefaultPromptTemplates();
             bool stock = new[] { "dialogue_output_schema.json", "event_output_schema.json" }.Any(name =>
@@ -1261,6 +1262,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
                 foreach (var write in ReadDictionaryList(example, field))
                     if (!write.ContainsKey("sourceEvidence")) write["sourceEvidence"] = ConversationSourceEvidenceExample();
             if (!example.ContainsKey("continuityWrites")) example["continuityWrites"] = new[] { ConversationQuestionExample() };
+            if (!example.ContainsKey("communicationPlans")) example["communicationPlans"] = new[] { CommunicationPlanExample() };
             return Json.Serialize(example);
         }
 
@@ -1302,8 +1304,10 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             // after the last spoken turn must still be visible at the next read.
             string letterPart = TableExists(connection, "letters")
                 ? " UNION ALL SELECT COALESCE(MAX(COALESCE((to_jsonb(l)->>'dispatch_sequence')::bigint,0)),0) AS n FROM letters l" : "";
+            string communicationPart = TableExists(connection, "communication_history")
+                ? " UNION ALL SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM communication_history" : "";
             return ReadLong(QuerySql(connection, "SELECT MAX(n) AS watermark FROM (SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM conversation_turns"
-                + letterPart + ") sources;").Single(), "watermark", 0);
+                + letterPart + communicationPart + ") sources;").Single(), "watermark", 0);
         }
 
         private static bool PrecisionTurnVisible(Dictionary<string,object> turn,string observer,KnowledgeAccessContext knowledge, ReignDbConnection connection = null) =>

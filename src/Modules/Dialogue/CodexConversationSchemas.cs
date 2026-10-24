@@ -39,8 +39,9 @@ namespace ReignBetaServer
             "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals",
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
             "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites",
-            "courtKnowledgeWrites", "sceneStateUpdates", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
-            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "raisedGossip"
+            "courtKnowledgeWrites", "pregnancyDisclosures", "sceneStateUpdates", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
+            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "raisedGossip",
+            "npcStoryAssessments", "npcLeaveAssessment", "announcementReactions", "announcementReview", "communicationPlans"
         };
 
         internal static IReadOnlyList<string> TemplateNames(CodexConversationContractKind kind)
@@ -240,11 +241,36 @@ namespace ReignBetaServer
                 ["intent"] = String(),
                 ["relationshipSignal"] = String(),
                 ["relationshipAssessments"] = Array(RelationshipAssessment()),
+                ["communicationPlans"] = Array(Object(new Dictionary<string, object> {
+                    ["key"] = String(), ["operation"] = String(new[] { "send", "cancel" }),
+                    ["kind"] = String(new[] { "inform", "ask", "summon", "summon_then_inform" }),
+                    ["recipientId"] = String(), ["evidenceQuote"] = String(),
+                    ["contentEvidence"] = Array(Object(new Dictionary<string, object> {
+                        ["turnId"] = String(), ["quote"] = String()
+                    }, null, false)),
+                    ["destinationId"] = String(), ["stayDays"] = Number(0, 31.5), ["delayDays"] = Number(0, 126)
+                }, null, false)),
+                ["npcStoryAssessments"] = Array(Object(new Dictionary<string, object> {
+                    ["storyId"] = String(), ["revision"] = Integer(), ["objectiveId"] = String(),
+                    ["outcome"] = String(new[] { "progress", "tangent" }), ["evidenceQuote"] = String()
+                }, null, false)),
+                ["npcLeaveAssessment"] = Object(new Dictionary<string, object> {
+                    ["leaveId"] = String(), ["revision"] = Integer(), ["reasonKind"] = String(),
+                    ["evidenceQuote"] = String(), ["compelling"] = Boolean()
+                }, null, false),
+                ["announcementReactions"] = Array(Object(new Dictionary<string, object> {
+                    ["id"] = String(), ["evidenceQuote"] = String()
+                }, null, false)),
+                ["announcementReview"] = Object(new Dictionary<string, object> {
+                    ["reviewedAll"] = Boolean(), ["disposition"] = String(new[] { "commented", "no_comment" }), ["evidenceQuote"] = String()
+                }, null, false),
                 ["actionGate"] = ActionGate(new[] { "accepted", "commanded", "conditional", "refused", "threat", "roleplay_only", "final_private_report" }),
                 ["proposalDecisions"] = Array(ProposalDecision()),
                 ["identityIntroductions"] = Array(IdentityIntroduction()),
                 ["memoryWrites"] = Array(MemoryWrite()),
                 ["beliefWrites"] = Array(BeliefWrite()),
+                ["pregnancyDisclosures"] = Array(Object(new Dictionary<string, object> {
+                    ["pregnancyId"] = String(), ["kind"] = String(new[] { "pregnancy", "illicit", "paternity" }), ["evidenceQuote"] = String() }, null, false)),
                 ["relationshipUpdates"] = Array(RelationshipUpdate()),
                 ["obligationWrites"] = Array(ObligationWrite()),
                 ["comprehensionWrites"] = Array(ComprehensionWrite()),
@@ -265,9 +291,13 @@ namespace ReignBetaServer
                     // the existing finalizer must remove nulls before merging.
                     ["mood"] = NullableString(), ["currentPlan"] = NullableString(), ["currentCrisis"] = NullableString()
                 }, null, true),
-                ["suggestedActions"] = Array(SuggestedAction())
+                ["suggestedActions"] = Array(SuggestedAction()),
+                ["politicalReflection"] = Array(Object(new Dictionary<string, object> {
+                    ["value"] = String(), ["stanceChange"] = Integer(), ["importanceChange"] = Integer(),
+                    ["evidenceQuote"] = String(), ["sourceQuote"] = String() }, null, false))
             };
             if (HasStructuredActions(payload)) properties["structuredActionDecision"] = StructuredActionDecision();
+            AddOpeningEvidenceProperties(properties, payload);
 
             if (kind == CodexConversationContractKind.Individual)
             {
@@ -285,10 +315,34 @@ namespace ReignBetaServer
             return properties;
         }
 
+        private static void AddOpeningEvidenceProperties(Dictionary<string, object> properties, Dictionary<string, object> payload)
+        {
+            if (payload == null) return;
+            if (payload.TryGetValue("authoritativeApproachOpening", out object opening) && ToBool(opening)
+                && payload.TryGetValue("authoritativeApproachKind", out object kind) && Convert.ToString(kind) == "shared"
+                && payload.TryGetValue("authoritativeApproachBrief", out object rawBrief) && rawBrief is Dictionary<string, object> brief)
+            {
+                var rivals = new Dictionary<string, object>(StringComparer.Ordinal);
+                if (brief.TryGetValue("rivals", out object rawRivals) && rawRivals is IEnumerable<object> entries)
+                    foreach (Dictionary<string, object> rival in entries.OfType<Dictionary<string, object>>())
+                        if (rival.TryGetValue("heroId", out object rawId) && !string.IsNullOrWhiteSpace(Convert.ToString(rawId)))
+                            rivals[Convert.ToString(rawId)] = Integer();
+                properties["approachOpeningEvidence"] = Object(new Dictionary<string, object> {
+                    ["primaryRivalId"] = String(), ["severityLevel"] = Integer(),
+                    ["rivalDays"] = Object(rivals, null, false,
+                        "Use each saved rival's exact individual witnessed day count. Include all saved rival counts; this does not require naming them all in speech.")
+                }, null, false);
+            }
+            if (payload.TryGetValue("rescueOpening", out object rescueOpening) && ToBool(rescueOpening))
+                properties["rescueOpeningEvidence"] = Object(new Dictionary<string, object> {
+                    ["eventId"] = String(), ["kind"] = String(new[] { "battle_rescue", "prison_rescue" })
+                }, null, false);
+        }
+
         private static Dictionary<string, object> GossipSignal()
         {
             return Object(new Dictionary<string, object> {
-                ["topic"] = String(new[] { "family", "relationship", "intimacy", "politics", "shared_activity", "gift", "question", "conversation" }),
+                ["topic"] = String(new[] { "family", "relationship", "intimacy", "politics", "shared_activity", "gift", "question", "conversation", "impression" }),
                 ["subjectId"] = String(), ["evidenceQuote"] = String(), ["confidence"] = Number(0, 1),
                 ["excitement"] = Integer(), ["curiosity"] = Integer(), ["hurt"] = Integer(),
                 ["privacy"] = String(new[] { "public", "personal", "intimate", "secret" }),
@@ -380,6 +434,8 @@ namespace ReignBetaServer
             {
                 ["shouldReply"] = Boolean(),
                 ["body"] = String(),
+                ["pregnancyDisclosures"] = Array(Object(new Dictionary<string, object> {
+                    ["pregnancyId"] = String(), ["kind"] = String(new[] { "pregnancy", "illicit", "paternity" }), ["evidenceQuote"] = String() }, null, false)),
                 ["reason"] = String(),
                 ["actionGate"] = ActionGate(new[] { "none", "conditional", "accepted", "refused", "final_private_report" }),
                 ["proposalDecisions"] = Array(ProposalDecision()),

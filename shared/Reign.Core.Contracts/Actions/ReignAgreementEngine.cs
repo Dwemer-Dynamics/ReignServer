@@ -208,6 +208,30 @@ namespace Reign.Core.Contracts.Actions
                 + "; delivered effects retained and unused reservations returned.", now);
         }
 
+        public static bool RetireObservedMeeting(AgreementJournal original, AgreementJournal control,
+            string meetingId, int meetingRevision, bool nativeAccepted, IAgreementBackend backend, double now)
+        {
+            if (!nativeAccepted || original == null || control == null || original == control || string.IsNullOrEmpty(meetingId)
+                || original.Agreement.Clauses.Count != 1 || control.Agreement.Clauses.Count != 1
+                || original.Steps.Count != 1 || control.Steps.Count != 1) return false;
+            var a = original.Agreement; var b = control.Agreement; var term = b.Clauses[0];
+            var first = a.Clauses[0]; var before = original.Steps[0]; var after = control.Steps[0];
+            if ((first.ActionId != "npc_life.summon_meeting" && first.ActionId != "npc_life.change_meeting")
+                || (term.ActionId != "npc_life.change_meeting" && term.ActionId != "npc_life.cancel_meeting")
+                || !term.Arguments.TryGetValue("meetingId", out var id) || id != meetingId
+                || !term.Arguments.TryGetValue("meetingRevision", out var revision)
+                || revision != meetingRevision.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                || a.PlayerId != b.PlayerId || a.NpcId != b.NpcId || first.ActorId != term.ActorId || first.RecipientId != term.RecipientId
+                || !a.HasRequiredConsents || !b.HasRequiredConsents || original.CommittedHash != a.TermsHash() || control.CommittedHash != b.TermsHash()
+                || before.ClauseId != first.Id || after.ClauseId != term.Id || !before.Reserved || !before.Started || before.Completed || before.Returned
+                || !after.Reserved || !after.Started || after.Returned
+                || (b.State != AgreementState.Waiting && b.State != AgreementState.Completed)
+                || (a.State != AgreementState.Waiting && a.State != AgreementState.InTransit)) return false;
+            a.State = AgreementState.Cancelled;
+            Receipt(original, "Meeting commitment superseded by accepted agreement " + b.Id + "; the original stay was not fulfilled.", now);
+            backend.SaveJournal(original); return true;
+        }
+
         private static void ReturnUnfulfilled(AgreementJournal journal, IAgreementBackend backend, double now)
         {
             bool recovery = journal.Steps.Any(s => s.Started || s.FulfilledInstallments > 0);

@@ -11,6 +11,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunPromptCompositionSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
+            results.AddRange(RunPregnancyContextAssertions());
             Action<string, bool, object> add = (id, passed, data) => results.Add(new Dictionary<string, object> {
                 ["caseId"] = id, ["passed"] = passed, ["summary"] = id, ["data"] = data
             });
@@ -165,14 +166,18 @@ namespace ReignBetaServer
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                         mode, out string text, out var diagnostics);
                     var drinkBudget = ReadDictionary(diagnostics, "drinkPromptBudget");
-                    add("production_envelope_" + id + "_" + mode + (structured ? "_structured" : ""), messages.Count == 4
+                    add("production_envelope_" + id + "_" + mode + (structured ? "_structured" : ""), messages.Count >= 7
                         && ReadString(messages[1], "content", "").Contains(DrinkingOutputContract)
+                        && ReadString(messages[1], "role", "") == "system"
+                        && messages.Any(m => ReadString(m, "role", "") == "assistant" && ReadString(m, "content", "").Contains("NPC_HISTORY_SENTINEL"))
+                        && ReadString(messages.Last(), "content", "").EndsWith("What do you mean? I do not understand.", StringComparison.Ordinal)
+                        && ReadInt(ReadDictionary(diagnostics, "conversationMessageStructure"), "referenceHistoryRecords", -1) == 0
                         && ReadInt(drinkBudget, "inputTokenBudget", 0) == ConversationDrinkInputTokenBudget
                         && ReadInt(drinkBudget, "inputTokenEstimate", int.MaxValue) <= ConversationDrinkInputTokenBudget
                         && text.Contains("PERSONALITY_COVERAGE_SENTINEL") && text.Contains("AUTHORITATIVE FACT BOUNDARY")
                         && text.Contains(expectedVoice)
-                        && ReadString(messages.Last(), "content", "").Contains("CULTURAL VOICE CHECK FOR THIS SPEAKER")
-                        && ReadString(messages.Last(), "content", "").Contains("visible spoken words")
+                        && text.Contains("CULTURAL VOICE CHECK FOR THIS SPEAKER")
+                        && text.Contains("visible spoken words")
                         && text.Contains("ACTION ROUTING BOUNDARY") && text.Contains("What do you mean? I do not understand.")
                         && (!structured || (ReadString(messages[0], "content", "").Contains("REGISTERED INTERPERSONAL ACTIONS")
                             && ReadString(messages[0], "content", "").Contains("\"structuredActionDecision\"")

@@ -31,18 +31,25 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> BanterProviderSettings(Dictionary<string, object> payload, Dictionary<string, object> settings)
         {
-            if (ReadString(payload, "requestType", "") != "party_banter") return settings;
+            string route = ReadString(payload, "requestType", "");
+            bool approach = route == "npc_approach" || route.StartsWith("npc_approach_", StringComparison.Ordinal);
+            if (route != "party_banter" && !approach) return settings;
             var result = DeepCloneProfileDictionary(settings);
-            string provider = ReadString(settings, "banterProvider", "");
+            string provider = approach ? FirstNonEmpty(ReadString(settings, "npcLivesApproachProvider", ""), ReadString(settings, "banterProvider", "")) : ReadString(settings, "banterProvider", "");
             if (!string.IsNullOrWhiteSpace(provider))
             {
                 result["llmProvider"] = provider;
                 var bank = ReadDictionary(ReadDictionary(settings, "llmModelProfiles"), provider);
                 foreach (string key in ChatModelKeys) result[key] = ReadString(bank, key, "");
             }
-            if (!string.IsNullOrWhiteSpace(ReadString(settings, "banterModel", ""))) result["dialogueModel"] = settings["banterModel"];
-            // Banter is a short performance. Keep ordinary conversation reasoning settings intact.
-            result["reasoningMode"] = "off";
+            bool inheritBanterModel = !approach || string.IsNullOrWhiteSpace(ReadString(settings, "npcLivesApproachProvider", ""))
+                || provider == ReadString(settings, "banterProvider", "");
+            if (inheritBanterModel && !string.IsNullOrWhiteSpace(ReadString(settings, "banterModel", ""))) result["dialogueModel"] = settings["banterModel"];
+            if (approach && !string.IsNullOrWhiteSpace(ReadString(settings, "npcLivesApproachModel", "")))
+                result["dialogueModel"] = settings["npcLivesApproachModel"];
+            // Banter remains a short performance. Approaches retain the user's
+            // ordinary reasoning preference because their accuracy comes first.
+            if (route == "party_banter") result["reasoningMode"] = "off";
             return result;
         }
 

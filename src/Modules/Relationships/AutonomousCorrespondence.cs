@@ -54,13 +54,16 @@ WHERE (hero_a_id=$player AND affinity_b_to_a>=10)
         private static Dictionary<string, object> AutonomousCorrespondenceEvaluateApi(
             Dictionary<string, object> payload,
             Func<string, string, string, Dictionary<string, object>, double, bool, bool,
-                Dictionary<string, object>> generate = null)
+                Dictionary<string, object>> generate = null, Dictionary<string, object> settings = null)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             string playerId = ReadString(payload, "playerId", "");
             double day = ReadDouble(payload, "worldDay", 0d);
             if (string.IsNullOrWhiteSpace(playerId) || day <= 0d)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Player and campaign day are required." };
+            settings ??= LoadSettings();
+            double frequency = CorrespondenceOption(settings, "correspondenceFrequencyMultiplier");
+            if (frequency == 0d) return TestDict("ok", true, "sent", 0, "introductions", 0);
             int slotDay = (int)Math.Floor(day / 3d) * 3;
             object gate = AutonomousMailLocks.GetOrAdd(campaignId, _ => new object());
             lock (gate)
@@ -99,6 +102,7 @@ ORDER BY dispatch_day DESC LIMIT 1;",
                     {
                         string senderId = ReadString(candidate, "heroId", "");
                         int affinity = scores[senderId];
+                        int chance = AutonomousLetterChance(affinity, frequency);
                         var introductionsForSender = QuerySql(connection, @"SELECT status FROM letters
 WHERE sender_id=$sender AND recipient_id=$player AND source='npc_introduction'
 ORDER BY dispatch_day DESC LIMIT 1;", new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId });
@@ -112,6 +116,7 @@ WHERE sender_id=$sender LIMIT 1;", new Dictionary<string, object> { ["sender"] =
                         var check = QuerySql(connection, @"SELECT * FROM autonomous_correspondence_checks
 WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender LIMIT 1;", key).FirstOrDefault();
                         if (check != null && ReadString(check, "status", "") != "triggered") continue;
+                        if (check != null) chance = ReadInt(check, "chance", chance);
                         int roll = check == null ? RandomNumberGenerator.GetInt32(1, 101) : ReadInt(check, "roll", 101);
                         if (check == null)
                         {
@@ -120,11 +125,11 @@ WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender LIMIT 1;", 
 VALUES($timeline,$slot,$sender,$chance,$roll,$status,$ts);",
                                 new Dictionary<string, object> {
                                     ["timeline"] = timeline, ["slot"] = slotDay, ["sender"] = senderId,
-                                    ["chance"] = affinity, ["roll"] = roll,
-                                    ["status"] = roll <= affinity ? "triggered" : "missed",
+                                    ["chance"] = chance, ["roll"] = roll,
+                                    ["status"] = roll <= chance ? "triggered" : "missed",
                                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                         }
-                        if (roll > affinity) continue;
+                        if (roll > chance) continue;
                         string source = known ? "npc_initiated" : "npc_introduction";
                         string reason = "autonomous_relationship:" + timeline + ":" + slotDay.ToString(CultureInfo.InvariantCulture) + ":" + senderId;
                         var existing = QuerySql(connection, @"SELECT letter_id FROM letters
@@ -252,8 +257,17 @@ VALUES($key,$sender,'player', $affinity,0,1,12,$ts);",
                             ["body"] = introduction ? "I am " + sender + ". I write to introduce myself."
                                 : "A letter from " + sender + "." };
                     };
-                var first = AutonomousCorrespondenceEvaluateApi(request, generate);
-                var second = AutonomousCorrespondenceEvaluateApi(request, generate);
+                var disabled = AutonomousCorrespondenceEvaluateApi(request, generate, TestDict("correspondenceFrequencyMultiplier", 0d));
+                using (var disabledInspection = OpenCampaignConnection(campaignId))
+                {
+                    EnsureAutonomousCorrespondenceSchema(disabledInspection);
+                    add("autonomous_mail_zero_frequency_no_generation", ReadInt(disabled, "sent", -1) == 0 && generatedCount == 0
+                        && QuerySql(disabledInspection, "SELECT * FROM autonomous_correspondence_checks;").Count == 0
+                        && QuerySql(disabledInspection, "SELECT * FROM autonomous_correspondence_cooldowns;").Count == 0,
+                        "Zero frequency returns before rolls, generation or cooldown writes; ordinary delivery has its independent path.");
+                }
+                var first = AutonomousCorrespondenceEvaluateApi(request, generate, DefaultSettings());
+                var second = AutonomousCorrespondenceEvaluateApi(request, generate, TestDict("correspondenceFrequencyMultiplier", .25d));
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
                     var letters = QuerySql(connection, "SELECT * FROM letters ORDER BY source, sender_id;");

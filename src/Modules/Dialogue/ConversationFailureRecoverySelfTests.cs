@@ -54,11 +54,43 @@ namespace ReignBetaServer
             Check("outage_keeps_failure_no_retry_or_fabricated_reply", !ReadBool(outage, "ok", true)
                 && ReadString(outage, "error", "") == "provider timeout"
                 && ReadInt(ReadDictionary(outage, "conversationRecovery"), "additionalProviderCalls", -1) == 0);
+            var limited = TestDict("codexFailure", TestDict("httpStatusCode", 429));
+            Check("codex_rate_limit_is_explained_to_player", LlmFailureForDisplay(limited).Contains("429")
+                && LlmFailureForDisplay(limited).Contains("Retry"));
             var quiet = TestDict("ok", true, "content", Json.Serialize(TestDict("participation", "quiet", "reply", "")));
             Check("intentional_group_silence_remains_valid", ReadBool(EnsureConversationDelivery(quiet, true), "ok", false)
                 && !ReadBool(EnsureConversationDelivery(quiet), "ok", true));
             Check("empty_object_is_not_group_silence",
                 !ReadBool(EnsureConversationDelivery(TestDict("ok", true, "content", "{}"), true), "ok", true));
+            int spokenValidationCalls = 0, formatRepairCalls = 0;
+            var quietAnswer = TestDict("participation", "quiet", "reply", "", "emotion", "patient", "intent", "listen",
+                "relationshipSignal", "unchanged", "relationshipAssessments", new object[0],
+                "decisionBrief", TestDict("decision", "Let the other speaker answer."), "actionGate", TestDict("needed", false));
+            foreach (string mode in new[] { "party_chat", "castle_chat", "social_event" })
+            {
+                string bytes = Json.Serialize(quietAnswer);
+                var structured = RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
+                    "", "quiet-contract", mode, "npc", "", _ => { formatRepairCalls++; throw new InvalidOperationException("Silence needs no provider repair."); });
+                var validated = ValidateSpokenEventResponse(structured, candidate => { spokenValidationCalls++; return candidate; });
+                Check(mode + "_silence_skips_format_and_spoken_repairs", formatRepairCalls == 0 && spokenValidationCalls == 0
+                    && ReferenceEquals(structured, validated) && ReadString(validated, "content", "") == bytes
+                    && ReadBool(EnsureConversationDelivery(validated, true), "ok", false));
+            }
+            foreach (var control in new[] { TestDict(), TestDict("reply", ""), TestDict("participation", "speak", "reply", ""),
+                TestDict("participation", "quiet", "reply", speech), TestDict("participation", "speak", "reply", speech) })
+            {
+                int before = spokenValidationCalls;
+                ValidateSpokenEventResponse(TestDict("ok", true, "content", Json.Serialize(control)), candidate => { spokenValidationCalls++; return candidate; });
+                Check("non_silent_response_keeps_validation_" + rows.Count, spokenValidationCalls == before + 1);
+            }
+            foreach (string failureFlag in new[] { "provider", "visibleRepairFailure" })
+            {
+                var failedQuiet = TestDict("ok", failureFlag != "provider", "content", Json.Serialize(quietAnswer),
+                    "visibleRepairFailure", failureFlag == "visibleRepairFailure");
+                int before = spokenValidationCalls;
+                ValidateSpokenEventResponse(failedQuiet, candidate => { spokenValidationCalls++; return candidate; });
+                Check("silence_does_not_hide_" + failureFlag, spokenValidationCalls == before + 1);
+            }
             var failedLetter = PrepareCorrespondenceDelivery(TestDict("ok", true, "content",
                 Json.Serialize(TestDict("body", notice, "shouldReply", true))));
             Check("error_notice_is_never_sent_as_a_letter", !ReadBool(failedLetter, "shouldReply", true)
@@ -114,6 +146,26 @@ VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""liste
                         else
                             Check(route + "_answer_available_after_failed_generation", ReadLogicalConversationTurns(connection,
                                 ReadString(retained, "sessionId", ""), 30).Any(t => ReadString(t, "text", "") == words));
+                    }
+                    if (route == "individual")
+                    {
+                        input["retryOfCorrelationId"] = EnsureCorrelationId(input);
+                        int generated = 0;
+                        input["playerText"] = "Changed words cannot replace an original.";
+                        var changed = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });
+                        Check("retry_cannot_change_saved_words", ReadString(changed, "errorCode", "") == "retry_text_mismatch" && generated == 0);
+                        input["playerText"] = words;
+                        var retried = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });
+                        Check("retry_dispatches_same_unanswered_turn", ReadBool(retried, "ok", false) && generated == 1);
+                        string unit = AcceptedConversationEventId(campaign, "npc", input);
+                        StoreConversationExchange(campaign, input, "npc", "player", "Player", "Mira", words,
+                            "Use the east gate; I will meet you there.", unit, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                        var recovered = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });
+                        Check("completed_response_is_recovered_without_generation", ReadBool(recovered, "reloadConversationHistory", false)
+                            && ReadInt(recovered, "additionalProviderCalls", -1) == 0 && generated == 1);
+                        using (var connection = OpenCampaignConnection(campaign))
+                            Check("retry_never_duplicates_original_player_line", QuerySql(connection,
+                                "SELECT turn_id FROM conversation_turns WHERE event_id=$id AND role='player';", TestDict("id", unit)).Count == 1);
                     }
                 }
             }

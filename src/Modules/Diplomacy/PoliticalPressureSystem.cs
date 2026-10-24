@@ -1085,6 +1085,7 @@ ORDER BY world_day,incident_id LIMIT " + limit.ToString(CultureInfo.InvariantCul
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
                 foreach (Dictionary<string, object> incident in incidents)
                 {
+                    incident["news_description"] = PoliticalPressureCatalog.FirstOrDefault(a => a.Id == ReadString(incident, "archetype_id", ""))?.Description ?? "";
                     string id = ReadString(incident, "incident_id", "");
                     incident["nativeEffects"] = QuerySql(connection, @"SELECT effect_id,effect_type,target_id,amount,status
 FROM political_pressure_native_effects WHERE incident_id=$incident ORDER BY effect_id;",

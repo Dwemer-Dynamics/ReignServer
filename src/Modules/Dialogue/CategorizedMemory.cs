@@ -235,7 +235,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
                 "playerClanId", "playerClanName", "playerKingdomId", "playerKingdomName",
                 "speakerHeroStringId", "heroStringId", "heroId", "speakerName", "speakerClanId",
                 "speakerKingdomId", "npcClanId", "npcKingdomId", "npcSettlementId", "npcPartyId",
-                "phaseId", "phaseIndex", "memoryGroupKey", "playerPromptLabel", "approachOpening",
+                "phaseId", "phaseIndex", "memoryGroupKey", "playerPromptLabel", "approachOpening", "npcStoryId", "npcLifeRequestId", "npcLivesRevision", "npcLifeContext",
                 "playerAttentionPresence", "approachRequestId", "authoritativeApproachBrief", "authoritativeApproachOpening", "authoritativeApproachKind", "rescueContext", "rescueOpening",
                 "actualPlayerTurn", "courtLifePhase", "conversationMode", "routeInputHash", "inputSourceId", "contributionId", "playerNarrationProjectionVersion"
             };
@@ -251,7 +251,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             string[] listKeys =
             {
                 "participants", "activeHeroIds", "attendeeIds", "knownBy", "witnesses",
-                "sourceTurnIds", "sourceEventIds"
+                "sourceTurnIds", "sourceEventIds", "npcLifeAudienceIds"
             };
             foreach (string key in listKeys)
             {
@@ -600,9 +600,22 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             {
                 return MemoryConversationFinishedApi(payload);
             }
-            return FinishConversationSession(campaignId, sessionId, ReadString(payload, "reason", "closed_by_game"),
+            var finished = FinishConversationSession(campaignId, sessionId, ReadString(payload, "reason", "closed_by_game"),
                 ReadBool(payload, "interrupted", false), ReadDouble(payload, "worldDay", 0d),
                 ReadLong(payload, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+            if (ReadBool(finished, "ok", false))
+            using (var connection = OpenCampaignConnection(campaignId))
+            {
+                var session = QuerySql(connection, "SELECT payload_json FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).FirstOrDefault();
+                string timeline = ContinuityTimeline(GossipJson(session));
+                if (timeline == ActiveWorldHistoryTimeline(connection))
+                {
+                    finished["communicationCampaignId"] = campaignId; finished["communicationTimelineId"] = timeline;
+                    finished["communicationGeneration"] = NpcLivesGeneration(connection);
+                    finished["communicationHostReservations"] = CommunicationHostWork(connection, timeline);
+                }
+            }
+            return finished;
         }
 
         private static Dictionary<string, object> ConversationRecoverApi(Dictionary<string, object> payload)
@@ -654,6 +667,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                     if (ReadString(session,"status","")!="closed" && ReadString(session,"status","")!="interrupted")
                         ExecuteSql(connection,"UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,close_reason=$reason WHERE session_id=$id;",
                             new Dictionary<string,object>{["status"]=interrupted?"interrupted":"closed",["ts"]=ts,["day"]=worldDay,["reason"]=reason??"",["id"]=sessionId});
+                    ReleaseCommunicationSession(connection, session, reason, worldDay);
                     closure.Commit();
                     return new Dictionary<string, object>
                     {
@@ -662,6 +676,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
                     };
                 }
                 sceneJobId = EnqueueMemoryJob(connection, campaignId, "scene_summary", ReadString(session, "npc_id", ""), "scene:" + sessionId, sessionId);
+                ReleaseCommunicationSession(connection, session, reason, worldDay);
                 ExecuteSql(connection, @"UPDATE conversation_sessions SET status=$status,end_ts=$ts,end_world_day=$day,
 close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 {

@@ -167,6 +167,7 @@ ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTi
                     + "Use the existing continuity record id for a supported update, or preserve a genuinely different unresolved concern.\n"
                     + "Record " + recordId + "; current revision " + ReadInt(current, "revision", 0)
                     + "; status " + ReadString(current, "status", "") + "; meaning: " + ReadString(currentValue, "meaning", "")
+                    + "\nAccepted source turn: " + ReadString(row, "source_turn_id", "")
                     + "\nEarlier accepted speaker " + owner + ": " + string.Join("\n", spans.Select(s => ReadString(s, "quote", "")));
                 sourceIds.Add(id); sourceIds.Add(ReadString(row, "source_turn_id", ""));
                 text.AppendLine(RenderContinuityRecord(id, "pending_update_source", owner, ReadString(turn, "session_id", ""),

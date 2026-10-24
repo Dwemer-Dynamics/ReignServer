@@ -28,6 +28,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             results.AddRange(RunConversationDiagnosticsSelfTests());
+            results.AddRange(RunConversationResponseParsingSelfTests());
             results.AddRange(RunGroupConversationTurnOrderSelfTests());
             results.AddRange(RunGroupConversationFloorSelfTests());
             results.AddRange(RunPromptEditorPersistenceTests());
@@ -59,12 +60,13 @@ namespace ReignBetaServer
                 @"<div id='diagnosticNavigation'[\s\S]*?</div>").Value;
             add("control_center_navigation_contract",
                 System.Text.RegularExpressions.Regex.Matches(mainNavigation, "data-tab=").Count == 12
-                && System.Text.RegularExpressions.Regex.Matches(diagnosticNavigation, "data-tab=").Count == 13
+                && System.Text.RegularExpressions.Regex.Matches(diagnosticNavigation, "data-tab=").Count == 14
+                && diagnosticNavigation.Contains("data-tab='npclivesdiagnostics'")
                 && mainNavigation.Contains("data-tab='diagnostic-tools'")
                 && mainNavigation.Contains("data-tab='options'")
                 && diagnosticNavigation.Contains(" hidden>")
                 && controlCenter.Contains("function selectControlCenterTab(tab)"),
-                "Eleven everyday pages including Options and one Diagnostics entry expose thirteen subordinate diagnostic pages.", null);
+                "Eleven everyday pages including Options and one Diagnostics entry expose fourteen subordinate diagnostic pages, including the personal story editor.", null);
             add("control_center_retired_tools_absent",
                 !controlCenter.Contains("relationshipSimulation") && !controlCenter.Contains("runDirectorSample")
                 && !controlCenter.Contains("/relationships/simulation/") && !controlCenter.Contains(".simulationChart"),
@@ -479,9 +481,9 @@ namespace ReignBetaServer
                         && BuildBalancedSummarySource(longSummaryRecords, 30000) == string.Join("\n---\n", longSummaryRecords),
                         "Budgeted summary input retains whole chronological records; sufficient capacity preserves every record without clipping source evidence.",
                         new Dictionary<string, object> { ["sourceChars"] = balancedSummarySource.Length, ["recordCount"] = longSummaryRecords.Count });
-                    add("structured_event_first_attempt_budget", StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 8000,
+                    add("structured_event_first_attempt_budget", StructuredEventResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
                         "Structured party and social-event JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
-                    add("structured_dialogue_first_attempt_budget", StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 8000,
+                    add("structured_dialogue_first_attempt_budget", StructuredDialogueResponseMaxTokens(new Dictionary<string, object> { ["maxTokens"] = 900 }) == 16000,
                         "Structured individual-dialogue JSON receives enough first-attempt output space for the visible reply and all private classifications without a full prompt resend.", null);
                     add("empty_structured_response_retry_omits_redundant_character_context",
                         !FormatRetryNeedsCharacterContext("{}")
@@ -619,6 +621,41 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     && ReadString(scenarioCommands[0], "operation", "") == "open"
                     && ReadString(scenarioCommands[1], "operation", "") == "send",
                     "Versioned scenario files retain every normalized command in order.", scenarioCommands);
+
+                var accordRun = new Dictionary<string, object>(scenarioRun) { ["mode"] = "individual_chat" };
+                var accordInput = new Dictionary<string, object>
+                {
+                    ["operation"] = "clan_accords_test", ["profile"] = "CONTRACTS",
+                    ["fixtureRunId"] = "isolated_accord_contracts", ["timeoutSeconds"] = 1800
+                };
+                string accordRunBefore = Json.Serialize(accordRun), accordInputBefore = Json.Serialize(accordInput);
+                var accordCommand = NormalizeLiveTestCommand(accordRun, accordInput);
+                var accordSteps = NormalizeLiveTestScenarioCommands(accordRun, new Dictionary<string, object>
+                { ["steps"] = new List<Dictionary<string, object>> { accordInput } });
+                add("clan_accord_contract_command_reachable", accordCommand != null && accordSteps.Count == 1
+                    && ReadString(accordSteps[0], "operation", "") == "clan_accords_test"
+                    && ReadString(accordCommand, "profile", "") == "contracts"
+                    && ReadInt(accordCommand, "timeoutSeconds", 0) == 120
+                    && ReadString(accordCommand, "campaignId", "") == campaignId
+                    && ReadString(accordCommand, "gameInstanceId", "") == "game"
+                    && Json.Serialize(accordRun) == accordRunBefore && Json.Serialize(accordInput) == accordInputBefore,
+                    "The fixed native math contract survives real scenario normalization without mutating run/input identity.", accordCommand);
+                bool accordRejected = true;
+                foreach (string badProfile in new[] { "apply", "contracts ", "", "create_accord" })
+                    accordRejected &= NormalizeLiveTestCommand(accordRun,
+                        new Dictionary<string, object>(accordInput) { ["profile"] = badProfile }) == null;
+                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                    new Dictionary<string, object>(accordInput) { ["mode"] = "party_chat" }) == null;
+                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                    new Dictionary<string, object>(accordInput) { ["fixtureRunId"] = new string('x', 129) }) == null;
+                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                    new Dictionary<string, object>(accordInput) { ["schemaVersion"] = 3 }) == null;
+                var defaultAccordInput = new Dictionary<string, object>(accordInput);
+                defaultAccordInput.Remove("profile");
+                var defaultAccordCommand = NormalizeLiveTestCommand(accordRun, defaultAccordInput);
+                add("clan_accord_contract_command_bounds", accordRejected && defaultAccordCommand != null
+                    && ReadString(defaultAccordCommand, "profile", "") == "contracts",
+                    "Only the bounded non-mutating profile is accepted; unsupported profiles, modes, identity size and schema refuse.", null);
 
                 string boundedTurnPath = SocialEventTurnCacheFile(campaignId,
                     "reign_live_test_event_" + new string('e', 64),
@@ -1466,6 +1503,15 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 string kingdomEventRecordText = File.Exists(kingdomEventRecordPath) ? File.ReadAllText(kingdomEventRecordPath) : "";
                 string kingdomEventSaveText = File.Exists(kingdomEventSavePath) ? File.ReadAllText(kingdomEventSavePath) : "";
                 string kingdomEventSettingsText = File.Exists(kingdomEventSettingsPath) ? File.ReadAllText(kingdomEventSettingsPath) : "";
+                string kingdomNewsQueuePath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
+                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignNewsCampaignBehavior.cs", "src/Modules/WorldSimulation/News");
+                string kingdomNewsNoticesPath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
+                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignNewsNativeNotices.cs", "src/Modules/WorldSimulation/News");
+                string kingdomNewsScreenPath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
+                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignDiplomacyAnnouncementScreenManager.cs", "src/Modules/Diplomacy/UI");
+                string kingdomNewsQueueText = File.Exists(kingdomNewsQueuePath) ? File.ReadAllText(kingdomNewsQueuePath) : "";
+                string kingdomNewsNoticesText = File.Exists(kingdomNewsNoticesPath) ? File.ReadAllText(kingdomNewsNoticesPath) : "";
+                string kingdomNewsScreenText = File.Exists(kingdomNewsScreenPath) ? File.ReadAllText(kingdomNewsScreenPath) : "";
                 string actionResultPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""
                     : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignActionResult.cs", "src");
@@ -1531,13 +1577,28 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["settingsPath"] = kingdomEventSettingsPath
                     });
                 add("kingdom_event_announcement_queue_contract",
-                    kingdomEventBehaviorText.Contains("Queue<string> PendingAnnouncementEventIds", StringComparison.Ordinal)
-                    && kingdomEventBehaviorText.Contains("PendingAnnouncementEventIds.Enqueue(announcementEventId)", StringComparison.Ordinal)
-                    && kingdomEventBehaviorText.Contains("InformationManager.IsAnyInquiryActive()", StringComparison.Ordinal)
-                    && kingdomEventBehaviorText.Contains("PendingAnnouncementEventIds.Dequeue()", StringComparison.Ordinal)
-                    && kingdomEventBehaviorText.Contains("InformationManager.HideInquiry()", StringComparison.Ordinal),
-                    "The disposable live harness tracks every queued Reign kingdom-event inquiry and dismisses only one known announcement at a time, so stacked event notices cannot leave an empty modal blocking native time.",
-                    kingdomEventBehaviorPath);
+                    kingdomEventBehaviorText.Contains("ReignNewsCampaignBehavior.Instance?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal)
+                    && !kingdomEventBehaviorText.Contains("PendingAnnouncementEventIds", StringComparison.Ordinal)
+                    && kingdomNewsNoticesText.Contains("Category = ReignNewsCategories.WorldEvents", StringComparison.Ordinal)
+                    && kingdomNewsNoticesText.Contains("Publish(news)", StringComparison.Ordinal)
+                    && kingdomNewsQueueText.Contains("var news = _state.Pending[0]", StringComparison.Ordinal)
+                    && kingdomNewsQueueText.Contains("ReignDiplomacyAnnouncementScreenManager.IsOpen", StringComparison.Ordinal)
+                    && kingdomNewsQueueText.Contains("!InformationManager.IsAnyInquiryActive()", StringComparison.Ordinal)
+                    && kingdomNewsQueueText.Contains("epoch != _epoch", StringComparison.Ordinal)
+                    && kingdomNewsQueueText.Contains("_state.Acknowledge(news.Id)", StringComparison.Ordinal)
+                    && kingdomNewsQueueText.Contains("TryCloseOwnedAnnouncement(_activeId)", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("TryAcknowledgeForLiveHarness(bool restoreInterruptedTime, out string eventId,", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("bool observeGovernmentNews = false)", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("PassiveWorldAnnouncementPolicy.ShouldAcknowledge(", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("observeGovernmentNews, IsGovernmentNewsOpen)", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("if (!IsOpen || _layer == null || _vm == null)", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("_activeEventId != eventId", StringComparison.Ordinal)
+                    && kingdomNewsScreenText.Contains("UnregisterActiveStateDisableRequest()", StringComparison.Ordinal)
+                    && !kingdomNewsScreenText.Contains("InformationManager.HideInquiry()", StringComparison.Ordinal),
+                    "Kingdom events use the shared Herald queue: one owned announcement at a time, exact head acknowledgement, epoch-safe callbacks, foreign inquiry exclusion and guarded harness/focus cleanup without dismissing another inquiry.",
+                    new Dictionary<string, object> { ["behaviorPath"] = kingdomEventBehaviorPath,
+                        ["queuePath"] = kingdomNewsQueuePath, ["noticesPath"] = kingdomNewsNoticesPath,
+                        ["screenPath"] = kingdomNewsScreenPath });
                 add("stale_ransom_action_obsolete_contract",
                     actionResultText.Contains("ransom_target_obsolete", StringComparison.Ordinal)
                     && actionResultText.Contains("is no longer a prisoner", StringComparison.Ordinal)
@@ -2394,6 +2455,54 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && allCampaignAccessTasksFinished,
                     "Durable World History ingestion is not held behind unrelated campaign readers; PostgreSQL transaction boundaries provide its write serialization.",
                     null);
+
+                using (var infrastructureCompleted = new ManualResetEventSlim(false))
+                using (var campaignReaderStarted = new ManualResetEventSlim(false))
+                using (var campaignReaderEntered = new ManualResetEventSlim(false))
+                {
+                    bool infrastructureUngated = false;
+                    bool infrastructureRespondedDuringReplacement = false;
+                    bool campaignReaderWaitedForReplacement = false;
+                    System.Threading.Tasks.Task infrastructureRequest = null;
+                    System.Threading.Tasks.Task campaignRequest = null;
+                    CampaignDataGate.EnterWriteLock();
+                    try
+                    {
+                        infrastructureRequest = System.Threading.Tasks.Task.Factory.StartNew(() =>
+                        {
+                            infrastructureUngated = true;
+                            foreach (string path in new[] { "/health", "/", "/index.html",
+                                "/assets/reign-icon.webp", "/assets/ReignLogo.png" })
+                            {
+                                CampaignRequestAccess access = EnterCampaignRequestAccess(path);
+                                try { infrastructureUngated &= access == CampaignRequestAccess.None; }
+                                finally { ExitCampaignRequestAccess(access); }
+                            }
+                            infrastructureCompleted.Set();
+                        }, CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
+                            System.Threading.Tasks.TaskScheduler.Default);
+                        campaignRequest = System.Threading.Tasks.Task.Factory.StartNew(() =>
+                        {
+                            campaignReaderStarted.Set();
+                            CampaignRequestAccess access = EnterCampaignRequestAccess("/tests/live/game/heartbeat");
+                            try { campaignReaderEntered.Set(); }
+                            finally { ExitCampaignRequestAccess(access); }
+                        }, CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
+                            System.Threading.Tasks.TaskScheduler.Default);
+                        infrastructureRespondedDuringReplacement = infrastructureCompleted.Wait(1000);
+                        campaignReaderWaitedForReplacement = campaignReaderStarted.Wait(1000)
+                            && !campaignReaderEntered.Wait(100);
+                    }
+                    finally { CampaignDataGate.ExitWriteLock(); }
+                    bool accessTasksFinished = System.Threading.Tasks.Task.WaitAll(
+                        new[] { infrastructureRequest, campaignRequest }, 3000);
+                    add("service_health_and_static_ui_remain_available_during_campaign_replacement",
+                        infrastructureRespondedDuringReplacement && infrastructureUngated && accessTasksFinished,
+                        "Health and static Control Center routes remain available while Save Sync holds the campaign write lock.", null);
+                    add("campaign_requests_still_wait_for_campaign_replacement",
+                        campaignReaderWaitedForReplacement && accessTasksFinished && campaignReaderEntered.IsSet,
+                        "Native campaign requests wait until Save Sync releases the write lock, then continue normally.", null);
+                }
 
                 CampaignRequestAccess liveHeartbeatAccess =
                     EnterCampaignRequestAccess("/tests/live/game/heartbeat");

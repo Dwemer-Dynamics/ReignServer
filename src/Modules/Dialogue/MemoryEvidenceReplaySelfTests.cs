@@ -263,6 +263,18 @@ namespace ReignBetaServer
                 string Wire(Dictionary<string, object> report, int index, string field = "providerWireCapture") =>
                     ReadString(ReadDictionary(ReadDictionary(ReadDictionaryList(report, "cases")[index], "writerReplay"), field), "requestJson", "");
                 var firstWorldWriter = FirstWriter(firstWorld); var secondWorldWriter = FirstWriter(secondWorld);
+                var replayNativeRequest = ReadDictionary(firstWorldWriter, "request");
+                var replayNativeProfile = ReadDictionary(replayNativeRequest, "hero");
+                Check("writer_native_profile_is_bound_to_isolated_world",
+                    ReadString(replayNativeProfile, "campaignId", "") == stableCampaign
+                    && ReadString(replayNativeProfile, "heroStringId", "") == "0:npc"
+                    && ReadString(replayNativeProfile, "politicalTimelineId", "") == "replay_0");
+                var replayNativeWire = ReadDictionary(firstWorldWriter, "providerWireCapture");
+                Check("writer_native_profile_preserves_required_politics_without_dispatch",
+                    ReadString(replayNativeWire, "status", "") == "captured"
+                    && ReadString(replayNativeWire, "requestJson", "").Contains("REQUIRED PRIVATE POLITICAL BELIEFS")
+                    && ReadInt(replayNativeWire, "providerCalls", -1) == 0
+                    && !ReadBool(replayNativeWire, "certificateEligible", true));
                 Check("fresh_worlds_produce_identical_provider_bytes",
                     ReadString(firstWorldWriter, "status", "") == "writer_pending"
                     && ReadString(ReadDictionary(firstWorldWriter, "providerWireCapture"), "requestJson", "")
@@ -358,6 +370,15 @@ namespace ReignBetaServer
                         && ReadDictionaryList(recentNext, "repairRequests").Count == 1 && !recentNext.ContainsKey("publication"), recentDiagnostics);
                     var recentRepair = ReadDictionaryList(recentNext, "repairRequests").SingleOrDefault() ?? TestDict();
                     var recentRepairWire = ReadDictionary(recentRepair, "providerWireCapture") ?? TestDict();
+                    var recentRepairHero = ReadDictionary(ReadDictionary(recentRepair, "request"), "hero") ?? TestDict();
+                    Check("continuation_repair_native_profile_keeps_required_politics_" + callback,
+                        ReadString(recentRepairHero, "heroStringId", "") == "0:npc"
+                        && ReadString(recentRepairHero, "politicalTimelineId", "") == "replay_0"
+                        && ReadString(recentRepairHero, "campaignId", "")
+                            == ReadString(ReadDictionary(ReadDictionary(recentFirst, "request"), "hero"), "campaignId", "missing")
+                        && ReadString(recentRepairWire, "requestJson", "").Contains("REQUIRED PRIVATE POLITICAL BELIEFS")
+                        && ReadInt(recentNext, "providerCalls", -1) == 0
+                        && !ReadBool(recentNext, "certificateEligible", true));
                     var recentRepairPreflight = ReadDictionary(ReadDictionary(recentRepairWire, "providerPreflight"), "continuity");
                     string recentRepairMessages = string.Join("\n", ReadDictionaryList(WireBody(recentRepairWire), "messages")
                         .Select(m => ReadString(m, "content", "")));
@@ -443,7 +464,7 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                 var pendingWire = ReadDictionary(pendingWriter, "providerWireCapture");
                 Check("wire_actual_writer_capture_uses_default_medium", ReadString(ReadDictionary(WireBody(pendingWire), "reasoning"), "effort", "") == "medium"
                     && ReadDouble(WireBody(pendingWire), "temperature", -1) == .5d
-                    && ReadInt(WireBody(pendingWire), "max_tokens", 0) == 8000
+                    && ReadInt(WireBody(pendingWire), "max_tokens", 0) == 16000
                     && ReadString(pendingWire, "requestJson", "").Contains(answer)
                     && !ReadDictionary(pendingWriter, "request").ContainsKey("providerWireCapture"));
                 int SourceCount()
@@ -459,7 +480,7 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                 var verifiedPreflight = ReadDictionary(ReadDictionary(ReadDictionary(verifiedWriter, "request"), "promptEnvelope"), "continuityPreflight");
                 Check("writer_replay_capacity_binds_actual_model_and_restores_settings",
                     ReadBool(verifiedPreflight, "capacityVerified", false)
-                    && ReadInt(verifiedPreflight, "inputAllowance", 0) == 1048576 - 8000 - ConversationCapacitySafetyReserve
+                    && ReadInt(verifiedPreflight, "inputAllowance", 0) == 1048576 - 16000 - ConversationCapacitySafetyReserve
                     && ReadString(verifiedPreflight, "routeKey", "").Contains(":captured-writer:")
                     && ReferenceEquals(savedSettingsScope, CodexPerformanceSettings.Value));
                 ReadDictionary(writerConfiguration, "contextCapacity")["validUntilUtc"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o");
@@ -488,7 +509,7 @@ VALUES($id,'orchard_history',$id,$order,$id,$role,$speaker,$speaker,$text,$day,1
                         ReadString(groupRequest, "requestType", "") == "social_event" && ReadString(groupRequest, "eventId", "") == "npc:event"
                         && ReadString(groupRequest, "playerText", "") == ReadString(writerFixture, "query", "")
                         && ReadBool(groupRequest, "promptCacheEligible", false) && !groupRequest.ContainsKey("temperature")
-                        && ReadDouble(groupBody, "temperature", -1) == .7d && ReadInt(groupBody, "max_tokens", 0) == 8000
+                        && ReadDouble(groupBody, "temperature", -1) == .7d && ReadInt(groupBody, "max_tokens", 0) == 16000
                         && ReadString(ReadDictionary(groupBody, "reasoning"), "effort", "") == "medium"
                         && Json.Serialize(ReadDictionaryList(groupBody, "messages")).Contains("participation"));
                     groupConfiguration["response"] = TestDict("ok", true, "finishReason", "stop", "content", "{\"participation\":\"quiet\",\"reply\":\"\"}");

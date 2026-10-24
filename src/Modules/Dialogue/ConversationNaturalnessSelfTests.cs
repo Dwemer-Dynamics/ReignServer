@@ -27,14 +27,14 @@ namespace ReignBetaServer
                 (reply, player, own, shared) => FindConversationNaturalnessViolations(TestDict("reply", reply), player, own, shared, "fixture_gavene", speaker);
             var loop = violations(badAnswer, "Don't you want to know more about me?", prior, null);
             add("captured_answer_loop_below_lexical_threshold", prior.All(row => RoleplayTextSimilarity(badAnswer, ReadString(row, "text", "")) < 0.72d)
-                && loop.Count == 1, loop);
+                && loop.Any(v => ReadString(v, "type", "") == "repeated_conversation_accounting"), loop);
             var corrected = new List<Dictionary<string, object>>
             {
                 npc(speaker, "Say it at the boards and I will count it paid. Now say what you want. You have had mine. Spend yours."),
                 npc(speaker, "You are right. I put that word on the boards before you did — a wife. That was answering me, not hooking me. I counted it wrong. So that is paid, and it does not change the toll.")
             };
             const string clarify = "Im not telling you no, what do you mean by something sideways? What did you ask me plainly that I could refuse?";
-            add("captured_correction_repeated_lecture", violations(badCorrection, clarify, corrected, null).Count == 1, null);
+            add("captured_correction_repeated_lecture", violations(badCorrection, clarify, corrected, null).Any(v => ReadString(v, "type", "") == "repeated_conversation_accounting"), null);
             var guide = BuildConversationNaturalnessContext(clarify, false);
             add("clarification_is_not_refusal", ReadBool(guide, "clarification", false) && ReadString(guide, "prompt", "").Contains("not refusal or evasion"), guide);
             add("explicit_player_correction", ReadBool(BuildConversationNaturalnessContext("I only said that because of what you said. I wasnt implying anything.", false), "correction", false), null);
@@ -137,6 +137,7 @@ namespace ReignBetaServer
             add("legacy_clause_scoped_without_erasing_customization", effective.StartsWith("CUSTOM VOICE: proud, terse, fond of chess.")
                 && effective.EndsWith("CUSTOM END.") && !effective.Contains(ConversationToneReplacements[0, 0]) && custom.Contains(ConversationToneReplacements[0, 0]), effective);
 
+            results.AddRange(RunConversationRepetitionSelfTests());
             results.AddRange(RunAcceptedItemGiftRoutingSelfTests());
             results.AddRange(RunDialogueActionReliabilitySelfTests());
             results.AddRange(RunActionAvailabilityRoutingSelfTests());

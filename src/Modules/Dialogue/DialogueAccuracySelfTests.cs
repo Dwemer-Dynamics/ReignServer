@@ -167,7 +167,8 @@ namespace ReignBetaServer
                     && ReadStringList(political, "warnings").Contains("group_rhetorical_convergence"), political);
                 Check("actual_political_defiance_remains_blocking", ReadStringList(ClassifyPoliticalConduct(
                     "You fool, I will destroy you.", politicalPosture, TestDict()), "violations").Contains("defiance_tier_exceeded"));
-                Check("wording_lecture_is_a_style_warning", IsConversationStyleWarning(TestDict("type", "repeated_wording_lecture")));
+                Check("wording_lecture_requires_expression_repair", !IsConversationStyleWarning(TestDict("type", "repeated_wording_lecture"))
+                    && IsConversationExpressionViolation(TestDict("type", "repeated_wording_lecture")));
 
                 var style = Reply("You owe me an answer about your intentions.");
                 var history = new List<Dictionary<string, object>>
@@ -178,10 +179,11 @@ namespace ReignBetaServer
                 int styleCalls = 0;
                 var styleResult = RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(style)), TestDict(),
                     TestDict("playerText", "I came to listen."), TestDict("knowsIdentity", true), history, campaign, "style",
-                    "dialogue", "npc", "Mira", "Player", "", req => { styleCalls++; throw new InvalidOperationException("Style must not call a provider."); });
-                Check("style_warning_preserves_reply_without_retry", styleCalls == 0
-                    && ReadString(ReadDictionary(styleResult, "roleplayContinuityRepair"), "method", "") == "style_warning_no_provider_rewrite"
-                    && ReadString(TryParseJsonObject(ReadString(styleResult, "content", "")), "reply", "") == ReadString(style, "reply", ""), styleResult);
+                    "dialogue", "npc", "Mira", "Player", "", req => { styleCalls++; return TestDict("ok", true, "content",
+                        Json.Serialize(TestDict("reply", "Then listen. I would like to know what brought you here."))); });
+                Check("sustained_accounting_gets_one_expression_repair", styleCalls == 1
+                    && ReadString(ReadDictionary(styleResult, "roleplayContinuityRepair"), "method", "") == "bounded_expression_rewrite"
+                    && ReadString(TryParseJsonObject(ReadString(styleResult, "content", "")), "reply", "").StartsWith("Then listen.", StringComparison.Ordinal), styleResult);
                 Check("action_and_identity_failures_are_not_style", !IsConversationStyleWarning(TestDict("type", "player_narration"))
                     && !IsConversationStyleWarning(TestDict("type", "unverified_material_handover"))
                     && !IsConversationStyleWarning(TestDict("type", "current_speaker_claimed_absent")));

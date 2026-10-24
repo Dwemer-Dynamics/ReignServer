@@ -19,6 +19,9 @@ namespace ReignBetaServer
             internal bool RepairUsed;
             internal long QueueMs;
             internal Dictionary<string, object> FinalContract;
+            internal Dictionary<string, object> AcceptedPoliticalConduct;
+            internal string AcceptedPoliticalConductReply;
+            internal CodexRoleplayMemoryAccess MemoryAccess;
             internal readonly List<Tuple<Dictionary<string, object>, Dictionary<string, object>>> Results = new List<Tuple<Dictionary<string, object>, Dictionary<string, object>>>();
         }
         private static readonly AsyncLocal<CodexConversationScope> ActiveCodexConversationScope = new AsyncLocal<CodexConversationScope>();
@@ -43,7 +46,10 @@ namespace ReignBetaServer
             lock (CodexTimelineGate)
             {
                 string value;
-                return CodexConversationTimelines.TryGetValue(campaignId ?? "", out value) ? value : "";
+                if (string.IsNullOrWhiteSpace(campaignId)) return "";
+                if (!CodexConversationTimelines.TryGetValue(campaignId, out value))
+                    CodexConversationTimelines[campaignId] = value = Guid.NewGuid().ToString("N");
+                return value;
             }
         }
 
@@ -72,15 +78,17 @@ namespace ReignBetaServer
                 ["campaignId"] = campaignId, ["timelineId"] = generation, ["loadGeneration"] = generation,
                 ["sessionId"] = sessionId ?? "", ["ownSessionId"] = sessionId ?? "", ["speakerHeroStringId"] = speakerId,
                 ["conversationMode"] = FirstNonEmpty(ReadString(source, "conversationMode", ""), mode),
-                ["visibilityScope"] = PromptHash(Json.Serialize(identityView) + "|" + mode + "|" + speakerId),
+                ["visibilityScope"] = PromptHash(CanonicalJson(CodexIdentityPermissions(identityView)) + "|" + mode + "|" + speakerId),
                 ["authorityHash"] = PromptHash(Json.Serialize(authority)),
                 ["canonicalHistorySignature"] = CodexCanonicalHistorySignature(canonicalHistory),
                 ["currentTurnText"] = currentTurnText ?? "",
                 ["promptVersion"] = ReadString(ReadDictionary(request, "promptEnvelope"), "globalPrefixHash", "")
             };
-            foreach (string key in new[] { "castleOpening", "channel", "mode", "governmentPrivateContext", "ambassadorOfficialContext", "nobleDocketTurn", "courtLifeContext", "guardedPromptOverride", "outputSchema", "customOutputContract" })
+            foreach (string key in new[] { "castleOpening", "channel", "mode", "governmentPrivateContext", "ambassadorOfficialContext", "nobleDocketTurn", "courtLifeContext", "guardedPromptOverride", "outputSchema", "customOutputContract",
+                "authoritativeApproachOpening", "authoritativeApproachKind", "authoritativeApproachBrief", "rescueOpening", "rescueContext" })
                 if (source != null && source.ContainsKey(key)) metadata[key] = source[key];
             request["codexAuthoritativeMetadata"] = metadata;
+            AttachCodexRoleplayContext(request, source, metadata, campaignId, speakerId, identityView, profile);
         }
 
         private static string CodexCanonicalHistorySignature(List<Dictionary<string, object>> lines)
@@ -101,7 +109,7 @@ namespace ReignBetaServer
             string session = ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId");
             string campaign = ReadString(payload, "campaignId", "");
             string speaker = FirstNonEmpty(ReadFirstString(payload, "heroStringId", "speakerHeroStringId", "heroId"), ReadString(ReadDictionary(payload, "hero"), "heroStringId", ""));
-            if (ReadBool(ReadDictionary(settings, "codexOptions"), "reuseThreads", false) && session.Length > 0 && campaign.Length > 0 && speaker.Length > 0)
+            if (session.Length > 0 && campaign.Length > 0 && speaker.Length > 0)
             {
                 // Broader than visibility scope: all turns by this speaker/session serialize through final state effects.
                 gateKey = Json.Serialize(new[] { campaign, CodexConversationTimeline(campaign), session, speaker, ReadString(payload, "conversationMode", "dialogue") });
@@ -110,7 +118,7 @@ namespace ReignBetaServer
                     if (!CodexConversationGates.TryGetValue(gateKey, out gate) && CodexConversationGates.Count < 64)
                         CodexConversationGates[gateKey] = gate = new CodexConversationGate();
                     if (gate != null) gate.Users++;
-                    else ReadDictionary(scope.Settings, "codexOptions")["reuseThreads"] = false;
+                    else throw new InvalidOperationException("Codex conversation queue capacity reached before generation.");
                 }
             }
             ActiveCodexConversationScope.Value = scope;
@@ -137,16 +145,29 @@ namespace ReignBetaServer
                     context["accepted"] = accepted;
                     var draft = TryParseJsonObject(ReadString(entry.Item1, "content", ""));
                     bool changed = scope.Results.Count != 1 || draft == null || !accepted;
+                    string changeReason = !accepted ? "response_not_accepted" : draft == null ? "missing_model_contract"
+                        : scope.Results.Count != 1 ? "multiple_model_calls" : "unchanged";
                     if (!changed)
                     {
                         foreach (var field in draft)
                         {
                             object finalValue;
-                            if (scope.FinalContract == null || !scope.FinalContract.TryGetValue(field.Key, out finalValue)
-                                || Json.Serialize(field.Value) != Json.Serialize(finalValue)) { changed = true; break; }
+                            if (scope.FinalContract == null || !scope.FinalContract.TryGetValue(field.Key, out finalValue))
+                            { changed = true; changeReason = "missing_final_field:" + field.Key; break; }
+                            if (CanonicalJson(field.Value) != CanonicalJson(finalValue))
+                            {
+                                // The server supplies this authoritative date/venue heading.
+                                // It does not change what the character said; the current
+                                // engine update carries the accepted scene on the next turn.
+                                if (field.Key == "reply" && field.Value is string draftReply && finalValue is string acceptedReply
+                                    && RenderGroundedSceneHeading(payload, speaker, scope.FinalContract, draftReply) == acceptedReply) continue;
+                                if (CodexAcceptedPoliticalConductMatches(scope, draft, field.Key, finalValue)) continue;
+                                changed = true; changeReason = "changed_final_field:" + field.Key; break;
+                            }
                         }
                     }
                     context["substantivelyChanged"] = changed;
+                    context["threadChangeReason"] = changeReason;
                     context["acceptedHistorySignature"] = final != null && final.ContainsKey("lines")
                         ? CodexCanonicalHistorySignature(ReadDictionaryList(final, "lines")) : "";
                     try { FinalizeCodexThreadRequest(entry.Item1, context); }
@@ -171,6 +192,14 @@ namespace ReignBetaServer
         {
             var scope = ActiveCodexConversationScope.Value;
             if (scope == null) return;
+            var conduct = ReadDictionary(llm, "politicalConductEnforcement");
+            string originalReply = ReadString(conduct, "originalReply", "");
+            if (ReadString(conduct, "outcome", "") == "accepted" && !ReadBool(conduct, "repairAttempted", false)
+                && originalReply.Length > 0 && originalReply == ReadString(conduct, "finalReply", ""))
+            {
+                scope.AcceptedPoliticalConduct = DeepCloneProfileDictionary(ReadDictionary(conduct, "observed"));
+                scope.AcceptedPoliticalConductReply = originalReply;
+            }
             foreach (var pair in llm ?? new Dictionary<string, object>())
             {
                 if (pair.Key.IndexOf("repair", StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -181,13 +210,27 @@ namespace ReignBetaServer
             }
         }
 
+        private static bool CodexAcceptedPoliticalConductMatches(CodexConversationScope scope,
+            Dictionary<string, object> draft, string field, object finalValue)
+        {
+            // The normal accepted branch independently classifies delivery. Only
+            // its receipt for this exact unchanged reply may explain the replacement.
+            return field == "politicalConduct" && scope.AcceptedPoliticalConduct != null
+                && !string.IsNullOrEmpty(scope.AcceptedPoliticalConductReply)
+                && ReadFirstString(draft, "reply", "response", "text", "content") == scope.AcceptedPoliticalConductReply
+                && CanonicalJson(finalValue) == CanonicalJson(scope.AcceptedPoliticalConduct);
+        }
+
         private static void RecordCodexFinalizedContract(Dictionary<string, object> parsed, Dictionary<string, object> response)
         {
             var scope = ActiveCodexConversationScope.Value;
             if (scope == null || parsed == null) return;
             scope.FinalContract = DeepCloneProfileDictionary(parsed);
-            foreach (string key in parsed.Keys)
-                if (response != null && response.ContainsKey(key)) scope.FinalContract[key] = response[key];
+            // Response diagnostics add engine-owned decision/motive fields on every
+            // turn. They are not edits to the model's contract. Keep the validated
+            // parsed contract, but compare its spoken reply with the accepted text.
+            if (response != null && response.TryGetValue("reply", out object acceptedReply))
+                scope.FinalContract["reply"] = acceptedReply;
         }
 
         private static Dictionary<string, object> BuildCodexConversationPerformanceDiagnostics(CodexConversationScope scope, Dictionary<string, object> final)
@@ -198,6 +241,7 @@ namespace ReignBetaServer
                 ["model"] = ReadString(entry.Item2, "model", ""),
                 ["durationMs"] = ReadLong(entry.Item1, "durationMs", 0),
                 ["runtime"] = ReadDictionary(entry.Item1, "codexDiagnostics") ?? new Dictionary<string, object>(),
+                ["threadFinalization"] = ReadDictionary(entry.Item2, "threadFinalization") ?? TestDict("status", "unknown"),
                 ["schemaId"] = ReadString(entry.Item2, "schemaId", ""),
                 ["schemaContractFingerprint"] = ReadString(entry.Item2, "schemaContractFingerprint", "unknown"),
                 ["schemaFingerprint"] = !ReadBool(ReadDictionary(ReadDictionary(entry.Item1, "codexDiagnostics"), "request"), "schemaApplied", false)
@@ -251,7 +295,8 @@ namespace ReignBetaServer
             if (!new[] { "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra" }.Contains(effort)) effort = "medium";
             var normalized = new Dictionary<string, object> {
                 ["schema"] = "reign-codex-options-v1", ["version"] = 1, ["reasoningMode"] = mode,
-                ["reasoningEffort"] = effort, ["fastMode"] = ReadBool(previous, "fastMode", false)
+                ["reasoningEffort"] = effort, ["fastMode"] = ReadBool(previous, "fastMode", false),
+                ["lookupMode"] = NormalizeCodexLookupMode(ReadString(previous, "lookupMode", "auto"))
             };
             foreach (string key in CodexExperimentKeys) normalized[key] = ReadBool(previous, key, false);
             settings["codexOptions"] = normalized;
@@ -295,6 +340,13 @@ namespace ReignBetaServer
             var authority = ReadDictionary(context, "authoritativeMetadata");
             foreach (string key in new[] { "canonicalHistorySignature", "currentTurnText" })
                 context[key] = ReadString(authority, key, "");
+            if (ReadBool(authority, "persistentRoleplay", false))
+            {
+                context["persistentRoleplay"] = true;
+                context["incrementalContext"] = ReadString(authority, "incrementalContext", "");
+                context["promptContractHash"] = ReadString(authority, "promptContractHash", "");
+                context["memoryAccess"] = ActiveCodexConversationScope.Value?.MemoryAccess;
+            }
             return context;
         }
 

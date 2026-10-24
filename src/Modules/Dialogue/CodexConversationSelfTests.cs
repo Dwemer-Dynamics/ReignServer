@@ -18,6 +18,7 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             AddCodexSelfTest(results, "options_default_off", TestCodexOptions());
             AddCodexSelfTest(results, "standard_schema_contracts", TestStandardSchemas());
+            AddCodexSelfTest(results, "opening_evidence_schema", TestOpeningEvidenceSchema());
             AddCodexSelfTest(results, "optional_null_semantics", TestOptionalNullSemantics());
             AddCodexSelfTest(results, "optional_null_normalization", TestOptionalNullNormalization());
             AddCodexSelfTest(results, "built_in_example_conformance", TestBuiltInExampleConformance());
@@ -106,6 +107,33 @@ namespace ReignBetaServer
             }
             return SelfTest(all, all ? "all five standard contracts have complete JSON Schema envelopes" : "a standard contract schema is incomplete",
                 new Dictionary<string, object> { ["modes"] = checks });
+        }
+
+        private static Dictionary<string, object> TestOpeningEvidenceSchema()
+        {
+            var defaults = DefaultPromptTemplates();
+            var actual = CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Individual)
+                .ToDictionary(name => name, name => defaults[name], StringComparer.OrdinalIgnoreCase);
+            var payload = TestDict("authoritativeApproachOpening", true, "authoritativeApproachKind", "shared",
+                "authoritativeApproachBrief", TestDict("rivals", new[] {
+                    TestDict("heroId", "rival_one", "days", 2), TestDict("heroId", "rival_two", "days", 1) }));
+            var selected = CodexConversationSchemas.Select(CodexConversationContractKind.Individual, actual, defaults, payload);
+            var properties = ReadDictionary(selected.Schema, "properties");
+            var proof = ReadDictionary(properties, "approachOpeningEvidence");
+            var rivalDays = ReadDictionary(ReadDictionary(ReadDictionary(proof, "properties"), "rivalDays"), "properties");
+            bool jealousy = CheckStrictSchema(selected.Schema, out _) && rivalDays.Keys.OrderBy(id => id)
+                .SequenceEqual(new[] { "rival_one", "rival_two" })
+                && ReadStringList(selected.Schema, "required").Contains("approachOpeningEvidence");
+            payload["authoritativeApproachOpening"] = false;
+            var ordinary = CodexConversationSchemas.Select(CodexConversationContractKind.Individual, actual, defaults, payload);
+            bool followup = !ReadDictionary(ordinary.Schema, "properties").ContainsKey("approachOpeningEvidence");
+            var rescue = CodexConversationSchemas.Select(CodexConversationContractKind.Individual, actual, defaults,
+                TestDict("rescueOpening", true, "rescueContext", TestDict("eventId", "native_rescue", "kind", "battle_rescue")));
+            bool rescueAllowed = CheckStrictSchema(rescue.Schema, out _)
+                && ReadDictionary(rescue.Schema, "properties").ContainsKey("rescueOpeningEvidence");
+            return SelfTest(jealousy && followup && rescueAllowed,
+                "strict provider schemas allow required opening proof and leave ordinary follow-ups unchanged",
+                TestDict("jealousy", jealousy, "followup", followup, "rescue", rescueAllowed));
         }
 
         private static bool CheckStrictSchema(Dictionary<string, object> schema, out string error)

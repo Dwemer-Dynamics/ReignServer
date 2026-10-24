@@ -204,6 +204,8 @@ WHERE input_id=$id AND restore_generation=$generation;",
                 "conversationExchange", TestDict("sessionId", ReadString(exchange, "sessionId", ""),
                     "exchangeId", ReadString(exchange, "exchangeId", ""), "turnIds", ReadStringList(exchange, "turnIds"), "acceptedUnit", accepted),
                 "deliveryRecovery", TestDict("status", "accepted_response_recovered", "nativeActionPublication", "not_confirmed"));
+            if (unit.GroupConversation || unit.EventType == "social_event_turn")
+                replay["participation"] = NormalizeSocialEventParticipation(unit.Parsed);
             ExecuteSql(connection, @"UPDATE conversation_input_receipts SET
 response_json=((response_json::jsonb)||jsonb_build_object(CAST($observer AS text),CAST($response AS jsonb)))::text,
 status='accepted',updated_ts=$now WHERE input_id=$id AND restore_generation=$generation;",

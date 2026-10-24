@@ -8,6 +8,19 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private static int ContinuityRepairOutputAllowance(Dictionary<string, object> request,
+            Dictionary<string, object> original)
+        {
+            const int ceiling = 24000;
+            int requested = Math.Max(3000, Math.Min(ceiling, ReadInt(request, "maxTokens", 8000)));
+            // A rewrite must return the complete structured response, including
+            // its unchanged action decision. Reuse the conservative serialized
+            // estimate with 25% grace and room for the correction itself.
+            int estimated = EstimateContinuityTokens(Json.Serialize(original));
+            int withGrace = (int)Math.Min(ceiling, Math.Ceiling(estimated * 1.25d) + 1024d);
+            return Math.Max(requested, withGrace);
+        }
+
         private static Dictionary<string, object> RetryRoleplayContinuityViolation(
             Dictionary<string, object> llm,
             Dictionary<string, object> request,
@@ -28,11 +41,14 @@ namespace ReignBetaServer
             if (parsed == null) return llm;
             List<Dictionary<string, object>> continuityLines = LoadRecentNpcRoleplayContinuityLines(
                 campaignId, heroId, heroName, priorLines);
+            // Freeze the attributed current-route snapshot once. SQL history used by
+            // older safety checks must not leak another scene or branch into style evidence.
+            var expressionHistory = ConversationExpressionHistory(priorLines, heroId, heroName, payload);
             List<Dictionary<string, object>> violations = FindRoleplayContinuityViolations(
                 parsed, identityView, continuityLines, heroName, playerName);
             string latestPlayerText = ReadFirstString(payload, "playerText", "text", "message");
             violations.AddRange(FindConversationNaturalnessViolations(parsed, latestPlayerText,
-                continuityLines, priorLines, heroId, heroName));
+                continuityLines, priorLines, heroId, heroName, expressionHistory));
             violations.AddRange(FindTemporaryGuestDepartureViolations(parsed, payload, heroId));
             violations.AddRange(FindCriticalConversationContinuityViolations(parsed, payload, heroId));
             if (violations.Count == 0) return llm;
@@ -44,12 +60,17 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> originalRemaining = FindRoleplayContinuityViolations(
                 originalForRepair, identityView, continuityLines, heroName, playerName);
             originalRemaining.AddRange(FindConversationNaturalnessViolations(originalForRepair,
-                latestPlayerText, continuityLines, priorLines, heroId, heroName));
+                latestPlayerText, continuityLines, priorLines, heroId, heroName, expressionHistory));
             originalRemaining.AddRange(FindTemporaryGuestDepartureViolations(originalForRepair, payload, heroId));
             originalRemaining.AddRange(FindCriticalConversationContinuityViolations(originalForRepair, payload, heroId));
 
             bool removedUnsupportedWrites = ReadDictionaryList(parsed, "continuityWrites").Count
                 != ReadDictionaryList(originalForRepair, "continuityWrites").Count;
+            if (originalRemaining.Any(IsConversationExpressionViolation)
+                && originalRemaining.All(v => IsConversationExpressionViolation(v) || IsConversationStyleWarning(v)))
+                return RepairConversationExpression(llm, originalForRepair, request, payload, identityView,
+                    continuityLines, priorLines, expressionHistory, originalRemaining, campaignId, correlationId,
+                    auditMode, heroId, heroName, playerName, eventId, responder);
             bool stageDirectionsRemoved = TryRemoveRepeatedStageDirectionsOnly(originalForRepair, originalRemaining, identityView,
                 continuityLines, heroName, playerName, out Dictionary<string, object> sanitizedOriginal,
                 out List<Dictionary<string, object>> sanitizedOriginalRemaining,
@@ -135,7 +156,7 @@ namespace ReignBetaServer
                 ["promptCacheEligible"] = false,
                 ["reasoningDisabled"] = true,
                 ["temperature"] = 0d,
-                ["maxTokens"] = Math.Max(3000, Math.Min(8000, ReadInt(request, "maxTokens", 8000))),
+                ["maxTokens"] = ContinuityRepairOutputAllowance(request, parsed),
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" },
                 ["messages"] = new List<Dictionary<string, object>>
                 {
@@ -202,7 +223,7 @@ namespace ReignBetaServer
             if (repairedParsed != null)
             {
                 remaining.AddRange(FindConversationNaturalnessViolations(repairedParsed, latestPlayerText,
-                    continuityLines, priorLines, heroId, heroName));
+                    continuityLines, priorLines, heroId, heroName, expressionHistory));
                 remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
                 remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
                 if (!StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed))
@@ -219,6 +240,12 @@ namespace ReignBetaServer
             {
                 repairedParsed = sanitizedRepair;
                 remaining = sanitizedRepairRemaining;
+                // The narration-only helper rechecks role-play structure, not the
+                // full semantic/naturalness set. Never lose those checks here.
+                remaining.AddRange(FindConversationNaturalnessViolations(repairedParsed, latestPlayerText,
+                    continuityLines, priorLines, heroId, heroName, expressionHistory));
+                remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
                 repaired["content"] = Json.Serialize(repairedParsed);
                 repairMethod = "compact_llm_rewrite_then_deterministic_stage_direction_removal";
             }
@@ -226,6 +253,7 @@ namespace ReignBetaServer
                 && repairedParsed != null
                 && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed)
                 && !remaining.Any(IsBlockingContinuityViolation)
+                && !remaining.Any(IsConversationExpressionViolation)
                 && StructuredResponseIsComplete(
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
@@ -514,7 +542,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 ? new List<string>
                 {
                     @"\bmy\s+lord\b",
-                    @"\bsir\b",
+                    @"(?:^|[.!?\r\n]\s*|,\s*)sir(?=\s*[,!?.:]|\s*$)",
                     @"\byou(?:'re|\s+are)\s+(?:a\s+)?(?:man|lord)\b",
                     @"\b(?:man|lord)\s+(?:such\s+as|like)\s+you\b"
                 }
@@ -522,7 +550,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 {
                     @"\bmy\s+lady\b",
                     @"\bmilady\b",
-                    @"\bmadam\b",
+                    @"(?:^|[.!?\r\n]\s*|,\s*)madam(?=\s*[,!?.:]|\s*$)",
                     @"\byou(?:'re|\s+are)\s+(?:a\s+)?(?:woman|lady)\b",
                     @"\b(?:woman|lady)\s+(?:such\s+as|like)\s+you\b"
                 };
@@ -1172,6 +1200,30 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     .All(row => ReadString(row, "type", "")
                         != "player_sex_misidentification"),
                 "The guard does not mistake a grounded reference to another lady for player misidentification.");
+            foreach (var addressCase in new (string Id, string Sex, bool Expected, string Reply)[]
+            {
+                ("captured_pet_self_description", "male", false, "So it's done, Your Grace. She's mine, and she rides with us. A madam, a king, and a rabbit named Ledger — Zeonica would laugh itself sick. Let them."),
+                ("pet_given_to_speaker", "male", false, "You bought a madam a rabbit, Your Grace."),
+                ("speaker_is_madam", "male", false, "I'm a madam, and I keep my own accounts."),
+                ("third_party_madam", "male", false, "The madam is waiting in the tavern."),
+                ("third_party_sir", "female", false, "Sir Rolf is waiting in the hall."),
+                ("speaker_is_sir", "female", false, "They call me sir, though I dislike the title."),
+                ("initial_madam_address", "male", true, "Madam, I accept your invitation."),
+                ("final_madam_address", "male", true, "Thank you, madam."),
+                ("later_madam_address", "male", true, "I must refuse. Madam, you ask too much."),
+                ("heading_then_madam_address", "male", true, "Amprela - 22:00\n\nMadam, you ask too much."),
+                ("initial_sir_address", "female", true, "Sir, I accept your invitation."),
+                ("final_sir_address", "female", true, "Thank you, sir."),
+                ("gesture_then_sir_address", "female", true, "*She nods.*\n\nSir, I accept."),
+                ("second_person_woman", "male", true, "You are a woman of your word."),
+                ("second_person_man", "female", true, "You're a man of your word."),
+            })
+            {
+                add("player_sex_address_scope_" + addressCase.Id,
+                    TryFindOppositeSexPlayerAddress(addressCase.Reply, addressCase.Sex, "Raven", out _)
+                        == addressCase.Expected,
+                    "Bare honorifics require a direct-address boundary; self descriptions and named third parties do not identify the player.");
+            }
             Dictionary<string, object> unknownFemale =
                 new Dictionary<string, object>(unknown,
                     StringComparer.OrdinalIgnoreCase)

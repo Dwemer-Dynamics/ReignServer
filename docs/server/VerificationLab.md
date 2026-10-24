@@ -1,5 +1,16 @@
 # Reign Offline-First Verification Lab
 
+The optional `memory_evidence_replay` `denseWorkerReplay` fixture uses an explicitly
+started nonce-scoped loopback test worker, never the installed worker. It requires
+high port40000-65000,32hex nonce,pinned bge/minilm model/tree and matching window;
+the handshake requires isolated/no-external-network/model-loaded identity.
+Only non-listening ReignValidation can activate it. It indexes source-linked
+verbatim memory projections and runs production semantic HTTP, SQL fusion and
+final writer packing. It cannot combine with supplied writer responses/continuations
+or other captured model helpers. No live campaign/provider/native effect or release
+certificate is granted. The paired `DIALOGUE_AND_PROVIDERS.md` full-pipeline section
+defines source grading and separate first/repeated latency/RSS evidence.
+
 Private drinking actions (2026-10-08): `conversation_intoxication` includes `RunConversationDrinkActionSelfTests` (`private_drink_*`) on the live reducer/final acceptance path. Coverage includes expressive prose, typed consumption/ordered cup operations, malformed data without reply blocking, missing cup identity, local rebasing, replay/concurrency, recovery and isolated PostgreSQL snapshot restore/cleanup. Historical parser contracts remain separate. Run `prompt_efficiency` for output schemas, repair retention, accepted-unit individual/group rollback/replay and the independent 6,144-token allowance. Use the exact successful Release artifact through `reign_run_offline_verification`; no provider, live campaign or native advancement. See [ConversationIntoxication](ConversationIntoxication.md) for current authority and remaining native/provider acceptance.
 
 ## Trait-driven group participation (2026-09-28)
@@ -114,6 +125,8 @@ Image presets are exact matches verified from `GET https://openrouter.ai/api/v1/
 
 ## Codex performance controls and isolated comparisons
 
+2026-10-12: `contracts.codex_runtime` also exercises the production persistent roleplay adapter and scoped Direct lookup host. Tests retain a large character foundation, update current context on a warm turn, force a fresh current prompt after compaction, and check nested usage receipts, original-record visibility, tool argument/budget boundaries and save-load invalidation. The shared browser fixture checks Auto/Direct placement, defaults, provider-bank preservation, automatic model discovery, identifier variants, selection retention and discovery failure recovery. Use the artifact-bound offline Codex suite; never inject its transport into the listening game server. See [provider safety and configuration](CODEX_APP_SERVER_PROVIDER.md).
+
 `reign-codex-performance-report-v1` is cataloged under `codexPerformance` in `reign.testing.json`. Run `reign_run_offline_verification` with the exact successful Release validation run ID and suite `codex_performance` for injected runtime, conversation, settings migration, dispatch-cap, and report contracts. Run `interaction_architecture` for the shared Control Center fixture, then its three browser contracts at 1672, 1024, and 600 pixels with all traffic intercepted. This is a web control change: native artwork raster/fidelity checks do not apply.
 
 The optional provider comparison is explicit-only: `reign_start_verification`, tier `live-llm`, suite `codex_performance`, the usual `start Reign verification` confirmation, and `codexPerformanceJson`. The JSON must name the exact model, caseIds, full baselineOptions and variantOptions, the single changedOption, a mandatory totalProviderCallCap from 1 through 1000, and confirmation `run bounded Codex performance comparison`. The run-wide cap covers every physical turn/start across primary generation, repair, tier retries, probes, judges and repeat passes. Discovery and thread creation are not generation calls. Cancellation/closed budgets prevent later dispatch. The suite uses isolated Verification Lab campaign data, preserves the selected live provider/settings, and is never included implicitly in aggregate live suites.
@@ -132,5 +145,7 @@ Codex comparison fixtures must identify a shipped character or include a complet
 
 
 ## Captured writer continuations (2026-09-30)
+
+2026-10-13 Codex capacity regressions: the artifact-bound `codex_performance` suite injects exact-model runtime metadata for 272k/500k context windows at 95% usable capacity. Check complete 279,768/450,000/600,000-character requests, final dispatch without truncation, malformed/expired/duplicate/wrong-model metadata, route isolation and oversized pre-dispatch rejection. The production two-turn fixture reports 150k input tokens and must still reuse its thread under the verified model allowance. Offline fixtures never read a signed-in user's model cache, discover models or generate provider responses. `capacityAccounting`, `runtimeManagedContext`, `runtimeReserve` and `contextInputLimitTokens` disclose the budget basis; actual tokenization and compaction remain runtime-enforced. Provider and native acceptance remain separate.
 
 The existing `memory_evidence_replay` supports up to three optional captured writer continuations after its first accepted turn. All use the same run-owned campaign, production accepted-unit publisher, original prepared writer requests and fresh source-bounded reads; no provider or game is invoked. `writer_continuation_*` in `prompt_efficiency` covers bounds, forbidden overrides, fresh checker judgments, pending publication, immutable inputs, conditional memory, actual later prompt content and retry deduplication without future-source leakage. Inspect nested results and separate execution completeness from memory-update and semantic accuracy. Procedure: the paired workspace `docs/agent/testing/DIALOGUE_AND_PROVIDERS.md`.

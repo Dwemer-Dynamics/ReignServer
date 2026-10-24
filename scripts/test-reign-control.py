@@ -248,6 +248,9 @@ class ControlTests(unittest.TestCase):
         source = (SOURCE / "reignctl").read_text()
         site = source.split("cat > /etc/apache2/sites-available/reign.conf <<'EOF'\n", 1)[1].split("\nEOF", 1)[0]
         self.assertLess(site.index("ProxyPass /reign-control !"), site.index("ProxyPass / http"))
+        # Interactive client requests allow 900 seconds, including provider retries.
+        # A shorter proxy deadline substitutes the offline HTML page for a pending JSON response.
+        self.assertIn("ProxyPass / http://127.0.0.1:5101/ timeout=900\n", site)
         with tempfile.TemporaryDirectory(prefix="reign-control-config-") as directory:
             root = Path(directory)
             modules = ["mpm_event", "authz_core", "proxy", "proxy_http", "alias", "cgid"]

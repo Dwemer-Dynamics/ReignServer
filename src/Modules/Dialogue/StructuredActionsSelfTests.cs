@@ -11,7 +11,12 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunStructuredActionSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
+            results.AddRange(RunSpouseSeparationSelfTests());
             void Check(string id, bool pass) => results.Add(TestDict("caseId", "structured_action_" + id, "passed", pass, "summary", id));
+            var spouseProposal = TestDict("proposal", TestDict("Clauses", new object[] { TestDict("ActionId", "leave_spouse") }));
+            Check("spouse_letter_has_private_consequence_cue", RequestedSpouseSeparationCue(spouseProposal).Contains("major and consequential")
+                && RequestedSpouseSeparationCue(spouseProposal).Contains("no romance, marriage, travel"));
+            Check("spouse_letter_cue_does_not_appear_for_unrelated_requests", RequestedSpouseSeparationCue(TestDict()) == "");
             ActionAgreement Gift(int quantity = 100)
             {
                 var a = new ActionAgreement { PlayerId = "player", NpcId = "npc", ProposerId = "player", Origin = ActionOrigin.Conversation };
@@ -20,6 +25,16 @@ namespace ReignBetaServer
             }
             void Agree(ActionAgreement a) { a.State = AgreementState.Offered; string hash = a.TermsHash(); AgreementRules.Accept(a, a.PlayerId, hash); AgreementRules.Accept(a, a.NpcId, hash); }
             var single = Gift();
+            var serviceQuote = TestDict("governmentPetitions", TestDict("requestedPersonalServiceQuote",
+                TestDict("politicalOnlyNpcSide", true, "referenceTotalGold", 6750,
+                    "minimumConsiderationGold", 3375, "maximumConsiderationGold", 13500)));
+            string quoteCue = RequestedPoliticalServiceQuoteCue(serviceQuote);
+            Check("political_quote_cue_uses_exact_supplied_bounds_and_keeps_free_consent",
+                quoteCue.Contains("6750") && quoteCue.Contains("3375 through 13500")
+                && quoteCue.Contains("may still be free") && quoteCue.Contains("give.gold quantity"));
+            ReadDictionary(ReadDictionary(serviceQuote, "governmentPetitions"), "requestedPersonalServiceQuote")["politicalOnlyNpcSide"] = false;
+            Check("political_quote_cue_does_not_misprice_mixed_npc_asset_side", RequestedPoliticalServiceQuoteCue(serviceQuote) == "");
+            Check("political_quote_cue_does_not_invent_missing_legacy_reference", RequestedPoliticalServiceQuoteCue(TestDict()) == "");
             foreach (string guestAction in new[] { "accept_temporary_party_guest", "renew_temporary_party_guest" })
             {
                 var guest = new ActionAgreement { PlayerId = "player", NpcId = "npc", ProposerId = "player", Origin = ActionOrigin.Conversation };
@@ -223,6 +238,153 @@ namespace ReignBetaServer
                     !repairCalled && ReadString(result, "content", "") == before);
             }
             results.AddRange(RunStructuredActionPromptScopeTests());
+            results.AddRange(RunStructuredActionExactEchoTests());
+            results.AddRange(RunStructuredActionAcceptanceConsistencyTests());
+            return results;
+        }
+
+        private static List<Dictionary<string, object>> RunStructuredActionAcceptanceConsistencyTests()
+        {
+            var results = new List<Dictionary<string, object>>();
+            void Check(string id, bool pass) => results.Add(TestDict("caseId", "structured_action_consent_" + id, "passed", pass, "summary", id));
+            var offered = new ActionAgreement { Id = "crown_adoption", PlayerId = "player", NpcId = "npc", ProposerId = "player",
+                ConversationId = "conversation", Origin = ActionOrigin.Conversation, State = AgreementState.Offered };
+            offered.Clauses.Add(new ActionClause { ActionId = "government.seek_petition_adoption", ActorId = "npc", RecipientId = "player",
+                Arguments = new SortedDictionary<string, string> { ["petitionId"] = "civic_mandate", ["petitionRevision"] = "1" } });
+            offered.Clauses.Add(new ActionClause { ActionId = "give.gold", ActorId = "player", RecipientId = "npc",
+                Arguments = new SortedDictionary<string, string> { ["quantity"] = "90000" } });
+            offered.PlayerAcceptedHash = offered.TermsHash();
+            Dictionary<string, object> Wire() => Json.Deserialize<Dictionary<string, object>>(Json.Serialize(TestDict(
+                "structuredActionProtocolVersion", 1, "playerHeroStringId", "player", "speakerHeroStringId", "npc",
+                "structuredActionContext", TestDict("playerId", "player", "npcId", "npc", "conversationId", "conversation", "proposal", offered))));
+            Dictionary<string, object> Answer(string reply, string reason = "I agree to the exact offered service and payment.", string kind = "accept") =>
+                TestDict("reply", reply, "structuredActionDecision", TestDict("kind", kind, "proposalId", offered.Id,
+                    "revision", offered.Revision, "termsHash", offered.TermsHash(), "reason", reason, "clauses", new object[0]));
+            string captured = "I will seek adoption of the petition for the civic mandate of Zeonica, and I will take your ninety thousand denars for that specific labor. Nothing more is promised. Not my vote. Not the senators'. Not your admission.\n\n"
+                + "*He lifts one finger, unhurried.*\n\nOne condition, and it is not negotiable. If the chamber refuses, you do not come back to this table demanding your coin returned as though I had sold you a seat.\n\nSay yes to that, and we have terms.";
+            foreach (string reply in new[] { captured, "Say the word, and we have a deal.", "Tell me you agree before I commit.",
+                "Do we have a deal?", "I still require your confirmation.", "Once you accept, we have an agreement.", "So, say yes and I will do it." })
+            {
+                var wire = Wire(); var answer = Answer(reply);
+                CaptureStructuredActionDecision(wire, answer);
+                Check("fresh_agreement_withholds_accept_" + results.Count,
+                    !ReadBool(ReadDictionary(wire, "validatedStructuredActionDecision"), "valid", true)
+                    && ReadString(ReadDictionary(wire, "validatedStructuredActionDecision"), "kind", "") == "none"
+                    && ReadString(answer, "reply", "") == reply && offered.NpcAcceptedHash.Length == 0);
+            }
+            var addedCondition = Answer("I accept.", "Lucon accepts the paid service, with the added condition that Nal not demand repayment if the chamber refuses.");
+            var conditionedWire = Wire(); CaptureStructuredActionDecision(conditionedWire, addedCondition);
+            Check("declared_added_condition_blocks_even_without_confirmation_phrase",
+                !ReadBool(ReadDictionary(conditionedWire, "validatedStructuredActionDecision"), "valid", true));
+            foreach (var answer in new[] { Answer("I accept your exact offer. Payment is due now."),
+                Answer("Six thousand seven hundred and fifty denars, paid now. In return I give that one endorsement. Coin on the wood, my lord."),
+                Answer("When I arrive, I will remain for the agreed three days."),
+                Answer("I do not need your confirmation again. I accept."),
+                Answer("Yesterday I asked you to say yes. Now I accept your offer."),
+                Answer("*He remembers the words: say yes.* I accept your offer."),
+                Answer("I accept, without any additional condition.", "There is no new condition."),
+                Answer("I accept.", "Without any additional condition, I agree to the existing terms.") })
+            {
+                var wire = Wire(); CaptureStructuredActionDecision(wire, answer);
+                Check("unconditional_and_existing_delivery_terms_remain_valid_" + results.Count,
+                    ReadBool(ReadDictionary(wire, "validatedStructuredActionDecision"), "valid", false)
+                    && ReadString(ReadDictionary(wire, "validatedStructuredActionDecision"), "kind", "") == "accept");
+            }
+            foreach (string kind in new[] { "none", "reject", "counter", "propose" })
+                Check(kind + "_may_seek_player_agreement_without_granting_npc_acceptance",
+                    StructuredActionAcceptanceContradictions(Answer("Say yes to that, and we have terms.", kind: kind), Wire()).Count == 0);
+            var finalWire = Wire(); var finalReply = Answer(captured);
+            Check("continuity_rewrite_cannot_erase_a_pending_agreement_request",
+                !StructuredActionContinuityDecisionPreserved(finalWire, Answer(captured), Answer("I accept your offer.")));
+            Check("continuity_rewrite_can_correct_unconditional_acceptance_prose",
+                StructuredActionContinuityDecisionPreserved(finalWire, Answer("I accept your exact offer. I remember the tavern."), Answer("I accept your exact offer.")));
+            string finalText = captured;
+            Check("final_grounding_withholds_conditional_choice_without_rewriting_it_into_consent",
+                !FinalizeConversationGrounding(finalWire, "npc", finalReply, ref finalText)
+                && ReadString(ReadDictionary(finalWire, "conversationGrounding"), "status", "") == "unresolved"
+                && !ReadBool(ReadDictionary(finalReply, "structuredActionDecision"), "valid", true)
+                && !ReadBool(ReadDictionary(finalWire, "validatedStructuredActionDecision"), "valid", true)
+                && offered.NpcAcceptedHash.Length == 0);
+            return results;
+        }
+
+        private static List<Dictionary<string, object>> RunStructuredActionExactEchoTests()
+        {
+            var results = new List<Dictionary<string, object>>();
+            void Check(string id, bool pass) => results.Add(TestDict("caseId", "structured_action_exact_echo_" + id,
+                "passed", pass, "summary", id));
+            var offered = new ActionAgreement { Id = "echo_bargain", PlayerId = "player", NpcId = "npc",
+                ConversationId = "conversation", ProposerId = "player", Origin = ActionOrigin.Conversation, State = AgreementState.Offered };
+            offered.Clauses.Add(new ActionClause { Id = "gold_out", ActionId = "give.gold", ActorId = "player", RecipientId = "npc",
+                Arguments = new SortedDictionary<string, string> { ["quantity"] = "100" }, DisplayText = "I give you 100 denars" });
+            offered.Clauses.Add(new ActionClause { Id = "gold_back", ActionId = "give.gold", ActorId = "npc", RecipientId = "player",
+                Arguments = new SortedDictionary<string, string> { ["quantity"] = "20" }, DisplayText = "and you give me 20 denars" });
+            offered.PlayerAcceptedHash = offered.TermsHash();
+            Dictionary<string, object> Answer(string kind = "accept") => TestDict("kind", kind, "proposalId", offered.Id,
+                "revision", offered.Revision, "termsHash", offered.TermsHash(), "reason", "Exact existing bargain.",
+                "clauses", offered.Clauses.Select(c => TestDict("actionId", c.ActionId, "actorId", c.ActorId,
+                    "recipientId", c.RecipientId, "arguments", c.Arguments.Select(a => TestDict("key", a.Key, "value", a.Value)).ToList(),
+                    "dueDay", c.DueDay, "durationDays", c.DurationDays, "installments", c.Installments,
+                    "intervalDays", c.IntervalDays, "conditionKind", c.ConditionKind, "conditionTargetId", c.ConditionTargetId)).ToList());
+            Dictionary<string, object> Capture(Dictionary<string, object> answer, ActionAgreement proposal = null)
+            {
+                var wire = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(TestDict(
+                    "structuredActionProtocolVersion", 1, "playerHeroStringId", "player", "speakerHeroStringId", "npc",
+                    "structuredActionContext", TestDict("playerId", "player", "npcId", "npc", "conversationId", "conversation", "proposal", proposal ?? offered))));
+                CaptureStructuredActionDecision(wire, TestDict("reply", "Visible reply", "structuredActionDecision", answer));
+                return ReadDictionary(wire, "validatedStructuredActionDecision");
+            }
+            foreach (string kind in new[] { "accept", "reject" })
+            {
+                var answer = Answer(kind); string original = Json.Serialize(answer); var result = Capture(answer);
+                var decision = result.TryGetValue("decision", out object typed)
+                    ? Json.Deserialize<ActionDecision>(Json.Serialize(typed)) : new ActionDecision();
+                Check(kind + "_canonical_empty_clauses", ReadBool(result, "valid", false)
+                    && ReadBool(result, "unchangedTermEchoCanonicalized", false) && decision.Kind == kind
+                    && decision.Clauses.Count == 0 && decision.TermsHash == offered.TermsHash());
+                Check(kind + "_preserves_provider_evidence_and_unsigned_npc", Json.Serialize(answer) == original && offered.NpcAcceptedHash == "");
+                Check(kind + "_core_contract_remains_strict", ActionNegotiation.ValidateDecision(offered,
+                    Json.Deserialize<ActionDecision>(original), "player", "npc", "conversation", 0).Count > 0);
+            }
+            var mutations = new Dictionary<string, Action<Dictionary<string, object>>>
+            {
+                ["action"] = d => ReadDictionaryList(d, "clauses")[0]["actionId"] = "give.item",
+                ["actor"] = d => ReadDictionaryList(d, "clauses")[0]["actorId"] = "npc",
+                ["recipient"] = d => ReadDictionaryList(d, "clauses")[0]["recipientId"] = "player",
+                ["quantity"] = d => ReadDictionaryList(ReadDictionaryList(d, "clauses")[0], "arguments")[0]["value"] = "101",
+                ["due_day"] = d => ReadDictionaryList(d, "clauses")[0]["dueDay"] = 1d,
+                ["duration"] = d => ReadDictionaryList(d, "clauses")[0]["durationDays"] = 1d,
+                ["installments"] = d => ReadDictionaryList(d, "clauses")[0]["installments"] = 2,
+                ["interval"] = d => ReadDictionaryList(d, "clauses")[0]["intervalDays"] = 1d,
+                ["condition"] = d => ReadDictionaryList(d, "clauses")[0]["conditionKind"] = "arrive",
+                ["condition_target"] = d => ReadDictionaryList(d, "clauses")[0]["conditionTargetId"] = "town",
+                ["storage_timing"] = d => ReadDictionaryList(d, "clauses")[0]["timing"] = 1,
+                ["unknown_field"] = d => ReadDictionaryList(d, "clauses")[0]["script"] = "anything",
+                ["unknown_argument_field"] = d => ReadDictionaryList(ReadDictionaryList(d, "clauses")[0], "arguments")[0]["extra"] = true,
+                ["null_arguments"] = d => ReadDictionaryList(d, "clauses")[0]["arguments"] = null,
+                ["revision"] = d => d["revision"] = offered.Revision + 1,
+                ["hash"] = d => d["termsHash"] = "changed",
+                ["identity"] = d => d["proposalId"] = "another",
+                ["none"] = d => d["kind"] = "none",
+                ["missing_term"] = d => d["clauses"] = ReadDictionaryList(d, "clauses").Take(1).ToList(),
+                ["extra_term"] = d => d["clauses"] = ReadDictionaryList(d, "clauses").Concat(ReadDictionaryList(d, "clauses").Take(1)).ToList(),
+                ["reordered_terms"] = d => d["clauses"] = ReadDictionaryList(d, "clauses").AsEnumerable().Reverse().ToList(),
+                ["duplicate_argument"] = d => { var t = ReadDictionaryList(d, "clauses")[0]; t["arguments"] = ReadDictionaryList(t, "arguments").Concat(ReadDictionaryList(t, "arguments")).ToList(); }
+            };
+            foreach (var mutation in mutations)
+            {
+                var answer = Answer(); mutation.Value(answer); var result = Capture(answer);
+                Check("blocks_" + mutation.Key, !ReadBool(result, "valid", true) && !ReadBool(result, "unchangedTermEchoCanonicalized", false));
+            }
+            foreach (string invalid in new[] { "signature", "conversation", "state", "origin" })
+            {
+                var changed = Json.Deserialize<ActionAgreement>(Json.Serialize(offered)); var answer = Answer();
+                if (invalid == "signature") changed.PlayerAcceptedHash = "";
+                if (invalid == "conversation") changed.ConversationId = "other";
+                if (invalid == "state") changed.State = AgreementState.Accepted;
+                if (invalid == "origin") changed.Origin = ActionOrigin.Console;
+                Check("blocks_offer_" + invalid, !ReadBool(Capture(answer, changed), "valid", true));
+            }
             return results;
         }
 
@@ -384,6 +546,19 @@ namespace ReignBetaServer
             Check("counter_projection_grants_no_signature_or_execution", newVotes != null && !newVotes.HasRequiredConsents
                 && newVotes.PlayerAcceptedHash == "" && newVotes.NpcAcceptedHash == ""
                 && Json.Serialize(ReadDictionary(votesWire, "structuredActionContext")) == beforeVotes);
+            var unchangedCounter = CloneDictionary(counterAnswer);
+            ReadDictionary(unchangedCounter, "structuredActionDecision")["clauses"] =
+                ReadDictionaryList(ReadDictionary(votesView, "proposal"), "Clauses")
+                    .Select(c => TestDict("actionId", c["ActionId"], "actorId", c["ActorId"], "recipientId", c["RecipientId"],
+                        "arguments", c["Arguments"], "dueDay", c["DueDay"], "durationDays", c["DurationDays"],
+                        "installments", c["Installments"], "intervalDays", c["IntervalDays"],
+                        "conditionKind", c["ConditionKind"], "conditionTargetId", c["ConditionTargetId"])).ToList();
+            ReadDictionary(unchangedCounter, "structuredActionDecision")["reason"] = "Only if you also pay me two hundred denars.";
+            CaptureStructuredActionDecision(votesWire, unchangedCounter);
+            var unchangedEnvelope = ReadDictionary(votesWire, "validatedStructuredActionDecision");
+            Check("spoken_fee_cannot_make_unchanged_counter_binding", !ReadBool(unchangedEnvelope, "valid", true)
+                && !unchangedEnvelope.ContainsKey("proposal")
+                && Json.Serialize(ReadDictionary(votesWire, "structuredActionContext")) == beforeVotes);
             var badShape = CloneDictionary(counterAnswer);
             ReadDictionaryList(ReadDictionary(badShape, "structuredActionDecision"), "clauses")[0]["arguments"]
                 = TestDict("businessId", "business_0", "optionId", "accept");
@@ -497,6 +672,68 @@ namespace ReignBetaServer
                     .Contains("A new NPC proposal cannot claim an existing identity or consent."));
             Check("ordinary_action_context_reduction", prompt.Length < before.Length / 3,
                 TestDict("unscopedContextCharacters", before.Length, "completeActionPromptCharacters", prompt.Length));
+
+            var paidRow = TestDict("agreementId", "settled-sponsorship", "clauseId", "fee", "termsHash", new string('a', 64),
+                "status", "applied", "fromHeroStringId", "player", "toHeroStringId", "npc", "amount", 500L,
+                "quantityPerInstallment", 500, "fulfilledInstallments", 1, "scheduledInstallments", 1,
+                "associatedActionIds", new[] { "government.sponsor_petition" });
+            var paymentPayload = TestDict("structuredActionProtocolVersion", 1, "structuredActionContext",
+                TestDict("playerId", "player", "npcId", "npc", "fulfilledPaymentHistory",
+                    TestDict("schema", AgreementPaymentHistory.Schema, "source", "native_agreement_journal", "total", 1,
+                        "truncated", false, "rows", new[] { paidRow })));
+            string paymentInputBefore = Json.Serialize(paymentPayload);
+            var paymentFacts = VerifiedAgreementPaymentHistory(paymentPayload, "npc", "player");
+            var writerFacts = StructuredActionPromptContext(paymentPayload);
+            string paymentWriter = StructuredActionTurnPrompt(paymentPayload);
+            var motiveContext = TestDict("fulfilledPaymentHistory", paymentFacts);
+            string motiveCore = BuildConversationDecisionPromptCore(motiveContext);
+            string paymentMotive = BuildConversationDecisionPrompt(motiveContext);
+            Check("settled_payment_is_read_only_scoped_native_fact", ReadDictionaryList(paymentFacts, "rows").Count == 1
+                && ReadDictionaryList(ReadDictionary(writerFacts, "fulfilledPaymentHistory"), "rows").Count == 1
+                && Json.Serialize(paymentPayload) == paymentInputBefore);
+            Check("settled_payment_reaches_writer_without_claiming_new_consent", paymentWriter.Contains("settled-sponsorship")
+                && paymentWriter.Contains("VERIFIED PRIOR STRUCTURED PAYMENTS")
+                && paymentWriter.Contains("A new service may have a new price or be refused"));
+            Check("settled_payment_reaches_private_decision_without_trimming_existing_context",
+                paymentMotive.StartsWith(motiveCore, StringComparison.Ordinal)
+                && paymentMotive.Contains("settled-sponsorship") && paymentMotive.Contains("500")
+                && paymentMotive.Contains("do not prove other services completed"));
+            Check("no_payment_history_preserves_private_decision_prompt", BuildConversationDecisionPrompt(TestDict())
+                == BuildConversationDecisionPromptCore(TestDict()));
+            Check("foreign_private_decision_has_no_payment_facts", VerifiedAgreementPaymentHistory(paymentPayload, "other", "player").Count == 0
+                && VerifiedAgreementPaymentHistory(paymentPayload, "npc", "other").Count == 0);
+            foreach (string fault in new[] { "foreign", "pending", "amount", "fulfilled", "hash", "duplicate", "missing_actor" })
+            {
+                var bad = CloneDictionary(paymentPayload);
+                var badContext = ReadDictionary(bad, "structuredActionContext");
+                var badHistory = ReadDictionary(badContext, "fulfilledPaymentHistory");
+                var badRow = ReadDictionaryList(badHistory, "rows")[0];
+                switch (fault)
+                {
+                    case "foreign": badRow["toHeroStringId"] = "other"; break;
+                    case "pending": badRow["status"] = "pending"; break;
+                    case "amount": badRow["amount"] = 501; break;
+                    case "fulfilled": badRow["fulfilledInstallments"] = 2; break;
+                    case "hash": badRow["termsHash"] = new string('z', 64); break;
+                    case "duplicate": badHistory["rows"] = new[] { badRow, CloneDictionary(badRow) }; break;
+                    case "missing_actor": badContext.Remove("npcId"); break;
+                }
+                // Replace the row explicitly: dictionary-list readers may return converted views.
+                if (fault != "duplicate") badHistory["rows"] = new[] { badRow };
+                badContext["fulfilledPaymentHistory"] = badHistory; bad["structuredActionContext"] = badContext;
+                Check("invalid_payment_" + fault + "_withheld", ReadDictionaryList(VerifiedAgreementPaymentHistory(bad), "rows").Count == 0);
+            }
+            var manyPayments = Enumerable.Range(0, 13).Select(i => {
+                var row = CloneDictionary(paidRow); row["agreementId"] = "paid-" + i; return row;
+            }).ToList();
+            var boundedPayload = CloneDictionary(paymentPayload);
+            var boundedContext = ReadDictionary(boundedPayload, "structuredActionContext");
+            var boundedHistory = ReadDictionary(boundedContext, "fulfilledPaymentHistory");
+            boundedHistory["rows"] = manyPayments; boundedHistory["total"] = 13;
+            boundedContext["fulfilledPaymentHistory"] = boundedHistory; boundedPayload["structuredActionContext"] = boundedContext;
+            var boundedPayments = VerifiedAgreementPaymentHistory(boundedPayload);
+            Check("payment_facts_cap_reports_omission", ReadDictionaryList(boundedPayments, "rows").Count == 12
+                && ReadBool(boundedPayments, "truncated", false) && ReadInt(boundedPayments, "total", 0) == 13);
 
             string scene = "On the road. Arytha's husband is imprisoned; her last answer was no.";
             payload["sceneContext"] = scene;
@@ -643,7 +880,7 @@ namespace ReignBetaServer
             // TestDict deliberately discards whitespace keys; retain the actual provider corruption here.
             var shifted = new Dictionary<string, object> { [""] = "reply", [" "] = "I accept these exact terms.",
                 ["actionGate"] = TestDict("needed", false) };
-            foreach (string broken in new[] { Json.Serialize(shifted), "{\"reply\":\"I accept these exact terms.\",\"unfinished\":" })
+            foreach (string broken in new[] { Json.Serialize(shifted), "{\"reply\":\"I accept these exact terms.\"" })
             {
                 calls = 0;
                 var recoveredShape = RetryMalformedStructuredResponse(TestDict("ok", true, "content", broken), metadataRequest,

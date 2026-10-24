@@ -16,12 +16,39 @@ namespace ReignLiveTest
         // overview read. Keep a real quiescence window instead of accepting two
         // adjacent samples that can straddle that completion boundary.
         private const int PassiveWorldStableObservationCount = 8;
+        private static bool PersonalGossipCheckpointQuiescent(Dictionary<string, object> readiness,
+            Dictionary<string, object> runtime, string campaign, string timeline)
+        {
+            var native = ReadObject(runtime, "personalGossip");
+            // Future correspondence does not block a save. Composition, an unpublished
+            // ready result, and an already-due delivery do block it.
+            return PassiveWorldCheckpointPolicy.PersonalGossipQuiescent(IsOk(readiness)
+                    && String(readiness, "schema") == "reign-gossip-delivery-readiness-v1"
+                    && String(readiness, "campaignId") == campaign && String(readiness, "timelineId") == timeline,
+                ReadBoolean(readiness, "enabled"), ReadBoolean(readiness, "schemaReady"),
+                ReadLong(readiness, "pendingComposition", -1), ReadLong(readiness, "awaitingNativeClock", -1), ReadLong(readiness, "dueInTransit", -1),
+                native.ContainsKey("inFlight") ? ReadBoolean(native, "inFlight") : (bool?)null,
+                String(native, "schema") == "reign-gossip-clock-runtime-v1" && String(native, "campaignId") == campaign && String(native, "timelineId") == timeline,
+                native.ContainsKey("lastError") ? String(native, "lastError") : null);
+        }
+        private static bool _observeGovernmentNewsForPassiveWorldControl;
 
         private static Dictionary<string, object> PassiveWorldControl(string[] args)
+        {
+            bool previous = _observeGovernmentNewsForPassiveWorldControl;
+            _observeGovernmentNewsForPassiveWorldControl = Has(args, "--observe-government-news");
+            try { return PassiveWorldControlCore(args); }
+            finally { _observeGovernmentNewsForPassiveWorldControl = previous; }
+        }
+
+        private static Dictionary<string, object> PassiveWorldControlCore(string[] args)
         {
             string operation = args.Skip(1)
                 .FirstOrDefault(value => !value.StartsWith("-", StringComparison.Ordinal))
                 ?? "status";
+            if (_observeGovernmentNewsForPassiveWorldControl
+                && operation.Equals("checkpoint", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Government-news observation cannot create a checkpoint.");
             Dictionary<string, object> runtime = Runtime(args);
             string campaignId = ResolveCampaign(args, runtime);
             string timelineId = FirstNonEmpty(
@@ -178,6 +205,8 @@ namespace ReignLiveTest
             string campaignId,
             string timelineId)
         {
+            if (_observeGovernmentNewsForPassiveWorldControl && !Has(args, "--no-save"))
+                throw new InvalidOperationException("Government-news observation requires --no-save.");
             Dictionary<string, object> live = ReadObject(runtime, "runtime");
             double startDay = ReadDoubleValue(live, "worldDay", -1d);
             if (startDay < 0d)
@@ -268,6 +297,8 @@ namespace ReignLiveTest
             };
             foreach (KeyValuePair<string, object> field in fields)
                 step[field.Key] = field.Value;
+            // Carry the choice through advance, stop, snapshot and every catch-up acknowledgment.
+            step["observeGovernmentNews"] = _observeGovernmentNewsForPassiveWorldControl;
 
             Dictionary<string, object> started = Post("/tests/live/run/start",
                 new Dictionary<string, object>
@@ -297,6 +328,7 @@ namespace ReignLiveTest
             DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
             Dictionary<string, object> latest = new Dictionary<string, object>();
             Dictionary<string, object> latestRuntime = new Dictionary<string, object>();
+            Dictionary<string, object> latestGossip = new Dictionary<string, object>();
             int stable = 0;
             var gateTimer = System.Diagnostics.Stopwatch.StartNew();
             var blockedMs = new Dictionary<string, object>();
@@ -339,6 +371,11 @@ namespace ReignLiveTest
                     + Uri.EscapeDataString(campaignId));
                 Dictionary<string, object> nativeRuntime =
                     ReadObject(latestRuntime, "runtime");
+                Dictionary<string, object> gossip = Get("/gossip/status?deliveryOnly=true&campaignId=" + Uri.EscapeDataString(campaignId)
+                    + "&timelineId=" + Uri.EscapeDataString(timelineId) + "&worldDay="
+                    + ReadDoubleValue(nativeRuntime, "worldDay", targetDay).ToString("R", CultureInfo.InvariantCulture));
+                latestGossip = gossip;
+                bool gossipQuiescent = PersonalGossipCheckpointQuiescent(gossip, nativeRuntime, campaignId, timelineId);
                 string actionFailure = PassiveWorldCheckpointPolicy.ActionFailureError(
                     ReadLong(ReadObject(latest, "pipeline"), "failedActions", -1));
                 if (!string.IsNullOrEmpty(actionFailure))
@@ -460,6 +497,9 @@ namespace ReignLiveTest
                     && ReadBoolean(latestRuntime, "gameOnline")
                     && CourtLifeRuntimeQuiescent(nativeRuntime)
                     && ClanAccordsRuntimeQuiescent(nativeRuntime)
+                    && GovernmentRuntimeQuiescent(nativeRuntime)
+                    && RulerRuntimeQuiescent(nativeRuntime)
+                    && gossipQuiescent
                     && !ReadBoolean(diplomacy, "inFlight")
                     && nativeEffectsPending == 0
                     && nativeEffectsFailed == 0
@@ -482,6 +522,9 @@ namespace ReignLiveTest
                     ["clanConflicts"] = clanConflictEffectsPending != 0 || clanConflictEffectsFailed != 0 || clanConflictIncidentFailures != 0 || pendingClanConflictNotices != 0,
                     ["courtLife"] = !CourtLifeRuntimeQuiescent(nativeRuntime),
                     ["clanAccords"] = !ClanAccordsRuntimeQuiescent(nativeRuntime),
+                    ["government"] = !GovernmentRuntimeQuiescent(nativeRuntime),
+                    ["rulers"] = !RulerRuntimeQuiescent(nativeRuntime),
+                    ["personalGossip"] = !gossipQuiescent,
                     ["diplomacy"] = ReadBoolean(diplomacy, "inFlight"),
                     ["worldHistory"] = ReadLong(worldHistory, "pendingCount", -1) != 0 || ReadBoolean(worldHistory, "uploadInFlight"),
                     ["nativeOffline"] = !ReadBoolean(latestRuntime, "gameOnline"),
@@ -496,6 +539,7 @@ namespace ReignLiveTest
                     {
                         ["ok"] = true,
                         ["status"] = "caught_up",
+                        ["personalGossip"] = latestGossip,
                         ["catchUpMs"] = gateTimer.ElapsedMilliseconds,
                         ["blockedObservationMs"] = blockedMs,
                         ["requiredStableObservations"] = PassiveWorldStableObservationCount,
@@ -511,6 +555,7 @@ namespace ReignLiveTest
             {
                 ["ok"] = false,
                 ["status"] = "catch_up_timeout",
+                ["personalGossip"] = latestGossip,
                 ["catchUpMs"] = gateTimer.ElapsedMilliseconds,
                 ["blockedObservationMs"] = blockedMs,
                 ["error"] = "Passive systems and native diplomacy did not remain caught up for the required quiescence window before the timeout.",
@@ -566,6 +611,8 @@ namespace ReignLiveTest
                 ["busy"] = ReadBoolean(native, "busy"),
                 ["courtLife"] = ReadObject(native, "courtLife"),
                 ["clanAccords"] = ReadObject(native, "clanAccords"),
+                ["government"] = ReadObject(native, "government"),
+                ["personalGossip"] = ReadObject(native, "personalGossip"),
                 ["saveSync"] = new Dictionary<string, object>
                 {
                     ["alignmentPending"] = ReadBoolean(saveSync, "alignmentPending"),
@@ -719,6 +766,8 @@ namespace ReignLiveTest
                 && !ReadBoolean(runtime, "busy")
                 && CourtLifeRuntimeQuiescent(runtime)
                 && ClanAccordsRuntimeQuiescent(runtime)
+                && GovernmentRuntimeQuiescent(runtime)
+                && RulerRuntimeQuiescent(runtime)
                 && !ReadBoolean(saveSync, "alignmentPending")
                 && ReadBoolean(saveSync, "ready")
                 && !ReadBoolean(diplomacy, "inFlight")
@@ -759,6 +808,28 @@ namespace ReignLiveTest
                 && courtLife.ContainsKey("internationalPending") && !ReadBoolean(courtLife, "internationalPending")
                 && !ReadBoolean(courtLife, "familyAttentionPending")
                 && ReadLong(courtLife, "familyVisitOutbox", -1) == 0;
+        }
+
+        private static bool RulerRuntimeQuiescent(Dictionary<string, object> runtime)
+        {
+            // Legacy clients do not advertise this subsystem. A new client must
+            // provide the complete ruler record, never an empty placeholder.
+            if (!runtime.ContainsKey("rulers")) return true;
+            var rulers = ReadObject(runtime, "rulers");
+            return String(rulers, "schema") == "reign-ruler-runtime-v1" && ReadBoolean(rulers, "available")
+                && rulers.ContainsKey("pending") && !ReadBoolean(rulers, "pending")
+                && ReadLong(rulers, "failures", -1) == 0 && ReadLong(rulers, "pendingRelationships", -1) == 0;
+        }
+
+        private static bool GovernmentRuntimeQuiescent(Dictionary<string, object> runtime)
+        {
+            var government = ReadObject(runtime, "government");
+            return PassiveWorldCheckpointPolicy.GovernmentQuiescent(
+                String(government, "schema"), ReadBoolean(government, "available"),
+                government.ContainsKey("calendarReady") ? ReadBoolean(government, "calendarReady") : (bool?)null,
+                government.ContainsKey("syncInFlight") ? ReadBoolean(government, "syncInFlight") : (bool?)null,
+                ReadLong(government, "missingProfiles", -1), ReadLong(government, "pendingEvidence", -1),
+                government.ContainsKey("syncError") ? String(government, "syncError") : null);
         }
 
         private static bool ClanAccordsRuntimeQuiescent(Dictionary<string, object> runtime)

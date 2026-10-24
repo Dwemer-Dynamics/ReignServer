@@ -241,6 +241,37 @@ namespace ReignBetaServer
             check("targeted_missing_slot_repair", repairCalls == 2 && targetedRepair && NarrativeDocumentReady(repaired)
                 && Json.Serialize(ReadDictionary(repaired, "life")) == Json.Serialize(fixtureLife)
                 && NarrativeDocumentReady(repairCheckpoint), "A length-finished response that made progress repairs only missing slot zero; accepted life, voice and other concerns survive unchanged.");
+            int voiceRepairCalls = 0; bool voiceOnlyRequested = false;
+            var voiceRepaired = AuthorCharacterNarrative(hero, new Dictionary<string, object>(), "premade/test", request => {
+                voiceRepairCalls++;
+                if (voiceRepairCalls == 1)
+                    return TestDict("ok", true, "content", Json.Serialize(TestDict("life", fixtureLife, "items", itemResponse())));
+                string prompt = ReadString(ReadDictionaryList(request, "messages").Last(), "content", "");
+                voiceOnlyRequested = prompt.Contains("\"requiredSlots\":[]") && prompt.Contains("\"writeLife\":false")
+                    && prompt.Contains("\"writeVoice\":true");
+                return TestDict("ok", true, "content", Json.Serialize(TestDict("voice", fixtureVoice)));
+            });
+            check("voice_only_repair_without_items", voiceRepairCalls == 2 && voiceOnlyRequested && NarrativeDocumentReady(voiceRepaired)
+                && Json.Serialize(ReadDictionary(voiceRepaired, "life")) == Json.Serialize(fixtureLife)
+                && Json.Serialize(ReadDictionaryList(voiceRepaired, "items")) == Json.Serialize(ReadDictionaryList(written, "items")),
+                "A voice-only repair may omit items; completed biography and all concern slots survive without a null reference.");
+            foreach (object malformedItems in new object[] { null, new object[0], "invalid" })
+            {
+                int malformedCalls = 0; Dictionary<string, object> malformedCheckpoint = null;
+                var malformedRepaired = AuthorCharacterNarrative(hero, new Dictionary<string, object>(), "premade/test", request => {
+                    malformedCalls++;
+                    return TestDict("ok", true, "content", Json.Serialize(malformedCalls == 1
+                        ? TestDict("life", fixtureLife, "voice", fixtureVoice, "items", malformedItems)
+                        : TestDict("items", itemResponse())));
+                }, null, value => { if (malformedCheckpoint == null) malformedCheckpoint = DeepCloneProfileDictionary(value); });
+                check("malformed_items_repair_" + (malformedItems == null ? "null" : malformedItems is string ? "string" : "array"),
+                    malformedCalls == 2 && NarrativeDocumentReady(malformedRepaired) && !NarrativeDocumentReady(malformedCheckpoint)
+                    && Json.Serialize(ReadDictionary(malformedCheckpoint, "life")) == Json.Serialize(fixtureLife),
+                    "Malformed items fail completeness checks and retain valid sections for a bounded repair instead of crashing or publishing a partial profile.");
+            }
+            check("prior_parse_failure_retries_after_engine_fix", ShouldRetryFailedConstruction(TestDict("status", "failed",
+                "failureKind", "parse", "constructionEngineVersion", 4), DefaultSettings()),
+                "Profiles blocked by the earlier parser can resume after the engine fix without editing campaign data or settings.");
             var interrupted = DeepCloneProfileDictionary(written); interrupted["status"] = "blueprint";
             ReadDictionaryList(interrupted, "items")[0]["description"] = "";
             int failedCalls = 0; bool providerFailed = false;

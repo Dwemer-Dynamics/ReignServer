@@ -97,8 +97,11 @@ namespace ReignBetaServer
         // Offline contract tests inject a deterministic JSON-RPC transport here. Production
         // leaves this null and always uses the owned official app-server process.
         private static Func<string, Dictionary<string, object>, int, Dictionary<string, object>> CodexRpcTransportOverride;
+        private static Action<Dictionary<string, object>> CodexWriteTransportOverride;
         private static readonly Encoding CodexTransportUtf8 = new UTF8Encoding(false, true);
         private static Dictionary<string, object> CodexAccount = new Dictionary<string, object>();
+        private static bool CodexAccountIdentityVerificationRequired;
+        private static long CodexAccountNotificationGeneration;
         private static List<Dictionary<string, object>> CodexModels = new List<Dictionary<string, object>>();
 
         private static string NormalizeLlmProvider(string value)
@@ -174,6 +177,7 @@ namespace ReignBetaServer
                     ["threadReuse"] = CodexRuntimeThreads.Diagnostics(),
                     ["threadCleanup"] = CodexRuntimeCleanup.Diagnostics(),
                     ["lastError"] = LimitText(CodexLastError, 1200),
+                    ["generationFailure"] = CodexFailureStatus(),
                     ["lastStderr"] = LimitText(CodexLastStderr, 1200),
                     ["transport"] = new Dictionary<string, object>
                     {
@@ -330,10 +334,16 @@ namespace ReignBetaServer
                 ReadString(codexContext, "correlationId", ""), codexContext);
             List<Dictionary<string, object>> requestMessages = ReadDictionaryList(requestBody, "messages");
             string prompt = BuildCodexPrompt(requestMessages);
+            if (context.MemoryAccess != null) prompt = CodexDirectInstructions + "\n\n" + BuildCodexMessageBlocks(requestMessages);
             string fullPrompt = prompt;
             context.PromptText = prompt;
             context.PromptHash = HashCodexText(prompt);
             CodexPromptMapping promptMapping = BuildCodexPromptMapping(context, requestMessages);
+            if (context.MemoryAccess != null)
+            {
+                promptMapping.BaseInstructions = promptMapping.BaseInstructions.Replace("Do not use tools, shell commands, files, or network access.", "Use only the supplied character record lookup tools. Never use shell, files, web or other tools.");
+                if (!promptMapping.Applied) promptMapping.TurnInput = new List<Dictionary<string, object>> { TestDict("type", "text", "text", prompt) };
+            }
             context.StablePromptMappingRequested = promptMapping.Requested;
             context.StablePromptMappingApplied = promptMapping.Applied;
             context.StablePromptMappingState = promptMapping.State;
@@ -342,7 +352,9 @@ namespace ReignBetaServer
             context.StableTurnInput = promptMapping.TurnInput;
             AugmentCodexPromptContractHash(context);
             int timeout = Math.Max(CodexRpcTimeout(settings), ReadInt(settings, "providerRequestTimeoutMs", 120000));
-            int RemainingTimeout() => timeout;
+            var deadline = Stopwatch.StartNew();
+            int RemainingTimeout() => Math.Max(1, timeout - (int)Math.Min(int.MaxValue, deadline.ElapsedMilliseconds));
+            EnsureCodexAccountIdentityCurrent();
             CodexRequestTimings timings = new CodexRequestTimings();
             bool cleanupFallback = false;
             CodexThreadLease lease = CodexRuntimeThreads.Acquire(context);
@@ -398,6 +410,7 @@ namespace ReignBetaServer
                     };
                     CodexFastMode.ApplyThreadScope(threadParameters, context.Fast, CodexRuntimeProtocol);
                     ApplyCodexPromptMapping(context, threadParameters);
+                    ConfigureCodexRoleplayThread(threadParameters, context);
                     try
                     {
                         thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
@@ -453,6 +466,7 @@ namespace ReignBetaServer
                         };
                         CodexFastMode.ApplyThreadScope(threadParameters, context.Fast, CodexRuntimeProtocol);
                         ApplyCodexPromptMapping(context, threadParameters);
+                        ConfigureCodexRoleplayThread(threadParameters, context);
                         try
                         {
                             thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
@@ -469,6 +483,7 @@ namespace ReignBetaServer
                         threadId = ReadNestedId(thread, "thread");
                         if (string.IsNullOrWhiteSpace(threadId)) throw new InvalidOperationException("Codex app-server did not return a thread id.");
                         if (context.Options.ReuseThreads) lease = CodexRuntimeThreads.RegisterNew(context, threadId);
+                        turnInput = promptMapping.TurnInput;
                         DrainCodexThreadEvictions(settings, ref cleanupFallback);
                     }
                 }
@@ -488,6 +503,7 @@ namespace ReignBetaServer
                     turnParameters["outputSchema"] = context.OutputSchema;
                 CodexFastMode.Apply(turnParameters, context.Fast);
                 BeginCodexTurnAttempt(threadId);
+                if (context.MemoryAccess != null) lock (CodexStateLock) CodexMemoryTurns[threadId] = context.MemoryAccess;
                 ReserveCodexPerformanceCall(context.ToDictionary());
                 timings.TurnStartUtc = DateTime.UtcNow;
                 Dictionary<string, object> turn;
@@ -512,7 +528,8 @@ namespace ReignBetaServer
                 if (waiter == null) throw new InvalidOperationException("Codex turn was already retired.");
                 WaitForCodexTurn(waiter, RemainingTimeout(), false, canceled);
                 assembly = waiter.Assembly.Snapshot();
-                if (!string.IsNullOrWhiteSpace(assembly.Error)) throw new InvalidOperationException(assembly.Error);
+                if (!string.IsNullOrWhiteSpace(assembly.Error)) throw new CodexGenerationException(assembly);
+                if (assembly.Status != "completed") throw new InvalidOperationException("Codex turn ended with status " + assembly.Status + ".");
                 string content = (assembly.Text ?? "").Trim();
                 if (string.IsNullOrWhiteSpace(content)) throw new InvalidOperationException("Codex app-server completed without an assistant message.");
                 timings.FirstTextUtc = assembly.FirstTextUtc;
@@ -564,6 +581,7 @@ namespace ReignBetaServer
                     InterruptCodexTurn(threadId, turnId, settings);
                 }
                 RetireCodexTurn(turnId);
+                lock (CodexStateLock) CodexMemoryTurns.Remove(threadId);
                 if (string.IsNullOrWhiteSpace(turnId)) EndCodexTurnAttempt(threadId);
                 if (lease != null && !succeeded)
                 {
@@ -602,7 +620,7 @@ namespace ReignBetaServer
             Dictionary<string, object> settings, Dictionary<string, object> cacheRouting, string correlationId, string requestType, string model,
             Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
-            if (UsesCodexSubscription(settings)) return CodexChatCompletionJson(requestBody, settings, model, codexContext, contentDelta, canceled);
+            if (UsesCodexSubscription(settings)) return CodexChatCompletionWithRecovery(requestBody, settings, model, codexContext, contentDelta, canceled);
             return WithCampaignProviderWait(requestType,
                 () => ProviderPostJson(apiUrl, apiKey, outboundJson, settings, cacheRouting, correlationId, requestType, model, contentDelta, canceled));
         }
@@ -656,7 +674,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> initializeResult = CodexRpc("initialize", new Dictionary<string, object>
                     {
                         ["clientInfo"] = new Dictionary<string, object> { ["name"] = "bannerlord-reign", ["title"] = "Bannerlord Reign", ["version"] = "1.0" },
-                        ["capabilities"] = new Dictionary<string, object>()
+                        ["capabilities"] = new Dictionary<string, object> { ["experimentalApi"] = true }
                     }, CodexRpcTimeout(settings));
                     InspectCodexProtocolFromBundle(executable, settings, initializeResult);
                     CodexNotify("initialized", new Dictionary<string, object>());
@@ -731,6 +749,7 @@ namespace ReignBetaServer
 
         private static void WriteCodexMessage(Dictionary<string, object> message)
         {
+            if (CodexWriteTransportOverride != null) { CodexWriteTransportOverride(message); return; }
             string frame = SerializeCodexTransportFrame(message);
             string method = ReadString(message, "method", "response");
             if (method.StartsWith("turn/", StringComparison.Ordinal) || method.StartsWith("thread/", StringComparison.Ordinal))
@@ -828,29 +847,29 @@ namespace ReignBetaServer
                 return;
             }
 
-            if (id > 0 && !string.IsNullOrWhiteSpace(method))
+            if (message.ContainsKey("id") && !string.IsNullOrWhiteSpace(method))
             {
+                if (HandleCodexMemoryRequest(message)) return;
                 WriteCodexMessage(new Dictionary<string, object>
                 {
-                    ["id"] = id,
+                    ["id"] = message["id"],
                     ["error"] = new Dictionary<string, object> { ["code"] = -32601, ["message"] = "Reign does not permit interactive tool or approval requests." }
                 });
                 return;
             }
 
             Dictionary<string, object> parameters = ReadDictionary(message, "params") ?? new Dictionary<string, object>();
+            if (method == "account/rateLimits/updated")
+            {
+                ObserveCodexRateLimits(parameters);
+                return;
+            }
+            var item = ReadDictionary(parameters, "item");
+            if (method == "thread/compacted" || ReadString(item, "type", "") == "contextCompaction")
+                CodexRuntimeThreads.ObserveCompaction(ReadString(parameters, "threadId", ""));
             if (method == "account/updated")
             {
-                Dictionary<string, object> account = ReadDictionary(parameters, "account") ?? new Dictionary<string, object>(parameters);
-                if (!account.ContainsKey("type")) account["type"] = ReadString(parameters, "authMode", "");
-                bool identityChanged;
-                lock (CodexStateLock)
-                {
-                    identityChanged = !string.IsNullOrWhiteSpace(CodexAccountIdentityFingerprint(CodexAccount))
-                        && !CodexAccountIdentityFingerprint(CodexAccount).Equals(CodexAccountIdentityFingerprint(account), StringComparison.Ordinal);
-                    CodexAccount = account;
-                }
-                if (identityChanged) InvalidateCodexThreads("Codex account identity changed");
+                ObserveCodexAccountUpdate(parameters);
                 return;
             }
 
@@ -875,11 +894,87 @@ namespace ReignBetaServer
             turnWaiter.Accept(message);
         }
 
-        private static void RefreshCodexAccount()
+        private static void RefreshCodexAccount(int timeoutMs = 0)
         {
-            Dictionary<string, object> result = CodexRpc("account/read", new Dictionary<string, object> { ["refreshToken"] = false }, CodexRpcTimeout(LoadSettings()));
+            long generation;
+            lock (CodexStateLock) generation = CodexAccountNotificationGeneration;
+            Dictionary<string, object> result = CodexRpc("account/read", new Dictionary<string, object> { ["refreshToken"] = false },
+                timeoutMs > 0 ? timeoutMs : CodexRpcTimeout(LoadSettings()));
             Dictionary<string, object> account = ReadDictionary(result, "account") ?? new Dictionary<string, object>();
-            lock (CodexStateLock) CodexAccount = account;
+            ApplyCodexAccountSnapshot(account, generation);
+        }
+
+        // account/updated contains authMode and planType, not an account ID or
+        // email. Missing identity fields must not erase the verified snapshot.
+        // Recheck the official account metadata before the next thread acquisition.
+        private static void ObserveCodexAccountUpdate(Dictionary<string, object> update)
+        {
+            var full = ReadDictionary(update, "account");
+            if (full != null)
+            {
+                long generation;
+                lock (CodexStateLock) generation = ++CodexAccountNotificationGeneration;
+                ApplyCodexAccountSnapshot(full, generation);
+                return;
+            }
+            bool signedOut = update.ContainsKey("authMode") && update["authMode"] == null;
+            bool changedMode;
+            lock (CodexStateLock)
+            {
+                CodexAccountNotificationGeneration++;
+                string mode = ReadString(update, "authMode", "");
+                if (mode == "chatgptAuthTokens") mode = "chatgpt";
+                string previous = ReadString(CodexAccount, "type", "");
+                changedMode = signedOut || mode.Length > 0 && previous.Length > 0 && mode != previous;
+                var next = changedMode ? TestDict() : DeepCloneProfileDictionary(CodexAccount);
+                if (!signedOut && mode.Length > 0) next["type"] = mode;
+                if (!signedOut && update.ContainsKey("planType")) next["planType"] = update["planType"];
+                CodexAccount = next;
+                CodexAccountIdentityVerificationRequired = true;
+            }
+            if (changedMode)
+            {
+                InvalidateCodexThreads("Codex authentication mode changed");
+                lock (CodexFailureStateLock) { CodexLastRateLimits = TestDict(); CodexLastGenerationFailure = TestDict(); }
+            }
+        }
+
+        private static void ApplyCodexAccountSnapshot(Dictionary<string, object> account, long generation)
+        {
+            bool changed;
+            lock (CodexStateLock)
+            {
+                string previous = CodexAccountIdentityFingerprint(CodexAccount);
+                changed = previous.Length > 0 && previous != CodexAccountIdentityFingerprint(account);
+                CodexAccount = DeepCloneProfileDictionary(account);
+                CodexAccountIdentityVerificationRequired = generation != CodexAccountNotificationGeneration;
+            }
+            if (changed)
+            {
+                InvalidateCodexThreads("Codex verified account identity changed");
+                lock (CodexFailureStateLock) { CodexLastRateLimits = TestDict(); CodexLastGenerationFailure = TestDict(); }
+            }
+        }
+
+        private static void EnsureCodexAccountIdentityCurrent()
+        {
+            for (int read = 0; read < 2; read++)
+            {
+                lock (CodexStateLock) if (!CodexAccountIdentityVerificationRequired) return;
+                RefreshCodexAccount(2000);
+                bool settled, signedIn, identified;
+                lock (CodexStateLock)
+                {
+                    settled = !CodexAccountIdentityVerificationRequired;
+                    signedIn = !string.IsNullOrWhiteSpace(ReadString(CodexAccount, "type", ""));
+                    identified = !string.IsNullOrWhiteSpace(ReadFirstString(CodexAccount, "accountId", "id", "email"));
+                }
+                if (!signedIn) throw new InvalidOperationException("Codex is signed out. Sign in again, then select Retry.");
+                if (!settled) continue;
+                if (!identified) InvalidateCodexThreads("Codex account identity unavailable; using a fresh thread");
+                return;
+            }
+            throw new InvalidOperationException("Codex account changed while checking its identity. Select Retry after sign-in settles.");
         }
 
         private static void StopCodexAppServer()
@@ -1004,13 +1099,12 @@ namespace ReignBetaServer
 
         private static string CodexAccountIdentityFingerprint(Dictionary<string, object> account)
         {
-            if (account == null) return "";
+            if (account == null || account.Count == 0) return "";
             return string.Join("|", new[]
             {
                 ReadString(account, "type", ReadString(account, "authMode", "")),
                 ReadFirstString(account, "accountId", "id", "email"),
-                ReadString(account, "email", ""),
-                ReadString(account, "planType", ReadString(account, "plan", ""))
+                ReadString(account, "email", "")
             }.Select(value => (value ?? "").Trim().ToLowerInvariant()));
         }
 

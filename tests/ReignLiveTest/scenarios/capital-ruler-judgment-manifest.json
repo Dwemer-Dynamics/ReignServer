@@ -1,0 +1,661 @@
+{
+  "schema": "reign-ruler-certification-manifest-v1",
+  "version": 1,
+  "caseCount": 73,
+  "saveAuthority": "guarded-campaign-test-enrollment",
+  "fixtureTool": "reign_test_structured_actions",
+  "fixtureAction": "fixture.ruler_setup",
+  "fixtureProfiles": [
+    "ruler",
+    "garrison",
+    "army",
+    "party",
+    "snapshot",
+    "captivity",
+    "ownership",
+    "loyalty",
+    "wound",
+    "capture_roll",
+    "judgment_draw",
+    "prison_guard",
+    "ransom_offer",
+    "barter_release",
+    "barter_transfer",
+    "mortality",
+    "news"
+  ],
+  "fixtureArguments": [
+    "profile",
+    "heroId",
+    "settlementId",
+    "otherHeroId",
+    "amount"
+  ],
+  "schedule": "Advance only to the next required assertion boundary; combine compatible cases; restore incompatible branches. No fixed soak.",
+  "clockBoundaries": [
+    15,
+    20,
+    30,
+    31.5,
+    40,
+    45,
+    60,
+    126
+  ],
+  "fixedSoakDays": null,
+  "oneRollingCheckpoint": true,
+  "uniqueSaveCapacity": 15,
+  "consecutivePassesRequired": 1,
+  "captureSamples": {
+    "healthy": 10000,
+    "wounded": 10000,
+    "maximumAbsoluteError": 0.015
+  },
+  "fingerprints": [
+    "source",
+    "client",
+    "server",
+    "bannerlord",
+    "manifest",
+    "provider_if_used",
+    "dependencies"
+  ],
+  "fatalStops": [
+    "wrong_loaded_save",
+    "campaign_contamination",
+    "bridge_desynchronization",
+    "native_crash",
+    "missing_evidence"
+  ],
+  "requiredEvidence": [
+    "case ledger",
+    "native before/after",
+    "operation receipts",
+    "world history",
+    "logs",
+    "save/reload receipts",
+    "timing and balance traces",
+    "protected baseline hash",
+    "cleanup proof"
+  ],
+  "balanceAcceptance": {
+    "difficulty": "hardest",
+    "passiveVsControlLoyaltyGapAfterTenDays": 5,
+    "managedTownAboveNativeRebellionThreshold": true,
+    "recordOpportunityCosts": true
+  },
+  "readiness": "All mandatory native assertions and required human acceptance; no uncertain side effects, failed queue or missing cleanup. Offline and fixture-only receipts do not count as native passes.",
+  "cases": [
+    {
+      "id": "RUL-CAP-001",
+      "description": "strongest ruling-clan city",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-002",
+      "description": "stable capital despite garrison changes",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-003",
+      "description": "replacement ruling-clan city",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-004",
+      "description": "other-clan city fallback",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-005",
+      "description": "castle refuge and no-land fugitive",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-006",
+      "description": "manual player capital",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-007",
+      "description": "999 versus 1000 healthy departure",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-008",
+      "description": "wounded and approaching parties excluded",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-009",
+      "description": "749 versus 750 return and disband",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAP-010",
+      "description": "objective completion and relocation exceptions",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CAPTURE-001",
+      "description": "healthy fought field defeat",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true,
+      "variants": [
+        "capture",
+        "escape"
+      ]
+    },
+    {
+      "id": "RUL-CAPTURE-002",
+      "description": "wounded fought field defeat",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true,
+      "variants": [
+        "capture",
+        "escape"
+      ]
+    },
+    {
+      "id": "RUL-CAPTURE-003",
+      "description": "AI siege defeat",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true,
+      "variants": [
+        "capture",
+        "escape"
+      ]
+    },
+    {
+      "id": "RUL-CAPTURE-004",
+      "description": "capital resident siege capture",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true,
+      "variants": [
+        "capture",
+        "escape"
+      ]
+    },
+    {
+      "id": "RUL-CAPTURE-005",
+      "description": "player victory and player defeat",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true,
+      "variants": [
+        "capture",
+        "escape"
+      ]
+    },
+    {
+      "id": "RUL-CAPTURE-006",
+      "description": "surrender and ordinary troop regression",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-001",
+      "description": "player sovereign outcome selection",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-002",
+      "description": "AI trait-weighted saved selection",
+      "assertions": ["Native AI execution cannot bypass a pending sovereign decision while context is in flight.", "A structured kill request is rejected before native mutation and schedules no delayed side effect.", "The saved eligible trait choice is applied exactly once."],
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-003",
+      "description": "vassal direct handover versus dungeon donation",
+      "assertions": ["Dungeon donation alone does not hand over judgment authority.", "Escape and reload remove stale awaiting-authority records.", "A player who succeeds as sovereign may judge their existing captive without handing the ruler to themselves."],
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-004",
+      "description": "torture fifteen-day execution and -20/-19 split",
+      "assertions": ["Only clans still in the defeated realm at execution may defect; prior membership cannot pull a clan from a third realm.", "Transferred clans retain all fiefs they hold at execution, including acquisitions since sentencing; those holdings receive the conquest effect."],
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-005",
+      "description": "clean fifteen-day execution and -10/-9 split",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-006",
+      "description": "heir succession and no-heir election",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-007",
+      "description": "ransom sale exchange and barter before payment",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-008",
+      "description": "normal escape cancels sentence",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-009",
+      "description": "player prison-break rescue",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-010",
+      "description": "battle rescue and recapture fresh deadline",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-011",
+      "description": "same-kingdom custody transfer",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-012",
+      "description": "unauthorized execution native and -30/-60 reactions",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-013",
+      "description": "exile city/castle reparations ruler and family",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-014",
+      "description": "submission all clans fiefs and directional +75",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-JUDGMENT-015",
+      "description": "player exile and native player death",
+      "assertions": ["The player execution request opens native heir selection without forcing death or reporting a failure for the pending native transition.", "Death-custody release does not cancel the accepted execution request or end its war.", "Actual heir selection and death complete once, retain native execution relation costs, apply the selected political outcome, and anchor settlement timers to the actual death day."],
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-001",
+      "description": "torture full fade expiry",
+      "assertions": ["A lost and recaptured war-start homeland holding receives homeland bonuses without a conquest loyalty penalty; ordinary conquered holdings retain the penalty."],
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-002",
+      "description": "clean full fade expiry",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-003",
+      "description": "exile both realms and loser surcharge",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-004",
+      "description": "submission merged/annexed and security",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-005",
+      "description": "war-start homeland ownership",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-006",
+      "description": "later capture inherits remaining timer",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-007",
+      "description": "stacking cap and ownership reversal",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-EFFECT-008",
+      "description": "castles receive stats without town rebellions",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-001",
+      "description": "recognized independence preserves sides",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-002",
+      "description": "rebel execution keeps independent war",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-003",
+      "description": "reunification and old ruler demotion",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-004",
+      "description": "reunification no-adult-heir exception",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-005",
+      "description": "royal victory three defeated-lord fates",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-006",
+      "description": "pending sentence and rescue prevent early resolution",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-007",
+      "description": "post-settlement fugitive alone and unchanged old clan",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-CIVIL-008",
+      "description": "immediate signed player clan/member recruitment",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-SAVE-001",
+      "description": "sentencing different-instance reload",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-SAVE-002",
+      "description": "rescue and recapture reload",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-SAVE-003",
+      "description": "partial transfer and repeated-operation receipts",
+      "assertions": ["An interrupted submission after prisoner release, or exile after payment, retains Applying, failure and receipts through observation and reload.", "No escape cancellation may hide partially applied political consequences; resolve only by diagnosis or restoring the owned disposable checkpoint."],
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-SAVE-004",
+      "description": "fading effects reload",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-SAVE-005",
+      "description": "126-day exile boundary",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-SAVE-006",
+      "description": "31.5-day fugitive boundary",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-OPTIONS-001",
+      "description": "all switches persist independently",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-OPTIONS-002",
+      "description": "master preserves individual preferences",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-OPTIONS-003",
+      "description": "disable judgments cancels only pending effects",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-OPTIONS-004",
+      "description": "disable/reenable settlement effects keeps original expiry",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-OPTIONS-005",
+      "description": "governor removal preserves owner/matching governor",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-OPTIONS-006",
+      "description": "mortality requirement and difficulty separation",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-BALANCE-001",
+      "description": "torture hardest difficulty control/passive/managed",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-BALANCE-002",
+      "description": "clean hardest difficulty control/passive/managed",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-BALANCE-003",
+      "description": "exile hardest difficulty control/passive/managed",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-BALANCE-004",
+      "description": "submission hardest difficulty control/passive/managed",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-RELEASE-001",
+      "description": "native UI presentation and accurate history",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-RELEASE-002",
+      "description": "baseline protection and exact owned cleanup",
+      "required": true,
+      "status": "pending",
+      "proof": "native",
+      "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-001", "description": "Real ruler/rebel capture notices and ordinary-capture exclusion", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-002", "description": "Sentence, actual execution, completed settlement and escape cancellation reports", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-003", "description": "Domestic and foreign rulings state factual outcomes in readable news prose", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-004", "description": "Real major world-event onset/ending and succession notices", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-005", "description": "Time remains paused across queued acknowledgements and restores its previous mode", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-006", "description": "Battle/conversation/inquiry deferral and interrupted display recovery", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-007", "description": "Fresh-process save/load preserves unread order without acknowledged replay", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    },
+    {
+      "id": "RUL-NEWS-008", "description": "Independent web toggles, text fallback, no disabled backlog and full native/rendered art and long-copy acceptance", "required": true, "status": "pending", "proof": "native", "combineCompatible": true
+    }
+  ],
+  "captureControl": "One-shot roll amount/4000 for the exact ruler and enrolled Current/game instance. 0 forces capture, 4000 forces escape. Consumed before production selection; no save/reload carry. Native before/after remains required."
+}

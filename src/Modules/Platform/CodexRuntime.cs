@@ -130,6 +130,10 @@ namespace ReignBetaServer
             public bool HasExplicitThreadMetadata;
             public bool ReasoningCapabilityKnown;
             public string ReasoningResolution = "";
+            public bool PersistentRoleplay;
+            public int ContextInputLimitTokens;
+            public string IncrementalContext = "";
+            public CodexRoleplayMemoryAccess MemoryAccess;
 
             public string ThreadIdentityKey
             {
@@ -163,6 +167,10 @@ namespace ReignBetaServer
                     ["schemaRequested"] = SchemaRequested,
                     ["schemaApplied"] = SchemaApplied,
                     ["schemaState"] = SchemaState,
+                    ["persistentRoleplay"] = PersistentRoleplay,
+                    ["contextInputLimitTokens"] = ContextInputLimitTokens,
+                    ["lookupMode"] = MemoryAccess == null ? "auto" : "direct",
+                    ["lookupCalls"] = MemoryAccess?.CallCount ?? 0,
                     ["stablePromptMapping"] = new Dictionary<string, object>
                     {
                         ["requested"] = StablePromptMappingRequested,
@@ -244,6 +252,11 @@ namespace ReignBetaServer
                 ReasoningCapabilityKnown = capabilityKnown,
                 ReasoningResolution = reasoningResolution
             };
+            result.PersistentRoleplay = ReadBool(source, "persistentRoleplay", false);
+            result.ContextInputLimitTokens = ReadInt(source, "contextInputLimitTokens", 0);
+            result.IncrementalContext = ReadString(source, "incrementalContext", "");
+            if (source.TryGetValue("memoryAccess", out object memory)) result.MemoryAccess = memory as CodexRoleplayMemoryAccess;
+            if (result.PersistentRoleplay) result.Options.ReuseThreads = true;
             result.PromptSegments = ReadDictionaryList(source, "promptSegments");
             result.PromptText = BuildPromptTextForRuntime(payload);
             result.PromptHash = HashCodexText(result.PromptText);
@@ -1154,6 +1167,7 @@ namespace ReignBetaServer
             public string Text = "";
             public string Status = "running";
             public string Error = "";
+            public Dictionary<string, object> ProviderError;
             public string AuthoritativeModel = "";
             public string ReportedModel = "";
             public string ServedModel = "";
@@ -1189,6 +1203,7 @@ namespace ReignBetaServer
             private string FinalText = "";
             private string Status = "running";
             private string Error = "";
+            private Dictionary<string, object> ProviderError;
             private string ReportedModel = "";
             private string ServedModel = "";
             private string ModelEvidence = "";
@@ -1308,6 +1323,7 @@ namespace ReignBetaServer
                     {
                         Status = turn == null ? ReadString(parameters, "status", "completed") : ReadString(turn, "status", "completed");
                         Dictionary<string, object> error = turn == null ? ReadDictionary(parameters, "error") : ReadDictionary(turn, "error");
+                        ProviderError = error == null ? null : DeepCloneProfileDictionary(error);
                         Error = error == null ? "" : ReadString(error, "message", Json.Serialize(error));
                         Dictionary<string, object> completedUsage = turn == null ? ReadUsage(parameters) : ReadUsage(turn);
                         if (completedUsage != null && !UsageFromThreadTokenUpdate) Usage = completedUsage;
@@ -1332,6 +1348,7 @@ namespace ReignBetaServer
                         Text = final ?? "",
                         Status = Status,
                         Error = Error,
+                        ProviderError = ProviderError == null ? null : DeepCloneProfileDictionary(ProviderError),
                         AuthoritativeModel = ServedModel,
                         ReportedModel = ReportedModel,
                         ServedModel = ServedModel,
@@ -1510,6 +1527,7 @@ namespace ReignBetaServer
             public string AuthorityHash;
             public string PromptContractHash;
             public string Key;
+            public bool PersistentRoleplay;
 
             public static bool TryCreate(CodexRuntimeRequestContext context, out CodexThreadIdentity identity)
             {
@@ -1534,6 +1552,7 @@ namespace ReignBetaServer
                     AuthorityHash = context.AuthorityHash,
                     PromptContractHash = context.PromptContractHash
                 };
+                identity.PersistentRoleplay = context.PersistentRoleplay;
                 identity.Key = string.Join("\u001f", new[]
                 {
                     identity.CampaignId, timeline, identity.SessionId, identity.ConversationMode,
@@ -1563,6 +1582,7 @@ namespace ReignBetaServer
                 public string ThreadId;
                 public int Turns;
                 public long InputTokens;
+                public int ContextInputLimitTokens;
                 public DateTime LastUsedUtc;
                 public bool Leased;
                 public bool Finalized;
@@ -1597,6 +1617,7 @@ namespace ReignBetaServer
                         && entry.Identity.AuthorityHash.Equals(identity.AuthorityHash, StringComparison.Ordinal)
                         && entry.Identity.PromptContractHash.Equals(identity.PromptContractHash, StringComparison.Ordinal))
                     {
+                        if (context.ContextInputLimitTokens > 0) entry.ContextInputLimitTokens = context.ContextInputLimitTokens;
                         entry.Leased = true;
                         entry.LastUsedUtc = DateTime.UtcNow;
                         return new CodexThreadLease
@@ -1636,6 +1657,7 @@ namespace ReignBetaServer
                         ThreadId = threadId,
                         LastUsedUtc = DateTime.UtcNow,
                         Leased = true,
+                        ContextInputLimitTokens = context.ContextInputLimitTokens,
                         Finalized = false,
                         PendingPromptText = context.PromptText ?? "",
                         PendingCanonicalHistorySignature = context.CanonicalHistorySignature ?? ""
@@ -1653,7 +1675,8 @@ namespace ReignBetaServer
                     || string.IsNullOrWhiteSpace(context.CanonicalHistorySignature)
                     || !lease.PreviousAcceptedHistorySignature.Equals(context.CanonicalHistorySignature, StringComparison.Ordinal)
                     || string.IsNullOrWhiteSpace(context.CurrentTurnText)) return false;
-                delta = BuildCodexIncrementalTurnPrompt(context.CurrentTurnText);
+                delta = context.PersistentRoleplay ? context.IncrementalContext : BuildCodexIncrementalTurnPrompt(context.CurrentTurnText);
+                if (string.IsNullOrWhiteSpace(delta)) return false;
                 return true;
             }
 
@@ -1715,7 +1738,10 @@ namespace ReignBetaServer
                     if (!entry.ThreadId.Equals(lease.ThreadId, StringComparison.OrdinalIgnoreCase)) return lease.ThreadId;
                     entry.Leased = false;
                     entry.LastUsedUtc = DateTime.UtcNow;
-                    if (entry.Invalidated || !accepted || substantiveChanged || !usageKnown || entry.Turns + 1 >= MaxTurns || entry.InputTokens + Math.Max(0, inputTokens) >= MaxInputTokens)
+                    bool capacityReached = entry.Identity.PersistentRoleplay
+                        ? entry.Turns + 1 >= 32 || inputTokens >= (entry.ContextInputLimitTokens > 0 ? entry.ContextInputLimitTokens : 128000)
+                        : entry.Turns + 1 >= MaxTurns || entry.InputTokens + Math.Max(0, inputTokens) >= MaxInputTokens;
+                    if (entry.Invalidated || !accepted || substantiveChanged || !usageKnown || capacityReached)
                     {
                         Entries.Remove(lease.IdentityKey);
                         return entry.ThreadId;
@@ -1743,6 +1769,12 @@ namespace ReignBetaServer
                     }
                     return result;
                 }
+            }
+
+            public void ObserveCompaction(string threadId)
+            {
+                lock (Sync)
+                    foreach (var entry in Entries.Values.Where(e => e.ThreadId == threadId)) entry.Invalidated = true;
             }
 
             public List<string> TakeEvictedThreadIds()
@@ -1944,7 +1976,11 @@ namespace ReignBetaServer
             CodexThreadLease lease;
             lock (CodexRuntimeStateLock)
             {
-                if (!CodexPendingThreadLeases.TryGetValue(request.CorrelationId, out lease)) return;
+                if (!CodexPendingThreadLeases.TryGetValue(request.CorrelationId, out lease))
+                {
+                    if (context != null) context["threadFinalization"] = TestDict("status", "no_pending_thread");
+                    return;
+                }
                 CodexPendingThreadLeases.Remove(request.CorrelationId);
             }
             bool accepted = ReadBool(result, "accepted", ReadBool(context, "accepted", ReadBool(ReadDictionary(result, "codexFinalization"), "accepted", request.FinalizationApproved)));
@@ -1956,13 +1992,17 @@ namespace ReignBetaServer
             if (context != null && context.ContainsKey("substantivelyChanged")) substantiveChanged = ReadBool(context, "substantivelyChanged", substantiveChanged);
             if (result != null && result.ContainsKey("substantiveChanged")) substantiveChanged = ReadBool(result, "substantiveChanged", substantiveChanged);
             if (result != null && result.ContainsKey("substantivelyChanged")) substantiveChanged = ReadBool(result, "substantivelyChanged", substantiveChanged);
-            Dictionary<string, object> usage = ReadDictionary(result, "usage");
+            Dictionary<string, object> usage = ReadDictionary(result, "usage") ?? ReadDictionary(ReadDictionary(result, "raw"), "usage");
             bool usageKnown = usage != null && (usage.ContainsKey("prompt_tokens") || usage.ContainsKey("input_tokens") || usage.ContainsKey("inputTokens"));
             long inputTokens = usage == null ? 0 : ReadLong(usage, "prompt_tokens", ReadLong(usage, "input_tokens", ReadLong(usage, "inputTokens", 0)));
             string acceptedHistorySignature = FirstNonEmpty(ReadString(result, "acceptedHistorySignature", ""), ReadString(context, "acceptedHistorySignature", ""), request.CanonicalHistorySignature);
             if (accepted && !substantiveChanged && !string.IsNullOrWhiteSpace(acceptedHistorySignature))
                 CodexRuntimeThreads.RecordAcceptedHistorySignature(lease, acceptedHistorySignature);
             string cleanupId = CodexRuntimeThreads.Finalize(lease, accepted, substantiveChanged, inputTokens, usageKnown);
+            if (context != null) context["threadFinalization"] = TestDict("status", cleanupId.Length == 0 ? "retained" : "retired",
+                "accepted", accepted, "substantivelyChanged", substantiveChanged,
+                "changeReason", ReadString(context, "threadChangeReason", substantiveChanged ? "changed" : "unchanged"),
+                "usageKnown", usageKnown, "inputTokens", inputTokens, "threadId", lease.ThreadId);
             bool fallback = false;
             QueueCodexThreadCleanup(cleanupId, LoadSettings(), ref fallback);
         }
@@ -2274,7 +2314,10 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunCodexRuntimeSelfTests()
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
+            tests.AddRange(RunCodexRoleplayMemorySelfTests());
+            tests.AddRange(RunCodexFailureRecoverySelfTests());
             Action<string, bool, string> add = (id, passed, summary) => tests.Add(new Dictionary<string, object> { ["id"] = id, ["passed"] = passed, ["summary"] = summary });
+            RunCodexConversationCapacitySelfTests((id, passed, evidence) => add(id, passed, "Exact-model Codex context metadata and complete serialized input capacity contract."));
             Dictionary<string, object> settings = new Dictionary<string, object> { ["reasoningMode"] = "selective", ["reasoningEffort"] = "high" };
             Dictionary<string, object> options = new Dictionary<string, object>
             {

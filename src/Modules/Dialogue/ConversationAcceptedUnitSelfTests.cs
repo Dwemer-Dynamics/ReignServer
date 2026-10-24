@@ -62,7 +62,10 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     accept => unit.GroupConversation
                         ? StorePartyConversationExchange(campaign, unit.Payload, "npc", "player", "Player", "Mira",
                             unit.PrivateWhisper ? "A private remark." : unit.PlayerText,
-                            unit.PrivateWhisper ? "*The speaker replies privately to the player.*" : unit.Reply, unit.EventId, unit.Timestamp, accept)
+                            unit.PrivateWhisper && !string.IsNullOrWhiteSpace(unit.Reply) ? "*The speaker replies privately to the player.*" : unit.Reply, unit.EventId, unit.Timestamp, accept)
+                        : unit.EventType == "social_event_turn"
+                        ? StoreSocialEventConversationExchange(campaign, unit.Payload, "npc", "player", "Player", "Mira",
+                            unit.PlayerText, unit.Reply, unit.EventId, "quiet_event", unit.Timestamp, accept)
                         : StoreConversationExchange(campaign, unit.Payload, "npc", "player", "Player", "Mira",
                             unit.PlayerText, unit.Reply, unit.EventId, unit.Timestamp, acceptance: accept), fault);
                 int Count(string table, string field = "", string id = "")
@@ -374,6 +377,54 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                         && ReadDouble(drinking, "consumed", -1) == .25
                         && ReadString(drinking, "acceptedReplyHash", "") == PromptHash(privateDrink.Reply), privateReceipt);
                 }
+                using (var connection = OpenCampaignConnection(campaign)) EnsurePlayerApproachSchema(connection);
+                foreach (string route in new[] { "party", "private_party", "social_event" })
+                {
+                    var silent = Unit("silent_" + route, group: route != "social_event", whisper: route == "private_party");
+                    if (route == "social_event") silent.EventType = "social_event_turn";
+                    silent.Reply = ""; silent.Parsed["reply"] = ""; silent.Parsed["participation"] = "quiet";
+                    silent.PublishScene = silent.PublishSocial = silent.PublishIntroductions = true;
+                    silent.Payload["playerAttentionPresence"] = new[] {
+                        TestDict("heroId", "npc", "alive", true, "scopes", new[] { "town" }),
+                        TestDict("heroId", "listener", "alive", true, "scopes", new[] { "town" }) };
+                    var inputReceipt = AdmitConversationInput(campaign, silent.Payload, generation, "npc");
+                    int eventCount = Count("events"), memoryCount = Count("memories"), attentionCount = Count("player_attention_events");
+                    int drinkCount = Count("conversation_drinking_turns"), negotiationCount = Count("conversation_negotiation_turns");
+                    bool rolledBack = false;
+                    try { Publish(silent, phase => { if (phase == "before_unit_receipt") throw new InvalidOperationException("Silent acceptance fault."); }); }
+                    catch (InvalidOperationException) { rolledBack = true; }
+                    Check(route + "_silence_rollback_keeps_original_input", rolledBack
+                        && Count("conversation_accepted_units", "unit_id", silent.EventId) == 0
+                        && Count("conversation_turns", "turn_id", ReadString(inputReceipt, "sourceId", "")) == 1);
+                    var silence = Publish(silent);
+                    var receipt = ReadDictionary(silence, "acceptedUnit");
+                    Check(route + "_silence_accepts_without_reply_effects", ReadBool(receipt, "ok", false)
+                        && ReadBool(receipt, "memoryUpdateComplete", false) && ReadString(receipt, "status", "") == "committed"
+                        && ReadString(ReadDictionary(receipt, "playerAttention"), "status", "") == "intentional_silence_excluded"
+                        && ReadString(ReadDictionary(receipt, "npcLives"), "status", "") == "intentional_silence_excluded"
+                        && ReadString(ReadDictionary(receipt, "memory"), "status", "") == "intentional_silence_excluded"
+                        && Count("events") == eventCount && Count("memories") == memoryCount
+                        && Count("player_attention_events") == attentionCount && Count("conversation_drinking_turns") == drinkCount
+                        && Count("conversation_negotiation_turns") == negotiationCount, receipt);
+                    var replayed = ReadConversationInputReplay(campaign, silent.Payload, "npc");
+                    Check(route + "_silence_replay_retains_participation", ReadBool(replayed, "idempotentReplay", false)
+                        && ReadString(replayed, "participation", "") == "quiet" && ReadString(replayed, "reply", "missing") == ""
+                        && ReadBool(ReadDictionary(Publish(silent), "acceptedUnit"), "idempotentReplay", false));
+                    using var connection = OpenCampaignConnection(campaign);
+                    var sources = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", silent.EventId));
+                    Check(route + "_silence_has_no_fabricated_npc_source", sources.All(row => ReadString(row, "role", "") != "npc")
+                        && ReadStringList(receipt, "sourceIds").All(id => QuerySql(connection,
+                            "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count == 1));
+                }
+                var afterSilence = Unit("after_silent_turn", group: true);
+                afterSilence.Payload["playerAttentionPresence"] = new[] {
+                    TestDict("heroId", "npc", "alive", true, "scopes", new[] { "town" }),
+                    TestDict("heroId", "listener", "alive", true, "scopes", new[] { "town" }) };
+                CapturePlayerInput(afterSilence.Payload);
+                var afterSilenceReceipt = ReadDictionary(Publish(afterSilence), "acceptedUnit");
+                Check("spoken_turn_after_silence_still_accepts", ReadBool(afterSilenceReceipt, "ok", false) && AcceptedSourcesMatch(afterSilence)
+                    && ReadString(ReadDictionary(afterSilenceReceipt, "playerAttention"), "status", "") == "committed"
+                    && ReadString(ReadDictionary(afterSilenceReceipt, "playerAttention"), "sourceId", "").Length > 0, afterSilenceReceipt);
                 var stale = Unit("pre_restore");
                 AdvanceMemoryRestoreGeneration(campaign);
                 bool restoreRejected = false;

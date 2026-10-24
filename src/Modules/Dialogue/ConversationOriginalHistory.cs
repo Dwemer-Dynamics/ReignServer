@@ -18,7 +18,7 @@ namespace ReignBetaServer
             var rows = QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload
 FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE s.player_id=$player AND ($session='' OR t.session_id=$session)
-AND ($npc='' OR s.npc_id=$npc OR EXISTS(SELECT 1 FROM conversation_turns n
+AND ($npc='' OR s.npc_id=$npc OR (t.channel='party_announcement' AND t.participants_json::jsonb @> jsonb_build_array($npc)) OR EXISTS(SELECT 1 FROM conversation_turns n
  WHERE n.session_id=t.session_id AND n.speaker_id=$npc AND n.role='npc'))
 AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.turn_order DESC,t.turn_id DESC LIMIT $limit;",
                 TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));

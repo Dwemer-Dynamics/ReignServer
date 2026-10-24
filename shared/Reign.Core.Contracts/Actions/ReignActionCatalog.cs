@@ -139,10 +139,42 @@ namespace Reign.Core.Contracts.Actions
             actions.Last().Parameters.Add(P("durationDays", "Days", "quantity", true));
             actions.Add(Political("support_vote", "Support a proposal", "businessId", "governmentBusiness"));
             actions.Last().Parameters.Add(P("optionId", "Vote", "governmentOption", true));
+            var nominationSupport = Political("support_nomination", "Support a party nomination", "petitionId", "governmentNomination");
+            nominationSupport.Parameters.Add(new ActionParameter { Key = "petitionRevision", Label = "Exact petition revision", Kind = "quantity", Required = true, Automatic = true });
+            nominationSupport.Parameters.Add(new ActionParameter { Key = "caucusId", Label = "Exact party selection", Kind = "text", Required = true, Automatic = true });
+            actions.Add(nominationSupport);
+            foreach (var entry in new[] { new[] { "endorse_petition", "Endorse a petition" }, new[] { "sponsor_petition", "Sponsor a petition" },
+                new[] { "seek_petition_adoption", "Seek party adoption of a petition" }, new[] { "present_petition", "Present an adopted petition" },
+                new[] { "transfer_mandate", "Consent to transfer a civic mandate" } })
+            {
+                var action = Political(entry[0], entry[1], "petitionId", "governmentPetition");
+                action.Parameters.Add(new ActionParameter { Key = "petitionRevision", Label = "Exact petition revision", Kind = "quantity", Required = true, Automatic = true });
+                actions.Add(action);
+            }
+            foreach (var entry in new[] { new[] { "nominate_leader", "Nominate a party speaker" }, new[] { "vote_leader", "Vote for a party speaker" } })
+            {
+                var action = Political(entry[0], entry[1], "candidateId", "governmentPartyMember");
+                action.Parameters.Add(new ActionParameter { Key = "electionId", Label = "Exact party election", Kind = "text", Required = true, Automatic = true });
+                actions.Add(action);
+            }
             actions.First(d => d.Id == "government.back_platform").DurationParameter = "durationDays";
+            actions.Add(new ActionDefinition { Id = "expose_concealed_pregnancy", Label = "Expose their concealed pregnancy",
+                Family = "regular", Adapter = "family:pregnancy_exposure", Source = "ReignFamilyCampaignBehavior",
+                Description = "Publicly expose a confirmed illicit pregnancy, optionally naming its known biological father. An immediate player declaration.",
+                Parameters = new List<ActionParameter> { P("pregnancyId", "Pregnancy", "pregnancy", true),
+                    new ActionParameter { Key = "disclosure", Label = "Whom to expose", Required = true,
+                        Choices = new[] { "mother_only", "name_father" } } } });
             AddCampaignActions(actions);
+            actions.Add(new ActionDefinition { Id = ReignSpouseSeparation.ActionId, Label = "Leave your spouse by letter", Family = "regular",
+                Adapter = "family:leave_spouse", Source = "ReignSpouseSeparationAction",
+                Description = "Write to your current spouse that your marriage is over and end it, with severe relationship consequences for their clan.",
+                Parameters = new List<ActionParameter> {
+                    new ActionParameter { Key = "spouseId", Label = "Current spouse", Kind = "hero", Required = true, Automatic = true },
+                    new ActionParameter { Key = "spouseClanId", Label = "Spouse's current clan", Kind = "clan", Automatic = true }
+                } });
             AddGovernmentActions(actions);
             AddCourtActions(actions);
+            actions.AddRange(NpcLifeDefinitions());
             return actions.ToArray();
         }
 

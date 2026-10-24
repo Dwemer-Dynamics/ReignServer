@@ -288,6 +288,7 @@ namespace Reign.Core.Contracts.Government
             switch (action)
             {
                 case ReignGovernmentResolutionAction.TreasuryPayment:
+                case ReignGovernmentResolutionAction.HoldFeast:
                 case ReignGovernmentResolutionAction.CompensateClan: return new[] { 10000, 25000, 60000 }[index];
                 case ReignGovernmentResolutionAction.FoodDelivery:
                 case ReignGovernmentResolutionAction.GoodsDelivery:
@@ -379,6 +380,7 @@ namespace Reign.Core.Contracts.Government
             switch (action)
             {
                 case ReignGovernmentResolutionAction.TreasuryPayment:
+                case ReignGovernmentResolutionAction.HoldFeast:
                 case ReignGovernmentResolutionAction.CompensateClan: return ReignGovernmentResolutionUnit.Gold;
                 case ReignGovernmentResolutionAction.FoodDelivery:
                 case ReignGovernmentResolutionAction.GoodsDelivery:

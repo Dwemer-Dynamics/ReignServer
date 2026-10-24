@@ -1513,7 +1513,7 @@ namespace ReignLiveTest
             Console.WriteLine("         add --prepare-authority-fixture to create the confirmed disposable sovereign/same-clan/family/governor fixture before an identity-authority gate");
             Console.WriteLine("Social: ReignLiveTest.exe social-balance plan|prepare|status|record|export [options]");
             Console.WriteLine("        prepare requires --campaign --timeline --save-prefix Reign_SocialBalance_* --main-hero");
-            Console.WriteLine("World:  ReignLiveTest.exe world-test status|snapshot|stop|drain|advance|checkpoint|delete-checkpoint [--days N|--target-day D] [--save name] [--prefix run-prefix] [--no-save] [--initial-baseline] [--timeout seconds] [--catch-up-timeout seconds] [--save-timeout seconds]");
+            Console.WriteLine("World:  ReignLiveTest.exe world-test status|snapshot|stop|drain|advance|checkpoint|delete-checkpoint [--days N|--target-day D] [--save name] [--prefix run-prefix] [--no-save] [--observe-government-news (advance requires --no-save; manually acknowledge bulletin)] [--initial-baseline] [--timeout seconds] [--catch-up-timeout seconds] [--save-timeout seconds]");
             Console.WriteLine("        --initial-baseline is reserved for the guarded campaign-test arm path; it accepts only an absent pre-existing daily rollup after exact native baseline observation and confirmation. All live queues and failure counters still must be clean.");
             Console.WriteLine("        drain, advance, and checkpoint emit bounded receipts; use their reportPath references for full live-test evidence.");
             Console.WriteLine("Party agency: ReignLiveTest.exe party-agency --profile contracts|status|preflight [--campaign id] [--no-wait]");
@@ -1535,6 +1535,7 @@ namespace ReignLiveTest
             Console.WriteLine("        War Council: select-lord, open-raven, set-raven-text, send-raven, cancel-raven, mobilize, pan-map, center-settlement, toggle-councilor, select-councilor, use-player-skills");
             Console.WriteLine("        ReignLiveTest.exe ui-snapshot --target <ui> | ui-status | ui-back | ui-close");
             Console.WriteLine("        ui-status observes live Government focus/input counters in governmentInput and the independent courtPetitionOpen flag without opening a fixture or making a decision.");
+            Console.WriteLine("        Government scrollbar observations include actual handle identity/ownership, pressed state, range/value and up to 32 held/release samples; they never change widget properties or inject input.");
             Console.WriteLine("        MCP government hearing_compose sets 1-1200 characters of unsent playerMessage on the exact already-open businessId in an armed disposable Current. Click native Speak to submit; it never votes or creates a case.");
             Console.WriteLine("Send:   --run <id> --text <player text>");
             Console.WriteLine("Run:    ReignLiveTest.exe run scenario.json [--timeout 1800]");

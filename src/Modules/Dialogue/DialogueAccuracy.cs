@@ -54,7 +54,7 @@ namespace ReignBetaServer
             if (original == null || repaired == null || !ConversationStructuredObjectHasUsableVisibleReply(original)) return;
             foreach (string field in new[] { "relationshipAssessments", "memoryWrites", "beliefWrites", "relationshipUpdates",
                 "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "continuityWrites", "proposalDecisions",
-                "identityIntroductions", "socialSignals", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "gossipSignals", "raisedGossip" })
+                "identityIntroductions", "socialSignals", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "gossipSignals", "raisedGossip", "communicationPlans" })
                 if (original.TryGetValue(field, out object value) && IsConversationObjectArray(value)) repaired[field] = value;
             foreach (string field in new[] { "decisionBrief", "actionGate", "conceptionGate", "stateUpdates" })
                 if (ReadDictionary(original, field) is Dictionary<string, object> value) repaired[field] = value;
@@ -132,8 +132,7 @@ namespace ReignBetaServer
 
         private static bool IsConversationStyleWarning(Dictionary<string, object> violation)
         {
-            return new[] { "repeated_distinctive_phrase", "repeated_wording_lecture", "repeated_conversation_accounting",
-                "group_conversation_accounting_echo", "group_rhetorical_convergence" }
+            return new[] { "repeated_distinctive_phrase", "group_rhetorical_convergence" }
                 .Contains(ReadString(violation, "type", ""));
         }
 

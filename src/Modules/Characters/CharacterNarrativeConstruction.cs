@@ -150,7 +150,9 @@ namespace ReignBetaServer
                     if (needLife && !sectionErrors.Any(NarrativeIsLifeError)) document["life"] = candidate["life"];
                     if (needVoice && !sectionErrors.Any(x => !NarrativeIsLifeError(x))) document["voice"] = candidate["voice"];
                     errors.AddRange(sectionErrors);
-                    var authored = ReadDictionary(result, "items");
+                    // Voice/life-only repairs legitimately omit items. Missing or malformed
+                    // items on a slot repair must reach validation rather than dereference null.
+                    var authored = ReadDictionary(result, "items") ?? new Dictionary<string, object>();
                     var expectedSlots = slots.Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList();
                     var unexpected = authored.Keys.Except(expectedSlots, StringComparer.Ordinal).ToList();
                     if (unexpected.Count > 0) errors.Add("Unexpected slots ignored: " + Json.Serialize(unexpected));

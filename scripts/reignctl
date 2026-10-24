@@ -135,7 +135,9 @@ EOF
     ErrorDocument 502 /reign-control/offline
     ErrorDocument 503 /reign-control/offline
     ErrorDocument 504 /reign-control/offline
-    ProxyPass / http://127.0.0.1:5101/ timeout=300
+    # Match the client's fifteen-minute interactive window, including provider retries.
+    # An earlier proxy deadline replaces a valid pending response with the offline HTML page.
+    ProxyPass / http://127.0.0.1:5101/ timeout=900
     ProxyPassReverse / http://127.0.0.1:5101/
     ErrorLog ${APACHE_LOG_DIR}/reign_error.log
     CustomLog ${APACHE_LOG_DIR}/reign_access.log combined

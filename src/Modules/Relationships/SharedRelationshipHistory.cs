@@ -264,7 +264,7 @@ ORDER BY created_ts DESC LIMIT 250;");
                     return reuseOnly;
                 }
 
-                Dictionary<string, object> llm = GenerateSharedRelationshipHistoryBatch(pending);
+                Dictionary<string, object> llm = GenerateSharedRelationshipHistoryBatch(pending, profiles);
                 Dictionary<string, Dictionary<string, object>> generatedByPair =
                     ReadDictionaryList(TryParseJsonObject(ReadString(llm, "content", "")), "histories")
                     .Where(row => !string.IsNullOrWhiteSpace(ReadString(row, "pairKey", "")))
@@ -424,7 +424,16 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         }
 
         private static Dictionary<string, object> GenerateSharedRelationshipHistoryBatch(
-            List<Dictionary<string, object>> pending)
+            List<Dictionary<string, object>> pending,
+            Dictionary<string, Dictionary<string, object>> profiles)
+        {
+            return ChatWithLlm(BuildSharedRelationshipHistoryBatchRequest(pending, profiles, LoadSettings()));
+        }
+
+        private static Dictionary<string, object> BuildSharedRelationshipHistoryBatchRequest(
+            List<Dictionary<string, object>> pending,
+            Dictionary<string, Dictionary<string, object>> profiles,
+            Dictionary<string, object> settings)
         {
             List<Dictionary<string, object>> compact = pending.Select(basis => new Dictionary<string, object>
             {
@@ -475,12 +484,28 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 + "If a prior chapter exists, append a plausible development rather than rewriting it. Its soft canon is not proof of a particular original exchange. Keep each field under 500 characters.\n\nPairs:\n"
                 + Json.Serialize(compact) + "\nOriginal mutually eligible source records:\n"
                 + RenderRelationshipHistorySourceEvidence(pending.SelectMany(b => ReadDictionaryList(b, "sharedSources")));
-            var settings = LoadSettings();
+            string campaignId = ReadString(pending.FirstOrDefault(), "campaignId", "default");
+            var heroIds = pending.SelectMany(basis => new[] {
+                ReadString(basis, "heroAId", ""), ReadString(basis, "heroBId", "")
+            }).ToList();
+            if (heroIds.Count == 0 || heroIds.Any(string.IsNullOrWhiteSpace))
+                throw new InvalidOperationException("A relationship-history batch requires its actual named characters.");
+            var politicalAuthors = new List<Dictionary<string, object>>();
+            foreach (string heroId in heroIds.Distinct(StringComparer.Ordinal))
+            {
+                var profile = SharedRelationshipHistoryProfile(campaignId, heroId,
+                    profiles.TryGetValue(heroId, out var supplied) ? supplied : null);
+                // That helper always adds the identity; an identity alone is not
+                // a native profile and must never seed a fabricated character.
+                if (profile.Count <= 1)
+                    throw new InvalidOperationException("Political context is awaiting the named character's native profile: " + heroId);
+                politicalAuthors.Add(profile);
+            }
             var request = new Dictionary<string, object>
             {
                 ["requestType"] = "relationship",
-                ["campaignId"] = ReadString(pending.FirstOrDefault(), "campaignId", "default"),
-                ["heroStringId"] = "__relationship_history_batch__",
+                ["campaignId"] = campaignId,
+                ["politicalAuthors"] = politicalAuthors,
                 ["model"] = ModelForRequest(settings, "relationship"),
                 ["correlationId"] = "relationship_history_" + Guid.NewGuid().ToString("N"),
                 ["maxTokens"] = Math.Min(5000, 900 + pending.Count * 360),
@@ -496,7 +521,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 },
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            return ChatWithLlm(request);
+            return request;
         }
 
         private static Dictionary<string, object> NormalizeSharedRelationshipHistoryCandidate(
@@ -811,6 +836,53 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
             string campaignId = "_shared_relationship_history_test_" + Guid.NewGuid().ToString("N");
             try
             {
+                var politicalBatchBasis = CloneDictionary(mixed);
+                politicalBatchBasis["campaignId"] = campaignId;
+                politicalBatchBasis["timelineId"] = "saved_branch";
+                var politicalPlayerPair = CloneDictionary(politicalBatchBasis);
+                politicalPlayerPair["pairKey"] = "a|player";
+                politicalPlayerPair["heroBId"] = "player";
+                politicalPlayerPair["heroB"] = TestDict("name", "Player");
+                var politicalProfiles = new Dictionary<string, Dictionary<string, object>> {
+                    ["a"] = TestDict("heroStringId", "a", "name", "A", "age", 30, "isAlive", true, "politicalTimelineId", "saved_branch"),
+                    ["b"] = TestDict("heroStringId", "b", "name", "B", "age", 25, "isAlive", true, "politicalTimelineId", "saved_branch"),
+                    ["player"] = TestDict("heroStringId", "player", "name", "Player", "isPlayer", true)
+                };
+                string politicalBasisBefore = CanonicalJson(politicalBatchBasis);
+                var politicalBatchRequest = BuildSharedRelationshipHistoryBatchRequest(
+                    new List<Dictionary<string, object>> { politicalBatchBasis, politicalPlayerPair }, politicalProfiles, TestDict());
+                var politicalAuthors = ReadDictionaryList(politicalBatchRequest, "politicalAuthors");
+                add("batch_uses_actual_deduplicated_authors", politicalAuthors.Count == 3
+                    && politicalAuthors.Select(CharacterIdFrom).OrderBy(x => x, StringComparer.Ordinal)
+                        .SequenceEqual(new[] { "a", "b", "player" })
+                    && !politicalBatchRequest.ContainsKey("heroStringId")
+                    && !Json.Serialize(politicalBatchRequest).Contains("__relationship_history_batch__", StringComparison.Ordinal),
+                    "A multi-pair history request names its actual participants; batch metadata is never a character.");
+                var politicalMessages = ReadDictionaryList(politicalBatchRequest, "messages");
+                var politicalOutbound = BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalMessages, "offline-capture");
+                var politicalActual = ReadDictionaryList(politicalOutbound, "messages");
+                var politicalBlocks = politicalActual.Where(row => ReadString(row, "content", "")
+                    .StartsWith("REQUIRED PRIVATE POLITICAL BELIEFS", StringComparison.Ordinal)).ToList();
+                add("batch_final_provider_keeps_each_npcs_complete_beliefs", politicalActual.Count == politicalMessages.Count + 2
+                    && politicalBlocks.Count == 2
+                    && politicalBlocks.Any(row => ReadString(row, "content", "").Contains("— a —", StringComparison.Ordinal))
+                    && politicalBlocks.Any(row => ReadString(row, "content", "").Contains("— b —", StringComparison.Ordinal))
+                    && politicalBlocks.All(row => ReadString(row, "content", "").Contains("timeline saved_branch", StringComparison.Ordinal))
+                    && Enum.GetValues(typeof(Reign.Core.Contracts.Government.ReignGovernmentPlank))
+                        .Cast<Reign.Core.Contracts.Government.ReignGovernmentPlank>()
+                        .All(plank => politicalBlocks.All(row => ReadString(row, "content", "").Contains(plank + ":", StringComparison.Ordinal)))
+                    && ReadDictionaryList(BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalActual, "offline-capture"), "messages").Count == politicalActual.Count,
+                    "The final provider envelope has one complete private foundation per actual NPC, preserves saved timelines, skips the human player and remains idempotent.");
+                add("private_batch_authors_do_not_mutate_shared_history_basis", CanonicalJson(politicalBatchBasis) == politicalBasisBefore
+                    && !politicalBatchBasis.ContainsKey("politicalAuthors"),
+                    "Private political author context is transient request metadata; it is not added to the persisted objective history basis.");
+                var missingPoliticalBasis = CloneDictionary(politicalBatchBasis);
+                missingPoliticalBasis["heroBId"] = "missing_named_character";
+                bool missingPoliticalProfileRefused = false;
+                try { BuildSharedRelationshipHistoryBatchRequest(new List<Dictionary<string, object>> { missingPoliticalBasis }, politicalProfiles, TestDict()); }
+                catch (InvalidOperationException ex) { missingPoliticalProfileRefused = ex.Message.Contains("missing_named_character", StringComparison.Ordinal); }
+                add("batch_missing_actual_native_profile_still_refused", missingPoliticalProfileRefused,
+                    "A missing real character profile still blocks generation rather than dropping their beliefs or inventing a substitute.");
                 Dictionary<string, object> persistedBasis = new Dictionary<string, object>(mixed)
                 {
                     ["stateFingerprint"] = SharedRelationshipHistoryStateFingerprint(mixed),

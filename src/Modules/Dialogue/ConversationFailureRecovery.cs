@@ -7,6 +7,48 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private static readonly Reign.Core.Contracts.Dialogue.ConversationTurnDispatchGate DialogueRetryDispatches =
+            new Reign.Core.Contracts.Dialogue.ConversationTurnDispatchGate();
+
+        private static Dictionary<string, object> RunDialogueWithRetryGate(Dictionary<string, object> payload,
+            Func<Dictionary<string, object>> respond)
+        {
+            string hero = FirstNonEmpty(ReadFirstString(payload, "heroStringId", "speakerHeroStringId", "heroId"),
+                CharacterIdFrom(ReadDictionary(payload, "hero")));
+            string campaign = ReadString(payload, "campaignId", "default");
+            string session = ReadFirstString(payload, "conversationSessionId", "sessionId");
+            if (hero.Length == 0 || session.Length == 0) return respond();
+            string correlation = EnsureCorrelationId(payload), retry = ReadString(payload, "retryOfCorrelationId", "");
+            if (retry.Length > 0 && retry != correlation)
+                return TestDict("ok", false, "errorCode", "retry_identity_mismatch", "error", "Retry must keep the original message identity.");
+            string unit = AcceptedConversationEventId(campaign, hero, payload);
+            string key = string.Join("|", campaign, ContinuityTimeline(payload), _playerActionGeneration ?? "", unit);
+            using (var lease = DialogueRetryDispatches.Enter(key, 30000, ThrowIfCampaignRequestReplaced))
+            {
+                if (lease == null) return TestDict("ok", false, "errorCode", "conversation_original_still_running",
+                    "error", "The original request is still running. Wait a moment, then select Retry.", "correlationId", correlation);
+                if (retry.Length > 0 && !string.IsNullOrWhiteSpace(ReadString(payload, "sceneTurnId", "")))
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    var previous = QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND role='npc' AND status='active';",
+                        TestDict("id", unit + "_npc")).FirstOrDefault();
+                    if (previous != null && HasRecallableConversationSpeech(ReadString(previous, "text", "")))
+                        return TestDict("ok", false, "errorCode", "conversation_response_already_saved",
+                            "error", "The original response was already saved. Reloading the conversation.",
+                            "reloadConversationHistory", true, "correlationId", correlation, "additionalProviderCalls", 0);
+                    if (retry.Length > 0)
+                    {
+                        var original = QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id AND role='player';",
+                            TestDict("id", unit + "_player")).FirstOrDefault();
+                        if (original != null && ReadString(original, "text", "") != ReadString(payload, "playerText", ""))
+                            return TestDict("ok", false, "errorCode", "retry_text_mismatch",
+                                "error", "This saved turn has different words. Write a new message instead.", "correlationId", correlation);
+                    }
+                }
+                return respond();
+            }
+        }
+
         // The displayed diagnostic is not something the character said. Keeping
         // it separate from safe speech must never change failed-effect gates.
         private static string ConversationSpeechForRecall(string text)
@@ -54,6 +96,18 @@ namespace ReignBetaServer
         // This is local delivery recovery after the bounded existing repair path.
         // Transport failure stays a failure; a server placeholder is not a model
         // answer, an acknowledgment, a memory, or authorization for an effect.
+        private static bool IsIntentionalConversationSilence(Dictionary<string, object> parsed) =>
+            parsed != null && NormalizeSocialEventParticipation(parsed) == "quiet"
+            && string.IsNullOrWhiteSpace(ReadFirstString(parsed, "reply", "response", "text", "content"));
+
+        // Called only by routes that allow quiet participation, after structural
+        // validation. Silence has no spoken claims, motives or conduct to repair.
+        private static Dictionary<string, object> ValidateSpokenEventResponse(Dictionary<string, object> result,
+            Func<Dictionary<string, object>, Dictionary<string, object>> validate) =>
+            ReadBool(result, "ok", false) && !ReadBool(result, "visibleRepairFailure", false)
+                && IsIntentionalConversationSilence(TryParseJsonObject(ReadString(result, "content", "")))
+                ? result : validate(result);
+
         private static Dictionary<string, object> EnsureConversationDelivery(Dictionary<string, object> result,
             bool allowQuiet = false)
         {
@@ -62,11 +116,12 @@ namespace ReignBetaServer
                 var unavailable = CloneDictionary(result);
                 if (ReadDictionary(unavailable, "conversationRecovery") == null)
                     unavailable["conversationRecovery"] = TestDict("status", "generation_unavailable",
-                        "generationSucceeded", false, "canContinue", true, "additionalProviderCalls", 0);
+                        "generationSucceeded", false, "canContinue", true, "canRetry", true,
+                        "retryAction", "retry_original_turn", "additionalProviderCalls", 0);
                 return unavailable;
             }
             var parsed = TryParseJsonObject(ReadString(result, "content", ""));
-            if (allowQuiet && parsed != null && NormalizeSocialEventParticipation(parsed) == "quiet") return result;
+            if (allowQuiet && IsIntentionalConversationSilence(parsed)) return result;
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
             string sanitized = SanitizeVisibleReply(reply);
             bool hidden = sanitized.StartsWith("[Bannerlord Reign:", StringComparison.Ordinal);

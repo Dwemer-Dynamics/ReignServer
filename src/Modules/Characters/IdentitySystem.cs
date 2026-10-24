@@ -2500,6 +2500,12 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                     || sameKingdom && subjectRealmOwnsCurrentSettlement
                         && subjectClanOwnsCurrentSettlement);
             bool realmSovereignKnown = publicOfficeKnown;
+            string memberOffice = ReadString(subject, "governmentOfficeTitle", "");
+            bool memberOfficeKnown = !subjectIsRuler && identityVerified && ReadBool(native, "authoritative", false)
+                && ReadBool(subject, "isAlive", true) && !ReadBool(subject, "isChild", false)
+                && ReadString(subject, "governmentOfficeKingdomId", "").Length > 0
+                && new[] { "Senator", "Peer", "Councillor", "Assembly member" }.Any(title => memberOffice == title || memberOffice == title + " and party speaker");
+            publicOfficeKnown |= memberOfficeKnown;
             bool subjectIsObserverSovereign =
                 realmSovereignKnown && (sameKingdom || localCivicSovereign);
             bool observerIsSubjectSovereign =
@@ -2534,6 +2540,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                 BuildAuthoritativePublicRoles(observer);
             if (realmSovereignKnown)
                 recognizedRoles.Add("realm_sovereign");
+            if (memberOfficeKnown) recognizedRoles.Add(memberOffice);
             if (subjectIsObserverSovereign)
                 recognizedRoles.Add(
                     "subject_is_observer_sovereign");
@@ -2627,8 +2634,9 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                 ["subjectPrimaryRole"] =
                     identityVerified
                         ? PrimaryAuthoritativePublicRole(subject)
-                        : publicOfficeKnown
+                        : realmSovereignKnown
                             ? "realm_sovereign"
+                            : memberOfficeKnown ? "government_member"
                             : "identity_unverified",
                 ["observerPrimaryRole"] =
                     PrimaryAuthoritativePublicRole(observer),
@@ -2665,9 +2673,11 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                     ReadDouble(
                         native, "observedWorldDay", -1d),
                 ["recognizedRoles"] = recognizedRoles,
-                ["validFormalAddresses"] = publicOfficeKnown
+                ["validFormalAddresses"] = realmSovereignKnown
                     ? SovereignFormalAddresses(subject)
-                    : new List<string>(),
+                    : memberOfficeKnown ? new List<string> { memberOffice.Split(new[] { " and " }, StringSplitOptions.None)[0] } : new List<string>(),
+                ["governmentMemberOfficeKnown"] = memberOfficeKnown,
+                ["governmentMemberRealmId"] = memberOfficeKnown ? ReadString(subject, "governmentOfficeKingdomId", "") : "",
                 ["instruction"] = subjectIsObserverSovereign
                     ? identityVerified
                         ? "The observer knows this person is their own current sovereign and knows their personal identity. Personality may produce loyalty, strategic flattery, manipulation, resentment, candid opposition, or deliberate defiance, but the observer must understand the unequal political relationship and its risks."
@@ -2676,6 +2686,8 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                         ? "The observer recognizes this person as a current foreign or independent sovereign. Clothing, lack of retinue, or an understated presentation cannot make that verified public office uncertain."
                     : currentSettlementOwnerKnown
                         ? "The observer recognizes this person's clan as the current owner of the settlement. Appearance cannot override current native ownership."
+                    : memberOfficeKnown
+                        ? "The observer recognizes this person's current government office. Address them naturally by the supplied title when appropriate. This is membership in the named realm; it grants no sovereign or royal-council powers."
                         : "Do not infer a political office that is not established by current native facts and verified identity."
             };
         }

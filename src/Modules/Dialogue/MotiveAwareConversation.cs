@@ -188,6 +188,7 @@ namespace ReignBetaServer
                 ["manipulation"] = manipulation,
                 ["politicalRiskPosture"] = politicalRiskPosture,
                 ["governmentDecision"] = governmentDecision,
+                ["fulfilledPaymentHistory"] = VerifiedAgreementPaymentHistory(payload, subjectId, targetId),
                 ["scene"] = scene,
                 ["romance"] = romance,
                 ["requiredEvidenceKeys"] = evidenceKeys,
@@ -847,6 +848,12 @@ namespace ReignBetaServer
         }
 
         private static string BuildConversationDecisionPrompt(Dictionary<string, object> context)
+            => BuildConversationDecisionPromptCore(context)
+                + AgreementPaymentHistoryPrompt(ReadDictionary(context, "fulfilledPaymentHistory"));
+
+        // Historical native deliveries have their own required allowance. Adding them
+        // must not trim the existing personality, relationship or political context.
+        private static string BuildConversationDecisionPromptCore(Dictionary<string, object> context)
         {
             List<Dictionary<string, object>> domains = ReadDictionaryList(context, "activeDomains");
             Dictionary<string, object> scores = new Dictionary<string, object>(ReadDictionary(context, "highlightedScores") ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
@@ -2119,12 +2126,14 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 || ReadBool(
                     authority,
                     "observerIsCurrentGovernor", false);
+            // "My hall" can describe the guest's meeting space or private interpretation.
+            // Only the fief and official-seat nouns here assert local political ownership.
             if (localAuthorityKnown
                 && !observerMayClaimLocalAuthority
                 && statements.Any(statement => Regex.IsMatch(
                     statement,
                     @"\bmy\s+(?:city|town|castle|settlement|fief|"
-                        + @"domain|keep|lord'?s\s+hall|great\s+hall|hall)\b",
+                        + @"domain|keep|lord'?s\s+hall)\b",
                     RegexOptions.IgnoreCase
                         | RegexOptions.CultureInvariant)))
                 return true;
@@ -2575,7 +2584,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             };
             foreach (string key in new[]
             {
-                "memoryWrites", "beliefWrites", "courtKnowledgeWrites",
+                "memoryWrites", "beliefWrites", "courtKnowledgeWrites", "pregnancyDisclosures",
                 "obligationWrites", "comprehensionWrites",
                 "dynamicCharacteristicWrites", "identityIntroductions",
                 "suggestedActions", "sceneStateUpdates"
@@ -3251,6 +3260,25 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                     },
                     sovereignContext),
                 "An NPC's own limited negotiating authority is not a denial of the player's office, while an explicit denial of the player's verified authority remains blocked.");
+            add("visiting_npc_hall_reference_does_not_claim_city_authority",
+                !VerifiedIdentityGroundingContradiction(
+                    new Dictionary<string, object>
+                    {
+                        ["reply"] = "Your Grace holds this city now, and would know before I would.",
+                        ["comprehensionWrites"] = new List<object>
+                        {
+                            new Dictionary<string, object>
+                            {
+                                ["text"] = "He came into my hall asking about vintners and tanners before taxes or loyalty, and left my own question standing. That is either a merchant-minded king or a careful one feeling the ground before he says what he wants here."
+                            }
+                        }
+                    }, sovereignContext),
+                "Captured mother022 private interpretation names a meeting space, while the visible answer recognizes the player's city ownership; a generic hall is not a fief or public office.");
+            add("visiting_npc_fief_and_official_hall_claims_remain_blocked",
+                new[] { "The people of my city must obey me.", "You stand in my castle.", "This is my lord's hall." }
+                    .All(statement => VerifiedIdentityGroundingContradiction(
+                        new Dictionary<string, object> { ["reply"] = statement }, sovereignContext)),
+                "The narrower spatial interpretation does not permit visiting NPCs to claim the current city, castle or official lord's hall.");
             Dictionary<string, object> sovereignFallbackLlm =
                 BuildDeterministicKnownClanStandingFallback(
                     new Dictionary<string, object>

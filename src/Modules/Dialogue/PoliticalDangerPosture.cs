@@ -560,7 +560,8 @@ namespace ReignBetaServer
             Dictionary<string, object> repairRequest =
                 new Dictionary<string, object>
                 {
-                    ["requestType"] = "political_conduct_repair",
+                    ["requestType"] = ReadString(originalRequest, "requestType", "") == "npc_approach"
+                        ? "npc_approach_political_conduct_repair" : "political_conduct_repair",
                     ["campaignId"] = campaignId,
                     ["correlationId"] = correlationId
                         + "-political-conduct-repair",

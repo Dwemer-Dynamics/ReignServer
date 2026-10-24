@@ -168,7 +168,7 @@ namespace Reign.Core.Contracts.Actions
         public const int MaximumClauses = 64;
         public static bool IsPlayerDeclaration(ActionAgreement a) => a != null && a.Clauses != null
             && a.Clauses.Count == 1 && a.Clauses[0] != null
-            && a.Clauses[0].ActionId == "start_ruling_clan_rebellion"
+            && (a.Clauses[0].ActionId == "start_ruling_clan_rebellion" || a.Clauses[0].ActionId == "expose_concealed_pregnancy")
             && a.ProposerId == a.PlayerId && a.Clauses[0].ActorId == a.PlayerId
             && a.Clauses[0].RecipientId == a.NpcId;
         public static readonly string[] ConditionKinds = { "", "arrival", "release", "peace", "war", "ownership", "day" };
@@ -188,13 +188,13 @@ namespace Reign.Core.Contracts.Actions
             if (a.Clauses.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count() != a.Clauses.Count) errors.Add("Duplicate clause identity.");
             if (new[] { now, a.CreatedDay, a.ExpiresDay }.Any(x => double.IsNaN(x) || double.IsInfinity(x) || x < 0)) errors.Add("Invalid campaign time.");
             if (a.ExpiresDay > 0 && now > a.ExpiresDay) errors.Add("This proposal has expired.");
-            if (a.Clauses.Any(c => c.ActionId == "start_ruling_clan_rebellion"))
+            if (a.Clauses.Any(c => c.ActionId == "start_ruling_clan_rebellion" || c.ActionId == "expose_concealed_pregnancy"))
             {
                 if (!IsPlayerDeclaration(a) || a.AdvancePayment)
-                    errors.Add("A rebellion declaration must be the player's own standalone statement to the ruler, without a bargain.");
+                    errors.Add("A declaration must be the player's own standalone statement, without a bargain.");
                 if (a.Clauses.Any(c => c.DueDay != 0 || c.DurationDays != 0 || c.Installments != 1
                     || c.IntervalDays != 0 || c.ConditionKind.Length != 0 || c.Timing != TermTiming.Immediate))
-                    errors.Add("A rebellion declaration is submitted when sent and cannot be scheduled or conditional.");
+                    errors.Add("A declaration is submitted when sent and cannot be scheduled or conditional.");
             }
             foreach (var c in a.Clauses)
             {
@@ -203,6 +203,7 @@ namespace Reign.Core.Contracts.Actions
                 if (!Enum.IsDefined(typeof(TermTiming), c.Timing)) errors.Add("Unknown term timing.");
                 var definition = resolve(c.ActionId);
                 if (definition == null) { errors.Add("Unknown action: " + c.ActionId); continue; }
+                errors.AddRange(ReignSpouseSeparation.Validate(a, c));
                 if (a.Origin == ActionOrigin.Conversation && !definition.ConversationEligible) errors.Add("This action is available only to an operator.");
                 if (a.Origin == ActionOrigin.Conversation && definition.ConversationEligible
                     && !ReignActionConversationPolicy.Allows(definition, c.ActorId == a.PlayerId))
@@ -245,6 +246,11 @@ namespace Reign.Core.Contracts.Actions
                 .GroupBy(c => c.ActorId + "\n" + (c.Arguments.TryGetValue("businessId", out var id) ? id : "")))
                 if (group.Select(c => c.Arguments.TryGetValue("optionId", out var option) ? option : "").Distinct(StringComparer.Ordinal).Count() > 1)
                     errors.Add("One agreement cannot promise opposing votes on the same proposal.");
+            foreach (var group in a.Clauses.Where(c => c.ActionId == "government.support_nomination")
+                .GroupBy(c => c.ActorId + "\n" + (c.Arguments.TryGetValue("caucusId", out var id) ? id : "")))
+                if (group.Select(c => (c.Arguments.TryGetValue("petitionId", out var id) ? id : "") + "\n"
+                    + (c.Arguments.TryGetValue("petitionRevision", out var revision) ? revision : "")).Distinct(StringComparer.Ordinal).Count() > 1)
+                    errors.Add("One agreement cannot promise opposing nominations in the same party selection.");
             foreach (var group in a.Clauses.Where(c => c.ActionId == "government.back_platform").GroupBy(c => c.ActorId))
                 if (group.Select(c => c.Arguments.TryGetValue("partyId", out var party) ? party : "").Distinct(StringComparer.Ordinal).Count() > 1)
                     errors.Add("One agreement cannot bind a member to different party platforms.");

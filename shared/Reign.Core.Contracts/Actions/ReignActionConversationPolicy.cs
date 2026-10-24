@@ -7,18 +7,26 @@ namespace Reign.Core.Contracts.Actions
     // the menu. Console/native operator capabilities retain their existing scope.
     public static class ReignActionConversationPolicy
     {
+        // Agreement consent survives a chat window reopening, but never a change
+        // of campaign, history branch or addressed character. Chat session IDs
+        // identify transcript windows and must not be used for signed terms.
+        public static string ConversationContextId(string campaignId, string timelineId, string npcId)
+            => campaignId + ":" + timelineId + ":" + npcId;
+
         public static bool Allows(ActionDefinition definition, bool playerActs, int existingTerms = 0)
         {
             if (!definition.ConversationEligible || definition.IsSetup) return false;
-            if (definition.Id == "start_ruling_clan_rebellion") return playerActs && existingTerms == 0;
+            if (definition.Id == "start_ruling_clan_rebellion" || definition.Id == "expose_concealed_pregnancy") return playerActs && existingTerms == 0;
             if (definition.MovesActor && playerActs) return false;
             if (definition.Family == "court") return !playerActs;
+            if (definition.Adapter.StartsWith("npc_life:", StringComparison.Ordinal)) return !playerActs;
             switch (definition.Id)
             {
                 case "prepare_arrest": case "confirm_arrest": case "release_arrested_character":
                 case "rescind_arrest_accusation": case "player_attack_party": case "join_rebellion":
                     return playerActs;
                 case "duel_player": case "surrender_to_player": case "leave_player_alone":
+                case "leave_spouse":
                 case "stop_following": case "recruit_encountered_resident":
                 case "accept_temporary_party_guest": case "renew_temporary_party_guest":
                 case "end_temporary_party_guest": case "acknowledge_own_faction_combat_risk":
@@ -60,6 +68,7 @@ namespace Reign.Core.Contracts.Actions
         {
             switch (definition.Id)
             {
+                case "expose_concealed_pregnancy": return "expose their concealed pregnancy";
                 case "duel_player": return "duel me";
                 case "attack_player_party": return "attack my party";
                 case "surrender_to_player": return "surrender to me";

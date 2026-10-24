@@ -373,6 +373,8 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             string playerName = EvidenceReplayPlayerName(item, transcript, peer);
             var profile = CloneDictionary(ReadDictionary(fixture, "profile"));
             profile["name"] = heroName; profile["heroStringId"] = observer;
+            profile["campaignId"] = campaign;
+            profile["politicalTimelineId"] = ReadString(context, "timelineId", "main");
             var payload = CloneDictionary(context);
             payload["campaignId"] = campaign; payload["heroStringId"] = observer;
             payload["mainHeroStringId"] = peer; payload["playerHeroStringId"] = peer;
@@ -439,6 +441,10 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                         throw new InvalidOperationException("Captured writer context exceeds its verified input allowance.");
                     var prepared = BuildConversationGenerationRequest(writerSettings, envelope, campaign, "", observer,
                         contribution, socialEvent, observer + ":event");
+                    // The non-listening fixture has no native profile file. Bind its
+                    // mapped profile as the ordinary wire builder expects, retaining
+                    // required political context inside this isolated replay world.
+                    prepared["hero"] = CloneDictionary(profile);
                     prepared["model"] = model;
                     prepared["singleProviderAttempt"] = true;
                     return prepared;
@@ -495,6 +501,9 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 {
                     int index = repairRequests.Count;
                     if (index >= EvidenceWriterReplayMaxRepairs) throw new InvalidOperationException("Conversation repair capture exceeded its bound.");
+                    // Repairs have their own request dictionary; retain the same
+                    // isolated native profile through the ordinary political guard.
+                    repairRequest["hero"] = CloneDictionary(profile);
                     var wire = ReadDictionary(CaptureMemoryReplayProviderRequest(repairRequest, writerSettings), "providerWireCapture");
                     repairRequests.Add(TestDict("index", index, "requestType", ReadString(repairRequest, "requestType", ""),
                         "request", repairRequest, "providerWireCapture", wire));
@@ -733,6 +742,11 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Fixture replay requires non-listening isolated Verification Lab state.");
             int ordinaryTokens = EvidenceReplayOrdinaryTokens(input);
+            string denseError = DenseReplayConfigError(input);
+            if (denseError.Length > 0) throw new InvalidOperationException(denseError);
+            var denseContracts = DenseReplayContracts();
+            if (denseContracts.Any(c => !ReadBool(c, "passed", false)))
+                throw new InvalidOperationException("Dense replay isolation contracts failed.");
             foreach (string flag in new[] { "analystEnabled", "indexSpecialistSources", "captureLateInteraction", "enableLocalMemoryExtractor", "captureMemorySelection", "enableMemoryEvidenceCompression" })
                 if (input.TryGetValue(flag, out var value) && value is not bool)
                     throw new InvalidOperationException("Replay " + flag + " must be a boolean.");
@@ -770,17 +784,28 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             }
             using var campaignLease = new EvidenceReplayCampaignLease(input);
             string campaign = campaignLease.Campaign;
+            var denseWorker = input.ContainsKey("denseWorkerReplay") ? new DenseReplayWorker(input) : null;
             var priorLate = LateInteractionReplay.Value;
             var priorLateAudit = LateInteractionReplayAudit.Value;
             var priorSelection = MemorySelectionReplay.Value;
             var results = new List<Dictionary<string, object>>();
+            var denseHistoryScopes = new Dictionary<string, int>();
             try
             {
                 for (int index = 0; index < cases.Count && !ShouldCancelVerification(); index++)
                 {
                     var item = cases[index];
-                    string timeline = "replay_" + index;
-                    string Map(string value) => index + ":" + value;
+                    int sourceScopeIndex = index;
+                    bool seedHistory = true;
+                    if (denseWorker != null)
+                    {
+                        string key = DenseReplayScopeKey(item);
+                        if (denseHistoryScopes.TryGetValue(key, out int priorScope))
+                        { sourceScopeIndex = priorScope; seedHistory = false; }
+                        else denseHistoryScopes[key] = index;
+                    }
+                    string timeline = "replay_" + sourceScopeIndex;
+                    string Map(string value) => sourceScopeIndex + ":" + value;
                     string observer = Map(ReadString(item, "observerId", "")), peer = Map(ReadString(item, "peerId", ""));
                     var sources = ReadDictionaryList(item, "sources").OrderBy(s => ReadLong(s, "sequence", 0)).ToList();
                     var context = EvidenceReplayMemoryContext(item, timeline, peer);
@@ -789,6 +814,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                         .ToDictionary(c => ReadString(c, "sourceId", ""), StringComparer.Ordinal);
                     var lateViews = new List<Dictionary<string, object>>();
                     var indexingClock = System.Diagnostics.Stopwatch.StartNew();
+                    if (seedHistory)
                     using (var connection = OpenCampaignConnection(campaign))
                     using (var transaction = connection.BeginTransaction())
                     {
@@ -872,6 +898,20 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                         "memorySelectionTimeoutMs", Math.Clamp(ReadInt(input, "memorySelectionTimeoutMs", 15000), 500, 30000),
                         "memorySelectionBackend", ReadString(input, "memorySelectionBackend", "cpu"),
                         "enableMemoryEvidenceCompression", ReadBool(input, "enableMemoryEvidenceCompression", false));
+                    Dictionary<string, object> denseIndex = null;
+                    if (denseWorker != null)
+                    {
+                        settings["enableSemanticMemory"] = true;
+                        settings["vectorWorkerUrl"] = denseWorker.Endpoint;
+                        settings["vectorProvider"] = "local";
+                        settings["vectorSearchTopK"] = 96;
+                        settings["vectorQueryTimeoutMs"] = 10000;
+                        settings["enableMinimeMemoryWorker"] = true;
+                        settings["enableMinimeMemoryReranking"] = false;
+                        settings["vectorScoreWeight"] = 30;
+                        settings["minimeRerankWeight"] = 35;
+                        denseIndex = denseWorker.Index(campaign, observer, peer, context, sources, sourceScopeIndex);
+                    }
                     if (ReadBool(item, "captureSemanticDocuments", false))
                     {
                         using var captureConnection = OpenCampaignConnection(campaign);
@@ -883,11 +923,34 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                             "role", ReadString(s, "role", ""), "text", ObserverConversationText(ReadString(s, "text", ""),
                                 Map(ReadString(s, "speakerId", "")), observer, ReadString(s, "role", "") == "player"))).ToList();
                     SetMemoryTranscriptContext(context, transcript);
-                    var packet = BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(item, "query", ""), 4000, context, settings);
-                    var writer = ReplayEvidenceWriter(campaign, observer, peer, item, context, settings, packet, transcript);
+                    Dictionary<string, object> packet = null, writer = null;
+                    var denseRounds = new List<Dictionary<string, object>>();
+                    for (int round = 0; round < (denseWorker?.Rounds ?? 1); round++)
+                    {
+                        var queryClock = System.Diagnostics.Stopwatch.StartNew();
+                        var roundPacket = BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(item, "query", ""), 4000, context, settings);
+                        long packetMs = queryClock.ElapsedMilliseconds;
+                        var roundWriter = ReplayEvidenceWriter(campaign, observer, peer, item, context, settings, roundPacket, transcript);
+                        if (denseWorker != null)
+                        {
+                            var semantic = ReadDictionary(roundPacket, "semanticRetrieval");
+                            if (!ReadBool(semantic, "applied", false))
+                                throw new InvalidOperationException("Dense pipeline did not apply actual semantic search: " + ReadString(semantic, "reason", "missing"));
+                            long queryMs = queryClock.ElapsedMilliseconds;
+                            var workerSample = denseWorker.Post("/vectors/status", TestDict());
+                            using var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+                            denseRounds.Add(TestDict("round", round, "cacheCondition", round == 0 ? "first_query_after_index" : "repeated_query",
+                                "packetMs", packetMs, "queryAndWriterMs", queryMs,
+                                "workerMemory", ReadDictionary(ReadDictionary(workerSample, "denseReplay"), "memory"),
+                                "serverResidentBytes", currentProcess.WorkingSet64, "serverPeakBytes", currentProcess.PeakWorkingSet64,
+                                "semantic", semantic, "messageHash", PromptHash(CanonicalJson(ReadDictionaryList(ReadDictionary(roundWriter, "request"), "messages")))));
+                        }
+                        if (round == 0) { packet = roundPacket; writer = roundWriter; }
+                    }
                     bool writerComplete = !item.ContainsKey("writerReplay")
                         || EvidenceWriterReplayComplete(writer);
-                    results.Add(TestDict("caseId", ReadString(item, "caseId", ""), "requests", requests, "packet", packet, "writerReplay", writer,
+                    results.Add(TestDict("caseId", ReadString(item, "caseId", ""), "sourceScopeIndex", sourceScopeIndex,
+                        "requests", requests, "packet", packet, "writerReplay", writer,
                         "specialistIndex", TestDict("enabled", indexSpecialists, "sources", indexedSources,
                             "fixtureAndIndexMs", indexingClock.ElapsedMilliseconds, "localModelCalls", 0,
                             "extractorEnabled", extractorEnabled, "capturedExtractorModelHash", extractorEnabled ? extractorModelHash : ""),
@@ -897,6 +960,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                         "commonTranscript", "CURRENT CONTRIBUTION: " + ReadString(item, "query", "") + "\nRECENT DIALOGUE:\n" + FormatEventLinesForPrompt(transcript),
                         "recentTranscriptSourceIds", transcript.Select(t => ReadString(t, "turnId", "")).ToList(),
                         "sourceSetHash", PromptHash(CanonicalJson(sources)), "pendingResponses", pending,
+                        "densePipeline", denseWorker == null ? null : TestDict("index", denseIndex, "rounds", denseRounds),
                         "fullyReplayed", pending.Count == 0 && writerComplete));
                 }
             }
@@ -918,12 +982,16 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                     "Optional indexSpecialistSources creates source metadata only in the disposable fixture. enableLocalMemoryExtractor imports exact model/source-bound captured extraction results through production validation and storage; it does not dispatch a model, grant qualification or change live settings. Remote analyst and checker stages are retired; legacy analystEnabled=false remains compatible.",
                     "captureLateInteraction exports exact observer-projected documents and requests; supplied pinned local ranks bind to identical query/view/text hashes. Source IDs are rebound to the disposable fixture. No model inference or certification occurs inside this replay. precisionMode may select legacy, shadow or precision for the fixture only.",
                     "captureMemorySelection retains exact source-bound local rank/compression requests. capturedMemorySelections must match the complete canonical request hash; incomplete, changed, malformed or unqualified captures cannot become a production certificate. enableMemoryEvidenceCompression is fixture-only. No local model is dispatched by this replay; run the pinned worker adapter separately and retain its timings, failures and hashes.",
-                    "No semantic worker, live provider, full live endpoint repairs, native effects or human review execute. Canonical source eligibility remains authoritative; analyst-only search captures are rejected.",
+                    "Without denseWorkerReplay no semantic worker executes. Explicit denseWorkerReplay uses only a nonce-scoped high-port loopback worker with verified isolated model identity and source-linked verbatim memory projections; these are not reconstructed saved derivatives. No live provider, full live endpoint repairs, native effects or human review execute. Canonical source eligibility remains authoritative; analyst-only search captures are rejected.",
                     "Optional semanticDocuments use the production document builders on eligible fixture originals, not live campaign data. Separate pinned local model/chunk/index execution is required before claiming semantic search quality.",
                      "Optional writerReplay carries both memory text and its precisionEvidence metadata through production envelopes and final source preflight, then publishes supplied prose/memory layers only in the isolated campaign; no actions or relationship assessments apply. Older replay captures omitting that metadata mixed precision packets with legacy continuity and are not production-parity evidence.",
                      "Up to three optional writer continuations reuse the preceding captured request and persist in the same isolated campaign; missing stages stop that chain and do not certify subsequent recall.",
                     "providerWireCapture retains initial NanoGPT JSON from shared body/policy/cache/reasoning builders using fixture settings. It does not dispatch HTTP, load credentials, reproduce live cooldowns or authorize subscription/paid routing.",
                     "Missing responses remain pending. Independently review semantic claims; execution success is not accuracy." });
+            report["denseReplayContracts"] = denseContracts;
+            if (denseWorker != null) report["denseWorker"] = TestDict("initial", denseWorker.InitialStatus,
+                "final", denseWorker.Post("/vectors/status", TestDict()), "model", denseWorker.Model,
+                "modelTreeSha256", denseWorker.ModelTreeHash);
             return report;
         }
     }

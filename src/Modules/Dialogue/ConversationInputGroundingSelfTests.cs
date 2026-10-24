@@ -112,6 +112,30 @@ namespace ReignBetaServer
             pParty["localPresence"] = TestDict("schema", "reign-local-presence-v1", "worldDay", 20d, "people", new[] {
                 TestDict("heroStringId", "bystander", "name", "Arin", "settlementPresence", "present", "roomPresence", "unknown", "conversationWitness", false) });
             Check("town_presence_does_not_grant_membership", FindConversationGroundingViolations(TestDict("reply", "Arin is our scout at the front of our column."), pParty, "npc").Count > 0);
+            const string councilRequest = "I would like Arin here in town to review the unanswered entries with us.";
+            var quotedCouncil = TestDict("reply", "I will invite Arin to review the accounts.",
+                "traitEvidence", new[] { TestDict("playerQuote", councilRequest, "replyQuote", "I will invite Arin to review the accounts.") });
+            Check("quoted_player_council_request_is_not_npc_party_membership",
+                FindConversationGroundingViolations(quotedCouncil, pParty, "npc").Count == 0);
+            Check("quoted_player_false_party_claim_is_not_npc_assertion",
+                FindConversationGroundingViolations(TestDict("reply", "I cannot confirm the proposed role.",
+                    "traitEvidence", new[] { TestDict("playerQuote", "Arin is our scout at the front of our column.",
+                        "replyQuote", "I cannot confirm the proposed role.") }), pParty, "npc").Count == 0);
+            Check("meeting_with_us_does_not_assert_party_membership",
+                FindConversationGroundingViolations(TestDict("reply", councilRequest), pParty, "npc").Count == 0);
+            Check("player_quote_cannot_excuse_false_npc_membership",
+                FindConversationGroundingViolations(TestDict("reply", "Arin is with our party.",
+                    "traitEvidence", new[] { TestDict("playerQuote", councilRequest) }), pParty, "npc").Count > 0);
+            Check("current_travel_with_us_still_needs_native_membership", new[] {
+                "Arin is travelling with us.", "Arin is currently riding with us.", "Arin marches with us." }
+                .All(reply => FindConversationGroundingViolations(TestDict("reply", reply), pParty, "npc").Count > 0));
+            Check("future_travel_request_is_not_current_membership",
+                FindConversationGroundingViolations(TestDict("reply", "Arin will travel with us after accepting the invitation."), pParty, "npc").Count == 0);
+            Check("npc_quote_and_durable_party_role_writes_still_checked",
+                FindConversationGroundingViolations(TestDict("reply", "We can review the accounts.",
+                    "traitEvidence", new[] { TestDict("replyQuote", "Arin is our scout.") }), pParty, "npc").Count > 0
+                && FindConversationGroundingViolations(TestDict("reply", "We can review the accounts.",
+                    "memoryWrites", new[] { TestDict("text", "Arin is our quartermaster.") }), pParty, "npc").Count > 0);
             Check("name_then_description_cannot_invent_shared_travel", FindConversationGroundingViolations(TestDict("reply",
                 "Arin. The Battanian woman who's been riding at the front of the column since Marunath, reading every ridge and calling the road conditions before anyone asks."), pParty, "npc")
                 .Any(issue => ReadString(issue, "type", "") == "critical_continuity_party_membership"));
