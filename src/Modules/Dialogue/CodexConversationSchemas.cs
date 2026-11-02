@@ -39,7 +39,7 @@ namespace ReignBetaServer
             "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals",
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
             "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites",
-            "courtKnowledgeWrites", "pregnancyDisclosures", "sceneStateUpdates", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
+            "courtKnowledgeWrites", "pregnancyDisclosures", "sceneStateUpdates", "viewWardrobeEvidence", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
             "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "raisedGossip",
             "npcStoryAssessments", "npcLeaveAssessment", "announcementReactions", "announcementReview", "communicationPlans"
         };
@@ -276,6 +276,10 @@ namespace ReignBetaServer
                 ["comprehensionWrites"] = Array(ComprehensionWrite()),
                 ["dynamicCharacteristicWrites"] = Array(DynamicCharacteristicWrite()),
                 ["sceneStateUpdates"] = Array(SceneStateUpdate()),
+                ["viewWardrobeEvidence"] = Array(Object(new Dictionary<string, object> {
+                    ["source"] = String(new[] { "player", "reply" }),
+                    ["characterIds"] = Array(String()), ["quote"] = String()
+                }, null, false)),
                 ["drinkActions"] = Array(DrinkAction()),
                 ["drinkingEvents"] = Array(DrinkingEvent()),
                 ["drinkConsumptions"] = Array(DrinkConsumption()),

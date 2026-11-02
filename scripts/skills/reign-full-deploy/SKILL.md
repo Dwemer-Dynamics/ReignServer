@@ -20,6 +20,8 @@ For files shared across startup, server, worker, maintenance, or Windows bridge 
 
 ## Preserved state and limits
 
+When installation must leave services stopped, pass `-LeaveStopped`. It preserves artifact and inventory verification and suppresses service startup during success and recovery. Skip live health and stop/start checks in this mode and report them as deferred. Never launch Bannerlord.
+
 Runtime versions live under `/var/www/html/ReignServer/runtime/versions`; dependency/model versions are keyed by their source locks. Player data lives in the same checkout at `/var/www/html/ReignServer/data`. The Windows record is `%USERPROFILE%/.reign/installation.json`. Its WSL paths must refer to the same selected local distro; arbitrary network shares are rejected.
 
 Do not overwrite an existing standalone Windows installation or another distro's record. Inventory and migrate that installation deliberately, including its secrets; Windows DPAPI secrets cannot simply be decrypted in Linux. Failed activation retains the previous runtime. Code rollback does not undo database migrations. Do not delete retained databases, versions, or dependency mods as deployment cleanup. After successful client verification and bridge setup, the deployment script retains the two newest run-marked rollback module backups and removes older run-marked backups. It also removes run-marked staging copies older than one day. Unmarked legacy backups, failed activation folders, and crash evidence require separate review and are preserved. Preflight requires staged copy size plus at least 10% or 1 GiB free reserve on each destination volume before copying.

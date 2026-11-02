@@ -113,6 +113,7 @@ namespace ReignBetaServer
             {
                 return new Dictionary<string, object>
                 {
+                    ["chatViewPending"] = ChatViewWorkers.Count,
                     ["ok"] = true, ["running"] = PriorityWorkThread != null && PriorityWorkThread.IsAlive,
                     ["active"] = PriorityWorkActiveName, ["interactiveQueued"] = PriorityWorkQueues[0].Count,
                     ["normalQueued"] = PriorityWorkQueues[1].Count, ["maintenanceQueued"] = PriorityWorkQueues[2].Count,

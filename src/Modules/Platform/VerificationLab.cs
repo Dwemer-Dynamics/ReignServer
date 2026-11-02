@@ -406,7 +406,12 @@ namespace ReignBetaServer
             if (string.Equals(requestedSuite, "outfit_changes", StringComparison.OrdinalIgnoreCase))
             {
                 AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
-            AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
+                AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
+                return;
+            }
+            if (string.Equals(requestedSuite, "chat_view", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
                 return;
             }
             if (string.Equals(requestedSuite, "character_narrative", StringComparison.OrdinalIgnoreCase)
@@ -540,6 +545,7 @@ namespace ReignBetaServer
             AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
             AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
             AddSubsystemListSummary(checks, "contracts.image_generation_profiles", "portraits_images", RunPortraitProviderAdapterContractTests());
+            AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
             if (includeExpensiveSubsystems)
             {
                 AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", RunSpymasterSystemSelfTests());
@@ -2534,8 +2540,7 @@ namespace ReignBetaServer
 				&& !individualZoomBlock.Contains("reign_modern_portrait_oval_overlay", StringComparison.Ordinal);
 			bool individualChatTransparentTranscriptValid = individualTranscriptBlock.Contains("IsVisible=\"@IsPlayerLine\"", StringComparison.Ordinal)
 				&& individualTranscriptBlock.Contains("IsVisible=\"@IsNonPlayerLine\"", StringComparison.Ordinal)
-				&& !Regex.IsMatch(individualTranscriptBlock, @"\sSprite=""")
-				&& !Regex.IsMatch(individualTranscriptBlock, @"\sColor=""");
+				&& VerificationTranscriptBackingsValid(FindVerificationXmlElementById(individualChatDocument, "ReignChatList"));
 			bool nativeModernPortraitFramesValid = gameMenuPartyRectangularPlateValid
 				&& conversationRectangularPortraitsValid
 				&& conversationCoverGeometryValid
@@ -3465,6 +3470,7 @@ namespace ReignBetaServer
             add("prompts.efficiency_cache", "prompt_efficiency", new[] { "contracts.dialogue_prompt_budget", "pipeline.prompt_caching" });
             add("memory.precision", "memory_precision", new[] { "pipeline.memory_precision" });
             add("portraits.images", "portraits_images", new[] { "contracts.gui_xml", "contracts.portrait_identity_metadata", "contracts.image_generation_profiles", "faults.corrupt_image" });
+            add("chat_view", "portraits_images", new[] { "contracts.chat_view" });
             add("actions.trade", "actions_trade", new[] { "pipeline.canned_cases", "pipeline.settlement_authority", "shadow_world.all_actions", "shadow_world.atomic_trade" });
             add("diplomacy.world", "world_diplomacy", new[] { "baseline.diplomacy", "contracts.random_diplomacy_popup_debug", "long_run.five_years" });
             add("history.world", "world_history", new[] { "baseline.world_history", "pipeline.rumors" });
@@ -4078,6 +4084,42 @@ namespace ReignBetaServer
         {
             if (document == null || string.IsNullOrWhiteSpace(id)) return null;
             return document.SelectSingleNode("//*[@Id='" + id + "']") as XmlElement;
+        }
+
+        private static bool VerificationTranscriptBackingsValid(XmlElement transcript)
+        {
+            if (transcript == null) return false;
+            var copy = (XmlElement)transcript.CloneNode(true);
+            foreach (XmlElement entry in copy.SelectNodes(".//*[@Id='ChatViewImageEntry']").Cast<XmlElement>().ToList())
+            {
+                var button = entry.SelectSingleNode("./Children/ButtonWidget[@Id='ChatViewInlineImage']") as XmlElement;
+                var art = button?.SelectSingleNode("./Children/ReignEventArtWidget") as XmlElement;
+                var background = button?.SelectSingleNode("./Children/Widget") as XmlElement;
+                var plate = button?.SelectSingleNode("./Children/ImageWidget") as XmlElement;
+                bool bounded = VerificationXmlAttributeEquals(entry, "IsVisible", "@IsViewLine")
+                    && VerificationXmlAttributeEquals(entry, "SuggestedWidth", "384")
+                    && VerificationXmlAttributeEquals(button, "WidthSizePolicy", "Fixed")
+                    && VerificationXmlAttributeEquals(button, "HeightSizePolicy", "Fixed")
+                    && VerificationXmlAttributeEquals(button, "SuggestedWidth", "384")
+                    && VerificationXmlAttributeEquals(button, "SuggestedHeight", "216")
+                    && VerificationXmlAttributeEquals(art, "SuggestedWidth", "282.375")
+                    && VerificationXmlAttributeEquals(art, "SuggestedHeight", "188.25")
+                    && VerificationXmlAttributeEquals(art, "EventImageId", "@SceneImageId")
+                    && VerificationXmlAttributeEquals(background, "WidthSizePolicy", "StretchToParent")
+                    && VerificationXmlAttributeEquals(background, "HeightSizePolicy", "StretchToParent")
+                    && VerificationXmlAttributeEquals(background, "Sprite", "BlankWhiteSquare")
+                    && VerificationXmlAttributeEquals(background, "Color", "#070808FF")
+                    && VerificationXmlAttributeEquals(plate, "Sprite", "reign_modern_memory_scene_overlay")
+                    && VerificationXmlAttributeEquals(plate, "WidthSizePolicy", "StretchToParent")
+                    && VerificationXmlAttributeEquals(plate, "HeightSizePolicy", "StretchToParent")
+                    && button?.SelectNodes("./Children/*")?.Count == 3
+                    && entry.SelectNodes(".//*[@Sprite or @Color]").Count == 2;
+                if (!bounded) return false;
+                entry.ParentNode.RemoveChild(entry);
+            }
+            // Ordinary speech and its containers must remain completely transparent.
+            return !copy.HasAttribute("Sprite") && !copy.HasAttribute("Color")
+                && copy.SelectNodes(".//*[@Sprite or @Color]").Count == 0;
         }
 
         private static bool VerificationXmlAttributeEquals(XmlElement element, string attributeName, string expected)

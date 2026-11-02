@@ -972,6 +972,10 @@ namespace ReignBetaServer
                             ["managedBy"] = "ReignServer"
                         };
                     }
+                    else if (request.Method == "POST" && request.Path.StartsWith("/chat-view/", StringComparison.Ordinal))
+                    {
+                        response = ChatViewApi(request.JsonBody, request.Path.Substring("/chat-view/".Length));
+                    }
                     else if (request.Method == "POST" && request.Path == "/api/activate")
                     {
                         response = ActivateRunningServer(request.JsonBody);
@@ -4073,8 +4077,9 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
             List<Dictionary<string, object>> preparedComprehension = PrepareStructuredWrites(comprehensionWrites, heroId, playerId, locationId, eventType, "comprehension", participants);
             var acceptedSources = CurrentConversationSources(playerId, heroId, playerText, reply, eventId,
                 ReadFirstString(continuityPayload, "sceneTurnId", "exchangeId", "turnId"));
-            AttachConversationWriteEvidence((memoryWrites ?? new List<Dictionary<string, object>>()).Concat(preparedBeliefs)
-                .Concat(preparedObligations).Concat(preparedComprehension), acceptedSources, heroId, eventId);
+            AttachConversationWriteEvidence(memoryWrites, acceptedSources, heroId, eventId, requireSemanticAdmission: true);
+            AttachConversationWriteEvidence(preparedBeliefs.Concat(preparedObligations).Concat(preparedComprehension),
+                acceptedSources, heroId, eventId);
             int incompleteSourceWrites = (memoryWrites ?? new List<Dictionary<string, object>>()).Concat(preparedBeliefs)
                 .Concat(preparedObligations).Concat(preparedComprehension)
                 .Count(write => ReadString(write, "sourceValidation", "incomplete") != "supported_span");
@@ -9115,6 +9120,9 @@ The previous attempt did not complete a JSON object within its output budget.
             // Return only grounded prose; no player turn or ordinary side effects.
             if (IsNpcLifeApproach(payload))
                 return BuildNpcApproachDraft(payload, llm, parsed, reply, motiveDecision, identityView, priorLines, heroId, heroName, playerName);
+            // A bounded leave reply replaces its whole draft. Do this before
+            // deriving memory/state/action caches, not only at final grounding.
+            ConstrainNpcLeaveReply(payload, heroId, parsed, ref reply);
             if (!governmentCertificationMemoryIsolation && !agencyVisibleFailure)
                 reply = ApplyConversationDrinking(campaignId, heroId, payload, profile, characteristics, parsed, reply, persist: false);
             Dictionary<string, object> conversationSceneResolution = TestDict("status", "pending_acceptance");
@@ -10155,6 +10163,11 @@ The previous attempt did not complete a JSON object within its output budget.
             reply = NormalizeUnknownIdentityVisibleAddress(reply, identityView);
             List<Dictionary<string, object>> recallConsistencyRepairs;
             reply = RepairVisibleExactRecallIdentifiers(playerText, reply, parsed, messages, out recallConsistencyRepairs);
+            // Keep group/event publication from caching effects of a discarded
+            // leave draft before the final prose guard runs.
+            ConstrainNpcLeaveReply(payload, heroId, parsed, ref reply);
+            if (ReadString(ReadDictionary(payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local")
+                participation = NormalizeSocialEventParticipation(parsed);
             if (!agencyVisibleFailure)
                 reply = ApplyConversationDrinking(campaignId, heroId, payload, profile, characteristics, parsed, reply, persist: false);
             Dictionary<string, object> conversationSceneResolution = TestDict("status", "pending_acceptance");
@@ -18315,13 +18328,13 @@ The previous attempt did not complete a JSON object within its output budget.
 
         private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload) => ChatWithLlm(payload, null, null);
 
-        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled)
+        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled, Dictionary<string, object> frozenSettings = null)
         {
             ThrowIfCampaignRequestReplaced();
             payload = payload ?? new Dictionary<string, object>();
             if (IsRetiredMemoryRequest(ReadString(payload, "requestType", "")))
                 return TestDict("ok", false, "errorCode", "memory_llm_stage_retired", "providerCallCount", 0);
-            Dictionary<string, object> settings = BanterProviderSettings(payload, LoadSettings());
+            Dictionary<string, object> settings = BanterProviderSettings(payload, frozenSettings ?? LoadSettings());
             bool singleAttempt = ReadBool(payload, "singleProviderAttempt", false);
             if (singleAttempt)
             {
@@ -23917,6 +23930,8 @@ Treat the name, age, gender, and culture as private generation guidance. They de
                 PromptMeta("tavern_house_look_again_image.txt", "Tavern House: Look Again Image", "image", true, "Non-explicit scene from the conversation summary and every participant reference. Tokens: {townName}, {participants}, {summary}."),
                 PromptMeta("tavern_house_portrait_clothing.txt", "Tavern House: Portrait Clothing", "image", true, "One clothing-only edit for every adult madam and worker, regardless of culture or gender. Uses the configured Adult Portraits provider after the identity portrait. Token: [TAVERN ROLE]."),
                 PromptMeta(OutfitPromptName, "Conversation: New Clothes", "image", true, "Dedicated clothing-only edit of the current full-body portrait. The player's exact outfit description is appended as quoted garment data. Normal Portraits at Physical Confidence 0-39; Adult Portraits at 40-100. No automatic fallback between profiles."),
+                PromptMeta(ChatViewSelectionPromptName, "Chat View: Moment Selection", "image", true, "Selects one evidenced high point from four complete exchanges using the selected dialogue model."),
+                PromptMeta(ChatViewPhotoPromptName, "Chat View: Documentary Photograph", "image", true, "Photographic rendering instructions for the selected instant and complete full-body identity references."),
                 PromptMeta("context_pull_check_inventory_appearance.txt", "Check Inventory And Appearance", "context", true, "Selector-readable header for NPC inventory, equipment, and material presentation."),
                 PromptMeta("context_pull_check_player_appearance_status.txt", "Check Player Appearance Status", "context", true, "Selector-readable header for the player's visible clothing, status, and disguise cues."),
                 PromptMeta("context_pull_nearby_settlements.txt", "Nearby Settlements", "context", true, "Selector-readable header for nearby towns, castles, villages, and routes."),
@@ -25204,6 +25219,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
 			{
 				defaults[pair.Key] = pair.Value;
 			}
+            foreach (var pair in ChatViewPromptDefaults()) defaults[pair.Key] = pair.Value;
 			defaults[OutfitPromptName] = OutfitPromptDefault;
 			return defaults;
         }

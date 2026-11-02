@@ -258,6 +258,7 @@ namespace ReignBetaServer
             Check("narrated_handoffs_negation_and_drinking_are_protected", MemoryPackingSegments(consequential, plan).Count == 0);
 
             int calls = 0;
+            List<Dictionary<string, object>> lastRankInputs = null;
             var prior = MemorySelectionReplay.Value;
             try
             {
@@ -266,8 +267,9 @@ namespace ReignBetaServer
                 MemorySelectionReplay.Value = request => {
                     calls++;
                     var inputs = ReadDictionaryList(request, "candidates");
+                    lastRankInputs = inputs;
                     return TestDict("schema", MemorySelectionSchema, "operation", "rank", "ok", true,
-                        "modelHash", MemorySelectionRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
+                        "modelHash", MemorySelectionCpuRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
                         "runtimeVersion", MemorySelectionRuntimeVersion, "backend", "cpu", "rankingPolicy", MemorySelectionRankingPolicy,
                         "results", inputs.Select(i => TestDict("id", i["id"], "textHash", i["textHash"],
                             "scoringCoverage", Coverage(ReadString(i, "text", "")),
@@ -281,6 +283,30 @@ namespace ReignBetaServer
                 Check("local_rank_does_not_lose_to_untouched_numeric_priority", calls == 1
                     && SelectPrecisionEvidence(ranked).Selected.First().SourceId == "answer"
                     && ranked.Single(e => e.SourceId == "answer").SelectionRelevance == .99d);
+                var linkedPlan = PlanMemoryQuery("observer", "player", "Why did that matter?", TestDict());
+                linkedPlan.SuppliedSources["explanation"] = "explanation_hash";
+                var explanation = TestDict("id", "explanation", "hash", "explanation_hash", "text", "Player: Finding it together mattered more than knowing its name.");
+                var acknowledgment = TestDict("id", "ack", "hash", "ack_hash", "text", "NPC: Now I understand what you meant.");
+                string linkedText = ReadString(explanation, "text", "") + "\n" + ReadString(acknowledgment, "text", "");
+                var linked = new MemoryEvidence { SourceId = "explanation,ack", SourceHash = "linked", Kind = "reported_exchange",
+                    Text = linkedText, SourceTurns = new() { explanation, acknowledgment } };
+                var linkedRanked = ApplyLocalMemorySelection(new() { linked }, linkedPlan, TestDict(), options, TestDict(), false);
+                Check("deduplicated_rank_keeps_complete_explanation_acknowledgment", linkedRanked.Count == 1
+                    && MemorySelectionRankingText(linkedRanked[0]) == linkedText
+                    && lastRankInputs.Count == 1 && ReadString(lastRankInputs[0], "text", "") == linkedText
+                    && ReadString(lastRankInputs[0], "textHash", "") == MemorySelectionTextHash(linkedText)
+                    && linkedRanked[0].Text == ReadString(acknowledgment, "text", "")
+                    && linkedRanked[0].SelectionRank == 0 && linked.Text == linkedText && linked.SourceTurns.Count == 2);
+                var otherExplanation = TestDict("id", "other_explanation", "hash", "other_hash", "text", "Player: I meant sharing the quiet walk rather than receiving a report.");
+                var overlappingLinked = CopyMemoryEvidence(linked, ReadString(otherExplanation, "text", "") + "\n" + ReadString(acknowledgment, "text", ""),
+                    new() { otherExplanation, acknowledgment });
+                linkedPlan.SuppliedSources["other_explanation"] = "other_hash";
+                Check("dedup_does_not_merge_different_complete_ranking_contexts",
+                    DistinctMemoryBundles(new[] { linked, overlappingLinked }, linkedPlan.SuppliedSources).Count == 2
+                    && SelectPrecisionEvidence(new[] { linked, overlappingLinked }, 4000, linkedPlan.SuppliedSources)
+                        .Selected.SelectMany(e => e.SourceTurns).Count(t => ReadString(t, "id", "") == "ack") == 1);
+                linkedPlan.SuppliedSources["ack"] = "ack_hash";
+                Check("fully_supplied_linked_unit_needs_no_duplicate", DistinctMemoryBundles(new[] { linked }, linkedPlan.SuppliedSources).Count == 0);
                 MemorySelectionReplay.Value = _ => TestDict("ok", false, "status", "selection_deadline");
                 var untouched = candidates.Select(e => { var c = CopyMemoryEvidence(e); c.SelectionRank = null; return c; }).ToList();
                 var diagnostics = TestDict();
@@ -289,7 +315,7 @@ namespace ReignBetaServer
                     && ReadString(ReadDictionary(diagnostics, "selectionHelpers"), "status", "") == "local_fallback");
                 var input = new List<Dictionary<string, object>> { TestDict("id", "r0", "textHash", "source", "text", "Late correction: no payment.") };
                 var malformed = TestDict("schema", MemorySelectionSchema, "operation", "rank", "ok", true,
-                    "modelHash", MemorySelectionRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
+                    "modelHash", MemorySelectionCpuRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
                     "runtimeVersion", MemorySelectionRuntimeVersion, "backend", "cpu", "rankingPolicy", MemorySelectionRankingPolicy,
                     "results", new[] { TestDict("id", "r99", "textHash", "source", "score", .9d) });
                 Check("unknown_and_incomplete_rankings_rejected", !ValidateMemorySelectionResponse(malformed, "rank", input, out _));
@@ -297,9 +323,16 @@ namespace ReignBetaServer
                 Check("nonfinite_scores_rejected", !ValidateMemorySelectionResponse(malformed, "rank", input, out _));
                 malformed["results"] = new[] { TestDict("id", "r0", "textHash", "source", "score", .9d) };
                 Check("backend_substitution_rejected", !ValidateMemorySelectionResponse(malformed, "rank", input, out _, "cuda"));
+                malformed["results"] = new[] { TestDict("id", "r0", "textHash", "source", "score", .9d,
+                    "scoringCoverage", Coverage(ReadString(input[0], "text", ""))) };
+                Check("cpu_graph_receipt_accepted", ValidateMemorySelectionResponse(malformed, "rank", input, out _));
+                malformed["modelHash"] = MemorySelectionRankerHash;
+                Check("gpu_graph_receipt_cannot_certify_cpu", !ValidateMemorySelectionResponse(malformed, "rank", input, out _));
+                malformed["modelHash"] = MemorySelectionCpuRankerHash;
                 malformed["rankingPolicy"] = "obsolete";
                 Check("changed_scoring_policy_rejected", !ValidateMemorySelectionResponse(malformed, "rank", input, out _));
                 malformed["rankingPolicy"] = MemorySelectionRankingPolicy;
+                malformed["results"] = new[] { TestDict("id", "r0", "textHash", "source", "score", .9d) };
                 Check("missing_source_coverage_rejected", !ValidateMemorySelectionResponse(malformed, "rank", input, out _));
                 var coverage = Coverage("Late correction: no payment.");
                 malformed["results"] = new[] { TestDict("id", "r0", "textHash", "source", "score", .9d, "scoringCoverage", coverage) };
@@ -320,7 +353,7 @@ namespace ReignBetaServer
                 MemorySelectionReplay.Value = request => {
                     if (ReadString(request, "operation", "") == "compress") throw new InvalidOperationException("compressor_unavailable");
                     return TestDict("schema", MemorySelectionSchema, "operation", "rank", "ok", true,
-                        "modelHash", MemorySelectionRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
+                        "modelHash", MemorySelectionCpuRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
                         "runtimeVersion", MemorySelectionRuntimeVersion, "backend", "cpu", "rankingPolicy", MemorySelectionRankingPolicy,
                         "results", ReadDictionaryList(request, "candidates").Select(i => TestDict("id", i["id"], "textHash", i["textHash"], "score", .9d,
                             "scoringCoverage", Coverage(ReadString(i, "text", "")))).ToList());
@@ -341,6 +374,48 @@ namespace ReignBetaServer
                     && !MinimumMemoryPackingFits(large, largeSegments, 10, 1));
             }
             finally { MemorySelectionReplay.Value = prior; }
+            var shadowPrior = MemorySelectionReplay.Value;
+            long priorCooldown = System.Threading.Interlocked.Read(ref MemorySelectionUnavailableUntilTicks);
+            try
+            {
+                System.Threading.Interlocked.Exchange(ref MemorySelectionUnavailableUntilTicks, 0);
+                var queued = TestDict("schema", MemorySelectionSchema, "operation", "rank", "backend", "cpu",
+                    "modelHash", MemorySelectionCpuRankerHash, "tokenizerHash", MemorySelectionRankerTokenizerHash,
+                    "rankingPolicy", MemorySelectionRankingPolicy, "runtimeVersion", MemorySelectionRuntimeVersion,
+                    "ok", true, "remoteCalls", 0, "status", "shadow_queued", "shadowJobId", new string('a', 32),
+                    "results", new List<Dictionary<string, object>>());
+                Check("shadow_admission_requires_exact_identity", ValidateMemorySelectionShadowAdmission(queued, "cpu")
+                    && !ValidateMemorySelectionShadowAdmission(queued, "cuda"));
+                foreach (string field in new[] { "schema", "operation", "backend", "modelHash", "tokenizerHash", "rankingPolicy", "runtimeVersion", "status", "shadowJobId" })
+                {
+                    var bad = new Dictionary<string, object>(queued) { [field] = "foreign" };
+                    Check("shadow_admission_rejects_" + field, !ValidateMemorySelectionShadowAdmission(bad, "cpu"));
+                }
+                Check("shadow_admission_rejects_partial_results", !ValidateMemorySelectionShadowAdmission(
+                    new Dictionary<string, object>(queued) { ["results"] = new[] { TestDict("id", "r0", "score", .9d) } }, "cpu"));
+                Check("shadow_admission_rejects_failure_or_remote_work", !ValidateMemorySelectionShadowAdmission(
+                    new Dictionary<string, object>(queued) { ["ok"] = false }, "cpu") && !ValidateMemorySelectionShadowAdmission(
+                    new Dictionary<string, object>(queued) { ["remoteCalls"] = 1 }, "cpu"));
+                Dictionary<string, object> captured = null;
+                MemorySelectionReplay.Value = request => { captured = request; return queued; };
+                var evidence = new MemoryEvidence { SourceId = "shadow-original", SourceHash = "source", Kind = "reported_exchange",
+                    Text = "Ira: No payment before arrival. Michael: Agreed.", RankingText = "Question: When?\nIra: No payment before arrival. Michael: Agreed." };
+                var beforeRank = evidence.SelectionRank;
+                var shadowAudit = TestDict();
+                var original = ApplyLocalMemorySelection(new() { evidence }, plan, TestDict(),
+                    TestDict("memorySelectionMode", "shadow", "memorySelectionBackend", "cpu", "enableMemoryEvidenceCompression", false), shadowAudit, true);
+                var audit = ReadDictionary(shadowAudit, "selectionHelpers");
+                Check("shadow_keeps_original_and_full_linked_request", original.Single() == evidence && evidence.SelectionRank == beforeRank
+                    && ReadBool(captured, "shadow", false) && ReadInt(captured, "timeoutMs", -1) == 15000
+                    && ReadString(ReadDictionaryList(captured, "candidates").Single(), "text", "") == evidence.RankingText
+                    && ReadString(audit, "status", "") == "shadow_queued" && ReadString(audit, "shadowJobId", "") == new string('a', 32)
+                    && !ReadBool(audit, "rankApplied", true) && !ReadBool(audit, "compressionApplied", true));
+            }
+            finally
+            {
+                MemorySelectionReplay.Value = shadowPrior;
+                System.Threading.Interlocked.Exchange(ref MemorySelectionUnavailableUntilTicks, priorCooldown);
+            }
             Check("missing_or_development_certificate_cannot_activate", !MemorySelectionQualified(TestDict(), false)
                 && !MemorySelectionQualified(TestDict("memorySelectionQualification", TestDict("heldOut", false, "caseCount", 153)), true));
             return results;

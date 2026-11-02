@@ -15,6 +15,7 @@ namespace ReignBeta.Shared.Characters
         public double Compassion { get; set; } = 50;
         public int DutyPressure { get; set; }
         public bool Available { get; set; }
+        public List<string> UnsafeLeaveLocationIds { get; set; } = new List<string>();
     }
     public sealed class NpcStoryLocation
     {
@@ -30,6 +31,15 @@ namespace ReignBeta.Shared.Characters
     // A persisted daily check cannot be rerolled by reopening UI or changing sliders.
     public static class NpcLivesEngine
     {
+        // Personal leave is a solo visit. The player's safe destinations do not
+        // establish safety for a guest who still belongs to another faction.
+        public static IReadOnlyList<NpcStoryLocation> LeaveDestinations(NpcLifeCandidate npc,
+            IEnumerable<NpcStoryLocation> locations)
+        {
+            var unsafeIds = new HashSet<string>(npc.UnsafeLeaveLocationIds ?? new List<string>(), StringComparer.Ordinal);
+            return locations.Where(l => l.Available && l.Kind != "hideout" && !unsafeIds.Contains(l.Id)).ToList();
+        }
+
         public static double Draw(string key)
         {
             using (var hash = SHA256.Create())
@@ -99,9 +109,11 @@ namespace ReignBeta.Shared.Characters
                 string seed = state.CampaignId + "|" + state.TimelineId + "|" + npc.HeroId + "|" + today;
                 var feasible = definitions.Where(d => d.Phases.Count > 0 && (d.Phases[0].LocationKind == "current"
                     || BindLocation(d.Phases[0], locations, current, seed).Length > 0)).ToList();
+                var leaveLocations = LeaveDestinations(npc, locations);
+                var leaveDefinitions = feasible.Where(d => BindLocation(d.Phases[0], leaveLocations, current, seed).Length > 0).ToList();
                 var eligibleWeights = NpcLivesPolicy.CategoryWeights.Where(w => w.Key == "leave"
-                    ? locations.Any(l => l.Available && l.Kind != "hideout" && l.TravelDays <= 3)
-                        && Choose(state, new NpcLifeCandidate { HeroId = npc.HeroId, Affinity = 100, Interests = npc.Interests }, "outing", feasible, day, seed) != null
+                    ? leaveLocations.Any(l => l.TravelDays <= 3)
+                        && Choose(state, new NpcLifeCandidate { HeroId = npc.HeroId, Affinity = 100, Interests = npc.Interests }, "outing", leaveDefinitions, day, seed) != null
                     : Choose(state, npc, w.Key == "independent" ? "brief" : w.Key, feasible, day, seed) != null
                         || state.Stories.Any(s => s.HeroId == npc.HeroId && s.Status == "between_phases" && s.Definition.Category == w.Key
                             && s.Definition.Phases[s.PhaseIndex].MinimumAffinity <= npc.Affinity)).ToDictionary(w => w.Key, w => w.Value);
@@ -122,10 +134,10 @@ namespace ReignBeta.Shared.Characters
                 }
                 if (category == "leave")
                 {
-                    var purpose = Choose(state, new NpcLifeCandidate { HeroId = npc.HeroId, Affinity = 100, Interests = npc.Interests }, "outing", feasible, day, seed);
+                    var purpose = Choose(state, new NpcLifeCandidate { HeroId = npc.HeroId, Affinity = 100, Interests = npc.Interests }, "outing", leaveDefinitions, day, seed);
                     if (purpose == null) continue;
                     double absence = 3 + Math.Floor(Draw(seed + "|absence") * 5);
-                    string location = BindLocation(purpose.Phases[0], locations.Where(l => l.TravelDays <= (absence - 1) / 2), current, seed);
+                    string location = BindLocation(purpose.Phases[0], leaveLocations.Where(l => l.TravelDays <= (absence - 1) / 2), current, seed);
                     if (location.Length == 0) continue;
                     var leave = new NpcPersonalLeave { Id = "leave_" + ShortId(seed), HeroId = npc.HeroId,
                         Trust = npc.Affinity, Honor = npc.Honor, Compassion = npc.Compassion, DutyPressure = npc.DutyPressure,

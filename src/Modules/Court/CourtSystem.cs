@@ -1010,6 +1010,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                 CastleSceneImageContractSelfTests.Append(results);
                 FamilyChambersSelfTests.Append(results);
                 AppendCourtLifeInterpretationTests(results);
+                AppendCourtLifeCreatorProfileTests(results, campaign);
                 AppendCourtLifeResolutionContinuityTests(results, campaign);
                 WarCouncilScrollSelfTests.Append(results);
             }

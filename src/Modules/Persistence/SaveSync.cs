@@ -88,6 +88,8 @@ namespace ReignBetaServer
             string savePointId = ReadString(payload, "savePointId", "");
             ValidateSaveSyncId(campaignId, "campaignId");
             ValidateSaveSyncId(savePointId, "savePointId");
+            if (ChatViewPending(campaignId)) return TestDict("ok", false, "result", "chat_view_pending", "retryable", true,
+                "error", "Save Sync is waiting for scene images to finish; no inconsistent image checkpoint was captured.");
             if (payload.ContainsKey("worldHistoryOutboxDrained")
                 && !ReadBool(payload, "worldHistoryOutboxDrained", false))
                 return new Dictionary<string, object>

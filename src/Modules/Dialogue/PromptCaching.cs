@@ -420,6 +420,7 @@ namespace ReignBetaServer
             priorLines = ProjectConversationLinesForObserver(priorLines, heroId, turnPayload);
             playerText = ProjectCurrentPlayerPromptText(playerText, heroId, turnPayload);
             turnPayload["playerText"] = playerText ?? "";
+            turnPayload["currentConversationCorrection"] = ActiveConversationCorrection(playerText, priorLines);
             if (UsesCastleRoomAttireContext(turnPayload))
             {
                 SanitizeRoomOutfitInjection(turnPayload);
@@ -540,7 +541,7 @@ namespace ReignBetaServer
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(false, NativeNoblePromptApplicability(profile), actionCatalog, specializedRoleBlock, UsesCastleRoomAttireContext(turnPayload), composition, UsesStructuredActions(turnPayload));
             CaptureRequiredPromptEvidence(turnPayload, "canonicalTranscript", canonicalTranscript);
-            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state);
+            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state, contextPullText);
             var capacity = ResolveConversationPromptCapacity(turnPayload, "dialogue",
                 IsNpcLifeApproach(turnPayload) ? BanterProviderSettings(TestDict("requestType", "npc_approach"), LoadSettings()) : null);
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
@@ -643,6 +644,7 @@ namespace ReignBetaServer
             eventLines = ProjectConversationLinesForObserver(eventLines, heroId, eventPayload);
             playerText = ProjectCurrentPlayerPromptText(playerText, heroId, eventPayload);
             eventPayload["playerText"] = playerText ?? "";
+            eventPayload["currentConversationCorrection"] = ActiveConversationCorrection(playerText, eventLines);
             if (UsesCastleRoomAttireContext(eventPayload))
             {
                 SanitizeRoomOutfitInjection(eventPayload);
@@ -743,7 +745,7 @@ namespace ReignBetaServer
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(true, NativeNoblePromptApplicability(profile), actionCatalog, ambassadorRoleBlock, UsesCastleRoomAttireContext(eventPayload), composition, UsesStructuredActions(eventPayload));
             CaptureRequiredPromptEvidence(eventPayload, "canonicalTranscript", canonicalTranscript);
-            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, eventPayload, state);
+            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, eventPayload, state, contextPullText);
             var capacity = ResolveConversationPromptCapacity(eventPayload, "social_event");
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
                 "event_live_turn_template.txt", "eventHistoryText", values,
@@ -1343,6 +1345,7 @@ namespace ReignBetaServer
             builder.Add("SCENE STATE OUTPUT", roomAttireContext
                 ? "Return sceneStateUpdates only for explicit present location changes, using supplied heroStringId, location, and locationClass. Do not emit hourly clothing overrides in this castle/keep room session. The room's cultural scene prompt and explicit transcript actions determine attire; portrait outfits, travel equipment, and general hourly outfits do not. Preserve established actions on reopening; the arriving player's attire follows their own actions. Return an empty array when nothing changes."
                 : SceneStateOutputContract);
+            builder.Add("VIEW CLOTHING EVIDENCE", ViewWardrobeEvidenceOutputContract);
             if (!string.IsNullOrWhiteSpace(specializedRoleBlock)) builder.Add("AUTHORITATIVE OFFICE ROLE - NON-OVERRIDABLE", specializedRoleBlock);
             if (isLord == false) builder.Omit("noble_prompt", "Native profile is not a noble; its own character foundation remains included.");
             if (string.IsNullOrWhiteSpace(specializedRoleBlock)) builder.Omit("authoritative_office_role.non-overridable", "Production posting/office resolver returned no applicable office.");

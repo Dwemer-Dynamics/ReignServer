@@ -33,7 +33,9 @@ namespace ReignBetaServer
             + "Family ties, clan membership, party membership and political authority are separate. Travel with companions is not recruitment or command over their relatives. "
             + "CURRENT facts override historical here/today/tomorrow and old scene plans. Distinguish a suggestion, an accepted intention, a completed narrated action and a confirmed native game effect. "
             + "A family home proves neither current presence nor witnessing. Use local presence evidence at its stated scope; unknown is not absent, town is not room, room is not witness. "
-            + "Retain major unresolved concerns privately through unrelated talk. Bring them up naturally when a relevant person, place, news or time creates an opportunity; don't recite a checklist each turn.\n"
+            + "Retain major unresolved concerns privately through unrelated talk. Bring them up naturally when a relevant person, place, news or time creates an opportunity; don't recite a checklist each turn. "
+            + "An agenda's next step is a fallible NPC intention, never independent evidence that the player owes an answer or that the proposed investigation is relevant. "
+            + "Reconcile later corrections, refusals and deferrals before repeating a step. Another NPC's demand creates no obligation for this speaker or the player.\n"
             + "Return continuityWrites for substantive questions raised or answered, acknowledged corrections to an active plan, durable concerns and important episodes; use [] for unchanged state or ordinary small talk. "
             + "Each write has id (empty for new), kind (agenda/relationship/episode/question), subject, peerId, status (open/active/waiting/blocked/deferred/resolved/abandoned/invalidated), "
             + "meaning, nextStep, completionCriterion, triggerPeople, triggerPlaces, parentId (empty unless this is a step of an existing concern), dueWorldDay (0 when unset), importance (0..1), evidenceQuote (exact nonempty excerpt of your visible reply), "
@@ -131,6 +133,21 @@ CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continui
                 return new Dictionary<string, object>();
             }
             var result = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+            // Earlier versions could accept a spoken scene correction as dialogue
+            // without retaining the room. Recover only its exact witnessed source
+            // within the same native hour and compatible physical anchor.
+            if (ConversationWorldHour(payload) == (long)Math.Floor(ReadDouble(row, "world_day", 0d) * 24d + .000001d)
+                && !ReadBool(CurrentNarrativeClock(payload), "advanced", false))
+                foreach (var exchange in ProjectSceneHandoffExchanges(connection, result, owner, payload))
+                {
+                    if (ReadString(exchange, "narrativeEpoch", "") != ReadString(CurrentNarrativeClock(payload), "epoch", "")) continue;
+                    var correction = SpokenSceneCorrections(ReadString(exchange, "playerText", ""), payload).LastOrDefault();
+                    string answer = ReadString(exchange, "reply", "");
+                    if (correction == null || Regex.IsMatch(ConversationSpeech(answer), @"\b(?:we are not|we remain|I remain|I am still|stay here instead)\b", RegexOptions.IgnoreCase)) continue;
+                    result["location_override"] = ReadString(correction, "location", "");
+                    result["location_class"] = ReadString(correction, "locationClass", "formal");
+                    result["acceptedPrivateScene"] = ExplicitClosedScene(ReadString(correction, "quote", ""));
+                }
             // Only the narrative venue is durable across the hourly clothing cache.
             if (ReadLong(result, "expires_world_hour", 0) <= ConversationWorldHour(payload)) result.Remove("clothing_override");
             result["acceptedExchanges"] = ProjectSceneHandoffExchanges(connection, result, owner, payload);
@@ -196,6 +213,24 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                 var previous = TryParseJsonObject(ReadString(old, "payload_json", "{}"));
                 row = row ?? (ReadString(old, "anchor", "") == ContinuitySceneAnchor(payload, participant)
                     ? new Dictionary<string, object>(previous ?? new Dictionary<string, object>()) : new Dictionary<string, object>());
+                bool sameAnchor = ReadString(old, "anchor", "") == ContinuitySceneAnchor(payload, participant);
+                var preparedState = ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "current")
+                    .FirstOrDefault(s => ReadString(s, "heroStringId", "") == owner);
+                if (sameAnchor && ReadBool(preparedState, "hasNarrativeLocation", false)
+                    && ReadString(row, "source_turn_id", "") != turnId)
+                {
+                    row["location_override"] = ReadString(preparedState, "location", "");
+                    row["location_class"] = ReadString(preparedState, "locationClass", "formal");
+                }
+                bool advanced = ReadBool(CurrentNarrativeClock(payload), "advanced", false);
+                row["acceptedPrivateScene"] = !advanced && sameAnchor && ReadBool(previous, "acceptedPrivateScene", ReadBool(preparedState, "acceptedPrivateScene", false));
+                if (advanced && ReadString(row, "source_turn_id", "") != turnId)
+                    row["location_override"] = "";
+                foreach (var proposal in ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "proposals")
+                    .Where(p => ReadString(p, "subject_id", "") == owner && ReadString(row, "source_turn_id", "") == turnId))
+                    row["acceptedPrivateScene"] = ExplicitClosedScene(ReadString(proposal, "sourceQuote", ""));
+                if (owner == speakerId) row["narrativeClock"] = CurrentNarrativeClock(payload);
+                else if (sameAnchor && previous.TryGetValue("narrativeClock", out var priorClock)) row["narrativeClock"] = priorClock;
                 var exchanges = ProjectSceneHandoffExchanges(connection, previous, owner, payload)
                     .Where(e => ReadString(e, "turnId", "") != turnId || ReadString(e, "speakerId", "") != speakerId).ToList();
                 string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
@@ -204,6 +239,7 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                     ["playerText"] = ProjectCurrentPlayerPromptText(playerText, owner, payload),
                     ["validatedPlayerProjection"] = ReadInt(payload, "playerNarrationProjectionVersion", 0) == 2 && ReadString(payload, "inputSourceId", "").Length > 0,
                     ["reply"] = ObserverConversationText(reply, speakerId, owner), ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
+                    ["narrativeEpoch"] = ReadString(CurrentNarrativeClock(payload), "epoch", ""),
                     ["sessionId"] = ReadFirstString(payload, "conversationSessionId", "sessionId", "eventId") });
                 row["acceptedExchanges"] = exchanges.Skip(Math.Max(0, exchanges.Count - 2)).ToList();
                 ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_handoffs
@@ -346,8 +382,21 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
             @"\b(?:learn(?:ed|t|ing)?\s+to\s+say\s+we|(?:uses?|says?|said|saying|word|pronoun)\s+['""‘’“”]?(?:I|we|our)['""‘’“”]?\s+(?:instead|rather)|(?:pronouns?|wording)\s+(?:prove|reveal|show)|speaks?\s+(?:of|as)\s+ownership)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+        private static string OmitExactSuppliedContinuityRecords(string protectedText, string suppliedContext)
+        {
+            if (string.IsNullOrEmpty(suppliedContext)) return protectedText;
+            string Key(ContinuityPromptRecord record) => record.SourceId + "|" + record.Kind + "|" + record.Observer + "|" + record.Session
+                + "|" + record.WorldDay.ToString("R", CultureInfo.InvariantCulture) + "|"
+                + record.Text.Substring(record.Text.IndexOf('\n') + 1);
+            var supplied = ContinuityPromptRecords(suppliedContext, false).Where(r => r.Kind != "legacy_complete_block")
+                .Select(Key).ToHashSet(StringComparer.Ordinal);
+            foreach (var record in ContinuityPromptRecords(protectedText, false).Where(r => r.Kind != "legacy_complete_block"))
+                if (supplied.Contains(Key(record))) protectedText = protectedText.Replace(record.Text, "", StringComparison.Ordinal);
+            return protectedText;
+        }
+
         private static string BuildProtectedConversationContinuity(string campaignId, string heroId,
-            Dictionary<string, object> payload, Dictionary<string, object> state)
+            Dictionary<string, object> payload, Dictionary<string, object> state, string suppliedContext = "")
         {
             state = WithoutRecallAbsenceState(state, campaignId, heroId, payload);
             var text = new StringBuilder(ConversationContinuityContract).AppendLine(ConversationSourceContract).AppendLine(ConversationQuestionContract).AppendLine(CharacterCommitmentContract);
@@ -466,14 +515,15 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
                 .Append("; location=").AppendLine(ReadFirstString(payload, "locationId", "settlementId"));
             text.Append(BuildLocalPresenceContinuityPrompt(payload));
             text.AppendLine().Append(BuildCurrentConversationGrounding(payload, heroId));
+            string protectedText = OmitExactSuppliedContinuityRecords(text.ToString(), suppliedContext);
             var requiredContent = CapturedRequiredPromptEvidence(payload);
-            requiredContent.Add(TestDict("id", "protected_continuity_content", "text", NormalizePromptSegment(text.ToString()),
-                "hash", PromptHash(text.ToString())));
+            requiredContent.Add(TestDict("id", "protected_continuity_content", "text", NormalizePromptSegment(protectedText),
+                "hash", PromptHash(protectedText)));
             payload["continuityEvidence"] = new Dictionary<string, object> { ["sourceIds"] = sourceIds,
-                ["timelineId"] = timeline, ["ownerId"] = heroId, ["peerId"] = peer, ["projectionHash"] = PromptHash(text.ToString()),
+                ["timelineId"] = timeline, ["ownerId"] = heroId, ["peerId"] = peer, ["projectionHash"] = PromptHash(protectedText),
                 ["requiredContent"] = requiredContent };
-            payload["protectedContinuityPrompt"] = text.ToString();
-            return text.ToString();
+            payload["protectedContinuityPrompt"] = protectedText;
+            return protectedText;
         }
 
         private static string BuildEstablishedRelationshipContinuity(ReignDbConnection connection, string campaignId,

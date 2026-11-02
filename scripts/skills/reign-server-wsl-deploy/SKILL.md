@@ -5,6 +5,8 @@ description: Deploy or update only ReignServer inside its own ReignServer WSL di
 
 # ReignServer WSL deployment
 
+When installation must leave services stopped, pass `-LeaveStopped`. It preserves artifact and inventory verification and suppresses service startup during success and recovery. Skip live health and stop/start checks in this mode and report them as deferred. Never launch Bannerlord.
+
 Read the paired repository AGENTS.md and confirm the exact checkout, branch, and WSL distro. The local distro is `ReignServer`, registered separately with its own virtual disk. Keep edits in ReignServer; the private Reign sibling provides the canonical validator.
 
 For source development, obtain the canonical validation plan/status, run the manifest-selected validation, then `ReignMcp/scripts/reign-validate.ps1 -LinuxServer -Restore -RequestingTaskId <task UUID>`. Use only its successful `reign-linux-build-v1` report. Sync reviewed server source to `/var/www/html/ReignServer`, preserving `.git`, ignored `data/`, and ignored `runtime/`, and run `sudo reignctl prepare` for the pinned dependencies.

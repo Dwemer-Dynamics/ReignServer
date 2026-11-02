@@ -49,6 +49,7 @@ namespace ReignBetaServer
 
         private sealed class ImageGenerationProfile
         {
+            public bool ChatView;
             public string Name;
             public string PromptPurpose;
             public string Provider;
@@ -806,7 +807,7 @@ namespace ReignBetaServer
 
             if (UsesImageReferenceAdapter(model))
             {
-                return GenerateNanoGptImageReference(settings, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
+                return GenerateNanoGptImageReference(settings, apiKey, model, prompt, sourceImagePng, outputSizeOverride, imageProfile.ChatView);
             }
 
             return GenerateNanoGptFluxKontext(settings, imageProfile, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
@@ -844,7 +845,7 @@ namespace ReignBetaServer
             string model,
             string prompt,
             byte[] sourceImagePng,
-            string outputSizeOverride)
+            string outputSizeOverride, bool chatView = false)
         {
             string outputSize = NanoGptReferenceSize(outputSizeOverride);
             string url = ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl);
@@ -857,6 +858,7 @@ namespace ReignBetaServer
                 ["imageDataUrl"] = "data:image/png;base64," + Convert.ToBase64String(sourceImagePng),
                 ["response_format"] = "b64_json"
             };
+            if (chatView) { body["quality"] = "high"; body["input_fidelity"] = "high"; }
             return PostImageJson(url, apiKey, body, settings, "NanoGPT", model, "image reference generation");
         }
 
@@ -925,6 +927,7 @@ namespace ReignBetaServer
                     sourceUrl,
                     outputSize,
                     imageProfile.AtlasWanNegativePrompt);
+                if (imageProfile.ChatView) ApplyChatViewAtlasSize(body, imageProfile);
                 model = ReadString(body, "model", model);
                 string json = Json.Serialize(body);
                 requestChars += json.Length;

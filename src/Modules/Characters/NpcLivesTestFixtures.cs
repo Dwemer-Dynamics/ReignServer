@@ -70,6 +70,7 @@ namespace ReignBetaServer
                 var candidate = new NpcLifeCandidate { HeroId = hero,
                     Affinity = NpcLivesAffinity(c, hero, player, ReadInt(member, "nativeRelation", 0)),
                     Honor = NarrativePersonalityScore(traits, member, "honor"), Compassion = NarrativePersonalityScore(traits, member, "compassion"),
+                    UnsafeLeaveLocationIds = ReadStringList(member, "unsafeLeaveLocationIds").Take(2048).ToList(),
                     DutyPressure = ReadBool(member, "isGovernor", false) || ReadBool(member, "isPartyLeader", false) ? 1 : 0 };
                 return PrepareNpcLivesLeaveInvitation(state, definition, candidate, selectedLocations, ReadString(p, "locationId", ""),
                     ReadString(p, "runId", "") + "|" + ReadString(p, "commandId", ""), day);
@@ -93,8 +94,8 @@ namespace ReignBetaServer
                 throw new InvalidOperationException("Resolve the companion's existing commitment before authored leave setup.");
             double absence = 3 + Math.Floor(NpcLivesEngine.Draw(fixture + "|absence") * 5);
             string location = NpcLivesEngine.BindLocation(definition.Phases[0],
-                locations.Where(l => l.TravelDays <= (absence - 1) / 2), current, id);
-            if (location.Length == 0) throw new InvalidOperationException("The authored leave has no feasible native destination within its absence.");
+                NpcLivesEngine.LeaveDestinations(npc, locations).Where(l => l.TravelDays <= (absence - 1) / 2), current, id);
+            if (location.Length == 0) throw new InvalidOperationException("The authored leave has no safe native destination for this NPC within its absence.");
             var leave = new NpcPersonalLeave { Id = id, HeroId = npc.HeroId, Trust = npc.Affinity,
                 Honor = npc.Honor, Compassion = npc.Compassion, DutyPressure = npc.DutyPressure,
                 Urgency = 1 + (int)(NpcLivesEngine.Draw(fixture + "|urgency") * 3),

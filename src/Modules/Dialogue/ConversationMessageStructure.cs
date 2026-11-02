@@ -57,6 +57,8 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
 
         private static void CopyConversationStructureReceipts(Dictionary<string, object> source, Dictionary<string, object> clone)
         {
+            if (source != null && clone != null && NarrativeClocks.TryGetValue(source, out var clock))
+                NarrativeClocks.GetValue(clone, _ => clock);
             void Copy(Dictionary<string, object> from, Dictionary<string, object> to)
             {
                 if (from != null && to != null && ConversationStructureReceipts.TryGetValue(from, out var receipt))

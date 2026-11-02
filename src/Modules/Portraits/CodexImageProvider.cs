@@ -181,6 +181,7 @@ namespace ReignBetaServer
 
         private static string CodexImageFraming(string size)
         {
+            if (size == "maximum-native-3:2") return "exact landscape 3:2 aspect ratio at the highest native resolution and quality this runtime supports; do not upscale or follow the reference sheet's aspect ratio";
             switch ((size ?? "").Trim())
             {
                 case "768x1024": case "1024x1536": return "portrait, full subject visible";

@@ -6,7 +6,8 @@ param(
     [ValidateSet('ReignServer')][string]$Distro = 'ReignServer',
     [string]$BannerlordPath = $env:REIGN_BANNERLORD_PATH,
     [switch]$SkipClient,
-    [switch]$SkipServer
+    [switch]$SkipServer,
+    [switch]$LeaveStopped
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ClientDeploymentStorage.ps1')
@@ -184,24 +185,31 @@ if (-not $SkipServer) {
     $previousVersion = (& wsl.exe -d $Distro -u root -- cat /var/www/html/ReignServer/runtime/current-version 2>$null | Out-String).Trim()
     & wsl.exe -d $Distro -u root -- systemctl stop reignserver
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the managed ReignServer service before activation.' }
-    & wsl.exe -d $Distro -u root -- /usr/local/bin/reignctl activate $artifact
+    [string[]]$activationOptions = if ($LeaveStopped) { @('--leave-stopped') } else { @() }
+    & wsl.exe -d $Distro -u root -- /usr/local/bin/reignctl activate $artifact @activationOptions
     if ($LASTEXITCODE -ne 0) {
-        if ($wasManagedRunning) { & wsl.exe -d $Distro -u root -- systemctl start reignserver }
+        if ($wasManagedRunning -and -not $LeaveStopped) { & wsl.exe -d $Distro -u root -- systemctl start reignserver }
         throw 'Linux activation failed; inspect the retained runtime and logs.'
     }
     $verifyRuntime = 'import hashlib,json,pathlib,sys; source=pathlib.Path(sys.argv[1]); current=pathlib.Path("/var/www/html/ReignServer/runtime/current"); manifest=json.loads((source/"reign-linux-artifact.json").read_text()); expected=manifest["files"]; actual={p.relative_to(current).as_posix() for p in current.rglob("*") if p.is_file() and p.name!="reign-linux-artifact.json"}; assert set(expected)==actual, "runtime inventory mismatch"; assert not any(p.is_symlink() for p in current.rglob("*")), "runtime symlink"; assert all(hashlib.sha256((current/name).read_bytes()).hexdigest()==digest for name,digest in expected.items()), "runtime checksum mismatch"'
     & wsl.exe -d $Distro -u root -- python3 -c $verifyRuntime $artifact
     if ($LASTEXITCODE -ne 0) {
         if ($previousVersion -match '^[0-9]{14}-[0-9]+$') {
-            & wsl.exe -d $Distro -u root -- /usr/local/bin/reignctl rollback $previousVersion
-            if ($wasManagedRunning) { & wsl.exe -d $Distro -u root -- systemctl start reignserver }
+            & wsl.exe -d $Distro -u root -- /usr/local/bin/reignctl rollback $previousVersion @activationOptions
+            if ($wasManagedRunning -and -not $LeaveStopped) { & wsl.exe -d $Distro -u root -- systemctl start reignserver }
         }
         throw 'Installed ReignServer files differ from the validated Linux artifact; rollback was attempted when available.'
     }
-    & wsl.exe -d $Distro -u root -- systemctl start reignserver
-    if ($LASTEXITCODE -ne 0) { throw 'The managed ReignServer service did not start.' }
-    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8089/health' -TimeoutSec 10
-    if (-not $health.ok -or $health.serverVersion -ne $release.version) { throw 'Deployed server version check failed.' }
-    Write-Output "ReignServer $($health.serverVersion) is healthy inside $Distro through port 8089."
+    if ($LeaveStopped) {
+        & wsl.exe -d $Distro -u root -- systemctl is-active --quiet reignserver
+        if ($LASTEXITCODE -eq 0) { throw 'The deployment was requested to leave ReignServer stopped.' }
+        Write-Output "ReignServer $($release.version) artifacts verified inside $Distro; service left stopped. Live health and lifecycle acceptance deferred."
+    } else {
+        & wsl.exe -d $Distro -u root -- systemctl start reignserver
+        if ($LASTEXITCODE -ne 0) { throw 'The managed ReignServer service did not start.' }
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8089/health' -TimeoutSec 10
+        if (-not $health.ok -or $health.serverVersion -ne $release.version) { throw 'Deployed server version check failed.' }
+        Write-Output "ReignServer $($health.serverVersion) is healthy inside $Distro through port 8089."
+    }
 }
 Write-Output 'No game was started. In-game validation remains manual.'

@@ -87,6 +87,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
                             Honor = NarrativePersonalityScore(traits, h, "honor"), Compassion = NarrativePersonalityScore(traits, h, "compassion"),
                             DutyPressure = ReadBool(h, "isGovernor", false) || ReadBool(h, "isPartyLeader", false) ? 1 : 0,
                             Available = ReadBool(h, "alive", false) && ReadBool(h, "free", false) && ReadBool(h, "adult", false),
+                            UnsafeLeaveLocationIds = ReadStringList(h, "unsafeLeaveLocationIds").Take(2048).ToList(),
                             Interests = Json.Serialize(traits ?? TestDict()) };
                     }).ToList();
                     var locations = ReadDictionaryList(p, "locations").Take(2048).Select(l => new NpcStoryLocation { Id = ReadString(l, "id", ""),

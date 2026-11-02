@@ -141,6 +141,22 @@ namespace ReignBeta.Shared.Characters
         }
         public static bool NativeEncounterSettled(bool missionActive, bool battleActive, string encounterStatus)
             => !missionActive && !battleActive && encounterStatus == "resolved";
+        public static bool CanReleaseBoundRescueCaptive(bool currentScope, bool nativeVictory,
+            bool activeRescue, bool participantsWitnessed, bool captureWitnessed, bool sameBoundHero,
+            bool alivePrisoner, bool ownedCustody, bool alreadyAttempted)
+            => currentScope && nativeVictory && activeRescue && participantsWitnessed && captureWitnessed
+                && sameBoundHero && alivePrisoner && ownedCustody && !alreadyAttempted;
+        public static bool ControlledRescueCustodyMatches(bool captureWitnessed, bool sameCapturedHero,
+            bool alivePrisoner, bool holderMatches, bool holderMissing, bool sameActiveBattle)
+            => captureWitnessed && sameCapturedHero && alivePrisoner
+                && (holderMatches || holderMissing && sameActiveBattle);
+        public static bool CanAcknowledgeControlledRescueConversation(bool ownedScope, bool missionActive,
+            bool conversationActive, bool participantsWitnessed, bool captiveOwned, string requiredOutcome,
+            string controlledOutcome, string boundHeroId, string speakingHeroId)
+            => ownedScope && !missionActive && conversationActive && participantsWitnessed && captiveOwned
+                && requiredOutcome == "rescued" && controlledOutcome == "won"
+                && !string.IsNullOrWhiteSpace(boundHeroId)
+                && string.Equals(boundHeroId, speakingHeroId, StringComparison.Ordinal);
         public static bool CanResumeGuestService(string capturedAgreement, string currentAgreement, string currentPhase, bool permanentlyJoined)
             => string.IsNullOrEmpty(capturedAgreement) || permanentlyJoined || capturedAgreement == currentAgreement
                 && (currentPhase == "Active" || currentPhase == "ReviewDue");

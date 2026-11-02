@@ -123,6 +123,7 @@ namespace ReignBetaServer
                             NpcLivesPolicy.ReaskDelay(ReadNpcLivesOptions())));
                 b.AppendLine("Your reason for wanting to leave remains the subject. Do not replace it with a different errand or agree to unrelated terms. Ordinary friendly speech cannot authorize departure or remove the request. Only the explicit current proposal can set a wait or departure. Waiting before departure is separate from time away.");
                 b.AppendLine("Listen to a concrete reason to stay. Return npcLeaveAssessment:{leaveId,revision,reasonKind,evidenceQuote,compelling}, where reasonKind is medical_need,imminent_danger,prior_commitment,alternative_arrangement,emotional_appeal or authority_demand. Quote the player's exact new argument. Tangents and repeated arguments do not change your decision. The engine fixes the result for each reason; never contradict its saved decision.");
+                b.AppendLine("When responding to a new request to wait or stay, include that assessment with this exact saved leave identity and revision. Omitting it or naming another request cannot agree to a wait: the engine will replace the complete draft with an unresolved-request clarification and discard its memories, plans and other effects. Do not claim that scheduling words alone have changed the agreed dates.");
                 if (leave.ReconsiderDay.HasValue) b.AppendLine("You agreed to stay for now and reconsider on campaign day " + leave.ReconsiderDay.Value + ". This did not abandon your purpose.");
                 if (leave.DepartureDay.HasValue) b.AppendLine("Agreed departure is campaign day " + leave.DepartureDay.Value + ". Actual time away starts when native departure is safe.");
                 foreach (var reason in leave.AcceptedArgumentIds) b.AppendLine("Already considered argument: " + reason + ". Do not reroll or treat a paraphrase as new.");
@@ -193,7 +194,11 @@ namespace ReignBetaServer
                 string quote = ReadString(row, "evidenceQuote", "").Trim();
                 string outcome = ReadString(row, "outcome", ""), resolution = ReadString(row, "resolutionQuote", "").Trim();
                 bool resolved = objective != null && objective.CompletionOutcomes.Contains(outcome) && NpcStoryResolutionMatches(unit.Reply, resolution);
-                if (objective == null || quote.Length < 6 || outcome != "progress" && !resolved) continue;
+                // A malformed completion quote cannot erase otherwise valid
+                // participation. Keep the exact accepted player source as progress;
+                // a verified full conclusion is still required before completion.
+                bool participation = objective != null && (outcome == "progress" || objective.CompletionOutcomes.Contains(outcome));
+                if (objective == null || quote.Length < 6 || !participation) continue;
                 var source = playerSources.FirstOrDefault(r => ReadString(r, "text", "").IndexOf(quote, StringComparison.Ordinal) >= 0);
                 if (source == null || RepeatedNpcStoryContribution(c, story, objective.Id, unit.Player, ReadString(source, "text", ""))) continue;
                 story.AcceptEvidence(new NpcStoryEvidence { ObjectiveId = objective.Id, HeroId = unit.Hero,
