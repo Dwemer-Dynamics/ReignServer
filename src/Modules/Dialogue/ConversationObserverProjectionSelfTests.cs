@@ -134,8 +134,15 @@ namespace ReignBetaServer
                     var bystander = BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
                     var ownerRows = QueryKnownRows(connection, "memories", owner, "status='active'", 50);
                     var publicRows = QueryKnownRows(connection, "memories", bystander, "status='active'", 50);
-                    Check("mixed_write_owned_only_by_actual_speaker", ownerRows.Any(r => ReadString(r, "memory_id", "") == "mixed_fixture" && ReadString(r, "owner_id", "") == "npc_a")
-                        && publicRows.All(r => ReadString(r, "memory_id", "") != "mixed_fixture"));
+                    var ownerAuditRows = QueryKnownRows(connection, "memories", owner, "status='audit_only'", 50);
+                    var bystanderAuditRows = QueryKnownRows(connection, "memories", bystander, "status='audit_only'", 50);
+                    Check("mixed_write_owned_only_by_actual_speaker", ownerAuditRows.Any(r =>
+                            ReadString(r, "memory_id", "") == "mixed_fixture" && ReadString(r, "owner_id", "") == "npc_a"
+                            && ReadString(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "sourceValidation", "") == "incomplete"
+                            && !EmbeddingRowActive("memory", r))
+                        && ownerRows.All(r => ReadString(r, "memory_id", "") != "mixed_fixture")
+                        && publicRows.All(r => ReadString(r, "memory_id", "") != "mixed_fixture")
+                        && bystanderAuditRows.All(r => ReadString(r, "memory_id", "") != "mixed_fixture"));
                     Check("public_observation_survives_as_separate_supported_record", publicRows.Any(r => ReadString(r, "summary", "").Contains("turns the stem"))
                         && publicRows.All(r => !ReadString(r, "summary", "").Contains(secret)), publicRows.Select(r => ReadString(r, "summary", "")).ToList());
                     var earlier = BuildKnowledgeAccessContext("npc_b", "player", "town", new Dictionary<string, object>(payload) { ["worldDay"] = 9d });

@@ -34,6 +34,7 @@ namespace ReignBetaServer
                 var state = ReadNpcLives(c, campaign, "test");
                 var options = new NpcLivesOptions();
                 results.AddRange(RunNpcApproachConversationSelfTests(campaign));
+                results.AddRange(RunNpcLifeInvitationOpeningSelfTests(campaign));
                 results.AddRange(RunNpcGroupApproachSessionSelfTests(campaign));
                 results.AddRange(RunNpcStoryInvitationSelfTests(campaign, c));
                 var initialApproachOff = new NpcLivesOptions(k => k != NpcLivesOptions.InitialApproachKey, _ => null);
@@ -160,6 +161,33 @@ namespace ReignBetaServer
                     new[] { new NpcStoryLocation { Id = "far", Kind = "town", TravelDays = 100 } }, "town", "far_fixture", 10); }
                 catch (InvalidOperationException) { infeasibleLeave = true; }
                 Check("authored_leave_setup_rejects_conflicts_and_infeasible_travel", leaveConflict && infeasibleLeave);
+                var factionGuest = new NpcLifeCandidate { HeroId = "foreign_guest", Affinity = 31,
+                    UnsafeLeaveLocationIds = new List<string> { "hostile_town" } };
+                var guestPlaces = new[] { new NpcStoryLocation { Id = "hostile_town", Kind = "town", TravelDays = .25 },
+                    new NpcStoryLocation { Id = "safe_town", Kind = "town", TravelDays = .25 } };
+                var safeLeaveState = new NpcLivesState { CampaignId = campaign, TimelineId = "guest_safety" };
+                PrepareNpcLivesLeaveInvitation(safeLeaveState, outing, factionGuest, guestPlaces, "origin", "guest_safety", 10);
+                Check("authored_leave_filters_the_guests_hostile_destination", safeLeaveState.Leaves.Single().DestinationId == "safe_town"
+                    && guestPlaces[0].Available && safeLeaveState.Effects.Count == 0 && !safeLeaveState.Leaves.Single().DepartureDay.HasValue);
+                var unsafeLeaveState = new NpcLivesState { CampaignId = campaign, TimelineId = "unsafe_guest" };
+                bool unsafeLeaveRejected = false;
+                try { PrepareNpcLivesLeaveInvitation(unsafeLeaveState, outing, factionGuest,
+                    new[] { guestPlaces[0] }, "origin", "unsafe_guest", 10); }
+                catch (InvalidOperationException) { unsafeLeaveRejected = true; }
+                Check("authored_leave_rejects_an_explicit_unsafe_npc_destination_without_effects", unsafeLeaveRejected
+                    && unsafeLeaveState.Leaves.Count == 0 && unsafeLeaveState.OperationReceipts.Count == 0 && unsafeLeaveState.Effects.Count == 0);
+                var interruptedWait = safeLeaveState.Leaves.Single();
+                bool waitAccepted = interruptedWait.AgreeDeparture(interruptedWait.ProposalId, interruptedWait.Revision, 10, 1, 5);
+                string interruptionId = interruptedWait.Id + ":interrupted";
+                var interruption = TestDict("kind", "interrupted", "id", interruptedWait.Id, "heroId", factionGuest.HeroId,
+                    "revision", interruptedWait.Revision, "operationId", interruptionId, "nativeReceipt", interruptionId);
+                NpcLivesNativeReceipt(c, safeLeaveState, interruption, "player", 10.1);
+                string firstInterruption = Json.Serialize(safeLeaveState);
+                NpcLivesNativeReceipt(c, safeLeaveState, interruption, "player", 10.2);
+                Check("waiting_leave_interruption_is_once_only_and_never_a_completed_trip", waitAccepted && interruptedWait.Status == "cancelled"
+                    && !interruptedWait.DepartedDay.HasValue && !interruptedWait.ReturnDay.HasValue
+                    && safeLeaveState.Effects.Count == 0 && safeLeaveState.Characters.All(n => n.Facts.Count == 0)
+                    && firstInterruption == Json.Serialize(safeLeaveState));
                 var invitationPrompt = new System.Text.StringBuilder();
                 AppendNpcStoryPrompt(invitationPrompt, fixtureState, "companion", TestDict("locationId", "town"));
                 Check("invitation_is_optional_reference_without_activity_or_progress_instructions", invitationPrompt.ToString().Contains(authored.Phases[0].Title)
@@ -289,13 +317,61 @@ VALUES('repeat_original','repeat_session',0,'player','player','Add unsalted brot
                     SubmitPet("conditional", "I support adopting the rabbit if its health is good.", outcome, conditionalAdoption, conditionalAdoption);
                     SubmitPet("foreign_quote", "The keeper has shown us the rabbit and we have made our choice.", outcome, "That decision is still ahead.", "I have adopted Clover as my companion.");
                     Check("uncertain_or_fabricated_resolution_does_not_publish_facts_" + outcome,
-                        petStory.Status == "active" && petStory.Evidence.Count == 3 && petState.Effects.Count == 0);
+                        petStory.Status == "active" && petStory.Evidence.Count == 5 && petState.Effects.Count == 0
+                            && petStory.Evidence.Count(e => e.SourceId == "conditional" || e.SourceId == "foreign_quote") == 2
+                            && petStory.Evidence.Where(e => e.SourceId == "conditional" || e.SourceId == "foreign_quote")
+                                .All(e => e.Outcome.Length == 0 && e.ResolutionQuote.Length == 0));
                     string conclusion = outcome == "adopted" ? "I have adopted Clover as my companion." : "I have decided against adopting this rabbit.";
                     SubmitPet("final", "The keeper has shown us the rabbit and we have made our final choice.", outcome, conclusion, conclusion);
                     Check("verified_pet_choice_publishes_only_matching_facts_and_rewards_" + outcome, petStory.Status == "completed"
                         && petState.Character(petStory.HeroId).Facts.Any(f => f.Kind == "pet") == (outcome == "adopted")
                         && petState.Character(petStory.HeroId).Facts.Any(f => f.Id.EndsWith(":rabbit_declined", StringComparison.Ordinal)) == (outcome == "declined")
                         && petState.Effects.Count == 2 && !petState.Advance(petStory, 11));
+                }
+                foreach (bool conclusionFirst in new[] { false, true })
+                {
+                    var verse = new NpcStoryInstance { Id = "verse_participation_" + conclusionFirst, HeroId = "verse_npc",
+                        Definition = NpcStoryCatalog.All.Single(d => d.Id == "brief_music_01"), Status = "active", LocationId = "town" };
+                    var verseState = new NpcLivesState { CampaignId = campaign, TimelineId = "test", Stories = new List<NpcStoryInstance> { verse } };
+                    string objectiveId = verse.Definition.Phases[0].Objectives.Single().Id;
+                    const string finishedVerse = "The verse is finished, and sharing the work gave its ending the honesty it needed.";
+                    void SubmitVerse(string sourceId, string words, string reply, string resolution, string result = "completed",
+                        int revision = 1, string hero = "verse_npc", string speaker = "player", string location = "town", string assessedObjective = "")
+                    {
+                        var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = hero, Player = "player", Reply = reply,
+                            Payload = TestDict("locationId", location, "npcStoryId", verse.Id, "worldDay", 10d),
+                            Parsed = TestDict("npcStoryAssessments", new[] { TestDict("storyId", verse.Id, "revision", revision,
+                                "objectiveId", assessedObjective.Length == 0 ? objectiveId : assessedObjective, "outcome", result,
+                                "evidenceQuote", words, "resolutionQuote", resolution) }) };
+                        AcceptNpcStoryAssessment(c, verseState, unit, new List<Dictionary<string, object>> {
+                            TestDict("turn_id", sourceId, "speaker_id", speaker, "role", "player", "text", words) });
+                    }
+                    SubmitVerse("stale", "A stale contribution cannot count.", finishedVerse, finishedVerse, revision: 2);
+                    SubmitVerse("foreign_npc", "A different NPC cannot finish this verse.", finishedVerse, finishedVerse, hero: "other");
+                    SubmitVerse("foreign_speaker", "Another player cannot supply this contribution.", finishedVerse, finishedVerse, speaker: "other");
+                    SubmitVerse("wrong_place", "A contribution from elsewhere cannot count.", finishedVerse, finishedVerse, location: "elsewhere");
+                    SubmitVerse("unknown_outcome", "An unknown result cannot count as participation.", finishedVerse, finishedVerse, result: "invented");
+                    SubmitVerse("wrong_objective", "An unrelated objective cannot count.", finishedVerse, finishedVerse, assessedObjective: "foreign_objective");
+                    Check("invalid_completion_retains_no_foreign_or_stale_authority_" + conclusionFirst, verse.Evidence.Count == 0 && verseState.Effects.Count == 0);
+                    SubmitVerse("first", "The bare tree endures without hiding its scars.",
+                        conclusionFirst ? finishedVerse : "If the line fits, the verse could be finished.",
+                        conclusionFirst ? finishedVerse : "If the line fits, the verse could be finished.");
+                    Check("one_contribution_never_completes_the_verse_" + conclusionFirst, verse.Status == "active" && verse.Evidence.Count == 1 && verseState.Effects.Count == 0);
+                    // Native regression: the provider quoted only the second sentence
+                    // of a paragraph that also contained future intent.
+                    SubmitVerse("second", "Sharing the ending makes the honest work less lonely.",
+                        "I will keep this verse. The matter closes as we agreed.", "The matter closes as we agreed.");
+                    Check("malformed_completion_retains_only_literal_participation_" + conclusionFirst,
+                        verse.Evidence.Count == 2 && verse.Evidence.Single(e => e.SourceId == "second").Outcome == ""
+                        && verse.Evidence.Single(e => e.SourceId == "second").ResolutionQuote == ""
+                        && (verse.Status == "completed") == conclusionFirst && verseState.Effects.Count == (conclusionFirst ? 2 : 0));
+                    if (!conclusionFirst)
+                        SubmitVerse("final", "The finished verse belongs with the person who carried it for years.", finishedVerse, finishedVerse);
+                    int completedEvidence = verse.Evidence.Count;
+                    SubmitVerse("replay", "The finished verse belongs with the person who carried it for years.", finishedVerse, finishedVerse);
+                    Check("verified_verse_conclusion_completes_and_rewards_once_" + conclusionFirst,
+                        verse.Status == "completed" && verseState.Effects.Count == 2 && verse.Evidence.Count == completedEvidence
+                        && !verseState.Advance(verse, 11));
                 }
                 var destinationChoices = new[] { new NpcStoryLocation { Id = "town", Kind = "town", Available = true },
                     new NpcStoryLocation { Id = "camp", Kind = "hideout", Available = true },
@@ -470,8 +546,10 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     ReadDictionaryList(settledFacts, "rows").Count == 1
                     && settledOpeningPrompt.Contains("settled-ballot-fee") && settledOpeningPrompt.Contains("30000")
                     && settledOpeningPrompt.Contains("an earlier conditional offer cannot make a verified delivery still unpaid")
-                    && !UsesStructuredActions(settledOpening) && StructuredActionPrompt(settledOpening) == ""
-                    && settledOpeningResponseContract.Count == 0
+                    && UsesStructuredActions(settledOpening)
+                    && StructuredActionPrompt(settledOpening).Contains("structuredActionDecision")
+                    && UsesStructuredActions(settledOpeningResponseContract)
+                    && NpcApproachInstructions(settledOpening).Contains("kind none")
                     && ReadDictionary(settledOpening, "structuredActionContext").Count == 3
                     && ReadString(settledOpening, "playerText", "missing") == ""
                     && Json.Serialize(settledOpeningSource) == settledOpeningBefore);
@@ -494,7 +572,8 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                     && completedVotePrompt.Contains("\"closed\":true") && completedVotePrompt.Contains("\"ownRecordedBallot\"")
                     && completedVotePrompt.Contains("\"resolvedDay\":110")
                     && !completedVotePrompt.Contains("PRIVATE GOVERNMENT BUSINESS")
-                    && !UsesStructuredActions(completedVoteArrival)
+                    && UsesStructuredActions(completedVoteArrival)
+                    && NpcApproachInstructions(completedVoteArrival).Contains("An arrival does not review or accept an action")
                     && ReadString(completedVoteArrival, "playerText", "missing") == "");
                 var reviewState = new NpcLivesState { CampaignId = campaign, TimelineId = "test" };
                 for (int i = 0; i < 15; i++) reviewState.Announcements.Add(new NpcPartyAnnouncement {
@@ -653,16 +732,68 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                 string words = "Please stay until the wounded have recovered.";
                 var p = TestDict("campaignId", campaign, "timelineId", "test", "playerText", words, "worldDay", 10d);
                 var assessment = TestDict("leaveId", "leave", "revision", 1, "reasonKind", "medical_need", "evidenceQuote", words, "compelling", true);
-                var parsed = TestDict("npcLeaveAssessment", assessment, "reply", "I abandon the visit forever.");
+                var parsed = TestDict("npcLeaveAssessment", assessment, "reply", "I abandon the visit forever.",
+                    "memoryWrites", new[] { TestDict("text", "I permanently abandoned my visit.") },
+                    "stateUpdates", TestDict("currentPlan", "Never make the visit"),
+                    "actionGate", TestDict("needed", true, "commitment", "accepted"),
+                    "intent", "abandon the visit", "continuityWrites", new[] { TestDict("subject", "Cancelled visit") },
+                    "drinkActions", new[] { TestDict("kind", "consume") });
                 string reply = ReadString(parsed, "reply", "");
                 ConstrainNpcLeaveReply(p, "companion", parsed, ref reply);
                 bool persuaded = NpcLeaveNegotiation.Persuaded(leave, "medical_need", true, campaign + "|test");
                 Check("contradictory_leave_reply_gets_bounded_matching_repair", reply.Contains(NpcLeaveNegotiation.Response(persuaded, 7))
                     && !reply.Contains("abandon") && ReadNpcLives(c, campaign, "test").Leaves.Single().Status == "discussing");
+                Check("bounded_leave_replacement_discards_memory_state_action_and_other_effect_metadata",
+                    !parsed.ContainsKey("memoryWrites") && !parsed.ContainsKey("stateUpdates") && !parsed.ContainsKey("actionGate")
+                    && !parsed.ContainsKey("intent") && !parsed.ContainsKey("continuityWrites") && !parsed.ContainsKey("drinkActions")
+                    && ReadDictionary(parsed, "npcLeaveAssessment") != null);
                 var invalid = TestDict("npcLeaveAssessment", TestDict("leaveId", "leave", "revision", 0, "reasonKind", "medical_need", "evidenceQuote", words, "compelling", true));
                 string staleReply = "I will stay.";
                 ConstrainNpcLeaveReply(p, "companion", invalid, ref staleReply);
                 Check("stale_argument_clarifies_without_state_change", !invalid.ContainsKey("npcLeaveAssessment") && staleReply.Contains("unresolved"));
+                foreach (string missingOrWrong in new[] { "omitted", "wrong_request", "malformed", "unsupported_action_kind" })
+                {
+                    var unassessed = TestDict("reply", "I agree to wait half a day and then leave.",
+                        "structuredActionDecision", TestDict("kind", missingOrWrong == "unsupported_action_kind" ? "invented_accept" : "none"),
+                        "memoryWrites", new[] { TestDict("text", "Agreed to delay departure by half a day.") },
+                        "stateUpdates", TestDict("currentPlan", "Wait half a day then depart"),
+                        "actionGate", TestDict("needed", true), "intent", "agreed_wait",
+                        "continuityWrites", new[] { TestDict("subject", "Agreed delayed departure") },
+                        "drinkActions", new[] { TestDict("kind", "consume") });
+                    if (missingOrWrong == "wrong_request")
+                        unassessed["npcLeaveAssessment"] = TestDict("leaveId", "another_leave", "revision", 1,
+                            "reasonKind", "medical_need", "evidenceQuote", words, "compelling", true);
+                    if (missingOrWrong == "malformed") unassessed["npcLeaveAssessment"] = "not an assessment";
+                    string unassessedReply = ReadString(unassessed, "reply", "");
+                    ConstrainNpcLeaveReply(p, "companion", unassessed, ref unassessedReply);
+                    var unchanged = ReadNpcLives(c, campaign, "test").Leaves.Single();
+                    Check("unassessed_leave_draft_is_bounded_without_publishing_effects_" + missingOrWrong,
+                        unassessedReply.Contains("unresolved") && !unassessedReply.Contains("half a day")
+                        && unassessed.Count == 2 && unassessed.ContainsKey("reply") && unassessed.ContainsKey("announcementReactions")
+                        && unchanged.Status == "discussing" && !unchanged.DepartureDay.HasValue
+                        && unchanged.AcceptedArgumentIds.Count == 0);
+                }
+                var unrelatedReplyMetadata = TestDict("reply", "Let us talk about the market.",
+                    "memoryWrites", new[] { TestDict("text", "Discussed the market.") });
+                string unrelatedReply = ReadString(unrelatedReplyMetadata, "reply", "");
+                ConstrainNpcLeaveReply(p, "other_companion", unrelatedReplyMetadata, ref unrelatedReply);
+                Check("unassessed_leave_guard_does_not_replace_another_npcs_conversation",
+                    unrelatedReply == "Let us talk about the market." && unrelatedReplyMetadata.ContainsKey("memoryWrites"));
+                var explicitOfferMetadata = TestDict("structuredActionDecision", TestDict("kind", "propose"),
+                    "npcLeaveAssessment", assessment, "reply", "Review my explicit proposal.");
+                string explicitOfferReply = ReadString(explicitOfferMetadata, "reply", "");
+                ConstrainNpcLeaveReply(p, "companion", explicitOfferMetadata, ref explicitOfferReply);
+                Check("leave_guard_keeps_explicit_offers_on_the_structured_action_validation_route",
+                    explicitOfferReply == "Review my explicit proposal." && explicitOfferMetadata.ContainsKey("structuredActionDecision")
+                    && !explicitOfferMetadata.ContainsKey("npcLeaveAssessment"));
+                foreach (string malformedHero in new[] { "companion", "other_companion" })
+                {
+                    string malformedEnvelopeReply = "[Bannerlord Reign: malformed response; please try again.]";
+                    ConstrainNpcLeaveReply(p, malformedHero, null, ref malformedEnvelopeReply);
+                    Check("malformed_response_envelope_preserves_existing_error_path_" + malformedHero,
+                        malformedEnvelopeReply == "[Bannerlord Reign: malformed response; please try again.]"
+                        && ReadNpcLives(c, campaign, "test").Leaves.Single().Status == "discussing");
+                }
                 Check("catalogue_structural_validation", NpcStoryCatalog.All.Count == 240 && NpcStoryCatalog.Validate(NpcStoryCatalog.All).Count == 0
                     && NpcStoryCatalog.ValidateLinks(NpcStoryCatalog.All).Count == 0);
                 foreach (int index in new[] { 0, 31, 65, 99, 130, 180 })

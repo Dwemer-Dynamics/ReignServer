@@ -143,7 +143,9 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
                     "SPEAKER " + who + "; ROLE " + ReadString(line, "role", "unknown") + ": " + text));
             }
             var messages = ReadDictionaryList(request, "messages");
-            messages.Add(TestDict("role", "user", "content", evidence.ToString()));
+            // Required continuity records use canonical prompt whitespace. Render the
+            // same representation; mixed template line endings must not look like lost evidence.
+            messages.Add(TestDict("role", "user", "content", NormalizePromptSegment(evidence.ToString())));
             request["messages"] = messages;
             bool Valid(Dictionary<string, object> draft)
             {

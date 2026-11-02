@@ -1,5 +1,11 @@
 # Conversation intoxication and action text
 
+## Separate narrative and campaign clocks (2026-10-28)
+
+Conversation recovery now uses native campaign hours by default, or the maximum of native hours and an accepted source-bound narrative clock. A current observable narrated passage of explicit hours/days or the next/following morning can advance conversation time while the game remains paused. Merely sending turns, spoken plans, recollections, private thoughts, uncertain durations and caller/model JSON clock values cannot. Server-local receipts authorize this projection; accepted responses persist it in the existing owner/timeline handoff. Contribution identity prevents retry double advancement, and native catch-up does not add the duration again.
+
+Recovery remains one gameplay serving per two such conversation hours. This affects conversation intoxication and scene wording only; it does not advance native campaign time, native travel/actions, pregnancy, deadlines, cooldowns or saves. A narrative time jump invalidates the old local room/privacy assumption for participants who heard it; new rooms retain source-bound acceptance/refusal and existing witness/knowledge boundaries. Historical sections below describe their original implementation and do not override this clock rule. The existing artifact-bound `prompt_efficiency` suite's `correction_*` cases prove recovery, retry, native catch-up, caller/foreign-scope rejection and scene-epoch reopening. Provider prose and native acceptance remain separate.
+
 ## Current private action system (2026-10-08)
 
 The ordinary response carries freely authored `reply` prose and a private `drinkActions` array. This is the sole accounting authority for new turns. The server does not search prose for sips, require a stock action sentence, compare exact quotes, or fall back to `drinkingEvents`, `drinkConsumptions` or `drinkSceneUpdates`. Older fields remain compatible schema fields and historical test fixtures, but live accounting ignores them. Historical receipts and counters are never backfilled.

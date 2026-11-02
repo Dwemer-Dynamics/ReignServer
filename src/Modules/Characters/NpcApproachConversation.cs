@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Reign.Core.Contracts.Actions;
 using System.Runtime.CompilerServices;
 using ReignBeta.Shared.Characters;
 
@@ -15,6 +16,7 @@ namespace ReignBetaServer
             public string Campaign, Timeline, Player, Hero, Operation, Generation, Session;
             public double Day;
             public NpcAnnouncementReviewWindow Review;
+            public NpcLifeInvitationOpening Invitation;
             public Dictionary<string, object> PublicationContext;
             public string ReplyHash, ActivityHash;
         }
@@ -42,8 +44,10 @@ namespace ReignBetaServer
             {
                 using (var c = OpenCampaignConnection(scope.Campaign))
                 {
+                    var current = ReadNpcLives(c, scope.Campaign, scope.Timeline);
                     if (NpcLivesGeneration(c) != scope.Generation
-                        || !ReadNpcLives(c, scope.Campaign, scope.Timeline).Encounters.Any(e => e.OpeningPending
+                        || scope.Invitation != null && ResolveNpcLifeInvitationOpening(current, payload, scope.Hero, ReadNpcLivesOptions())?.ReceiptKey != scope.Invitation.ReceiptKey
+                        || !current.Encounters.Any(e => e.OpeningPending
                             && e.HeroId == scope.Hero && e.OpeningOperationId == scope.Operation
                             && e.OpeningGeneration == scope.Generation && e.SessionId == scope.Session && e.OpeningDay == scope.Day))
                         return TestDict("ok", false, "status", "superseded");
@@ -54,7 +58,7 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> CreateNpcApproachPayload(NpcLivesState state, NpcConversationEncounter encounter,
-            Dictionary<string, object> source, string player, string hero, string operation, double day)
+            Dictionary<string, object> source, string player, string hero, string operation, double day, NpcLifeInvitationOpening invitation = null)
         {
             var p = DeepCloneProfileDictionary(source);
             p["campaignId"] = state.CampaignId; p["timelineId"] = state.TimelineId;
@@ -64,13 +68,16 @@ namespace ReignBetaServer
             p["conversationSessionId"] = encounter.SessionId; p["worldDay"] = day;
             p["playerText"] = ""; p.Remove("text"); p.Remove("message");
             p["turnType"] = "npc_approach_opening"; p["suppressPlayerTranscript"] = true;
+            // Background arrivals use the same shipping action schema as ordinary
+            // dialogue. The sealed opening returns before any action/effect commit.
+            p["structuredActionProtocolVersion"] = ActionNegotiation.ProtocolVersion;
             p["suppressConceptionGate"] = true;
             string scene = ReadString(source, "sceneContext", "");
             if (scene.Length == 0) scene = "Current native place: " + ReadString(source, "location", "unknown") + ".";
             p["sceneContext"] = scene + "\nNative game hour: " + ((day % 1) * 24).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
             NpcApproachRequests.Add(p, new NpcApproachDraftScope {
                 Campaign = state.CampaignId, Timeline = state.TimelineId, Player = player, Hero = hero,
-                Operation = operation, Generation = encounter.OpeningGeneration, Session = encounter.SessionId, Day = day
+                Operation = operation, Generation = encounter.OpeningGeneration, Session = encounter.SessionId, Day = day, Invitation = invitation
             });
             return p;
         }
@@ -92,11 +99,13 @@ namespace ReignBetaServer
                 + "Return the complete ordinary dialogue JSON schema, with additional string fields activity (a short description of your visible current activity, or empty if unknown) "
                 + "and receptiveness (busy, neutral, receptive or needs_help). These describe this moment, not permission to block conversation. "
                 + "This arrival alone grants no player action, agreement, relationship reward, conception, story progress or lasting character change.\n"
+                + "Return structuredActionDecision with kind none, empty proposalId, termsHash and clauses, and revision 0. An arrival does not review or accept an action. Describe your request in speech; an existing personal invitation keeps its saved offer and terms.\n"
                 + "Current directional affinity toward the player: " + ReadInt(p, "npcEffectiveAffinity", 0)
                 + ". Express the relationship naturally; never disclose the number.\n"
                 + "Actual conversation scope: " + ReadString(p, "npcLifeContext", "in_person")
                 + "; audience IDs: " + Json.Serialize(ReadStringList(p, "npcLifeAudienceIds"))
-                + ". Speak only for yourself and protect private memories from other listeners.";
+                + ". Speak only for yourself and protect private memories from other listeners."
+                + NpcLifeInvitationInstructions(NpcApproachRequests.TryGetValue(p, out var scope) ? scope.Invitation : null);
         }
 
         private static void ConfigureNpcApproachGeneration(Dictionary<string, object> request, Dictionary<string, object> payload)
@@ -152,6 +161,7 @@ namespace ReignBetaServer
                 Campaign = scope.Campaign, Timeline = scope.Timeline, Player = scope.Player, Hero = scope.Hero,
                 Operation = scope.Operation, Generation = scope.Generation, Session = scope.Session, Day = scope.Day,
                 Review = CapturedNpcAnnouncementReview(payload, scope.Hero, scope.Player),
+                Invitation = scope.Invitation,
                 PublicationContext = NpcApproachPublicationContext(payload),
                 ReplyHash = PromptHash(ReadString(draft, "reply", "")), ActivityHash = PromptHash(ReadString(draft, "activity", ""))
             };
@@ -170,7 +180,8 @@ namespace ReignBetaServer
                 || captured.Operation != encounter.OpeningOperationId || captured.Generation != generation
                 || captured.Session != encounter.SessionId || captured.Day != encounter.OpeningDay
                 || captured.ReplyHash != PromptHash(ReadString(draft, "reply", ""))
-                || captured.ActivityHash != PromptHash(ReadString(draft, "activity", ""))) return false;
+                || captured.ActivityHash != PromptHash(ReadString(draft, "activity", ""))
+                || captured.Invitation != null && ResolveNpcLifeInvitationOpening(state, saved, encounter.HeroId, ReadNpcLivesOptions())?.ReceiptKey != captured.Invitation.ReceiptKey) return false;
             receipt = captured; return true;
         }
 

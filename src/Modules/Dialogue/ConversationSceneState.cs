@@ -470,6 +470,8 @@ updated_ts INTEGER NOT NULL);");
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureConversationSceneStateSchema(connection);
+                EnsureConversationContinuitySchema(connection);
+                PrepareNarrativeClock(connection, payload, speakerId);
                 ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
                     new Dictionary<string, object> { ["hour"] = hour });
                 foreach (Dictionary<string, object> participant in participants)
@@ -481,6 +483,11 @@ updated_ts INTEGER NOT NULL);");
                     // Narrative location survives an hourly legacy cache expiry or
                     // session reload until native movement/room/timeline changes.
                     row = LoadSceneContinuityHandoff(connection, payload, participant) ?? row;
+                    if (ReadBool(CurrentNarrativeClock(payload), "advanced", false))
+                    {
+                        row = CloneDictionary(row ?? new Dictionary<string, object>());
+                        row.Remove("location_override"); row.Remove("location_class"); row.Remove("acceptedPrivateScene");
+                    }
                     current[id] = ResolveSceneParticipantState(campaignId, participant, row, detailedParticipantIds.Contains(id), UsesCastleRoomAttireContext(payload));
                 }
             }
@@ -521,6 +528,13 @@ updated_ts INTEGER NOT NULL);");
             };
             payload["conversationSceneState"] = result;
             payload["conversationScenePrompt"] = prompt;
+            result["narrativeClock"] = CurrentNarrativeClock(payload);
+            if (ReadString(CurrentNarrativeClock(payload), "label", "").Length > 0)
+            {
+                prompt += "\nNARRATIVE TIME — " + ReadString(CurrentNarrativeClock(payload), "label", "")
+                    + ". This is acknowledged roleplay time, distinct from the native campaign clock. Historical yesterday/tomorrow and old plans belong to their source scene. No native day, travel, cooldown, pregnancy or action advances from this label.";
+                result["prompt"] = prompt; payload["conversationScenePrompt"] = prompt;
+            }
             return result;
         }
 
@@ -711,6 +725,7 @@ updated_ts INTEGER NOT NULL);");
                 ["location"] = LimitText(location, 500),
                 ["locationClass"] = locationClass,
                 ["hasNarrativeLocation"] = !string.IsNullOrWhiteSpace(ReadString(stored, "location_override", "")),
+                ["acceptedPrivateScene"] = ReadBool(stored, "acceptedPrivateScene", false),
                 ["clothing"] = LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
                 ["clothingSource"] = clothingSource,
                 ["revision"] = ReadLong(stored, "revision", 0)
@@ -1023,7 +1038,7 @@ VALUES($proposal_id,$scene_turn_id,$subject_id,$speaker_id,$location_value,$loca
             long hour = ConversationWorldHour(payload);
             List<Dictionary<string, object>> participants = ReadDictionaryList(prepared, "participants");
             List<Dictionary<string, object>> proposals = ReadDictionaryList(prepared, "proposals");
-            if (ReadBool(payload, "conversationGroundingFailed", false))
+            if (ReadBool(payload, "conversationGroundingFailed", false) || ConversationRepairFailed(parsedResponse))
                 return TestDict("status", "unresolved_grounding", "applied", new List<Dictionary<string, object>>());
             List<Dictionary<string, object>> denied = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> npcUpdates = ReadDictionaryList(parsedResponse, "sceneStateUpdates")

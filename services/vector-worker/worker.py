@@ -737,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/dialogue/claims/extract":
                 self.send_json(200, MEMORY_EXTRACTOR.extract_claims(body))
             elif parsed.path == "/memory/selection":
-                self.send_json(200, STATE.memory_selection.evaluate(body))
+                self.send_json(200, STATE.memory_selection.evaluate_shadow(body) if isinstance(body, dict) and body.get("shadow") is True else STATE.memory_selection.evaluate(body))
             elif parsed.path == "/memory/late/index":
                 self.send_json(200, STATE.late_interaction.index(body))
             elif parsed.path == "/memory/late/search":

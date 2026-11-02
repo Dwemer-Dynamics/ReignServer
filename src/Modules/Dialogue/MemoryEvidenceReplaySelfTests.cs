@@ -193,7 +193,12 @@ namespace ReignBetaServer
                 "checkedAtUtc", DateTimeOffset.UtcNow.ToString("o"), "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             ReadDictionary(capacityWriter, "writerReplay")["contextCapacity"] = capacityCapture;
             Check("writer_replay_capacity_metadata_is_bounded", MemoryEvidenceReplayInputError(capacityWriter) == "");
-            var secondCase = CloneDictionary(capacityWriter); secondCase["caseId"] = "bounded_second";
+            // Scope only contract fixtures to this invocation. Real replay input
+            // remains stable; paired cold repeats below share the same nonce.
+            // Never reclaim an earlier interrupted invocation's unowned world.
+            string contractNamespace = Guid.NewGuid().ToString("N");
+            capacityWriter["caseId"] = ReadString(capacityWriter, "caseId", "writer") + "_" + contractNamespace;
+            var secondCase = CloneDictionary(capacityWriter); secondCase["caseId"] = "bounded_second_" + contractNamespace;
             var stableInput = TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", new[] { CloneDictionary(capacityWriter), secondCase });
             var withResponses = CloneDictionary(stableInput);
             ReadDictionary(ReadDictionaryList(withResponses, "cases").First(), "writerReplay")["response"] = TestDict("ok", true, "finishReason", "stop",
@@ -310,7 +315,7 @@ namespace ReignBetaServer
                         && !ReadBool(boundaryWriter, "allRequestedTurnsReplayed", true) && ReadInt(boundaryWriter, "providerCalls", -1) == 0);
                 }
                 var chronologicalCase = CloneDictionary(capacityWriter);
-                chronologicalCase["caseId"] = "archived_session_chronology";
+                chronologicalCase["caseId"] = "archived_session_chronology_" + contractNamespace;
                 chronologicalCase["query"] = "What did we discuss earlier?";
                 chronologicalCase["asOfSequence"] = 4L; chronologicalCase["worldDay"] = 4d;
                 chronologicalCase["recentSourceIds"] = Array.Empty<object>();
@@ -330,7 +335,7 @@ namespace ReignBetaServer
                 const string recentRecallFact = "Brindle is my mule. A crab pinched his nose beside the watermill.";
                 const string recentRecallFailure = "I have no memory of Brindle.";
                 var recentRecallCase = CloneDictionary(capacityWriter);
-                recentRecallCase["caseId"] = "recent_only_continuation_guard";
+                recentRecallCase["caseId"] = "recent_only_continuation_guard_" + contractNamespace;
                 recentRecallCase["query"] = "Let us rest beside the mill.";
                 recentRecallCase["sources"] = new[] {
                     TestDict("sourceId", "recent_fact", "sessionId", "recent", "exchangeId", "recent_pair", "speakerId", "player", "speakerName", "Mira",
@@ -348,7 +353,7 @@ namespace ReignBetaServer
                 foreach (string callback in new[] { "named", "pronoun" })
                 {
                     var callbackCase = CloneDictionary(recentRecallCase);
-                    callbackCase["caseId"] = "recent_only_continuation_guard_" + callback;
+                    callbackCase["caseId"] = "recent_only_continuation_guard_" + callback + "_" + contractNamespace;
                     ReadDictionary(callbackCase, "writerReplay")["nextContribution"] = callback == "named"
                         ? "Do you remember Brindle and the crab?" : "Do you remember him?";
                     var recentRecallReport = ReplayMemoryEvidenceFixture(TestDict("schema", "reign-memory-evidence-replay-input-v1",

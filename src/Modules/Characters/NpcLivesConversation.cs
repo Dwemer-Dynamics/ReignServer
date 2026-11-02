@@ -56,9 +56,23 @@ namespace ReignBetaServer
             using var c = OpenCampaignConnection(campaign); var state = ReadNpcLives(c, campaign, timeline);
             var encounter = NpcEncounter(state, player, hero, p);
             string generation = NpcLivesGeneration(c), jobKey = campaign + "|" + timeline + "|" + encounter.Id;
-            // This endpoint owns only the new NPC Lives Approach opener. Existing
-            // wilderness/social/event and explicit invitation openings use their own routes.
-            if (!options.Preference(NpcLivesOptions.InitialApproachKey))
+            var invitation = ResolveNpcLifeInvitationOpening(state, p, hero, options);
+            if (ReadBool(p, "npcLifeInvitationEntry", false) && invitation == null)
+                return TestDict("ok", false, "status", "invitation_unavailable", "error", "This personal invitation has changed or is disabled. Review the current request.");
+            var savedOpening = TryParseJsonObject(encounter.OpeningPayload) ?? TestDict();
+            var pendingInvitation = encounter.OpeningPending
+                ? ResolveNpcLifeInvitationOpening(state, savedOpening, hero, options) : null;
+            if (encounter.OpeningPending && (ReadBool(savedOpening, "npcLifeInvitationEntry", false) && pendingInvitation == null
+                || invitation != null && pendingInvitation?.ReceiptKey != invitation.ReceiptKey))
+            {
+                // A newly requested personal matter supersedes an unrelated pending
+                // greeting. The old job retains no publication authority.
+                DiscardNpcOpening(c, state, encounter);
+                pendingInvitation = null;
+            }
+            // Explicit invitations belong to their story/leave preference. The
+            // initial-speaker switch controls ordinary NPC Lives approaches only.
+            if (!NpcOpeningEnabled(options, invitation ?? pendingInvitation))
             {
                 DiscardNpcOpening(c, state, encounter);
                 return TestDict("ok", true, "status", "disabled", "generation", generation, "sessionId", encounter.SessionId);
@@ -92,9 +106,9 @@ ORDER BY t.world_day DESC LIMIT 1;", TestDict("hero", hero, "day", day, "player"
                 if (!HasCurrentJob()) CompleteNpcOpening(c, state, encounter, p, TestDict(), generation);
                 return NpcOpeningStatus(encounter, generation);
             }
-            if (!NpcLivesPolicy.NewOpeningDue(encounter.LastAcceptedDay, day, options.Number("npcLivesResumeHours")))
+            bool freshInvitation = invitation != null && !state.OperationReceipts.ContainsKey(invitation.ReceiptKey);
+            if (!freshInvitation && !NpcLivesPolicy.NewOpeningDue(encounter.LastAcceptedDay, day, options.Number("npcLivesResumeHours")))
                 return TestDict("ok", true, "status", "resume", "generation", generation, "sessionId", encounter.SessionId);
-            if (!options.Allows("approach")) return TestDict("ok", true, "status", "disabled", "generation", generation);
             string session = ReadFirstString(p, "conversationSessionId", "sessionId");
             var audience = ReadStringList(p, "npcLifeAudienceIds").Concat(new[] { player, hero }).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToList();
             if (session.Length == 0 || !QuerySql(c, @"SELECT session_id FROM conversation_sessions WHERE session_id=$id AND player_id=$player
@@ -102,7 +116,7 @@ AND participants_json::jsonb @> $audience::jsonb AND $audience::jsonb @> partici
 AND payload_json::jsonb->>'timelineId'=$timeline;",
                 TestDict("id", session, "audience", Json.Serialize(audience), "player", player, "timeline", timeline)).Any()) return TestDict("ok", false, "error", "The Approach audience or timeline has changed. Reopen the matching conversation.");
             string id = "opening_" + Guid.NewGuid().ToString("N");
-            if (!encounter.BeginOpening(id, day, options.Number("npcLivesResumeHours"))) return TestDict("ok", true, "status", "resume");
+            if (!encounter.BeginOpening(id, day, options.Number("npcLivesResumeHours"), freshInvitation)) return TestDict("ok", true, "status", "resume");
             encounter.SessionId = session; encounter.OpeningDay = day; encounter.OpeningGeneration = generation;
             // Old saves retain this field, but elapsed wall time never substitutes
             // an ordinary Approach fallback for a provider that is still working.
@@ -110,17 +124,19 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
             encounter.OpeningPayload = Json.Serialize(TestDict("campaignId", campaign, "timelineId", timeline, "playerId", player, "heroId", hero,
                 "playerName", ReadString(p, "playerName", "Player"), "heroName", ReadString(p, "heroName", hero), "worldDay", day,
                 "locationId", ReadString(p, "locationId", ""), "location", ReadString(p, "location", "the road"),
-                "npcLifeContext", ReadString(p, "npcLifeContext", "in_person"), "npcLifeAudienceIds", ReadStringList(p, "npcLifeAudienceIds")));
+                "npcLifeContext", ReadString(p, "npcLifeContext", "in_person"), "npcLifeAudienceIds", ReadStringList(p, "npcLifeAudienceIds"),
+                "npcLifeInvitationEntry", invitation != null, "npcLifeRequestId", invitation?.Id ?? "",
+                "npcStoryId", invitation == null ? "" : ReadString(p, "npcStoryId", ""), "npcLivesRevision", invitation?.Revision ?? 0));
             WriteNpcLives(c, state);
             p["npcEffectiveAffinity"] = NpcLivesAffinity(c, hero, player, ReadInt(ReadDictionary(p, "profile"), "relationToPlayer", 0));
-            var request = BuildNpcOpeningRequest(state, encounter, p, player, hero, id, day);
+            var request = BuildNpcOpeningRequest(state, encounter, p, player, hero, id, day, invitation);
             NpcOpeningJobs[jobKey] = id + "|" + generation;
             _ = Task.Run(() => GenerateNpcOpening(campaign, timeline, player, hero, id, generation, request, jobKey, encounter.Id));
             return TestDict("ok", true, "status", "pending", "operationId", id, "generation", generation);
         }
         private static Dictionary<string, object> BuildNpcOpeningRequest(NpcLivesState state, NpcConversationEncounter encounter,
-            Dictionary<string, object> p, string player, string hero, string id, double day) =>
-            CreateNpcApproachPayload(state, encounter, p, player, hero, id, day);
+            Dictionary<string, object> p, string player, string hero, string id, double day, NpcLifeInvitationOpening invitation = null) =>
+            CreateNpcApproachPayload(state, encounter, p, player, hero, id, day, invitation);
 
         private static async Task GenerateNpcOpening(string campaign, string timeline, string player, string hero, string id,
             string generation, Dictionary<string, object> request, string jobKey, string encounterId)
@@ -175,14 +191,16 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
             Dictionary<string, object> unused, Dictionary<string, object> draft, string generation, NpcLivesOptions options = null)
         {
             if (!encounter.OpeningPending || encounter.OpeningGeneration != generation) return;
-            // Recheck on publication as well as dispatch: turning the switch off
-            // while a provider is working must not publish a greeting or consume reactions.
-            if (!(options ?? ReadNpcLivesOptions()).Preference(NpcLivesOptions.InitialApproachKey))
+            var p = TryParseJsonObject(encounter.OpeningPayload) ?? TestDict();
+            options ??= ReadNpcLivesOptions();
+            var invitation = ResolveNpcLifeInvitationOpening(state, p, encounter.HeroId, options);
+            // Recheck the exact invitation and its feature preference at publication;
+            // an accepted/declined/revised offer cannot publish its obsolete intro.
+            if (ReadBool(p, "npcLifeInvitationEntry", false) && invitation == null || !NpcOpeningEnabled(options, invitation))
             {
                 DiscardNpcOpening(c, state, encounter);
                 return;
             }
-            var p = TryParseJsonObject(encounter.OpeningPayload);
             string player = ReadString(p, "playerId", ""), hero = encounter.HeroId;
             string activity = ReadString(draft, "activity", "").Trim(), reply = ReadString(draft, "reply", "").Trim();
             if (!NpcApproachReplyShape(draft)
@@ -213,6 +231,7 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
                 ReadString(p, "locationId", ""), audience, p);
             if (!encounter.AcceptOpening(encounter.OpeningOperationId, reply, activity, encounter.OpeningDay))
                 throw new InvalidOperationException("The opening was superseded before acceptance.");
+            if (invitation != null) state.OperationReceipts[invitation.ReceiptKey] = encounter.OpeningOperationId;
             AcceptNpcAnnouncementReactions(state, hero, player, source, reply, draft, encounter.OpeningDay, receipt.Review);
             WriteNpcLives(c, state); transaction.Commit();
         }

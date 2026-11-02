@@ -106,6 +106,9 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         ? FinalizeConversationSceneState(unit.Campaign, unit.Payload, unit.Hero, unit.PlayerText,
                             unit.Reply, unit.SceneMode ?? unit.EventType, unit.Parsed, connection, audience)
                         : TestDict("status", "suppressed_by_route");
+                    var viewWardrobe = unit.PublishScene && !suppressReplyEffects && !unit.PrivateWhisper
+                        ? StoreChatViewWardrobeEvidence(connection, unit.Payload, unit.Parsed, sourceRows, unit.Hero)
+                        : TestDict("status", "suppressed_by_route");
                     var social = unit.PublishSocial && !suppressReplyEffects
                         ? NormalizeAndPersistConversationSocialSignals(unit.Campaign, unit.Parsed, unit.Payload,
                             unit.Hero, unit.Player, unit.PlayerText, unit.Reply, unit.ConceptionGate,
@@ -152,7 +155,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         "acceptedReplyHash", PromptHash(unit.Reply ?? ""), "restoreGeneration", generation,
                         "memory", memory, "effects", effects, "privateExchange", privateExchange,
                         "personalRelationshipOwner", personalMatter ? "npc_lives" : "",
-                        "scene", scene, "social", social, "introductions", introductions, "playerAttention", attention, "npcLives", npcLives,
+                        "scene", scene, "viewWardrobe", viewWardrobe, "social", social, "introductions", introductions, "playerAttention", attention, "npcLives", npcLives,
                         "communications", communications,
                         "sourceIds", ReadStringList(source, "turnIds").Concat(ReadStringList(privateExchange, "turnIds")).ToArray(),
                         "effectPayload", TestDict("conversationAgencyReceipt", ReadDictionary(effectPayload, "conversationAgencyReceipt"),

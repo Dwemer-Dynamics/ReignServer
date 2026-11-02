@@ -36,6 +36,7 @@ namespace ReignBetaServer
         private sealed class MemoryEvidence
         {
             internal string SourceId = "", SourceHash = "", Kind = "reported", Text = "", Owner = "", Session = "";
+            internal string RankingText = "";
             internal int Revision = 1;
             internal double Day, Score;
             internal bool Required;

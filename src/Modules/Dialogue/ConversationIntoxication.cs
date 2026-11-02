@@ -107,7 +107,7 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
         private static double IntoxicationWorldHour(Dictionary<string, object> payload)
         {
             double day = ReadDouble(payload, "worldDay", double.NaN);
-            return day >= 0 && !double.IsInfinity(day) ? day * 24d : double.NaN;
+            return day >= 0 && !double.IsInfinity(day) ? NarrativeEffectiveHour(payload, day * 24d) : double.NaN;
         }
 
         private static void EnsureIntoxicationSchema(ReignDbConnection connection)

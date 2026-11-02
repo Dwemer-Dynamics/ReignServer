@@ -184,6 +184,13 @@ EOF
         "$python_root/bin/python" "$scripts/Prepare-LinuxRuntime.py" --model-directory "$model_root"
         ;;
     activate|rollback)
+        leave_stopped=0
+        case "${3:-}" in
+            '') ;;
+            --leave-stopped) leave_stopped=1 ;;
+            *) echo 'Unknown activation option.' >&2; exit 64 ;;
+        esac
+        [ "$#" -le 3 ] || exit 64
         if [ "$command" = rollback ]; then
             target=${2:?Supply a retained version ID}
             python3 /usr/local/bin/reign_versions.py check "$target"
@@ -242,7 +249,7 @@ PY
         mv -T "$root/current.next" "$root/current"
         printf '%s\n' "$version" > "$root/current-version.next"
         mv -f "$root/current-version.next" "$root/current-version"
-        if ! start; then
+        if [ "$leave_stopped" = 0 ] && ! start; then
             rm -rf -- "$root/current"
             if [ -e "$root/current.previous" ] || [ -L "$root/current.previous" ]; then
                 mv -T "$root/current.previous" "$root/current"
@@ -261,7 +268,11 @@ PY
         if [ -e "$root/current.previous" ] || [ -L "$root/current.previous" ]; then
             rm -rf -- "$root/current.previous"
         fi
-        echo 'Reign runtime activated and health checked; prior version retained.'
+        if [ "$leave_stopped" = 1 ]; then
+            echo 'Reign runtime activated; service left stopped; prior version retained.'
+        else
+            echo 'Reign runtime activated and health checked; prior version retained.'
+        fi
         ;;
     *) echo 'Usage: reignctl prepare|activate <validated-package>|rollback-list|rollback <version-id>|repair-permissions|start|stop|status' >&2; exit 64 ;;
 esac

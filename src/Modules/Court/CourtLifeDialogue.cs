@@ -19,10 +19,18 @@ namespace ReignBetaServer
             string playerText = phase == "conversation" ? ReadString(payload, "playerText", "") : "";
             if (phase == "conversation" && string.IsNullOrWhiteSpace(playerText))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "A player message is required." };
+            Dictionary<string, object> creator = null;
+            if (ReadString(payload, "source", "") == "Patronage")
+            {
+                creator = CourtLifeCreatorProfile(payload, actorId);
+                if (creator == null)
+                    return TestDict("ok", false, "error", "The patronage creator does not match this capital and catalog role.");
+            }
             var memory = PrepareRouteConversationMemory(payload, actorId, "court_life",
                 FirstNonEmpty(ReadString(payload, "transcriptId", ""), matterId), turnId,
                 ReadStringList(payload, "participants"), settingsOverride: settingsOverride);
             payload = memory.Payload;
+            if (creator != null) payload["hero"] = creator;
             playerText = phase == "conversation" ? ReadString(payload, "playerText", "") : "";
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
@@ -73,6 +81,26 @@ phase TEXT NOT NULL,player_text TEXT NOT NULL,reply_text TEXT NOT NULL,created_t
             return CompleteRouteConversationDelivery(memory, new Dictionary<string, object> { ["ok"] = true, ["reply"] = reply, ["turnId"] = turnId,
                 ["nativeActions"] = new object[0], ["providerCallCount"] = memory.ProviderCalls,
                 });
+        }
+
+        private static Dictionary<string, object> CourtLifeCreatorProfile(Dictionary<string, object> payload, string actorId)
+        {
+            if (ReadString(payload, "source", "") != "Patronage") return null;
+            var template = Reign.Core.Contracts.Court.ReignPatronageCatalog.Find(ReadString(payload, "templateId", ""));
+            string campaign = ReadString(payload, "campaignId", ""), capital = ReadString(payload, "capitalSettlementStringId", "");
+            string role = ReadString(payload, "speakerRole", "");
+            if (template == null || campaign.Length == 0 || capital.Length == 0 || role != template.CreatorRole
+                || ReadString(payload, "hostSettlementStringId", "") != capital
+                || ReadString(payload, "courtScope", "") != "capital" || !ReadBool(payload, "playerIsKingdomRuler", false)
+                || ReadString(payload, "playerHeroStringId", "").Length == 0 || ReadString(payload, "playerKingdomStringId", "").Length == 0
+                || !ReadString(payload, "matterId", "").StartsWith("patronage_", StringComparison.Ordinal)
+                || actorId != "reign_artist_" + CourtHash(campaign + "|" + capital + "|" + role)) return null;
+            // Patronage owns this virtual identity. Give it the same persisted political
+            // authorship as other named speakers without inventing a native hero or office.
+            return TestDict("heroStringId", actorId, "name", LimitText(ReadString(payload, "speakerName", "Court artist"), 120),
+                "campaignId", campaign, "politicalTimelineId", ReadString(payload, "timelineId", "main"),
+                "age", 30d, "occupation", role, "isNativeHero", false, "isChild", false,
+                "isPlayer", false, "isLord", false, "isNotable", false, "isRuler", false);
         }
 
         private static Dictionary<string, object> CourtLifeInterpret(Dictionary<string, object> payload)

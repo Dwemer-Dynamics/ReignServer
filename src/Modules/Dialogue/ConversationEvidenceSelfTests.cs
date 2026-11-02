@@ -95,6 +95,58 @@ namespace ReignBetaServer
             Check("speaker_alias_does_not_certify_lost_qualification", ReadString(qualifiedAlias, "sourceValidation", "") == "incomplete"
                 && ReadString(qualifiedAlias, "sourceValidationReason", "") == "qualification_lost"
                 && ReadDictionaryList(qualifiedAlias, "originalSources").Count == 2);
+            const string conditionalSource = "If rain comes, we can ride tomorrow; we have not gone yet.";
+            var semanticSources = CurrentConversationSources("player", "npc", conditionalSource,
+                "I will leave the bench agreement in place.", "semantic_event");
+            var exactMemory = TestDict("text", conditionalSource, "sourceEvidence", TestDict("turnId", "current_player",
+                "speakerId", "player", "quote", conditionalSource));
+            AttachConversationWriteEvidence(new[] { exactMemory }, semanticSources, "npc", "semantic_event", requireSemanticAdmission: true);
+            Check("semantic_complete_attributed_source_preserves_condition", ReadString(exactMemory, "sourceValidation", "") == "supported_span"
+                && ReadString(ReadDictionary(exactMemory, "semanticAdmission"), "status", "") == "exact_reported_source"
+                && !ReadBool(ReadDictionary(exactMemory, "semanticAdmission"), "claimEntailmentVerified", true));
+            foreach (string interpretation in new[] { "We completed the ride.", "The bench agreement was cancelled.",
+                "If rain comes, the player can ride tomorrow; they have not gone yet." })
+            {
+                var proposed = TestDict("text", interpretation, "semanticAdmission", TestDict("status", "approved", "claimEntailmentVerified", true),
+                    "sourceEvidence", TestDict("turnId", "current_player", "speakerId", "player", "quote", conditionalSource));
+                AttachConversationWriteEvidence(new[] { proposed }, semanticSources, "npc", "semantic_event", requireSemanticAdmission: true);
+                Check("semantic_unverified_interpretation_quarantined_" + interpretation.Length,
+                    ReadString(proposed, "sourceValidation", "") == "incomplete"
+                    && ReadString(ReadDictionary(proposed, "sourceEvidence"), "status", "") == "supported_span"
+                    && ReadString(ReadDictionary(proposed, "semanticAdmission"), "status", "") == "quarantined_interpretation"
+                    && ReadDictionaryList(proposed, "originalSources").Count == 2
+                    && ReadString(proposed, "status", "") == "audit_only"
+                    && !EmbeddingRowActive("memory", proposed)
+                    && ReadString(proposed, "proposedInterpretation", "") == interpretation);
+            }
+            foreach (string field in new[] { "memory", "summary", "content" })
+            {
+                var alias = TestDict(field, "We completed the ride.", "sourceEvidence", TestDict("turnId", "current_player",
+                    "speakerId", "player", "quote", conditionalSource));
+                AttachConversationWriteEvidence(new[] { alias }, semanticSources, "npc", "semantic_event", requireSemanticAdmission: true);
+                Check("semantic_storage_alias_cannot_bypass_" + field, ReadString(alias, "status", "") == "audit_only"
+                    && ReadString(alias, "sourceValidation", "") == "incomplete"
+                    && ReadString(alias, "proposedInterpretation", "") == "We completed the ride.");
+                var literalAlias = TestDict(field, conditionalSource, "sourceEvidence", TestDict("turnId", "current_player",
+                    "speakerId", "player", "quote", conditionalSource));
+                AttachConversationWriteEvidence(new[] { literalAlias }, semanticSources, "npc", "semantic_event", requireSemanticAdmission: true);
+                Check("semantic_complete_source_alias_preserves_condition_" + field,
+                    ReadString(literalAlias, "sourceValidation", "") == "supported_span"
+                    && ReadString(ReadDictionary(literalAlias, "semanticAdmission"), "status", "") == "exact_reported_source");
+            }
+            var mixedFields = TestDict("memory", "We completed the ride.", "summary", conditionalSource, "sourceEvidence",
+                TestDict("turnId", "current_player", "speakerId", "player", "quote", conditionalSource));
+            AttachConversationWriteEvidence(new[] { mixedFields }, semanticSources, "npc", "semantic_event", requireSemanticAdmission: true);
+            Check("semantic_secondary_field_cannot_approve_different_stored_claim", ReadString(mixedFields, "status", "") == "audit_only"
+                && ReadString(mixedFields, "proposedInterpretation", "") == "We completed the ride."
+                && ReadString(ReadDictionary(mixedFields, "semanticAdmission"), "claimHash", "") == MemorySelectionTextHash("We completed the ride."));
+            var clipped = TestDict("text", "we can ride tomorrow", "sourceEvidence", TestDict("turnId", "current_player", "speakerId", "player", "quote", "we can ride tomorrow"));
+            AttachConversationWriteEvidence(new[] { clipped }, semanticSources, "npc", "semantic_event", requireSemanticAdmission: true);
+            Check("semantic_exact_substring_cannot_drop_surrounding_condition", ReadString(clipped, "sourceValidation", "") == "incomplete");
+            exactMemory["text"] = "We have already ridden.";
+            ApplyConversationWriteSemanticAdmission(exactMemory, semanticSources);
+            Check("semantic_receipt_cannot_survive_claim_mutation", ReadString(exactMemory, "sourceValidation", "") == "incomplete"
+                && ReadString(ReadDictionary(exactMemory, "semanticAdmission"), "claimHash", "") == MemorySelectionTextHash("We have already ridden."));
             var sceneLines = new List<Dictionary<string, object>> { TestDict("role", "npc", "speaker", "Mira", "turnId", "scene",
                 "text", "I finished this last year. *She would have finished the meal.*") };
             Check("speech_and_hypothesis_not_scene_completion", BuildCurrentSceneProgressPrompt(sceneLines) == "");
@@ -488,14 +540,17 @@ VALUES($session,$campaign,'npc','player','closed',$ts,$day,$participants,$payloa
                     var stored = normalized.Select(write => QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;",
                         TestDict("id", ReadString(write, "id", ""))).Single()).ToList();
                     var validPayload = TryParseJsonObject(ReadString(stored[0], "payload_json", "{}"));
+                    Check(route + "_unverified_paraphrases_excluded_from_active_index", stored.All(row =>
+                        ReadString(row, "status", "") == "audit_only" && !EmbeddingRowActive("memory", row)));
                     var bound = ReadDictionary(validPayload, "sourceEvidence");
-                    Check(route + "_stored_citation_bound_to_accepted_player", ReadString(validPayload, "sourceValidation", "") == "supported_span"
+                    Check(route + "_stored_citation_bound_to_accepted_player", ReadString(validPayload, "sourceValidation", "") == "incomplete"
+                        && ReadString(bound, "status", "") == "supported_span"
                         && ReadString(bound, "speakerId", "") == "player" && ReadString(bound, "sourceEventId", "") == eventId
                         && ReadString(bound, "sourceHash", "") == PromptHash(playerText) && ReadInt(bound, "start", -1) == 0
                         && ReadInt(bound, "length", 0) == playerText.Length && ReadString(bound, "evidenceType", "") == "future_intention"
                         && ReadStringList(bound, "claimedActorIds").SequenceEqual(new[] { "player" }) && !bound.ContainsKey("actorIds"), bound);
                     string validPrompt = FormatMemoryPacketFact(stored[0], ReadString(stored[0], "summary", ""), "npc", "memory");
-                    Check(route + "_next_read_preserves_future_qualification", validPrompt.Contains("plans to recruit two escorts")
+                    Check(route + "_next_read_preserves_future_qualification", validPrompt.Contains(playerText)
                         && validPrompt.Contains("evidence=future_intention; speaker=player") && !validPrompt.Contains("fabricated original"), validPrompt);
                     var invalidPayload = TryParseJsonObject(ReadString(stored[1], "payload_json", "{}"));
                     string fallback = FormatMemoryPacketFact(stored[1], ReadString(stored[1], "summary", ""), "npc", "memory");
@@ -503,10 +558,12 @@ VALUES($session,$campaign,'npc','player','closed',$ts,$day,$participants,$payloa
                         && fallback.Contains("speaker=player: " + playerText) && fallback.Contains("speaker=npc: " + reply)
                         && !fallback.Contains("recruited a hundred escorts") && !fallback.Contains("fabricated original"), fallback);
                     var legacyPayload = TryParseJsonObject(ReadString(stored[2], "payload_json", "{}"));
-                    Check(route + "_legacy_quote_rebound_locally", ReadString(legacyPayload, "sourceValidation", "") == "supported_span"
+                    Check(route + "_legacy_quote_rebound_locally", ReadString(legacyPayload, "sourceValidation", "") == "incomplete"
+                        && ReadString(ReadDictionary(legacyPayload, "sourceEvidence"), "status", "") == "supported_span"
                         && ReadString(ReadDictionary(legacyPayload, "sourceEvidence"), "speakerId", "") == "npc");
                     var aliasPayload = TryParseJsonObject(ReadString(stored[3], "payload_json", "{}"));
-                    Check(route + "_actual_current_beat_alias_survives_storage", ReadString(aliasPayload, "sourceValidation", "") == "supported_span"
+                    Check(route + "_actual_current_beat_alias_survives_storage", ReadString(aliasPayload, "sourceValidation", "") == "incomplete"
+                        && ReadString(ReadDictionary(aliasPayload, "sourceEvidence"), "status", "") == "supported_span"
                         && ReadString(ReadDictionary(aliasPayload, "sourceEvidence"), "turnId", "") == "current_npc"
                         && ReadString(ReadDictionary(aliasPayload, "sourceEvidence"), "sourceHash", "") == PromptHash(reply));
                 }

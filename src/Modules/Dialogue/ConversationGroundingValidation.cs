@@ -194,6 +194,8 @@ namespace ReignBetaServer
             int modelHeadingLength = ConversationVenueHeadingLength(reply);
             string body = modelHeadingLength > 0 ? reply.Substring(modelHeadingLength) : reply;
             string date = ReadString(payload, "conversationDateLabel", "");
+            string narrativeDate = ReadString(CurrentNarrativeClock(payload), "label", "");
+            if (narrativeDate.Length > 0) date = narrativeDate;
             string owner = ReadString(MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => CharacterIdFrom(p) == observer), "name", "");
             string label = owner.Length > 0 ? Regex.Replace(venue, @"^(?:her|his|their)\s+", owner + "'s ", RegexOptions.IgnoreCase) : venue;
             string settlement = ReadFirstString(payload, "currentSettlementName", "settlementName");
@@ -203,7 +205,7 @@ namespace ReignBetaServer
             return header + "\n\n" + body;
         }
 
-        private static readonly string[] ConversationVenueKinds = { "stables?", "tavern", "tent", "bedchamber", "throne room", "courtyard", @"(?:(?:lord['’]s|great|feasting|main)\s+)?hall" };
+        private static readonly string[] ConversationVenueKinds = { "stables?", "tavern", "tent", "bedchamber", "study", "library(?: room)?", "throne room", "courtyard", @"(?:(?:lord['’]s|great|feasting|main)\s+)?hall" };
 
         private static int ConversationVenueHeadingLength(string reply)
         {

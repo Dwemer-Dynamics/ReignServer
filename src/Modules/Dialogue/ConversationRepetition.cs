@@ -37,7 +37,9 @@ namespace ReignBetaServer
                 "defense wall walls fortress fortresses shield shields armor armour barrier barriers",
                 "morning morning mornings dawn sunrise daybreak",
                 "departure leave leaves leaving left depart departed departure return returns returning returned",
-                "gamble gamble gambles gambling wager wagers dice stake stakes bet bets" })
+                "gamble gamble gambles gambling wager wagers dice stake stakes bet bets",
+                "judgment ruling rulings verdict verdicts bench hearing hearings court courts tribunal tribunals",
+                "body skull skulls headache headaches head heads" })
             {
                 string[] words = group.Split(' ');
                 foreach (string word in words.Skip(1)) result[word] = "@" + words[0];
@@ -121,7 +123,7 @@ namespace ReignBetaServer
             || Regex.IsMatch(text, @"\b(?:stay back|stay away|leave me alone|do not touch|don't touch|danger|attack(?:ing)?|fire spreading)\b", RegexOptions.IgnoreCase);
 
         private static bool IsExpressionRhetorical(string text) => Regex.IsMatch(text,
-            @"\b(?:like|as though|as if|rather than|all my life|years|always|nothing|no .* left|I find|that is|I am|I have|you are|you were)\b", RegexOptions.IgnoreCase);
+            @"\b(?:like|as though|as if|rather than|all my life|years|always|nothing|no .* left|I find|that is|I am|I have|you are|you were|my skull|the skull|the toll|a ruling|the ruling|the verdict|in better coin)\b", RegexOptions.IgnoreCase);
 
         private static List<Dictionary<string, object>> FindConversationExpressionViolations(
             Dictionary<string, object> parsed, string playerText, List<Dictionary<string, object>> history,
@@ -231,7 +233,8 @@ namespace ReignBetaServer
 
         private static bool IsConversationExpressionViolation(Dictionary<string, object> violation) => new[] {
             "repeated_conversation_passage", "repeated_conversation_theme", "repeated_wording_lecture",
-            "repeated_conversation_accounting", "group_conversation_accounting_echo" }.Contains(ReadString(violation, "type", ""));
+            "repeated_conversation_accounting", "group_conversation_accounting_echo",
+            "group_conversation_gesture_echo", "group_conversation_framing_echo" }.Contains(ReadString(violation, "type", ""));
 
         private static List<string> ExpressionRequiredQuotes(Dictionary<string, object> original, string reply)
         {

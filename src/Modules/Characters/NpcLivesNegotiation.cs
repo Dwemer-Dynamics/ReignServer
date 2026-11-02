@@ -43,18 +43,25 @@ namespace ReignBetaServer
         private static void ConstrainNpcLeaveReply(Dictionary<string, object> payload, string hero,
             Dictionary<string, object> parsed, ref string reply)
         {
-            if (ReadString(ReadDictionary(parsed, "structuredActionDecision"), "kind", "none") != "none")
+            // A wholly malformed envelope has no effect metadata. Preserve the
+            // existing conversation error path instead of dereferencing it here.
+            if (parsed == null) return;
+            string actionKind = ReadString(ReadDictionary(parsed, "structuredActionDecision"), "kind", "none");
+            if (new[] { "accept", "reject", "counter", "propose" }.Contains(actionKind))
             { parsed.Remove("npcLeaveAssessment"); return; }
             var assessment = ReadDictionary(parsed, "npcLeaveAssessment");
             string campaign = ReadString(payload, "campaignId", "");
-            if (assessment == null || campaign.Length == 0) return;
+            if (campaign.Length == 0) return;
             using var c = OpenCampaignConnection(campaign);
             var state = ReadNpcLives(c, campaign, ContinuityTimeline(payload));
-            var leave = state.Leaves.FirstOrDefault(l => l.HeroId == hero && l.Id == ReadString(assessment, "leaveId", "") && l.Status == "discussing");
+            // The saved request owns this turn. An omitted or wrong model-supplied
+            // assessment must not bypass the guard or publish an invented promise.
+            var leave = state.Leaves.FirstOrDefault(l => l.HeroId == hero && l.Status == "discussing");
             if (leave == null) { parsed.Remove("npcLeaveAssessment"); return; }
             string reason = ReadString(assessment, "reasonKind", ""), quote = ReadString(assessment, "evidenceQuote", "").Trim();
             string input = ReadString(payload, "playerText", "");
-            bool valid = leave != null && leave.Revision == ReadInt(assessment, "revision", -1)
+            bool valid = assessment != null && leave.Id == ReadString(assessment, "leaveId", "")
+                && leave.Revision == ReadInt(assessment, "revision", -1)
                 && NpcLeaveNegotiation.Reasons.Contains(reason) && quote.Length >= 8 && input.IndexOf(quote, StringComparison.Ordinal) >= 0
                 && !leave.AcceptedArgumentIds.Contains(reason);
             string sentence = valid ? NpcLeaveNegotiation.Response(NpcLeaveNegotiation.Persuaded(leave, reason,

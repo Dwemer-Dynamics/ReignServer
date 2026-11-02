@@ -13,7 +13,11 @@ namespace ReignBetaServer
     {
         private const string MemorySelectionSchema = "reign-memory-selection-v1";
         private const string MemorySelectionRankingPolicy = "complete-source-window-max-v1";
+        private const string MemorySelectionEvidencePolicy = "linked-source-context-v2";
         private const string MemorySelectionRankerHash = "91541a53f5faa6796553aa0d29fea3b24abceccfd45ccfeb78a267d4ea34908a";
+        private const string MemorySelectionCpuRankerHash = "a7bd997e927d552a25e2dc2398b86afa6b53b0bd1e5a97d23a7f81bedfdf3da4";
+        private static string MemorySelectionRankerHashForBackend(string backend) =>
+            backend == "cpu" ? MemorySelectionCpuRankerHash : MemorySelectionRankerHash;
         private const string MemorySelectionRuntimeVersion = "1.22.0";
         private const string MemorySelectionRankerTokenizerHash = "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4";
         private const string MemorySelectionCompressorHash = "6745c7aff5cb5c2c3c96b8e72ab8a65ce42157058f9221f6c340f0c37e760f5d";
@@ -23,6 +27,9 @@ namespace ReignBetaServer
 
         // Worker receipts bind the exact UTF-8 body. PromptHash intentionally
         // normalizes line whitespace and must not be used for transport fences.
+        private static string MemorySelectionRankingText(MemoryEvidence evidence) =>
+            evidence.RankingText.Length > 0 ? evidence.RankingText : evidence.Text;
+
         private static string MemorySelectionTextHash(string text) =>
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text ?? "")));
 
@@ -31,8 +38,9 @@ namespace ReignBetaServer
             var c = ReadDictionary(settings, "memorySelectionQualification");
             return ReadString(c, "schema", "") == "reign-memory-selection-certificate-v1"
                 && ReadString(c, "pipelineSchema", "") == MemorySelectionSchema
+                && ReadString(c, "evidencePolicy", "") == MemorySelectionEvidencePolicy
                 && ReadString(c, "rankingPolicy", "") == MemorySelectionRankingPolicy
-                && ReadString(c, "rankerHash", "") == MemorySelectionRankerHash
+                && ReadString(c, "rankerHash", "") == MemorySelectionRankerHashForBackend(ReadString(c, "runtimeBackend", ""))
                 && ReadString(c, "rankerTokenizerHash", "") == MemorySelectionRankerTokenizerHash
                 && ReadString(c, "runtimeVersion", "") == MemorySelectionRuntimeVersion
                 && new[] { "cpu", "cuda" }.Contains(ReadString(c, "runtimeBackend", ""))
@@ -64,7 +72,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> candidates, out Dictionary<string, Dictionary<string, object>> results, string backend = "cpu")
         {
             results = new(StringComparer.Ordinal);
-            string model = operation == "rank" ? MemorySelectionRankerHash : MemorySelectionCompressorHash;
+            string model = operation == "rank" ? MemorySelectionRankerHashForBackend(backend) : MemorySelectionCompressorHash;
             string tokenizer = operation == "rank" ? MemorySelectionRankerTokenizerHash : MemorySelectionCompressorTokenizerHash;
             if (!ReadBool(response, "ok", false) || ReadString(response, "schema", "") != MemorySelectionSchema
                 || ReadString(response, "operation", "") != operation || ReadString(response, "modelHash", "") != model
@@ -84,6 +92,22 @@ namespace ReignBetaServer
             }
             return results.Count == expected.Count;
         }
+
+        private static bool ValidateMemorySelectionShadowAdmission(Dictionary<string, object> response, string backend) =>
+            backend == "cpu" && ReadBool(response, "ok", false)
+            && ReadString(response, "schema", "") == MemorySelectionSchema
+            && ReadString(response, "status", "") == "shadow_queued"
+            && ReadString(response, "operation", "") == "rank"
+            && ReadString(response, "backend", "") == backend
+            && ReadString(response, "modelHash", "") == MemorySelectionCpuRankerHash
+            && ReadString(response, "tokenizerHash", "") == MemorySelectionRankerTokenizerHash
+            && ReadString(response, "rankingPolicy", "") == MemorySelectionRankingPolicy
+            && ReadString(response, "runtimeVersion", "") == MemorySelectionRuntimeVersion
+            && ReadInt(response, "remoteCalls", -1) == 0
+            && response.TryGetValue("results", out var pendingResults) && pendingResults is System.Collections.IEnumerable pending
+            && pendingResults is not string && !pending.Cast<object>().Any()
+            && ReadString(response, "shadowJobId", "").Length == 32
+            && Regex.IsMatch(ReadString(response, "shadowJobId", ""), "^[a-f0-9]{32}$");
 
         private static bool ValidateMemoryScoringCoverage(Dictionary<string, object> coverage, string text)
         {
@@ -149,8 +173,8 @@ namespace ReignBetaServer
             bool isolated = mode == "replay" && !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value) && MemorySelectionReplay.Value != null;
             bool compression = ReadBool(settings, "enableMemoryEvidenceCompression", false);
             var audit = TestDict("schema", MemorySelectionSchema, "mode", mode, "ranker", "Qwen/Qwen3-Reranker-0.6B",
-                "rankingPolicy", MemorySelectionRankingPolicy,
-                "rankerHash", MemorySelectionRankerHash, "compressor", "LLMLingua-2", "rankApplied", false,
+                "rankingPolicy", MemorySelectionRankingPolicy, "evidencePolicy", MemorySelectionEvidencePolicy,
+                "rankerHash", MemorySelectionRankerHashForBackend(ReadString(settings, "memorySelectionBackend", "cpu")), "compressor", "LLMLingua-2", "rankApplied", false,
                 "compressionApplied", false, "compressionViewsPrepared", false, "remoteCalls", 0, "localRequests", 0, "status", "disabled");
             diagnostics["selectionHelpers"] = audit;
             if (!new[] { "on", "shadow", "replay" }.Contains(mode)) return candidates;
@@ -168,23 +192,39 @@ namespace ReignBetaServer
                 string backend = isolated || mode == "shadow" ? ReadString(settings, "memorySelectionBackend", "cpu")
                     : ReadString(ReadDictionary(settings, "memorySelectionQualification"), "runtimeBackend", "");
                 if (!new[] { "cpu", "cuda" }.Contains(backend)) throw new InvalidOperationException("invalid_selection_backend");
-                audit["backend"] = backend; audit["runtimeVersion"] = MemorySelectionRuntimeVersion;
+                audit["backend"] = backend; audit["rankerHash"] = MemorySelectionRankerHashForBackend(backend);
+                audit["runtimeVersion"] = MemorySelectionRuntimeVersion;
                 var ranked = candidates.Where(e => !e.Required).OrderByDescending(e => e.Score)
                     .ThenBy(e => e.SourceId, StringComparer.Ordinal).Take(32).ToList();
                 if (ranked.Count == 0) { audit["status"] = "no_optional_candidates"; return candidates; }
                 string query = BuildMemorySelectionQuery(plan, context);
-                var inputs = ranked.Select((e, i) => TestDict("id", "r" + i, "text", e.Text, "textHash", MemorySelectionTextHash(e.Text))).ToList();
+                var inputs = ranked.Select((e, i) => TestDict("id", "r" + i, "text", MemorySelectionRankingText(e), "textHash", MemorySelectionTextHash(MemorySelectionRankingText(e)))).ToList();
                 var request = TestDict("schema", MemorySelectionSchema, "operation", "rank", "query", query,
                     "candidates", inputs, "timeoutMs", timeout, "backend", backend, "rankingPolicy", MemorySelectionRankingPolicy);
+                // Only explicitly configured CPU shadow can request background
+                // admission. On/replay remain complete, synchronous and gated.
+                bool backgroundShadow = mode == "shadow" && backend == "cpu" && !compression && !isolated;
+                if (backgroundShadow) request["shadow"] = true;
                 audit["candidateCount"] = ranked.Count;
                 audit["localRequests"] = 1;
-                var response = RequestMemorySelection(request, settings, timeout);
+                var response = RequestMemorySelection(request, settings, backgroundShadow ? 500 : timeout);
+                if (backgroundShadow)
+                {
+                    if (!ValidateMemorySelectionShadowAdmission(response, backend))
+                        throw new InvalidOperationException("shadow_rejected:" + ReadString(response, "status", "invalid_admission"));
+                    audit["status"] = "shadow_queued";
+                    audit["shadowJobId"] = ReadString(response, "shadowJobId", "");
+                    audit["shadowAdmissionMs"] = timer.ElapsedMilliseconds;
+                    audit["shadowBindings"] = ranked.Select((e, i) => TestDict("id", "r" + i, "sourceId", e.SourceId,
+                        "textHash", MemorySelectionTextHash(MemorySelectionRankingText(e)))).ToList();
+                    return candidates;
+                }
                 audit["rankMs"] = ReadDouble(response, "elapsedMs", timer.ElapsedMilliseconds);
                 if (!ValidateMemorySelectionResponse(response, "rank", inputs, out var scores, backend))
                     throw new InvalidOperationException("rank_rejected:" + ReadString(response, "status", "invalid_or_incomplete"));
                 var order = ranked.Select((e, i) => new { Evidence = e, Alias = "r" + i, Score = ReadDouble(scores["r" + i], "score", 0) })
                     .OrderByDescending(x => x.Score).ThenBy(x => x.Alias, StringComparer.Ordinal).ToList();
-                audit["ranks"] = order.Select((x, i) => TestDict("sourceId", x.Evidence.SourceId, "textHash", MemorySelectionTextHash(x.Evidence.Text),
+                audit["ranks"] = order.Select((x, i) => TestDict("sourceId", x.Evidence.SourceId, "textHash", MemorySelectionTextHash(MemorySelectionRankingText(x.Evidence)),
                     "rank", i, "relevance", x.Score, "priorPriority", x.Evidence.Score,
                     "scoringCoverage", ReadDictionary(scores[x.Alias], "scoringCoverage") ?? TestDict())).ToList();
                 if (apply)

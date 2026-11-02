@@ -44,6 +44,7 @@ payload_json TEXT NOT NULL DEFAULT '{}',UNIQUE(session_id,turn_order));");
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id,turn_order);");
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_turns_ts ON conversation_turns(ts DESC);");
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_turns_speaker_ts ON conversation_turns(speaker_id,ts DESC);");
+            EnsureChatViewSchema(connection);
             ExecuteSql(connection, @"CREATE VIRTUAL TABLE IF NOT EXISTS conversation_turn_fts USING fts5(
 turn_id UNINDEXED,text,speaker,participants,channel UNINDEXED);");
 
@@ -1053,6 +1054,7 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
                 || !audience.SetEquals(TextListFromJson(ReadString(stored, "participants_json", "[]")))
                 || ReadString(storedPayload, "timelineId", "") != ReadString(payload, "timelineId", ""))
                 throw new InvalidOperationException("A conversation source ID already belongs to different words, identity, audience or timeline.");
+            if (!technicalNotice) StoreChatViewFrame(connection, turnId, sessionId, exchangeId, payload);
             // Replays may repair a missing derived index, but must only index the
             // immutable winner. Never mix an old source with a new draft's words.
             if (!technicalNotice)

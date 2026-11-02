@@ -223,7 +223,20 @@ namespace ReignBetaServer
                     bool explicitlyUnified = Regex.IsMatch(text,
                         @"\b(?:the\s+same\s+(?:man|woman|person)|one\s+and\s+the\s+same|my\s+(?:husband|wife|spouse)\s+is\s+(?:also\s+)?(?:my\s+|the\s+)?(?:king|queen|sovereign|ruler)|my\s+(?:king|queen|sovereign|ruler)\s+is\s+(?:also\s+)?my\s+(?:husband|wife|spouse)|both\s+my\s+(?:husband|wife|spouse)\s+and\s+my\s+(?:king|queen|sovereign|ruler)|who\s+is\s+also)\b",
                         RegexOptions.IgnoreCase);
-                    if (explicitlySeparated || !explicitlyUnified)
+                    const string spouseRole = @"my\s+(?:husband|wife|spouse)";
+                    const string rulerRole = @"my\s+(?:king|queen|sovereign|ruler)";
+                    const string assent = @"\s+(?:agreed|consented|approved|accepted|said\s+yes)";
+                    const string refusal = @"\s+(?:did\s+not|didn't|refused|declined|said\s+no)";
+                    const string contrast = @"\s*[,;:\u2014-]?\s*(?:but|yet|while|whereas)\s+";
+                    bool conflictingDecisions = Regex.IsMatch(text,
+                        @"\b(?:" + spouseRole + assent + contrast + rulerRole + refusal + "|"
+                        + rulerRole + assent + contrast + spouseRole + refusal + "|"
+                        + spouseRole + refusal + contrast + rulerRole + assent + "|"
+                        + rulerRole + refusal + contrast + spouseRole + assent + @")\b",
+                        RegexOptions.IgnoreCase);
+                    // Mentioning both roles does not split their identity. In particular,
+                    // a spouse may ask for private time with a husband rather than a king.
+                    if (explicitlySeparated || (conflictingDecisions && !explicitlyUnified))
                         result.Add(new Dictionary<string, object> { ["type"] = "same_person_roles_separated", ["text"] = LimitText(text, 360) });
                 }
                 if (ReadBool(speaker, "isFemale", false))
@@ -258,6 +271,10 @@ namespace ReignBetaServer
             add("same_person_roles_are_cumulative", FindDialogueIntegrityViolations(parsed, payload, new List<Dictionary<string, object>>(), "asta").Any(x => ReadString(x, "type", "") == "same_person_roles_separated"), "Spouse and sovereign with one hero id cannot be narrated as two people.");
             parsed["reply"] = "My husband is not the king. My king is my king; my husband is my husband. Those are not the same man.";
             add("negated_same_person_wording_is_not_a_false_pass", FindDialogueIntegrityViolations(parsed, payload, new List<Dictionary<string, object>>(), "asta").Any(x => ReadString(x, "type", "") == "same_person_roles_separated"), "The words 'same man' do not satisfy role equivalence when they are explicitly negated.");
+            parsed["reply"] = "I'd rather have an hour of my husband than a petition from my king.";
+            add("private_time_role_contrast_preserves_one_identity", !FindDialogueIntegrityViolations(parsed, payload, new List<Dictionary<string, object>>(), "asta").Any(x => ReadString(x, "type", "") == "same_person_roles_separated"), "A natural spouse/sovereign role contrast does not assert two people.");
+            parsed["reply"] = "My husband wears a crown. My king needs a quiet evening.";
+            add("ordinary_dual_role_mentions_need_no_identity_formula", !FindDialogueIntegrityViolations(parsed, payload, new List<Dictionary<string, object>>(), "asta").Any(x => ReadString(x, "type", "") == "same_person_roles_separated"), "Known cumulative roles do not require a magic same-person sentence in every response.");
             parsed["reply"] = "I am not a queen, and I will not claim a crown by marriage.";
             add("female_sovereign_spouse_keeps_consort_status", FindDialogueIntegrityViolations(parsed, payload, new List<Dictionary<string, object>>(), "asta").Any(x => ReadString(x, "type", "") == "sovereign_spouse_consort_status_denied"), "A female spouse of the current sovereign may distinguish consort from ruler but cannot deny the supplied consort status.");
             Dictionary<string, object> rootHeroPayload = new Dictionary<string, object>

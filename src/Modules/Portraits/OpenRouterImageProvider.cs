@@ -22,7 +22,7 @@ namespace ReignBetaServer
                 : IsAtlasProvider(profile.Provider) ? profile.AtlasModel : profile.NanoGptModel;
         }
 
-        private static Dictionary<string, object> BuildOpenRouterImagePayload(string model, string prompt, byte[] source, string size)
+        private static Dictionary<string, object> BuildOpenRouterImagePayload(string model, string prompt, byte[] source, string size, bool chatView = false)
         {
             if (!OpenRouterImageModels.Contains(model)) throw new ArgumentException("Select a supported OpenRouter image model.");
             if (source != null && source.Length == 0) throw new ArgumentException("OpenRouter image references must not be empty.");
@@ -43,6 +43,13 @@ namespace ReignBetaServer
             if (source == null) body.Remove("input_references");
             if (gpt) body["quality"] = "high";
             else body["resolution"] = "2K";
+            if (chatView)
+            {
+                var capability = ChatViewImageCapability(new ImageGenerationProfile { Provider = "OpenRouter", OpenRouterModel = model });
+                body["aspect_ratio"] = "3:2";
+                string resolution = ReadString(capability, "resolution", "");
+                if (resolution.Length > 0) body["resolution"] = resolution;
+            }
             return body;
         }
 
@@ -57,7 +64,7 @@ namespace ReignBetaServer
             int requestChars = 0;
             try
             {
-                string json = Json.Serialize(BuildOpenRouterImagePayload(profile.OpenRouterModel, prompt, source, size));
+                string json = Json.Serialize(BuildOpenRouterImagePayload(profile.OpenRouterModel, prompt, source, size, profile.ChatView));
                 requestChars = json.Length;
                 string response = (send ?? PostJsonToLlm)(OpenRouterImagesUrl, key, json, settings);
                 var raw = Json.Deserialize<Dictionary<string, object>>(response);

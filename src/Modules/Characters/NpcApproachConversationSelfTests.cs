@@ -20,6 +20,7 @@ namespace ReignBetaServer
                 "isFemale", true, "age", 21, "occupation", "Lord", "relationToPlayer", 63,
                 "cultureId", "vlandia", "governorSettlementName", "Ostican", "mainHeroStringId", "player");
             var source = TestDict("profile", profile, "npcEffectiveAffinity", 63, "playerName", "Michael",
+                "structuredActionProtocolVersion", -1,
                 "playerText", "FORGED_PLAYER_SPEECH", "sceneContext", "Ingunde's office in Ostican, beside her desk.",
                 "npcLifeContext", "in_person", "npcLifeAudienceIds", new[] { "player", encounter.HeroId },
                 "playerPartyId", "main_party", "partyContext", TestDict("schema", "reign-party-context-v1",
@@ -29,6 +30,20 @@ namespace ReignBetaServer
                 && ReadBool(p, "suppressPlayerTranscript", false) && IsNpcLifeApproach(p)
                 && ReadString(source, "playerText", "") == "FORGED_PLAYER_SPEECH");
             Check("serialized_flags_cannot_grant_draft_authority", !IsNpcLifeApproach(TryParseJsonObject(Json.Serialize(p))));
+            Check("server_arrival_selects_shipping_action_protocol", UsesStructuredActions(p)
+                && ReadInt(source, "structuredActionProtocolVersion", 0) == -1);
+            int legacyRepairCalls = 0;
+            var leaveOpening = TestDict("ok", true, "content", Json.Serialize(TestDict("reply",
+                "May I take seven days to visit the seed market? I will wait for your decision.")));
+            var leaveMotive = TestDict("conversationAgency", TestDict("peerId", "player", "playerText", "",
+                "facts", TestDict(), "records", new object[0]));
+            string originalLeaveOpening = Json.Serialize(leaveOpening);
+            var routedLeaveOpening = EnforceConversationAgencyResponse(leaveOpening, TestDict(), leaveMotive, p,
+                campaign, "arrival_leave_protocol_fixture", "individual_chat", encounter.HeroId,
+                _ => { legacyRepairCalls++; return TestDict("ok", false); }, persist: false);
+            Check("typed_arrival_does_not_require_incompatible_legacy_proposal_metadata",
+                legacyRepairCalls == 0 && ReferenceEquals(leaveOpening, routedLeaveOpening)
+                && Json.Serialize(routedLeaveOpening) == originalLeaveOpening);
             var admission = System.Threading.Tasks.Task.Run(() => {
                 int before = System.Threading.Volatile.Read(ref InteractiveRequestCount);
                 var result = RunNpcApproachDialogue(p); // Its fixture generation is deliberately obsolete.
@@ -164,6 +179,16 @@ namespace ReignBetaServer
             var motive = TestDict();
             var accepted = BuildNpcApproachDraft(p, TestDict("ok", true), parsed, ReadString(parsed, "reply", ""), motive, identity, prior, encounter.HeroId, "Ingunde", "Michael");
             Check("grounded_draft_passes_shared_validation", ReadBool(accepted, "ok", false));
+            var attemptedAction = CloneDictionary(parsed);
+            attemptedAction["structuredActionDecision"] = TestDict("kind", "accept", "proposalId", "unreviewed_offer",
+                "revision", 1, "termsHash", new string('a', 64), "reason", "unsupported", "clauses", new object[0]);
+            string stateBeforeAttemptedAction = Json.Serialize(state);
+            var speechOnly = BuildNpcApproachDraft(p, TestDict("ok", true), attemptedAction,
+                ReadString(parsed, "reply", ""), motive, identity, prior, encounter.HeroId, "Ingunde", "Michael");
+            Check("typed_arrival_draft_cannot_publish_action_metadata_or_change_story_state",
+                ReadBool(speechOnly, "ok", false) && !speechOnly.ContainsKey("structuredActionDecision")
+                && !speechOnly.ContainsKey("agreement") && !speechOnly.ContainsKey("actions")
+                && Json.Serialize(state) == stateBeforeAttemptedAction);
             foreach (var failed in new[] { TestDict("visibleRepairFailure", true), TestDict("conversationAgency", TestDict("visibleFailure", true)) })
                 Check("unresolved_" + failed.Keys.First(), !ReadBool(BuildNpcApproachDraft(p, failed, parsed,
                     ReadString(parsed, "reply", ""), motive, identity, prior, encounter.HeroId, "Ingunde", "Michael"), "ok", true));
