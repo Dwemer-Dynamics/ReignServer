@@ -3360,7 +3360,7 @@ namespace ReignBetaServer
                 AddVerificationCheck(checks, "live_llm.configuration", "live_llm", false, "Live LLM verification requires a configured selected provider.", new Dictionary<string, object>
                 {
                     ["provider"] = NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider)),
-                    ["apiKeyPresent"] = !string.IsNullOrWhiteSpace(LlmApiKey(settings)),
+                    ["apiKeyPresent"] = ProviderKeyConfigured(settings, LlmApiKeySlot(settings)),
                     ["apiUrlPresent"] = !string.IsNullOrWhiteSpace(LlmApiUrl(settings)),
                     ["codexExecutablePresent"] = !string.IsNullOrWhiteSpace(ReadString(settings, "codexExecutable", ""))
                 }, "blocked");

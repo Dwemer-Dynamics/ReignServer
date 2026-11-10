@@ -57,9 +57,9 @@ namespace ReignBetaServer
             ImageGenerationProfile profile, string prompt, byte[] source, string size,
             Func<string, string, string, Dictionary<string, object>, string> send = null)
         {
-            string key = ReadString(settings, "openRouterApiKey", "");
+            string key = ProviderSecret(settings, "openRouterApiKey", OpenRouterImagesUrl);
             if (string.IsNullOrWhiteSpace(key)) return PortraitImageCallResult.Fail("OpenRouter", profile.OpenRouterModel,
-                "No OpenRouter key is saved. Add it in API Settings; chat and images share that key.");
+                ProviderKeyUnavailable(settings, "openRouterApiKey", key) ? GlobalKeyUnavailableError : "No OpenRouter key is saved. Add it in API Settings; chat and images share that key.");
             var timer = Stopwatch.StartNew();
             int requestChars = 0;
             try

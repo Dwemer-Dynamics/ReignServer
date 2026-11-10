@@ -789,11 +789,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = ReadString(settings, "portraitNanoGptApiKey", "");
+            string apiKey = ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
+                ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl));
             string model = imageProfile.NanoGptModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("NanoGPT", model, "No NanoGPT image API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("NanoGPT", model, ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
             }
 
             if (UsesGeminiChatImageAdapter(model))
@@ -899,11 +900,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = ReadString(settings, "portraitAtlasApiKey", "");
+            string apiKey = ProviderSecret(settings, "portraitAtlasApiKey", ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl),
+                ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl), ReadString(settings, "portraitAtlasPredictionUrlPrefix", AtlasPredictionUrlPrefix));
             string model = imageProfile.AtlasModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("AtlasCloud", model, "No AtlasCloud API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("AtlasCloud", model, ProviderKeyUnavailable(settings, "portraitAtlasApiKey", apiKey) ? GlobalKeyUnavailableError : "No AtlasCloud API key is set in the server AI Image Generation tab.");
             }
 
             Stopwatch total = Stopwatch.StartNew();

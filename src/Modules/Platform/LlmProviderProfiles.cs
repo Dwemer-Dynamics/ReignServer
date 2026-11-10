@@ -36,7 +36,8 @@ namespace ReignBetaServer
             var clearKeys = ReadStringList(incoming, "clearKeys");
             foreach (var pair in incoming ?? new Dictionary<string, object>())
             {
-                if (pair.Key == "clearKeys" || pair.Key == "chatProviderProfilesInitialized") continue;
+                // Bindings change only through the Global API Keys routes, which choose provider and origin themselves.
+                if (pair.Key == "clearKeys" || pair.Key == "chatProviderProfilesInitialized" || pair.Key == "globalKeyBindings") continue;
                 if (pair.Key == "codexOptions")
                 {
                     var suppliedCodexOptions = ReadDictionary(incoming, "codexOptions");
@@ -82,12 +83,9 @@ namespace ReignBetaServer
                 : provider == NanoGptProvider ? NanoGptChatCompletionsUrl : ReadString(settings, "apiUrl", "");
         }
 
-        private static string LlmApiKey(Dictionary<string, object> settings)
-        {
-            string provider = NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
-            return ReadString(settings, provider == OpenRouterProvider ? "openRouterApiKey"
-                : provider == NanoGptProvider ? "nanoGptApiKey" : "apiKey", "");
-        }
+        // Outbound use only: resolves a bound global key for the configured endpoint. Presence checks use ProviderKeyConfigured.
+        private static string LlmApiKey(Dictionary<string, object> settings) =>
+            ProviderSecret(settings, LlmApiKeySlot(settings), LlmApiUrl(settings));
 
         // Flat active model fields remain the runtime contract. The bank contains only model IDs, never credentials.
         private static Dictionary<string, object> ChatModelProfile(Dictionary<string, object> source, string fallback)

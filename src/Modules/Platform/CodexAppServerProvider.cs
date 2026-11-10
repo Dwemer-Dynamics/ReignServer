@@ -145,7 +145,7 @@ namespace ReignBetaServer
             }
             string url = LlmApiUrl(settings);
             bool local = url.IndexOf("127.0.0.1", StringComparison.OrdinalIgnoreCase) >= 0 || url.IndexOf("localhost", StringComparison.OrdinalIgnoreCase) >= 0;
-            return !string.IsNullOrWhiteSpace(url) && (!string.IsNullOrWhiteSpace(LlmApiKey(settings)) || local);
+            return !string.IsNullOrWhiteSpace(url) && (ProviderKeyConfigured(settings, LlmApiKeySlot(settings)) || local);
         }
 
         private static Dictionary<string, object> CodexStatusApi()
@@ -1158,6 +1158,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
             tests.AddRange(RunCodexRuntimeSelfTests());
             tests.AddRange(RunOpenRouterProviderContractTests());
+            tests.AddRange(RunGlobalKeyBridgeContractTests());
             Action<string, bool, string> add = (id, passed, summary) => tests.Add(new Dictionary<string, object>
             {
                 ["id"] = id, ["passed"] = passed, ["summary"] = summary

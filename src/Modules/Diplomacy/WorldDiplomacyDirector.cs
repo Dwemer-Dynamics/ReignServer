@@ -82,7 +82,7 @@ namespace ReignBetaServer
             {
                 return DirectorError("The diplomacy AI route is not configured. Check the API URL and Diplomacy Model in the Reign server control center.");
             }
-            if (!UsesCodexSubscription(settings) && !localDiplomacyEndpoint && string.IsNullOrWhiteSpace(LlmApiKey(settings)))
+            if (!UsesCodexSubscription(settings) && !localDiplomacyEndpoint && !ProviderKeyConfigured(settings, LlmApiKeySlot(settings)))
             {
                 return DirectorError("The main LLM API key is not configured. Open the Reign Control Center, save the key under Server Diagnostics, then run Test LLM Key.");
             }
