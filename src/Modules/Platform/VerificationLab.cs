@@ -348,6 +348,8 @@ namespace ReignBetaServer
             bool includeBaselines)
         {
             bool explicitSuite = !string.IsNullOrWhiteSpace(requestedSuite);
+            if (explicitSuite && ShouldRunVerificationSuite(requestedSuite, "war_economy_options"))
+                AddSubsystemListSummary(checks, "contracts.war_economy_options", "war_economy_options", RunWarEconomyOptionsSelfTests());
             if (string.Equals(requestedSuite, "memory_evidence_replay", StringComparison.OrdinalIgnoreCase))
             {
                 var replay = RunMemoryEvidenceReplay();
@@ -427,7 +429,7 @@ namespace ReignBetaServer
             if (string.Equals(requestedSuite, "conversation_intoxication", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", RunConversationIntoxicationSelfTests());
             if (string.Equals(requestedSuite, "relationships", StringComparison.OrdinalIgnoreCase))
-                AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RunCurrentRelationshipSelfTests());
+                AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RunCurrentRelationshipSelfTests(), caseResultLimit:512);
             if (string.Equals(requestedSuite, "wanderer_population", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", RunWandererPopulationTests());
             if (string.Equals(requestedSuite, "encountered_residents", StringComparison.OrdinalIgnoreCase))
@@ -514,7 +516,7 @@ namespace ReignBetaServer
             bool includeExpensiveSubsystems)
         {
             if (HasArg(Environment.GetCommandLineArgs(), "--run-verification") && ActiveServerPort <= 0)
-                AddSubsystemListSummary(checks, "contracts.campaign_provider_wait", "save_load", RunCampaignProviderWaitSelfTests());
+                AddSubsystemListSummary(checks, "contracts.campaign_provider_wait", "save_load", RunCampaignProviderWaitSelfTests(), caseResultLimit:64);
             AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", RunWandererPopulationTests());
             AddSubsystemListSummary(checks, "contracts.encountered_residents", "characters", RunEncounteredResidentTests());
             AddSubsystemListSummary(checks, "contracts.tavern_house", "characters", RunTavernHouseContractTests());
@@ -3533,11 +3535,30 @@ namespace ReignBetaServer
             AddVerificationCheck(checks, id, suite, passed, id + ": " + passedCount + "/" + total + " baseline checks passed.", CompactSelfTest(result));
         }
 
-        private static void AddSubsystemListSummary(List<Dictionary<string, object>> checks, string id, string suite, List<Dictionary<string, object>> rows)
+        private static void AddSubsystemListSummary(List<Dictionary<string, object>> checks, string id, string suite, List<Dictionary<string, object>> rows, int caseResultLimit=0)
         {
             rows = rows ?? new List<Dictionary<string, object>>();
             int passed = rows.Count(CheckPassed);
-            AddVerificationCheck(checks, id, suite, rows.Count > 0 && passed == rows.Count, id + ": " + passed + "/" + rows.Count + " checks passed.", new Dictionary<string, object> { ["failures"] = rows.Where(x => !CheckPassed(x)).Select(CompactVerificationFailure).ToList() });
+            var evidence=new Dictionary<string,object> { ["failures"] = rows.Where(x => !CheckPassed(x)).Select(CompactVerificationFailure).ToList() };
+            if(caseResultLimit>0)
+            {
+                if(caseResultLimit>512)throw new ArgumentOutOfRangeException(nameof(caseResultLimit));
+                var ids=new HashSet<string>(StringComparer.Ordinal);
+                bool invalid=false;
+                var caseResults=new List<Dictionary<string,object>>();
+                foreach(var row in rows.Take(caseResultLimit))
+                {
+                    string caseId=ReadFirstString(row,"caseId","id","name");
+                    bool valid=caseId.Length>0 && caseId.Length<=192 && caseId.All(c=>char.IsLetterOrDigit(c)||c=='_'||c=='.'||c=='-'||c==':') && ids.Add(ReadString(row,"suite","")+"\0"+caseId);
+                    invalid|=!valid;
+                    caseResults.Add(new Dictionary<string,object>{{"caseId",valid?caseId:""},{"passed",CheckPassed(row)}});
+                }
+                evidence["caseResults"]=caseResults;
+                evidence["caseResultsTotal"]=rows.Count;
+                evidence["caseResultsTruncated"]=rows.Count>caseResultLimit;
+                evidence["caseResultsInvalidIds"]=invalid;
+            }
+            AddVerificationCheck(checks, id, suite, rows.Count > 0 && passed == rows.Count, id + ": " + passed + "/" + rows.Count + " checks passed.", evidence);
         }
 
         private static Dictionary<string, object> CompactSelfTest(Dictionary<string, object> result)

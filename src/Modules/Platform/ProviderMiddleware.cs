@@ -127,6 +127,7 @@ namespace ReignBetaServer
         private static string PostStreamingProviderJson(string url, string key, string json, Dictionary<string, object> settings,
             Action<string> delta, Func<bool> canceled)
         {
+            ProviderTestGuard.BeforeDispatch("streaming_text");
             using var attempt = BeginDiagnosticAttempt(url, json, key);
             var request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "POST"; request.ContentType = "application/json"; request.Accept = "text/event-stream, application/json";
@@ -243,6 +244,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["idempotencyEntries"] = ProviderResponses.Count,
+                    ["nativeProviderTestGuard"] = ProviderTestGuard.Snapshot(),
                     ["providers"] = ProviderStates.Select(pair => new Dictionary<string, object>
                     {
                         ["provider"] = pair.Key, ["requests"] = pair.Value.Requests, ["successes"] = pair.Value.Successes,

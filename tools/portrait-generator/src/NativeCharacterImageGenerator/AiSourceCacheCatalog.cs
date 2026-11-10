@@ -403,16 +403,16 @@ internal static class CanonicalCharacterCatalog
         {
             throw new InvalidDataException($"Duplicate Reign portrait cache key: {duplicate.Key}");
         }
-        if (records.Count != 1260)
+        if (records.Count != 1338)
         {
-            throw new InvalidDataException($"AI source catalog expected 1,260 characters but found {records.Count:N0}.");
+            throw new InvalidDataException($"AI source catalog expected 1,338 characters (including 78 Nord court nobles) but found {records.Count:N0}.");
         }
 
         var matchedProfiles = records.Count(record => record.ProfileSource != "neutral_fallback");
-        if (matchedProfiles != 1117)
+        if (matchedProfiles != 1195)
         {
             throw new InvalidDataException(
-                $"AI source catalog expected 1,117 Reign profile matches but found {matchedProfiles:N0}.");
+                $"AI source catalog expected 1,195 Reign profile matches but found {matchedProfiles:N0}.");
         }
 
         var catalogHash = Sha256(string.Join("\n",

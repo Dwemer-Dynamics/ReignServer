@@ -940,13 +940,14 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             {
                 string reason = ReadString(payload, "reason", "");
                 if ((source.Equals("court_economic_transfer", StringComparison.OrdinalIgnoreCase)
-                        || campaignReport)
+                        || campaignReport || IsDeterministicMarriageLetter(source))
                     && !string.IsNullOrWhiteSpace(reason))
                 {
                     Dictionary<string, object> existing = QuerySql(connection,
-                        "SELECT * FROM letters WHERE sender_id=$sender AND recipient_id=$recipient AND source=$source AND reason=$reason ORDER BY created_ts ASC LIMIT 1;",
+                        "SELECT * FROM letters WHERE sender_id=$sender AND recipient_id=$recipient AND source=$source AND reason=$reason ORDER BY created_ts DESC,letter_id;",
                         new Dictionary<string, object> { ["sender"] = senderId, ["recipient"] = recipientId, ["source"] = source, ["reason"] = reason })
-                        .FirstOrDefault();
+                        .FirstOrDefault(row => !IsDeterministicMarriageLetter(source)
+                            || CorrespondenceDispatchOnTimeline(connection, row, ReadString(payload, "timelineId", "main")));
                     if (existing != null)
                     {
                         return new Dictionary<string, object>
@@ -1182,7 +1183,8 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
                     var placeholders = contacts.Select((id, i) => { parameters["contact" + i] = id; return "$contact" + i; }).ToList();
                     string allowed = string.Join(",", placeholders);
                     where += " AND (sender_id IN (" + allowed + ") OR recipient_id IN (" + allowed
-                        + ") OR source IN ('campaign_command_urgent_report','campaign_command_report','npc_introduction'))";
+                        + ") OR source IN ('campaign_command_urgent_report','campaign_command_report','npc_introduction',"
+                        + "'reign_marriage_offer','reign_marriage_answer','reign_marriage_meeting'))";
                 }
                 var states = QuerySql(connection, @"SELECT DISTINCT ON (contact_id) contact_id,
 SUM(CASE WHEN recipient_id=$player AND status='delivered' THEN 1 ELSE 0 END) OVER (PARTITION BY contact_id) AS unread_count,status

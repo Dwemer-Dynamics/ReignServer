@@ -1664,36 +1664,22 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["hostPath"] = passiveWorldHostPath
                     });
                 add("war_economy_mobilization_relief_contract",
-                    economyBehaviorText.Contains("MobilizationDailyDecayFactor = 0.95f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("MobilizationDailyFlatRecovery = 0.5f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("MinimumRecruitmentRecoveryModifier = 0.3f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefDonorEntryRatio = 0.7f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefDonorReserveRatio = 0.6f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefRecipientEntryRatio = 0.3f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefRecipientExitRatio = 0.5f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefMaximumDonorShipment = 10f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefMaximumRecipientShipment = 15f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("ReliefMaximumRouteDistance = 180f", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("donor.FoodStocks -= shipment", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("recipient.FoodStocks += delivered", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("float delivered = shipment * efficiency", StringComparison.Ordinal)
-                    && economyBehaviorText.Contains("town != null && !town.IsUnderSiege", StringComparison.Ordinal)
+                    economyBehaviorText.Contains("ReignWarEconomyPolicy.DecayStrain", StringComparison.Ordinal)
+                    && economyBehaviorText.Contains("ReignWarEconomyPolicy.AllocateRelief", StringComparison.Ordinal)
+                    && economyBehaviorText.Contains("towns[shipment.Donor].FoodStocks -= (float)shipment.Shipped", StringComparison.Ordinal)
+                    && economyBehaviorText.Contains("towns[shipment.Recipient].FoodStocks += (float)shipment.Delivered", StringComparison.Ordinal)
                     && economyBehaviorText.Contains("GroupBy(ReliefNetworkKey)", StringComparison.Ordinal)
+                    && economyBehaviorText.Contains("_reignEconomy_payload_v2", StringComparison.Ordinal)
                     && economyBehaviorText.Contains("_reignEconomy_villageMobilizationStrain", StringComparison.Ordinal)
                     && economyBehaviorText.Contains("_reignEconomy_reliefFoodShipped", StringComparison.Ordinal)
-                    && economyModelsText.Contains("manpower shortage", StringComparison.Ordinal)
+                    && economyModelsText.Contains("Household recovery after mobilization", StringComparison.Ordinal)
                     && economyModelsText.Contains("Emergency provisions received", StringComparison.Ordinal)
                     && economyModelsText.Contains("Unmet emergency provisions", StringComparison.Ordinal)
                     && economySubModuleText.Contains("new ReignSettlementLoyaltyModel()", StringComparison.Ordinal)
-                    && economyTelemetryText.Contains("mobilizationFoodPenalty", StringComparison.Ordinal)
+                    && economyTelemetryText.Contains("ReignWarEconomyTestHost.Capture(false)", StringComparison.Ordinal)
                     && economyTelemetryText.Contains("reliefFoodDelivered", StringComparison.Ordinal),
-                    "Recruitment creates saved, decaying village mobilization strain; recovering villages cannot recruit early; and conserved, capped, distance/security-limited same-realm relief moves real food stocks with loyalty and telemetry consequences.",
-                    new Dictionary<string, object>
-                    {
-                        ["behaviorPath"] = economyBehaviorPath,
-                        ["modelsPath"] = economyModelsPath,
-                        ["telemetryPath"] = economyTelemetryPath
-                    });
+                    "Native adapters use the tested continuous policy, preserve old save counters, and conserve actual same-realm aid stocks. Deterministic numeric and isolated native hook probes run in MCP tests; campaign balance remains separate.",
+                    new Dictionary<string, object> { ["behaviorPath"] = economyBehaviorPath, ["modelsPath"] = economyModelsPath, ["telemetryPath"] = economyTelemetryPath });
                 add("war_economy_relief_float_drift_tolerance",
                     ReliefFoodIsConserved(46846.6367d, 37907.082d, 8939.383d)
                     && !ReliefFoodIsConserved(46846.6367d, 37906.5d, 8939.383d)
@@ -1704,6 +1690,28 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["observedLongRunDrift"] =
                             46846.6367d - 37907.082d - 8939.383d
                     });
+                var coverageSample = new Dictionary<string, object>
+                {
+                    ["schemaVersion"] = 2, ["observedDay"] = 10d,
+                    ["observedUtc"] = DateTime.UtcNow.ToString("O"),
+                    ["active"] = true, ["allHooksHealthy"] = true, ["allModelsHealthy"] = true,
+                    ["behavioralCoverageComplete"] = true
+                };
+                var coveragePayload = new Dictionary<string, object> { ["warEconomy"] = coverageSample };
+                var freshCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
+                var staleCoverage = BuildWorldTestWarEconomy(coveragePayload, 12d);
+                coverageSample["schemaVersion"] = 1;
+                var legacyCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
+                add("war_economy_current_coverage_requires_fresh_schema",
+                    ReadBool(freshCoverage, "behavioralCoverageComplete", false)
+                    && ReadString(freshCoverage, "status", "") == "healthy"
+                    && !ReadBool(staleCoverage, "behavioralCoverageComplete", true)
+                    && ReadString(staleCoverage, "status", "") == "insufficient_data"
+                    && !ReadBool(legacyCoverage, "behavioralCoverageComplete", true)
+                    && ReadString(legacyCoverage, "status", "") == "insufficient_data"
+                    && ReadBool(coverageSample, "behavioralCoverageComplete", false),
+                    "Current coverage clears stale/legacy claims without mutating the original historical telemetry.",
+                    new Dictionary<string, object>());
                 string qualificationRunnerPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""
                     : VerificationSourceLocator.ResolveUnique(

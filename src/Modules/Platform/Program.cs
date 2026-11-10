@@ -39,6 +39,9 @@ namespace ReignBetaServer
         private static readonly string CharacterTemplatesDir = Path.Combine(DataDir, "character_templates");
         private static readonly string TestsDir = Path.Combine(DataDir, "tests");
         private static readonly string SettingsPath = Path.Combine(DataDir, "settings.json");
+        private static readonly Lazy<NativeProviderTestGuard> NativeProviderTestGuardInstance =
+            new Lazy<NativeProviderTestGuard>(() => new NativeProviderTestGuard(DataDir));
+        private static NativeProviderTestGuard ProviderTestGuard => NativeProviderTestGuardInstance.Value;
 
         private static string ResolveRuntimeDataDirectory(
             string configuredRoot,
@@ -2863,45 +2866,75 @@ namespace ReignBetaServer
             }
         }
 
+        [ThreadStatic] private static Action<bool> CampaignSchemaSettingsReadObserverForTests;
+        [ThreadStatic] private static Action<ReignDbConnection> CampaignSchemaConnectionOpenedForTests;
+        [ThreadStatic] private static Action CampaignSchemaInitializingForTests;
+        [ThreadStatic] private static Action CampaignSchemaAfterMemoryForTests;
+        [ThreadStatic] private static Action<bool> CampaignSchemaColdWaitObserverForTests;
+
         private static ReignDbConnection OpenCampaignConnection(string campaignId)
         {
+            // A caller must not carry the reverse order into the cold path.
+            if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
+                throw new InvalidOperationException("Campaign schema access requires FileLock before CampaignSchemaLock.");
             Directory.CreateDirectory(CampaignDirectory(campaignId));
             ReignDbConnection connection = ReignPostgreSqlStorage.OpenCampaignConnection(campaignId);
-            lock (CampaignSchemaLock)
+            try
             {
+                CampaignSchemaConnectionOpenedForTests?.Invoke(connection);
                 string schemaKey = ReignPostgreSqlStorage.CampaignSchemaName(campaignId);
-                bool cachedReady = CampaignSchemaReady.Contains(schemaKey);
-                if (cachedReady && !IsMemorySchemaRevisionCurrent(connection))
+                lock (CampaignSchemaLock)
                 {
-                    // Save Sync can replace the schema beneath a pooled
-                    // connection. Keep the normal checkout guard to one
-                    // indexed metadata read, but force the complete migration
-                    // path whenever the restored schema revision is stale.
-                    CampaignSchemaReady.Remove(schemaKey);
-                    InvalidateCampaignSchemaCaches(campaignId);
-                    cachedReady = false;
+                    if (IsCampaignSchemaCachedReady(connection, campaignId, schemaKey))
+                        return connection;
                 }
-                if (!cachedReady)
+                // Settings and action files share FileLock. Cold initialization
+                // must use FileLock -> SchemaLock, including reentrant action reads.
+                // Holding it through initialization also keeps the provider snapshot
+                // consistent with settings saves. Warm checkouts never take FileLock.
+                CampaignSchemaColdWaitObserverForTests?.Invoke(Monitor.IsEntered(CampaignSchemaLock));
+                lock (SettingsSaveGate)
                 {
-                    EnsureMemorySchema(connection);
-                    EnsureCategorizedMemorySchema(connection);
-                    EnsureWorldHistorySchema(connection);
-                    EnsureSemanticMemorySchema(connection);
-                    RunCategorizedMemoryMigration(connection, campaignId);
-                    // Older malformed provider responses could turn scalar
-                    // collection entries into dialogue memories such as "0".
-                    // Repair an affected save once when this process validates
-                    // the campaign schema; normal foreground reads remain free
-                    // of an extra write transaction.
-                    ExecuteSql(connection, @"DELETE FROM memories
+                    string providerGeneration = ReadString(LoadSettings(), "vectorProvider", "local")
+                        .ToLowerInvariant() + "|" + SemanticModelVersion;
+                    lock (CampaignSchemaLock)
+                    {
+                        if (IsCampaignSchemaCachedReady(connection, campaignId, schemaKey))
+                            return connection;
+                        CampaignSchemaInitializingForTests?.Invoke();
+                        EnsureMemorySchema(connection);
+                        CampaignSchemaAfterMemoryForTests?.Invoke();
+                        EnsureCategorizedMemorySchema(connection);
+                        EnsureWorldHistorySchema(connection);
+                        EnsureSemanticMemorySchema(connection, providerGeneration);
+                        RunCategorizedMemoryMigration(connection, campaignId);
+                        // Repair legacy scalar memories once, outside warm reads.
+                        ExecuteSql(connection, @"DELETE FROM memories
 WHERE source='dialogue_llm'
   AND lower(trim(summary)) IN ('0','1','true','false','null','undefined');");
-                    ReignPostgreSqlStorage.DeduplicateCampaignIndexes(
-                        campaignId);
-                    CampaignSchemaReady.Add(schemaKey);
+                        ReignPostgreSqlStorage.DeduplicateCampaignIndexes(campaignId);
+                        CampaignSchemaReady.Add(schemaKey);
+                    }
                 }
+                return connection;
             }
-            return connection;
+            catch
+            {
+                // Preserve the initialization exception even if cleanup also fails.
+                try { connection.Dispose(); } catch { }
+                throw;
+            }
+        }
+
+        // Caller owns CampaignSchemaLock; no settings/file access on this path.
+        private static bool IsCampaignSchemaCachedReady(ReignDbConnection connection,
+            string campaignId, string schemaKey)
+        {
+            if (!CampaignSchemaReady.Contains(schemaKey)) return false;
+            if (IsMemorySchemaRevisionCurrent(connection)) return true;
+            // Save Sync can replace a schema beneath a pooled connection.
+            InvalidateCampaignSchemaCaches(campaignId);
+            return false;
         }
 
         private static bool IsMemorySchemaRevisionCurrent(
@@ -3300,13 +3333,14 @@ WHERE table_schema=current_schema()
                     }
                     return;
                 }
-                catch (Exception ex) when (IsStalePostgreSqlPreparedPlan(ex)
+                catch (Exception ex) when (!SqlStatementRetriesSuppressed(connection) && IsStalePostgreSqlPreparedPlan(ex)
                     && attempt < 2)
                 {
                     ResetPostgreSqlPreparedPlans(connection);
                 }
-                catch (Exception ex) when (IsTransientDatabaseContention(ex) && attempt < 240)
+                catch (Exception ex) when (!SqlStatementRetriesSuppressed(connection) && IsTransientDatabaseContention(ex) && attempt < 240)
                 {
+                    SqlContentionRetryObserverForTests?.Invoke(ex);
                     Thread.Sleep(Math.Min(250, 10 + (attempt * 5)));
                 }
                 finally
@@ -3380,6 +3414,31 @@ WHERE table_schema=current_schema()
             public void Dispose() { CurrentSqlReadTiming = previous; }
         }
 
+        [ThreadStatic] private static SqlStatementRetrySuppression CurrentSqlRetrySuppression;
+        [ThreadStatic] private static Action<Exception> SqlContentionRetryObserverForTests;
+        private sealed class SqlStatementRetrySuppression : IDisposable
+        {
+            internal readonly ReignDbConnection Connection;
+            internal readonly SqlStatementRetrySuppression Previous;
+            private bool disposed;
+            internal SqlStatementRetrySuppression(ReignDbConnection connection)
+            {
+                Connection=connection; Previous=CurrentSqlRetrySuppression;
+                CurrentSqlRetrySuppression=this;
+            }
+            public void Dispose()
+            {
+                if(disposed)return;
+                CurrentSqlRetrySuppression=Previous; disposed=true;
+            }
+        }
+        private static bool SqlStatementRetriesSuppressed(ReignDbConnection connection)
+        {
+            for(var scope=CurrentSqlRetrySuppression;scope!=null;scope=scope.Previous)
+                if(ReferenceEquals(scope.Connection,connection))return true;
+            return false;
+        }
+
         private static List<Dictionary<string, object>> QuerySql(
             ReignDbConnection connection,
             string sql,
@@ -3432,13 +3491,14 @@ WHERE table_schema=current_schema()
                     }
                     return rows;
                 }
-                catch (Exception ex) when (IsStalePostgreSqlPreparedPlan(ex)
+                catch (Exception ex) when (!SqlStatementRetriesSuppressed(connection) && IsStalePostgreSqlPreparedPlan(ex)
                     && attempt < 2)
                 {
                     ResetPostgreSqlPreparedPlans(connection);
                 }
-                catch (Exception ex) when (IsTransientDatabaseContention(ex) && attempt < 240)
+                catch (Exception ex) when (!SqlStatementRetriesSuppressed(connection) && IsTransientDatabaseContention(ex) && attempt < 240)
                 {
+                    SqlContentionRetryObserverForTests?.Invoke(ex);
                     Thread.Sleep(Math.Min(250, 10 + (attempt * 5)));
                 }
             }
@@ -18744,6 +18804,7 @@ The previous attempt did not complete a JSON object within its output budget.
 
         private static string PostJsonToLlm(string apiUrl, string apiKey, string requestJson, Dictionary<string, object> settings)
         {
+            ProviderTestGuard.BeforeDispatch("http_text_or_image");
             using var diagnosticAttempt = BeginDiagnosticAttempt(apiUrl, requestJson, apiKey);
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
             request.Method = "POST";
@@ -21387,6 +21448,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 };
             }
             if (found) RecordSharedActionReceipt(campaignId, payload, matchedRecord, authoritativeStatus);
+            if(found)FinalizeDiplomaticMarriageEffects(campaignId,id,authoritativeStatus,matchedRecord,payload);
             Dictionary<string, object> memoryStore = StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = EvaluateCompletedActionRelationships(payload);
             UpdateDiplomaticEventForAction(campaignId, id, status, payload);
@@ -23144,12 +23206,20 @@ Return exactly this JSON shape:
                 ["banterModel"] = "",
                 ["autoOpenBrowser"] = true
             };
+            foreach (var pair in Reign.Core.Contracts.Economy.WarEconomyOptions.DefaultValues()) settings[pair.Key] = pair.Value;
             foreach (string key in ReignBeta.Shared.Rulers.RulerOptions.Switches.Keys) settings[key] = true;
             foreach (string key in Reign.Core.Contracts.World.ReignNewsCategories.Switches.Keys) settings[key] = true;
             return settings;
         }
 
         private static Dictionary<string, object> LoadSettings()
+        {
+            if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
+                throw new InvalidOperationException("Settings require FileLock before CampaignSchemaLock.");
+            CampaignSchemaSettingsReadObserverForTests?.Invoke(Monitor.IsEntered(CampaignSchemaLock));
+            lock(SettingsSaveGate)return LoadSettingsCore();
+        }
+        private static Dictionary<string, object> LoadSettingsCore()
         {
             if (ActiveCodexConversationScope.Value != null) return DeepCloneProfileDictionary(ActiveCodexConversationScope.Value.Settings);
             if (CodexPerformanceSettings.Value != null) return DeepCloneProfileDictionary(CodexPerformanceSettings.Value);
@@ -23169,6 +23239,8 @@ Return exactly this JSON shape:
                 catch (Exception ex)
                 {
                     LogOperational("settings.load_failed", new Dictionary<string, object> { ["error"] = ex.Message });
+                    // A fallback read must never normalize over the unreadable original.
+                    return settings;
                 }
             }
             bool secretsRecovered = RecoverInstalledSettingsSecrets(settings, !settingsFileExisted);
@@ -23184,7 +23256,7 @@ Return exactly this JSON shape:
             {
                 settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
                 Directory.CreateDirectory(DataDir);
-                File.WriteAllText(SettingsPath, Json.Serialize(settings), Encoding.UTF8);
+                WriteJsonObject(SettingsPath, settings);
                 LogOperational("settings.normalized", new Dictionary<string, object>
                 {
                     ["portraitSettingsChanged"] = portraitSettingsChanged, ["memorySettingsChanged"] = memorySettingsChanged,
@@ -23201,8 +23273,39 @@ Return exactly this JSON shape:
             return settings;
         }
 
+        // Reuse the existing file coordinator: callers already holding FileLock can
+        // read settings without a second lock-order dependency. Atomic replacement
+        // and revision checks cover both user saves and normalization writes.
+        private static object SettingsSaveGate => FileLock;
+        private static readonly object SettingsEffectsGate = new object();
         private static Dictionary<string, object> SaveSettings(Dictionary<string, object> incoming)
         {
+            Dictionary<string, object> applied;
+            bool invalidate;
+            Dictionary<string, object> result;
+            lock (SettingsSaveGate) result = SaveSettingsCore(incoming, out applied, out invalidate);
+            if (applied != null)
+            {
+                lock (SettingsEffectsGate)
+                {
+                    if (invalidate) InvalidateCodexThreads("provider_or_codex_settings_changed");
+                    LogOperational("settings.save", RedactSensitive(applied));
+                    if (ActiveListener != null)
+                {
+                    // Concurrent saves may have committed since ours: apply the latest state.
+                    var current = LoadSettings();
+                    if (ReadBool(current, "enableSemanticMemory", true)) StartSemanticMemorySubsystem(current);
+                    else StopSemanticMemorySubsystem();
+                }
+                }
+            }
+            return result;
+        }
+        private static Dictionary<string, object> SaveSettingsCore(Dictionary<string, object> incoming,
+            out Dictionary<string, object> applied, out bool invalidate)
+        {
+            applied = null;
+            invalidate = false;
             string gossipError = ValidatePersonalGossipOptions(incoming);
             if (!string.IsNullOrEmpty(gossipError)) return TestDict("ok", false, "error", gossipError);
             string announcementError = ValidateAnnouncementOptions(incoming);
@@ -23239,15 +23342,29 @@ Return exactly this JSON shape:
                 catch (Exception ex)
                 {
                     LogOperational("settings.save_load_existing_failed", new Dictionary<string, object> { ["error"] = ex.Message });
+                    return TestDict("ok", false, "error", "Existing settings could not be read. The original file was preserved; repair it before saving.");
                 }
             }
 
+            var storedEconomy = settings.Where(p => Reign.Core.Contracts.Economy.WarEconomyOptions.Switches.ContainsKey(p.Key)
+                || Reign.Core.Contracts.Economy.WarEconomyOptions.Numbers.ContainsKey(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+            if (!Reign.Core.Contracts.Economy.WarEconomyOptions.TryCreate(storedEconomy, false, out var validStoredEconomy, out var storedEconomyError))
+                return TestDict("ok", false, "error", "Existing economy settings are invalid and were preserved: " + storedEconomyError);
+            foreach (var pair in validStoredEconomy.Values()) settings[pair.Key] = pair.Value;
+            string economyError = ValidateWarEconomyPatch(settings, incoming, requireRevision:true);
+            if (!string.IsNullOrEmpty(economyError)) return TestDict("ok", false, "error", economyError);
+            if (incoming.ContainsKey("expectedSettingsRevision"))
+            {
+                incoming = new Dictionary<string, object>(incoming);
+                incoming.Remove("expectedSettingsRevision");
+            }
             string previousCodexSettingsIdentity = CodexSettingsIdentity(settings);
+            string settingsBeforeMerge = Json.Serialize(settings);
             List<string> clearKeys = MergeProviderSettings(settings, incoming);
+            foreach (var pair in ReadWarEconomyOptions(settings).Values()) settings[pair.Key] = pair.Value;
             var npcLivesOptions = ReadNpcLivesOptions(settings);
             if (npcLivesOptions.Number("npcLivesMajorMinDays") > npcLivesOptions.Number("npcLivesMajorMaxDays"))
                 return TestDict("ok", false, "error", "The minimum major-story cooldown cannot exceed its maximum.");
-            if (previousCodexSettingsIdentity != CodexSettingsIdentity(settings)) InvalidateCodexThreads("provider_or_codex_settings_changed");
 
             if (incoming != null && incoming.Keys.Any(key =>
                 key.StartsWith("scenery", StringComparison.OrdinalIgnoreCase)
@@ -23265,16 +23382,16 @@ Return exactly this JSON shape:
             NormalizeMemorySettings(settings);
             NormalizeArchitectureSettings(settings);
             NormalizeLlmProviderSettings(settings);
+            if(clearKeys.Count==0 && Json.Serialize(settings)==settingsBeforeMerge)
+            {
+                var unchanged=SettingsForUi(settings);unchanged["ok"]=true;unchanged["unchanged"]=true;return unchanged;
+            }
             settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
             Directory.CreateDirectory(DataDir);
-            File.WriteAllText(SettingsPath, Json.Serialize(settings), Encoding.UTF8);
+            WriteJsonObject(SettingsPath, settings);
             PersistInstalledSettingsSecrets(settings, clearKeys.Count > 0);
-            LogOperational("settings.save", RedactSensitive(settings));
-            if (ActiveListener != null)
-            {
-                if (ReadBool(settings, "enableSemanticMemory", true)) StartSemanticMemorySubsystem(settings);
-                else StopSemanticMemorySubsystem();
-            }
+            applied = settings;
+            invalidate = previousCodexSettingsIdentity != CodexSettingsIdentity(settings);
 
             Dictionary<string, object> result = SettingsForUi(settings);
             result["ok"] = true;
@@ -23498,6 +23615,7 @@ Return exactly this JSON shape:
         private static Dictionary<string, object> SettingsForUi(Dictionary<string, object> settings)
         {
             Dictionary<string, object> result = new Dictionary<string, object>(settings ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in ReadWarEconomyOptions(settings ?? new Dictionary<string, object>()).Values()) result[pair.Key] = pair.Value;
             foreach (string key in SensitiveSettingsKeys())
             {
                 string value = ReadString(settings, key, "");

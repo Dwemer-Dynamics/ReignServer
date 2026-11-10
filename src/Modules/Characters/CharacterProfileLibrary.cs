@@ -839,6 +839,29 @@ namespace ReignBetaServer
             Dictionary<string, object> courtManifest = ReadJsonObject(courtManifestPath);
             Dictionary<string, Dictionary<string, object>> courtRecords = ReadDictionaryList(courtManifest, "records").ToDictionary(x => ReadString(x, "id", ""), x => x, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, XElement> skillSets = skills.Descendants("SkillSet").Where(x => x.Attribute("id") != null).ToDictionary(x => (string)x.Attribute("id"), x => x, StringComparer.OrdinalIgnoreCase);
+            string coreSkillsPath = Path.GetFullPath(Path.Combine(sandbox, "..", "..", "SandBoxCore", "ModuleData", "sandboxcore_skill_sets.xml"));
+            if (File.Exists(coreSkillsPath))
+                foreach (XElement core in XDocument.Load(coreSkillsPath).Descendants("SkillSet").Where(x => x.Attribute("id") != null))
+                {
+                    string coreId = (string)core.Attribute("id");
+                    if (!skillSets.ContainsKey(coreId)) skillSets[coreId] = new XElement(core);
+                }
+            string navalSkillsPath = Path.GetFullPath(Path.Combine(sandbox, "..", "..", "NavalDLC", "ModuleData", "naval_skill_sets.xml"));
+            if (File.Exists(navalSkillsPath))
+                foreach (XElement extension in XDocument.Load(navalSkillsPath).Descendants("SkillSet").Where(x => x.Attribute("id") != null))
+                {
+                    string skillSetId = (string)extension.Attribute("id");
+                    // War Sails augments existing skill sets with naval skills;
+                    // replacing the whole node would erase ordinary combat/social skills.
+                    XElement merged = skillSets.TryGetValue(skillSetId, out XElement prior) ? new XElement(prior) : new XElement("SkillSet", new XAttribute("id", skillSetId));
+                    foreach (XElement skill in extension.Elements("skill"))
+                    {
+                        string skillId = (string)skill.Attribute("id");
+                        merged.Elements("skill").Where(x => (string)x.Attribute("id") == skillId).Remove();
+                        merged.Add(new XElement(skill));
+                    }
+                    skillSets[skillSetId] = merged;
+                }
             Dictionary<string, XElement> clanNodes = clans.Descendants("Faction").Where(x => x.Attribute("id") != null).ToDictionary(x => (string)x.Attribute("id"), x => x, StringComparer.OrdinalIgnoreCase);
             foreach (XElement clan in courtClans.Descendants("Faction").Where(x => x.Attribute("id") != null))
                 clanNodes[(string)clan.Attribute("id")] = clan;
@@ -880,7 +903,7 @@ namespace ReignBetaServer
                     ["courtHouseholdCount"] = ReadInt(courtManifest, "household_count", 0),
                     ["traitCount"] = CoreTraitKeys.Length,
                     ["courtCharacterModelVersion"] = CourtCharacterModelVersion,
-                    ["sandboxSourceHash"] = HashFiles(Path.Combine(sandbox, "heroes.xml"), Path.Combine(sandbox, "lords.xml"), Path.Combine(sandbox, "sandbox_skill_sets.xml"), Path.Combine(sandbox, "spclans.xml")),
+                    ["sandboxSourceHash"] = HashFiles(Path.Combine(sandbox, "heroes.xml"), Path.Combine(sandbox, "lords.xml"), Path.Combine(sandbox, "sandbox_skill_sets.xml"), Path.Combine(sandbox, "spclans.xml"), coreSkillsPath, navalSkillsPath),
                     ["reignSourceHash"] = HashFiles(Path.Combine(reign, "reign_court_heroes.xml"), Path.Combine(reign, "reign_court_lords.xml"), Path.Combine(reign, "reign_court_clans.xml"), courtManifestPath)
                 },
                 ["traitDefinitions"] = TraitDefinitions(),
@@ -1261,6 +1284,7 @@ namespace ReignBetaServer
         {
             string key = (value ?? "").Trim();
             if (key == "Crafting") return "smithing";
+            if (string.Equals(key, "Polearms", StringComparison.OrdinalIgnoreCase)) return "polearm";
             return key.Length == 0 ? "" : char.ToLowerInvariant(key[0]) + key.Substring(1);
         }
 

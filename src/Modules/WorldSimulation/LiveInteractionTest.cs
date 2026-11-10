@@ -48,7 +48,7 @@ namespace ReignBetaServer
                 "social_acknowledge_diplomacy_announcement",
                 "social_set_underlying_affinity",
                 "social_queue_rebellion_roll", "social_resolve_rebellion", "social_clear_overrides",
-                "world_snapshot", "world_time_control", "world_advance", "wait_for_correspondence", "world_delete_checkpoint",
+                "world_economy_test", "world_snapshot", "world_time_control", "world_advance", "wait_for_correspondence", "world_delete_checkpoint",
                 "world_acknowledge_diplomacy_announcement",
                 "world_acknowledge_native_diplomacy_notices",
                 "world_drain_political_pressure"
@@ -352,6 +352,11 @@ namespace ReignBetaServer
                     ["failures"] = new List<Dictionary<string, object>>()
                 };
                 run["commands"] = NormalizeLiveTestScenarioCommands(run, payload);
+                if (ReadDictionaryList(payload, "steps").Any(step =>
+                        string.Equals(ReadString(step, "operation", ReadString(step, "op", "")).Trim(),
+                            "world_economy_test", StringComparison.OrdinalIgnoreCase))
+                    && ReadDictionaryList(run, "commands").Count != ReadDictionaryList(payload, "steps").Count)
+                    return LiveTestError("Invalid war economy scenario command; no run was created.");
                 string gauntletRunId = ReadString(run, "gauntletRunId", "");
                 string caseInstanceId = ReadString(run, "caseInstanceId", "");
                 string gauntletCorrelationId =
@@ -3417,6 +3422,53 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             if (!LiveTestOperations.Contains(operation)) return null;
             string mode = NormalizeLiveTestMode(ReadString(input, "mode", ReadString(run, "mode", "individual_chat")));
             if (!LiveTestModes.Contains(mode)) return null;
+            if (operation == "world_economy_test")
+            {
+                string profile = ReadString(input, "profile", "");
+                if (profile != "cohort_control" || ReadString(input, "source", "") != "cohort_disable") try
+                {
+                    foreach (string key in new[] { "cohortDurationDays", "cohortWallHours", "cohortSampleIntervalDays" })
+                        if (input.TryGetValue(key, out var raw) && !(raw is byte || raw is short || raw is int || raw is long || raw is float || raw is double || raw is decimal)) return null;
+                    foreach (string key in new[] { "cohortBlockOtherWars", "cohortSuppressRebellions" })
+                        if (input.TryGetValue(key, out var raw) && !(raw is bool)) return null;
+                    foreach (string key in new[] { "peaceKingdomIds", "warPairs" })
+                        if (input.TryGetValue(key, out var raw) && !(raw is string)) return null;
+                    var cohortPlan = new Reign.Core.Contracts.Economy.WarEconomyCohortPlan(
+                        ReadDouble(input, "cohortDurationDays", 126), ReadDouble(input, "cohortWallHours", 6),
+                        ReadDouble(input, "cohortSampleIntervalDays", 1), ReadBool(input, "cohortBlockOtherWars", true),
+                        ReadBool(input, "cohortSuppressRebellions", true), ReadString(input, "peaceKingdomIds", "auto"), ReadString(input, "warPairs", "auto"));
+                    if (profile != "cohort_control" && (cohortPlan.DurationDays != 126 || cohortPlan.WallHours != 6 || cohortPlan.SampleIntervalDays != 1
+                        || !cohortPlan.BlockOtherWars || !cohortPlan.SuppressRebellions || cohortPlan.PeaceKingdomIds != "auto" || cohortPlan.WarPairs != "auto")) return null;
+                }
+                catch (ArgumentException) { return null; }
+                if(profile=="raid_partial_setup")
+                {
+                    if(input.TryGetValue("damagePercent",out var rawDamage)
+                        && !(rawDamage is byte || rawDamage is short || rawDamage is int || rawDamage is long || rawDamage is float || rawDamage is double || rawDamage is decimal))return null;
+                    if(!new double[]{0,4,6,10,24,25,40}.Contains(ReadDouble(input,"damagePercent",10)))return null;
+                }
+                if (mode != "passive_world" || ReadString(run, "mode", "") != "passive_world"
+                    || !new[] { "snapshot", "npc_caravan_probe", "household_stipend_probe", "recruitment", "production_probe", "relief_probe", "funding_probe", "market_food_probe", "household_probe", "raid_food_probe", "raid_partial_setup", "raid_setup", "readiness_probe", "replacement_setup", "funding_trace", "civilian_crew_probe", "ship_funding_probe", "cohort_control", "save_prepare", "save_verify" }.Contains(profile)
+                    || string.IsNullOrWhiteSpace(ReadString(input, "campaignTestRunId", ""))
+                    || string.IsNullOrWhiteSpace(ReadString(input, "expectedSaveName", ""))
+                    || ((profile is "npc_caravan_probe" or "household_stipend_probe")
+                        && (string.IsNullOrWhiteSpace(ReadString(input, "partyId", ""))
+                            || string.IsNullOrWhiteSpace(ReadString(input, "settlementId", ""))
+                            || !string.IsNullOrEmpty(ReadString(input, "source", ""))))
+                    || (profile == "recruitment" && (!new[] { "ai_volunteer", "native_auto_garrison", "native_base_garrison", "native_naval_garrison" }.Contains(ReadString(input, "source", ""))
+                        || string.IsNullOrWhiteSpace(ReadString(input, "partyId", "")) || string.IsNullOrWhiteSpace(ReadString(input, "settlementId", ""))))
+                    || ((profile is "ship_funding_probe" or "civilian_crew_probe" or "production_probe" or "relief_probe" or "funding_probe" or "market_food_probe" or "household_probe" or "raid_food_probe" or "raid_partial_setup" or "raid_setup"
+                        || (profile == "funding_trace" && ReadString(input, "source", "") == "trace_begin"))
+                        && string.IsNullOrWhiteSpace(ReadString(input, "settlementId", "")))
+                    || (profile == "funding_probe" && (string.IsNullOrWhiteSpace(ReadString(input, "partyId", ""))
+                        || !new[] { "lord_purse", "kingdom_support", "market_balance", "loot_sale", "horse_sale", "prisoner_sale", "gold_barter", "market_purchase" }.Contains(ReadString(input, "source", ""))))
+                    || (profile == "funding_trace" && !new[] { "trace_begin", "trace_observe", "trace_end" }.Contains(ReadString(input, "source", "")))
+                    || (profile == "cohort_control" && !new[] { "cohort_preview", "cohort_enable", "cohort_disable" }.Contains(ReadString(input, "source", "")))
+                    || ((profile is "ship_funding_probe" or "raid_partial_setup" or "raid_setup" or "readiness_probe" or "replacement_setup") && string.IsNullOrWhiteSpace(ReadString(input, "partyId", "")))
+                    || ((profile is "ship_funding_probe" or "civilian_crew_probe" or "household_probe" or "market_food_probe" or "raid_setup" or "readiness_probe" or "replacement_setup") && !string.IsNullOrEmpty(ReadString(input, "source", "")))
+                    || ReadString(input, "fixtureRunId", "").Length > 128
+                    || ReadString(input, "operationId", "").Length > 128) return null;
+            }
             if (operation == "clan_accords_test")
             {
                 // This fixed diagnostic runs only isolated math/JSON contracts.
@@ -3588,6 +3640,106 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             Dictionary<string, object> invalid = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["operation"] = "send", ["text"] = "" });
             Dictionary<string, object> wrongVersion = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["schemaVersion"] = 999, ["operation"] = "open" });
             add("command_schema", first != null && ReadString(first, "status", "") == "queued" && invalid == null && wrongVersion == null, "Command normalization requires the supported schema, valid operations, and non-empty dialogue text.");
+            var economyRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "passive_world" };
+            foreach (string profile in new[] { "civilian_crew_probe", "production_probe", "relief_probe", "market_food_probe", "household_probe" })
+            {
+                var probe = TestDict("operation", "world_economy_test", "profile", profile,
+                    "campaignTestRunId", "owned-run", "expectedSaveName", "Current", "settlementId", "fixture-location");
+                var accepted = NormalizeLiveTestCommand(economyRun, probe);
+                bool rejectsOtherMode = NormalizeLiveTestCommand(fakeRun, probe) == null;
+                probe.Remove("settlementId");
+                add("economy_" + profile, accepted != null && ReadString(accepted, "profile", "") == profile
+                    && ReadString(accepted, "settlementId", "") == "fixture-location" && rejectsOtherMode
+                    && NormalizeLiveTestCommand(economyRun, probe) == null,
+                    "The server admits the exact bounded economy probe only in passive-world mode with a locality.");
+            }
+            var shipFunding = TestDict("operation", "world_economy_test", "profile", "ship_funding_probe", "partyId", "real-npc-party",
+                "settlementId", "friendly-port", "campaignTestRunId", "owned-run", "expectedSaveName", "Current");
+            var normalizedShip = NormalizeLiveTestCommand(economyRun, shipFunding);
+            bool shipAccepted = normalizedShip != null && ReadString(normalizedShip, "profile", "") == "ship_funding_probe"
+                && ReadString(normalizedShip, "partyId", "") == "real-npc-party"
+                && ReadString(normalizedShip, "settlementId", "") == "friendly-port"
+                && ReadString(normalizedShip, "campaignTestRunId", "") == "owned-run";
+            var wrongShipRun = CloneDictionary(economyRun); wrongShipRun["mode"] = "individual_chat";
+            var wrongShipInput = CloneDictionary(shipFunding); wrongShipInput["mode"] = "individual_chat";
+            bool shipRejectsMode = NormalizeLiveTestCommand(wrongShipRun, shipFunding) == null
+                && NormalizeLiveTestCommand(economyRun, wrongShipInput) == null;
+            bool shipRejectsMissing = true;
+            foreach (string required in new[] { "partyId", "settlementId", "campaignTestRunId", "expectedSaveName" })
+            {
+                var incomplete = CloneDictionary(shipFunding); incomplete.Remove(required);
+                shipRejectsMissing &= NormalizeLiveTestCommand(economyRun, incomplete) == null;
+                foreach (string blank in new[] { "", "   " })
+                {
+                    var empty = CloneDictionary(shipFunding); empty[required] = blank;
+                    shipRejectsMissing &= NormalizeLiveTestCommand(economyRun, empty) == null;
+                }
+            }
+            shipFunding["source"] = "gold_barter";
+            add("economy_ship_funding_probe", shipAccepted && shipRejectsMode && shipRejectsMissing
+                && NormalizeLiveTestCommand(economyRun, shipFunding) == null,
+                "The fixed ship fixture requires passive-world enrollment, exact NPC party/port and no selectable money source.");
+            foreach (string source in new[] { "lord_purse", "kingdom_support", "market_balance", "loot_sale", "horse_sale", "prisoner_sale", "gold_barter", "market_purchase" })
+            {
+                var probe = TestDict("operation", "world_economy_test", "profile", "funding_probe", "source", source,
+                    "partyId", "npc-party", "settlementId", "safe-town", "campaignTestRunId", "owned-run", "expectedSaveName", "Current");
+                bool accepted = NormalizeLiveTestCommand(economyRun, probe) != null;
+                probe["source"] = "reset_treasury";
+                add("economy_funding_" + source, accepted && NormalizeLiveTestCommand(economyRun, probe) == null,
+                    "Funding probes admit only fixed native money routes, never arbitrary treasury mutation.");
+            }
+            foreach (string source in new[] { "cohort_preview", "cohort_enable", "cohort_disable" })
+            {
+                var control = TestDict("operation", "world_economy_test", "profile", "cohort_control", "source", source,
+                    "campaignTestRunId", "owned-run", "expectedSaveName", "Current");
+                bool accepted = NormalizeLiveTestCommand(economyRun, control) != null;
+                control["source"] = "reset_treasury";
+                bool rejected = NormalizeLiveTestCommand(economyRun, control) == null;
+                control["source"] = source; control.Remove("expectedSaveName");
+                add("economy_" + source, accepted && rejected && NormalizeLiveTestCommand(economyRun, control) == null,
+                    "Session-only cohort isolation retains exact enrollment and admits no resource mutation source.");
+            }
+            var configuredCohort = TestDict("operation", "world_economy_test", "profile", "cohort_control", "source", "cohort_enable",
+                "campaignTestRunId", "owned-run", "expectedSaveName", "Current", "cohortDurationDays", 100d,
+                "peaceKingdomIds", "aserai,empire_s", "warPairs", "empire:khuzait,empire_w:battania");
+            bool configurableAccepted = NormalizeLiveTestCommand(economyRun, configuredCohort) != null;
+            configuredCohort["cohortDurationDays"] = "100";
+            bool stringDurationRejected = NormalizeLiveTestCommand(economyRun, configuredCohort) == null;
+            configuredCohort["cohortDurationDays"] = double.NaN;
+            bool nanRejected = NormalizeLiveTestCommand(economyRun, configuredCohort) == null;
+            configuredCohort["cohortDurationDays"] = 6301d;
+            bool excessRejected = NormalizeLiveTestCommand(economyRun, configuredCohort) == null;
+            configuredCohort["cohortDurationDays"] = 100d; configuredCohort["cohortSuppressRebellions"] = "false";
+            bool stringFlagRejected = NormalizeLiveTestCommand(economyRun, configuredCohort) == null;
+            add("economy_configurable_cohorts", configurableAccepted && stringDurationRejected && nanRejected && excessRejected && stringFlagRejected,
+                "Cohort horizon and pair selection are bounded, typed and provider-free; malformed requests never dispatch.");
+            var replacement = TestDict("operation", "world_economy_test", "profile", "replacement_setup", "partyId", "real-npc-party",
+                "campaignTestRunId", "owned-run", "expectedSaveName", "Current");
+            bool replacementAccepted = NormalizeLiveTestCommand(economyRun, replacement) != null;
+            replacement.Remove("partyId");
+            bool replacementNeedsParty = NormalizeLiveTestCommand(economyRun, replacement) == null;
+            replacement["partyId"] = "real-npc-party"; replacement["source"] = "gold_barter";
+            bool replacementRejectsSource = NormalizeLiveTestCommand(economyRun, replacement) == null;
+            replacement["source"] = ""; replacement.Remove("expectedSaveName");
+            add("economy_replacement_setup", replacementAccepted && replacementNeedsParty && replacementRejectsSource
+                && NormalizeLiveTestCommand(economyRun, replacement) == null,
+                "Bounded field-loss scenario requires an exact enrolled Current and NPC party; no arbitrary funding source.");
+            var raidSetup = TestDict("operation", "world_economy_test", "profile", "raid_setup", "partyId", "real-enemy-party",
+                "settlementId", "one-npc-village", "campaignTestRunId", "owned-run", "expectedSaveName", "Current");
+            bool raidAccepted = NormalizeLiveTestCommand(economyRun, raidSetup) != null;
+            raidSetup.Remove("partyId");
+            bool raidNeedsActor = NormalizeLiveTestCommand(economyRun, raidSetup) == null;
+            raidSetup["partyId"] = "real-enemy-party"; raidSetup["source"] = "gold_barter";
+            add("economy_raid_setup", raidAccepted && raidNeedsActor && NormalizeLiveTestCommand(economyRun, raidSetup) == null,
+                "One-village raid setup requires an enrolled paused save, exact locality and existing enemy actor; no arbitrary resource source.");
+            var partialFood=TestDict("operation","world_economy_test","profile","raid_partial_setup","partyId","real-enemy-party",
+                "settlementId","one-npc-village","damagePercent",10,"campaignTestRunId","owned-run","expectedSaveName","Current");
+            bool partialAccepted=NormalizeLiveTestCommand(economyRun,partialFood)!=null;
+            partialFood["damagePercent"]=10.5;bool fractionRejected=NormalizeLiveTestCommand(economyRun,partialFood)==null;
+            partialFood["damagePercent"]="10";bool stringRejected=NormalizeLiveTestCommand(economyRun,partialFood)==null;
+            partialFood["damagePercent"]=100;bool excessiveRejected=NormalizeLiveTestCommand(economyRun,partialFood)==null;
+            add("economy_partial_food_bounds",partialAccepted&&fractionRejected&&stringRejected&&excessiveRejected,
+                "Native partial raid setup accepts fixed integer applied-buffer cases only; no string, fraction or excessive damage.");
             var structuredEnrollment = new Dictionary<string, object> { ["source"] = "reign_mcp_structured_actions", ["campaignId"] = "self",
                 ["campaignTestRunId"] = "owned-run", ["timelineId"] = "test", ["disposableSaveName"] = "Current", ["protectedBaselineSaveName"] = "Baseline" };
             var structuredRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "structured_actions", ["enrollment"] = structuredEnrollment };

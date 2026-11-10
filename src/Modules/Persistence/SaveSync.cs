@@ -2709,6 +2709,14 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                         ReadString(row, "campaignId", "") == activeRetirementId),
                     "The active campaign records durable pending_final_save_deletion instead of deleting live state.");
 
+                ProcessPendingCampaignRetirementsAtStartup();
+                add("startup_preserves_pending_retirement_for_background_monitor",
+                    IsCampaignRetirementPending(activeRetirementId)
+                    && ReignPostgreSqlStorage.ListCampaignMetadata().Any(row =>
+                        ReadString(row, "campaignId", "") == activeRetirementId)
+                    && Directory.Exists(StrictCampaignDirectory(activeRetirementId)),
+                    "Startup recovers staged transactions without executing pending campaign/vector deletion before HTTP health can answer; the existing monitor retains the durable retirement request.");
+
                 string replacementPoint = "replacement_" + token;
                 Dictionary<string, object> replacementLedger =
                     ReadSaveSyncLedger(activeRetirementId);
@@ -2940,6 +2948,9 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 add("campaign_storage_audit_and_control_center_contract",
                     html.Contains("/api/campaigns/storage-audit")
                     && html.Contains("delete Reign campaigns with no saves")
+                    && html.Contains("if(!confirm(`Are you sure you want to permanently delete all Reign data")
+                    && html.Contains("if(!confirm('Are you sure you want to permanently delete Reign campaigns")
+                    && html.Contains("if(!confirm('Are you sure you want to permanently delete every Reign campaign")
                     && html.Contains("No matching Bannerlord save")
                     && html.Contains("_shared"),
                     "The Control Center exposes the storage audit, explicit zero-save label, protected shared library, and confirmation-gated cleanup.");

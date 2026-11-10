@@ -52,6 +52,18 @@ namespace ReignBetaServer
 
         private static void EnsureSemanticMemorySchema(ReignDbConnection connection)
         {
+            if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
+                throw new InvalidOperationException("Semantic schema settings require FileLock before CampaignSchemaLock.");
+            string generation = ReadString(LoadSettings(), "vectorProvider", "local")
+                .ToLowerInvariant() + "|" + SemanticModelVersion;
+            EnsureSemanticMemorySchema(connection, generation);
+        }
+
+        // Cold campaign initialization supplies settings before taking SchemaLock.
+        private static void EnsureSemanticMemorySchema(ReignDbConnection connection,
+            string providerGeneration)
+        {
+            if (providerGeneration == null) throw new ArgumentNullException(nameof(providerGeneration));
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_documents (
 source_type TEXT NOT NULL,source_id TEXT NOT NULL,model_version TEXT NOT NULL,provider TEXT NOT NULL,
 campaign_id TEXT NOT NULL DEFAULT '',timeline_id TEXT NOT NULL DEFAULT '',content_hash TEXT NOT NULL DEFAULT '',
@@ -88,7 +100,6 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
                 QueueAllEmbeddingJobs(connection, false);
                 ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_v1_seeded','complete');");
             }
-            string providerGeneration = ReadString(LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + SemanticModelVersion;
             string activeGeneration = ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation' LIMIT 1;").FirstOrDefault(), "value", "");
             if (!string.Equals(providerGeneration, activeGeneration, StringComparison.OrdinalIgnoreCase))
             {

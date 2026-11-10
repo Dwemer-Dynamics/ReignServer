@@ -288,8 +288,9 @@ ORDER BY day_key;",
                 object campaignWriteLock =
                     CampaignRelationshipWriteLock(selectedCampaign);
                 Stopwatch lockWaitTimer = Stopwatch.StartNew();
-                lock (campaignWriteLock)
+                using (var ownership = EnterCampaignWorkLock(campaignWriteLock))
                 {
+                    ownership.SetStage("relationship_day");
                     lockWaitTimer.Stop();
                     ContinuousRelationshipLockWaitMs =
                         lockWaitTimer.ElapsedMilliseconds;

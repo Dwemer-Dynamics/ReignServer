@@ -1620,7 +1620,11 @@ ORDER BY seed_version DESC LIMIT 1;", pairParameters).FirstOrDefault()
                     ["evaluations"] = TableCount(connection, "marriage_evaluations"),
                     ["romanticMarriages"] = romanticMarriages,
                     ["arrangedMarriages"] = arrangedMarriages,
-                    ["statuses"] = StatusCounts(connection, "marriage_evaluations", "status")
+                    ["statuses"] = StatusCounts(connection, "marriage_evaluations", "status"),
+                    ["proposalPolicy"] = Reign.Relationships.ArrangedMarriagePolicy.Version,
+                    ["completedPeriods"] = QuerySql(connection,"SELECT name FROM sqlite_master WHERE type='table' AND name='arranged_marriage_periods';").Any()
+                        ? QuerySql(connection,"SELECT period_index,world_day,status FROM arranged_marriage_periods WHERE timeline_id=$t ORDER BY period_index DESC LIMIT 16;",new Dictionary<string,object>{{"t",timelineId}})
+                        : new List<Dictionary<string,object>>()
                 },
                 ["publicStanding"] = ReadDictionary(standingAndPolitical,
                     "publicStanding") ?? new Dictionary<string, object>(),
@@ -2018,7 +2022,21 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
             Dictionary<string, object> economy = ReadDictionary(nativePayload,
                 "warEconomy") ?? new Dictionary<string, object>();
             bool active = ReadBool(economy, "active", false);
-            bool hooksHealthy = ReadBool(economy, "allHooksHealthy", false);
+            bool hooksHealthy = ReadBool(economy, "allHooksHealthy", false) && ReadBool(economy, "allModelsHealthy", false);
+            bool versioned = ReadInt(economy, "schemaVersion", 0) >= 2;
+            var raidFood = ReadDictionary(economy, "raidFood") ?? new Dictionary<string, object>();
+            bool raidFoodCurrent = ReadInt(economy, "raidFoodEvidenceVersion", 0) == 1
+                && ReadString(raidFood, "schema", "") == "reign-raid-food-v1"
+                && ReadBool(raidFood, "hooksHealthy", false) && ReadInt(raidFood, "unsupported", 0) == 0
+                && !ReadBool(raidFood, "fixtureTainted", true)
+                && !ReadBool(economy, "raidFoodVillagesTruncated", true) && !ReadBool(economy, "raidFoodHoldingsTruncated", true);
+            bool fresh = versioned && Math.Abs(latestDay - ReadDouble(economy, "observedDay", -1000)) <= 1
+                && DateTime.TryParse(ReadString(economy, "observedUtc", ""), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out DateTime observedUtc)
+                && (DateTime.UtcNow - observedUtc.ToUniversalTime()).TotalMinutes >= -1
+                && (DateTime.UtcNow - observedUtc.ToUniversalTime()).TotalMinutes <= 10;
+            var accounting = ReadDictionary(economy, "accounting") ?? new Dictionary<string, object>();
+            int unsupported = ReadInt(accounting, "unsupportedEvents", 0), pending = ReadInt(accounting, "pendingTransactions", 0);
             int mismatches = ReadInt(economy, "patrolConservationMismatches", 0);
             int duplicateCreations = ReadInt(economy,
                 "retinueDuplicateCreations", 0);
@@ -2028,13 +2046,18 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
             bool reliefConserved = ReliefFoodIsConserved(
                 reliefShipped, reliefDelivered, reliefLost);
             string patchError = ReadString(economy, "lastPatchError", "");
-            string status = economy.Count == 0 ? "insufficient_data"
+            string status = economy.Count == 0 || !versioned || !fresh ? "insufficient_data"
                 : !active || !hooksHealthy || !string.IsNullOrWhiteSpace(patchError)
-                    || mismatches > 0 || !reliefConserved ? "error"
-                : duplicateCreations > 0 ? "warning" : "healthy";
+                    || mismatches > 0 || !reliefConserved || unsupported > 0 || pending > 0 ? "error"
+                : duplicateCreations > 0 || !ReadBool(economy, "behavioralCoverageComplete", false) ? "warning" : "healthy";
             List<string> anomalies = new List<string>();
+            if (!ReadBool(economy, "behavioralCoverageComplete", false)) anomalies.Add("Native source, reload and balance acceptance remains incomplete; installed hooks do not certify behavior.");
+            if (!versioned) anomalies.Add("Legacy economy evidence is readable but cannot establish current source coverage.");
+            if (versioned && !fresh) anomalies.Add("Economy evidence is stale or missing its observation clock.");
+            if (unsupported > 0) anomalies.Add(unsupported + " recruitment events lack a supported accounting adapter.");
+            if (pending > 0) anomalies.Add(pending + " interrupted economy transactions require reconciliation.");
             if (!active) anomalies.Add("The Reign economy Harmony patch group is inactive.");
-            if (active && !hooksHealthy) anomalies.Add("One or more required economy Harmony hooks are missing.");
+            if (active && !hooksHealthy) anomalies.Add("One or more required economy hooks or active model owners are missing or replaced.");
             if (!string.IsNullOrWhiteSpace(patchError)) anomalies.Add("Economy patch error: " + patchError);
             if (mismatches > 0) anomalies.Add(mismatches + " patrol troop conservation mismatches were observed.");
             if (!reliefConserved) anomalies.Add("Realm relief food was not conserved between shipped, delivered, and lost totals.");
@@ -2045,6 +2068,11 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
             {
                 ["name"] = "War Economy and Manpower",
                 ["status"] = status,
+                ["currentSchemaEvidence"] = versioned, ["evidenceFresh"] = fresh,
+                ["behavioralCoverageComplete"] = versioned && fresh && raidFoodCurrent
+                    && ReadString(raidFood, "nativeAcceptance", "pending") == "passed"
+                    && ReadBool(economy, "behavioralCoverageComplete", false),
+                ["raidFoodEvidenceCurrent"] = raidFoodCurrent && fresh,
                 ["latestSuccessfulDay"] = economy.Count == 0 ? -1d : latestDay,
                 ["anomalies"] = anomalies
             };

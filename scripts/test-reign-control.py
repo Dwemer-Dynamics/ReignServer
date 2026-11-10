@@ -72,6 +72,48 @@ class StartupPrerequisiteTests(unittest.TestCase):
             access = subprocess.run(['runuser', '-u', 'reign', '--', 'test', '-w', str(pidfile)])
             self.assertNotEqual(access.returncode, 0)
 
+    def test_campaign_portrait_permissions_support_retirement_and_unc_writes(self):
+        with tempfile.TemporaryDirectory(prefix='reign-portrait-access-') as directory:
+            fixture = Path(directory)
+            fixture.chmod(0o755)
+            portraits = fixture / 'data/PortraitCache'
+            campaign = portraits / 'LegacyCampaign'
+            campaign.mkdir(parents=True)
+            (campaign / 'portrait.png').write_bytes(b'original')
+            shared = portraits / '_shared'
+            shared.mkdir()
+            (shared / 'portrait.png').write_bytes(b'shared')
+            shared_before = shared.stat()
+            outside = fixture / 'outside'
+            outside.mkdir()
+            (portraits / 'redirected').symlink_to(outside, target_is_directory=True)
+            result = self.run_lifecycle(directory, '''repair_permissions
+runuser -u reign -- sh -c 'test -w "$1" && test -w "$1/portrait.png" && mv "$1" "$1.retired" && mv "$1.retired" "$1"' fixture "$data/PortraitCache/LegacyCampaign"
+''')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((campaign / 'portrait.png').read_bytes(), b'original')
+            self.assertEqual(shared.stat().st_uid, shared_before.st_uid)
+            self.assertEqual(shared.stat().st_mode, shared_before.st_mode)
+            self.assertEqual(outside.stat().st_uid, 0)
+            # New files created through root/UNC inherit server access even with umask 0077.
+            result = self.run_lifecycle(directory, '''umask 077
+mkdir "$data/PortraitCache/UncCampaign"
+printf new > "$data/PortraitCache/UncCampaign/portrait.png"
+runuser -u reign -- sh -c 'test -w "$1" && test -w "$1/portrait.png"' fixture "$data/PortraitCache/UncCampaign"
+''')
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_portrait_permission_repair_rejects_redirected_root(self):
+        with tempfile.TemporaryDirectory(prefix='reign-portrait-redirect-') as directory:
+            fixture = Path(directory)
+            (fixture / 'data').mkdir()
+            outside = fixture / 'outside'
+            outside.mkdir()
+            (fixture / 'data/PortraitCache').symlink_to(outside, target_is_directory=True)
+            result = self.run_lifecycle(directory, 'repair_permissions\n')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(outside.stat().st_uid, 0)
+
     def test_redirected_pid_paths_are_rejected_without_writing_the_target(self):
         with tempfile.TemporaryDirectory(prefix='reign-startup-redirect-') as directory:
             fixture = Path(directory)

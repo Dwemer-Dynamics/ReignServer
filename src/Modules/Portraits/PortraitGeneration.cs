@@ -1143,6 +1143,7 @@ namespace ReignBetaServer
 
         private static string UploadAtlasMedia(string uploadUrl, string apiKey, byte[] sourceImagePng, out int responseChars)
         {
+            ProviderTestGuard.BeforeDispatch("atlas_reference_upload");
             responseChars = 0;
             string boundary = "----BannerlordReign" + Guid.NewGuid().ToString("N");
             byte[] prefix = Encoding.UTF8.GetBytes("--" + boundary + "\r\n"
@@ -1593,6 +1594,7 @@ namespace ReignBetaServer
 
         private static string GetTextWithBearer(string url, string apiKey)
         {
+            ProviderTestGuard.BeforeDispatch("image_prediction_poll");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Accept = "application/json";
@@ -1603,6 +1605,7 @@ namespace ReignBetaServer
 
         private static byte[] DownloadBytes(string url)
         {
+            ProviderTestGuard.BeforeDispatch("image_download");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Timeout = 360000;
