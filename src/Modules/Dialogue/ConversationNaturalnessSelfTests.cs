@@ -138,6 +138,7 @@ namespace ReignBetaServer
                 && effective.EndsWith("CUSTOM END.") && !effective.Contains(ConversationToneReplacements[0, 0]) && custom.Contains(ConversationToneReplacements[0, 0]), effective);
 
             results.AddRange(RunConversationRepetitionSelfTests());
+            results.AddRange(RunConversationCorrectionSelfTests());
             results.AddRange(RunAcceptedItemGiftRoutingSelfTests());
             results.AddRange(RunDialogueActionReliabilitySelfTests());
             results.AddRange(RunActionAvailabilityRoutingSelfTests());

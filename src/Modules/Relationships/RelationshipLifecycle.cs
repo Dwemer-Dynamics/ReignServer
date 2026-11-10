@@ -1754,6 +1754,7 @@ VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
             results.AddRange(RunPlayerApproachSelfTests());
             results.AddRange(RunRelationshipLifecycleSelfTests());
             results.AddRange(RunRelationshipFlingSelfTests());
+            results.AddRange(RunArrangedMarriageSelfTests());
             results.AddRange(RunWorldRelationshipModelSelfTests());
             results.AddRange(RunNpcRelationshipPromptSelfTests());
             results.AddRange(RunSharedRelationshipHistorySelfTests());

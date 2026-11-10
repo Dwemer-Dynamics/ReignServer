@@ -23,7 +23,7 @@ namespace ReignBetaServer
 
         private static MemoryEvidence CopyMemoryEvidence(MemoryEvidence source, string text = null,
             List<Dictionary<string, object>> turns = null) => new MemoryEvidence {
-                SourceId = source.SourceId, SourceHash = source.SourceHash, Kind = source.Kind, Text = text ?? source.Text,
+                SourceId = source.SourceId, SourceHash = source.SourceHash, Kind = source.Kind, Text = text ?? source.Text, RankingText = source.RankingText,
                 Owner = source.Owner, Session = source.Session, Revision = source.Revision, Day = source.Day,
                 Score = source.Score, Required = source.Required, RelationshipFoundation = source.RelationshipFoundation,
                 SourceTurns = turns ?? source.SourceTurns, SelectionRank = source.SelectionRank, SelectionRelevance = source.SelectionRelevance,
@@ -36,6 +36,9 @@ namespace ReignBetaServer
             if (remaining.Count == 0) return null;
             if (remaining.Count == original.SourceTurns.Count) return original;
             var evidence = CopyMemoryEvidence(original, string.Join("\n", remaining.Select(t => ReadString(t, "text", ""))), remaining);
+            // Ranking still sees the complete linked exchange even when an
+            // identical question/answer is already supplied by the transcript.
+            evidence.RankingText = original.RankingText.Length > 0 ? original.RankingText : original.Text;
             evidence.SourceId = string.Join(",", remaining.Select(t => ReadString(t, "id", "")));
             evidence.SourceHash = PromptHash(CanonicalJson(remaining));
             // A compact view binds to the complete candidate. Recompute after deduplication.
@@ -50,7 +53,8 @@ namespace ReignBetaServer
             .GroupBy(e => e.Kind + "|" + e.Owner + "|" + e.Session + "|" + e.Revision + "|"
                 + (e.SourceTurns.Count == 0 ? e.SourceId + "|" + e.SourceHash
                     : string.Join(";", e.SourceTurns.Select(t => ReadString(t, "id", "") + ":" + ReadString(t, "hash", "")
-                        + ":" + PromptHash(ReadString(t, "text", ""))))), StringComparer.Ordinal)
+                        + ":" + PromptHash(ReadString(t, "text", "")))))
+                + "|ranking_context=" + MemorySelectionTextHash(MemorySelectionRankingText(e)), StringComparer.Ordinal)
             .Select(g => g.OrderByDescending(e => e.Required).ThenByDescending(e => e.Score).First()).ToList();
 
         // Compression is limited to optional, older narration. Every spoken word,

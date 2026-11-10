@@ -52,9 +52,11 @@ namespace ReignBeta.Shared.Characters
             AcceptedTurns.Add(turnId); LastAcceptedDay = day;
             return true;
         }
-        public bool BeginOpening(string operationId, double day, double hours)
+        public bool BeginOpening(string operationId, double day, double hours, bool freshInvitation = false)
         {
-            if (OpeningPending || string.IsNullOrWhiteSpace(operationId) || !NpcLivesPolicy.NewOpeningDue(LastAcceptedDay, day, hours)) return false;
+            if (OpeningPending || string.IsNullOrWhiteSpace(operationId) || !NpcLivesPolicy.Finite(day) || day < 0
+                || (LastAcceptedDay.HasValue && day < LastAcceptedDay.Value)
+                || (!freshInvitation && !NpcLivesPolicy.NewOpeningDue(LastAcceptedDay, day, hours))) return false;
             OpeningOperationId = operationId; OpeningPending = true; OpeningText = ""; return true;
         }
         public bool AcceptOpening(string operationId, string text, string activity, double day)

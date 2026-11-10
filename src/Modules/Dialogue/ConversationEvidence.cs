@@ -108,7 +108,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
         }
 
         private static void AttachConversationWriteEvidence(IEnumerable<Dictionary<string, object>> writes,
-            List<Dictionary<string, object>> sources, string owner, string eventId)
+            List<Dictionary<string, object>> sources, string owner, string eventId, bool requireSemanticAdmission = false)
         {
             foreach (var write in writes ?? Enumerable.Empty<Dictionary<string, object>>())
             {
@@ -124,7 +124,8 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                 // proven; retrieval must prefer this to a confident paraphrase.
                 if (ReadString(bound, "status", "") != "supported_span")
                     write["originalSources"] = sources;
-                string summary = ReadFirstString(write, "text", "summary", "claim", "meaning", "description");
+                string summary = requireSemanticAdmission ? ConversationMemoryWriteText(write)
+                    : ReadFirstString(write, "text", "summary", "claim", "meaning", "description");
                 if (HasUncertainty(ReadString(bound, "quote", "")) && !HasUncertainty(summary))
                 {
                     write["sourceValidation"] = "incomplete";
@@ -132,6 +133,50 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                     write["originalSources"] = sources;
                 }
                 AttachDialogueClaimSpanCoverage(write, sources, owner, eventId);
+                if (requireSemanticAdmission) ApplyConversationWriteSemanticAdmission(write, sources);
+            }
+        }
+
+        // Match StoreTurnMemoryLayers' accepted text aliases and precedence.
+        // A secondary faithful field cannot approve a different stored claim.
+        private static string ConversationMemoryWriteText(Dictionary<string, object> write) =>
+            ReadFirstString(write, "text", "memory", "summary", "content");
+
+        // Source-span validity is attribution, not semantic entailment. Without
+        // qualified semantic proof, only a faithful complete attributed source
+        // statement is eligible; proposed interpretations stay recoverable.
+        private static void ApplyConversationWriteSemanticAdmission(Dictionary<string, object> write,
+            List<Dictionary<string, object>> sources)
+        {
+            string claim = ConversationMemoryWriteText(write);
+            if (claim.Length == 0) return;
+            var bound = ReadDictionary(write, "sourceEvidence");
+            string quote = ReadString(bound, "quote", "");
+            string Canonical(string text) => Regex.Replace((text ?? "").Trim(), @"\s+", " ");
+            var original = (sources ?? new List<Dictionary<string, object>>()).FirstOrDefault(source => ReadString(source, "turnId", "") == ReadString(bound, "turnId", "")
+                && ReadString(source, "speakerId", "") == ReadString(bound, "speakerId", ""));
+            bool exact = ReadString(write, "sourceValidation", "") == "supported_span"
+                && quote.Length > 0 && original != null
+                && Canonical(claim) == Canonical(quote)
+                && Canonical(quote) == Canonical(ReadString(original, "text", ""));
+            write["semanticAdmission"] = TestDict("schema", "reign-memory-semantic-admission-v1",
+                "status", exact ? "exact_reported_source" : "quarantined_interpretation",
+                "claimHash", MemorySelectionTextHash(claim), "sourceHash", ReadString(bound, "sourceHash", ""),
+                "speakerId", ReadString(bound, "speakerId", ""), "sourceEventId", ReadString(bound, "sourceEventId", ""),
+                "claimEntailmentVerified", false, "nativeFactVerified", false, "policy", "complete_attributed_source_or_quarantine_v1");
+            // Ignore a provider's purported semantic approval. Optional NLI scores
+            // remain advisory; neither they nor a real quotation grant truth.
+            if (!exact)
+            {
+                write["proposedInterpretation"] = claim;
+                // Exclude unverified prose from active retrieval, embeddings and
+                // consolidation as well as prompt rendering. Canonical dialogue
+                // and its separately scoped observable account remain available.
+                write["status"] = "audit_only";
+                write["sourceValidation"] = "incomplete";
+                if (ReadString(write, "sourceValidationReason", "").Length == 0)
+                    write["sourceValidationReason"] = "semantic_support_unverified";
+                write["originalSources"] = sources;
             }
         }
 

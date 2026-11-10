@@ -1957,8 +1957,11 @@ namespace ReignBetaServer
         private static void ProcessPendingCampaignRetirementsAtStartup()
         {
             CleanupCampaignRetirementStagingAtStartup();
-            if (!string.IsNullOrWhiteSpace(CampaignMutationBlockReason())) return;
-            ProcessPendingCampaignRetirements(false);
+            // Recover interrupted filesystem transactions before accepting campaign
+            // requests, but leave pending retirement to the monitor. Semantic
+            // deletion can outlast systemd's startup deadline; running it here
+            // prevents even /health from reaching the HTTP accept loop and
+            // makes systemd kill and restart the same unfinished deletion.
         }
 
         private static void StartCampaignRetirementMonitor()

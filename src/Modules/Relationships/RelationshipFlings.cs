@@ -17,6 +17,10 @@ namespace ReignBetaServer
         private static void EnsureRelationshipFlingSchemaCore(
             ReignDbConnection connection)
         {
+            if (IsRelationshipMaintenanceTableReady(connection, "relationship_fling_profiles")
+                && IsRelationshipMaintenanceTableReady(connection, "relationship_fling_rolls")
+                && IsRelationshipMaintenanceTableReady(connection, "relationship_fling_sparks")
+                && IsRelationshipMaintenanceTableReady(connection, "relationship_fling_encounters")) return;
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_profiles (
 hero_id TEXT PRIMARY KEY,judgment INTEGER NOT NULL,source TEXT NOT NULL DEFAULT '',
 updated_ts INTEGER NOT NULL);" );

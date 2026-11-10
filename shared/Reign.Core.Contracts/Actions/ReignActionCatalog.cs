@@ -172,6 +172,19 @@ namespace Reign.Core.Contracts.Actions
                     new ActionParameter { Key = "spouseId", Label = "Current spouse", Kind = "hero", Required = true, Automatic = true },
                     new ActionParameter { Key = "spouseClanId", Label = "Spouse's current clan", Kind = "clan", Automatic = true }
                 } });
+            actions.Add(new ActionDefinition { Id = "marriage.propose", Label = "Propose an arranged marriage",
+                Family = "marriage", Adapter = "marriage:propose", Source = "ReignPlayerMarriageOffers",
+                Description = "Ask this clan leader to accept or refuse the exact proposed couple and consideration. An accepted match awaits wedding plans.",
+                Parameters = new List<ActionParameter> { P("playerMatchId", "Your clan's prospect", "hero", true),
+                    P("prospectId", "Their clan's prospect", "hero", true) } });
+            actions.Add(new ActionDefinition { Id = "marriage.appeal", Label = "Ask the prospective spouse to call off the wedding",
+                Family = "marriage", Adapter = "marriage:appeal", Source = "ReignWeddings",
+                Description = "Only during this exact ceremony. Accept only if you personally choose to withdraw from your own upcoming marriage.",
+                Parameters = new List<ActionParameter> { P("weddingId", "Wedding", "text", true), P("reason", "Reason", "text", true) } });
+            actions.Add(new ActionDefinition { Id = "marriage.release_prisoner", Label = "Release a captive",
+                Family = "marriage", Adapter = "marriage:release", Source = "ReignWeddingBargain",
+                Description = "Release this named prisoner when the arranged marriage settles.",
+                Parameters = new List<ActionParameter> { P("assetId", "Captive", "hero", true), P("quantity", "Amount", "quantity", false) } });
             AddGovernmentActions(actions);
             AddCourtActions(actions);
             actions.AddRange(NpcLifeDefinitions());

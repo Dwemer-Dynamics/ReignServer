@@ -47,6 +47,7 @@ namespace ReignBetaServer
                 return PortraitImageCallResult.Fail(CodexImageProvider, CodexImageModel, "Codex SDK cannot process adult image profiles or clothing-edit passes.");
             if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 64000)
                 return PortraitImageCallResult.Fail(CodexImageProvider, CodexImageModel, "The image prompt must contain between 1 and 64000 characters.");
+            ProviderTestGuard.BeforeDispatch("codex_image");
             var timer = Stopwatch.StartNew();
             int timeout = Math.Max(30000, Math.Min(600000, ReadInt(settings, "codexImageTimeoutMs", 300000)));
             int queueTimeout = Math.Max(1000, Math.Min(300000, ReadInt(settings, "providerQueueTimeoutMs", 120000)));
@@ -181,6 +182,7 @@ namespace ReignBetaServer
 
         private static string CodexImageFraming(string size)
         {
+            if (size == "maximum-native-3:2") return "exact landscape 3:2 aspect ratio at the highest native resolution and quality this runtime supports; do not upscale or follow the reference sheet's aspect ratio";
             switch ((size ?? "").Trim())
             {
                 case "768x1024": case "1024x1536": return "portrait, full subject visible";

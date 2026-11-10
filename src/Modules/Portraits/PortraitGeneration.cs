@@ -49,6 +49,7 @@ namespace ReignBetaServer
 
         private sealed class ImageGenerationProfile
         {
+            public bool ChatView;
             public string Name;
             public string PromptPurpose;
             public string Provider;
@@ -806,7 +807,7 @@ namespace ReignBetaServer
 
             if (UsesImageReferenceAdapter(model))
             {
-                return GenerateNanoGptImageReference(settings, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
+                return GenerateNanoGptImageReference(settings, apiKey, model, prompt, sourceImagePng, outputSizeOverride, imageProfile.ChatView);
             }
 
             return GenerateNanoGptFluxKontext(settings, imageProfile, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
@@ -844,7 +845,7 @@ namespace ReignBetaServer
             string model,
             string prompt,
             byte[] sourceImagePng,
-            string outputSizeOverride)
+            string outputSizeOverride, bool chatView = false)
         {
             string outputSize = NanoGptReferenceSize(outputSizeOverride);
             string url = ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl);
@@ -857,6 +858,7 @@ namespace ReignBetaServer
                 ["imageDataUrl"] = "data:image/png;base64," + Convert.ToBase64String(sourceImagePng),
                 ["response_format"] = "b64_json"
             };
+            if (chatView) { body["quality"] = "high"; body["input_fidelity"] = "high"; }
             return PostImageJson(url, apiKey, body, settings, "NanoGPT", model, "image reference generation");
         }
 
@@ -925,6 +927,7 @@ namespace ReignBetaServer
                     sourceUrl,
                     outputSize,
                     imageProfile.AtlasWanNegativePrompt);
+                if (imageProfile.ChatView) ApplyChatViewAtlasSize(body, imageProfile);
                 model = ReadString(body, "model", model);
                 string json = Json.Serialize(body);
                 requestChars += json.Length;
@@ -1140,6 +1143,7 @@ namespace ReignBetaServer
 
         private static string UploadAtlasMedia(string uploadUrl, string apiKey, byte[] sourceImagePng, out int responseChars)
         {
+            ProviderTestGuard.BeforeDispatch("atlas_reference_upload");
             responseChars = 0;
             string boundary = "----BannerlordReign" + Guid.NewGuid().ToString("N");
             byte[] prefix = Encoding.UTF8.GetBytes("--" + boundary + "\r\n"
@@ -1590,6 +1594,7 @@ namespace ReignBetaServer
 
         private static string GetTextWithBearer(string url, string apiKey)
         {
+            ProviderTestGuard.BeforeDispatch("image_prediction_poll");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Accept = "application/json";
@@ -1600,6 +1605,7 @@ namespace ReignBetaServer
 
         private static byte[] DownloadBytes(string url)
         {
+            ProviderTestGuard.BeforeDispatch("image_download");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Timeout = 360000;

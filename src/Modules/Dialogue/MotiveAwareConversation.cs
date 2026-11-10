@@ -119,6 +119,7 @@ namespace ReignBetaServer
             Dictionary<string, object> sanitizedState =
                 SanitizeConversationStateForVerifiedIdentity(
                     state, identityView, opportunity);
+            sanitizedState = ReconcileConversationPlanForPrompt(sanitizedState, playerText, payload);
             Dictionary<string, object> courtCharacter = CourtCharacterDecisionSnapshot(characteristics, opportunity);
             courtCharacter["activeScheme"] = LoadCourtCharacterScheme(campaignId, subjectId, targetId, ReadDouble(payload, "worldDay", 0d));
             Dictionary<string, object> romance = CalculateRomanticPosture(campaignId, subjectId, targetId, profile, characteristics, relationship, spouseRelationship, opportunity, payload, mode, playerText);
@@ -800,9 +801,16 @@ namespace ReignBetaServer
             List<string> witnesses = ReadStringList(supplied, "witnessIds").Concat(ReadStringList(payload, "witnessHeroIds")).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             string m = (mode ?? ReadString(payload, "mode", "dialogue")).ToLowerInvariant();
             bool privateScene = ReadBool(supplied, "private", m == "correspondence");
+            var present = ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "current");
+            var presentIds = present.Select(s => ReadString(s, "heroStringId", "")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool acceptedPrivate = present.Count > 0 && present.Where(s => ReadString(s, "role", "") != "player")
+                .All(s => ReadBool(s, "acceptedPrivateScene", false))
+                && witnesses.All(presentIds.Contains) && !ReadBool(CurrentNarrativeClock(payload), "advanced", false);
+            if (acceptedPrivate) privateScene = true;
             bool coercive = ReadBool(supplied, "coercive", false) || ReadBool(payload, "coercive", false) || ReadBool(payload, "playerIsCaptive", false) || ReadBool(payload, "speakerIsCaptive", false);
             double defaultExposure = privateScene ? 0.10d : m == "social_event" || m == "party_chat" ? 0.85d : 0.45d;
             double exposure = ClampDouble(ReadDouble(supplied, "exposure", defaultExposure + Math.Min(0.15d, witnesses.Count * 0.03d)), 0d, 1d);
+            if (acceptedPrivate) exposure = Math.Min(exposure, .10d + Math.Min(.15d, witnesses.Count * .03d));
             return new Dictionary<string, object> { ["private"] = privateScene, ["exposure"] = Math.Round(exposure, 2), ["witnessIds"] = witnesses, ["witnessCount"] = witnesses.Count, ["coercive"] = coercive };
         }
 

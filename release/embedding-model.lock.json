@@ -143,6 +143,12 @@
   ],
   "derivedModels": [
     {
+      "file": "qwen-reranker-cpu.onnx",
+      "sha256": "a7bd997e927d552a25e2dc2398b86afa6b53b0bd1e5a97d23a7f81bedfdf3da4",
+      "source": "qwen-reranker.onnx",
+      "recipe": "scripts/Prepare-MemorySelection.py"
+    },
+    {
       "file": "qwen-reranker-binary.onnx",
       "sha256": "91541a53f5faa6796553aa0d29fea3b24abceccfd45ccfeb78a267d4ea34908a",
       "source": "qwen-reranker.onnx",

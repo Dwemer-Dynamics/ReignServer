@@ -99,6 +99,11 @@ namespace ReignBetaServer
 
         private static void EnsureNotableMbtiSchema(ReignDbConnection connection)
         {
+            if (IsRelationshipMaintenanceTableReady(connection, "notable_mbti_profiles")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_heads")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_revisions")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_native_commands")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_reconciliation")) return;
             EnsureCharacterEditorSchema(connection);
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS notable_mbti_profiles (
 hero_id TEXT PRIMARY KEY,mbti_type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,

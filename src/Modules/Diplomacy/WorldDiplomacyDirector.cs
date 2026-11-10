@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -649,7 +649,8 @@ namespace ReignBetaServer
                 {
                     Dictionary<string, object> war = GetDirectorWarState(state, ReadString(ruler, "kingdomId", ""), enemyId);
                     double effectiveFatigue = EffectiveWarFatigue(ReadDouble(war, "fatigue", 0d));
-                    double fatiguePressure = Math.Pow(effectiveFatigue / 100d, 2d);
+                    double fatiguePressure = EconomyPeacePressure(effectiveFatigue, CurrentEconomicStress(ruler, worldDay),
+                        string.Equals(ReadString(ruler, "civilWarOpponentKingdomId", ""), enemyId, StringComparison.OrdinalIgnoreCase));
                     double peaceChance = BlendDirectorChance(peaceBaseline, DirectorPeaceCeiling, fatiguePressure);
                     double roll = StableDirectorRoll(campaignId, day, ReadString(ruler, "leaderHeroId", "") + "|peace|" + enemyId + "|" + (rollSalt ?? string.Empty));
                     attempts.Add(DirectorInitiativeAttempt(ruler, "peace", enemyId, peaceAssessment, peaceBaseline, fatiguePressure, peaceChance, roll));
@@ -816,7 +817,7 @@ namespace ReignBetaServer
             {
                 List<Dictionary<string, object>> eligibleWarTargets = peacefulTargets.Where(target => DirectorCanDeclareAdditionalWar(world, ruler, target)).ToList();
                 if (eligibleWarTargets.Count == 0) return 0d;
-                return eligibleWarTargets.Max(target =>
+                return (1d - CurrentEconomicStress(ruler, ReadDouble(world, "worldDay", -1))) * eligibleWarTargets.Max(target =>
                 {
                     double targetStrength = Math.Max(1d, ReadDouble(target, "strength", 1d));
                     double advantage = Clamp(0d, 1d, (strength / targetStrength - 0.85d) / 1.15d);
@@ -838,6 +839,23 @@ namespace ReignBetaServer
                 0.45d + ReadDouble(FindDirectorRulerAttitude(ruler, target),
                     "effectiveAttitude", 0d) / 200d));
             return Clamp(0d, 1d, 0.55d * trustedPartner + 0.45d * exposure);
+        }
+
+        private static double CurrentEconomicStress(Dictionary<string, object> ruler, double worldDay)
+        {
+            var stress = ReadDictionary(ruler, "economicStress");
+            if (stress == null || ReadInt(stress, "schemaVersion", 0) < 2) return 0;
+            double observed = ReadDouble(stress, "observedDay", -1);
+            double value = ReadDouble(stress, "maximum", 0);
+            if (!double.IsFinite(worldDay) || !double.IsFinite(observed) || !double.IsFinite(value)
+                || worldDay < 0 || observed < 0 || Math.Abs(worldDay - observed) > 1) return 0;
+            return Clamp(0, 1, value);
+        }
+
+        private static double EconomyPeacePressure(double effectiveFatigue, double stress, bool civilWar)
+        {
+            double fatigue = Math.Pow(effectiveFatigue / 100d, 2d);
+            return civilWar ? fatigue : Math.Max(fatigue, Math.Pow(stress, 2));
         }
 
         private static double DirectorRelation(Dictionary<string, object> world, string firstId, string secondId, string field)
@@ -1626,14 +1644,13 @@ namespace ReignBetaServer
                 && ReadInt(terms, "durationDays", 0) <= 0)
                 errors.Add(command + " requires positive durationDays");
 
-            int outgoingGold = Math.Max(ReadInt(terms, "gold", 0), ReadInt(terms, "loanGold", 0));
+            int outgoingGold = Math.Max(Math.Max(ReadInt(terms, "gold", 0), ReadInt(terms, "loanGold", 0)), ReadInt(terms, "reparationsGold", 0));
             bool targetPays = command == "war_indemnity" || command == "ransom_package" || command == "demand_reparations_peace" || command == "demand_surrender_peace";
             if (command == "diplomatic_package" && string.Equals(ReadFirstString(terms, "goldFromHeroStringId", "fromHeroStringId"), ReadString(target, "leaderHeroId", ""), StringComparison.OrdinalIgnoreCase)) targetPays = true;
             Dictionary<string, object> payer = targetPays ? target : actor;
             // Packages debit the named ruler, not the sum of every clan's wealth.
             // Old snapshots without a payer balance must not authorize a payment.
-            int availableGold = command == "diplomatic_package"
-                ? ReadInt(payer, "leaderGold", -1) : ReadInt(payer, "treasury", int.MaxValue);
+            int availableGold = ReadInt(payer, "leaderGold", -1);
             if (outgoingGold > 0 && availableGold < 0) errors.Add("payer gold balance is unavailable");
             else if (outgoingGold > 0 && outgoingGold > availableGold) errors.Add((targetPays ? "target" : "actor") + " cannot afford proposed gold transfer");
 
@@ -1649,6 +1666,24 @@ namespace ReignBetaServer
                 }
                 string marriageA = ReadFirstString(terms, "marriageHero1StringId", "groomHeroStringId");
                 string marriageB = ReadFirstString(terms, "marriageHero2StringId", "brideHeroStringId", "spouseHeroStringId");
+                if(marriageA!=""&&marriageB!="")
+                {
+                    var candidates=ReadDictionaryList(world,"allianceMarriageCandidates");
+                    var first=candidates.FirstOrDefault(x=>ReadString(x,"heroId","")==marriageA);
+                    var second=candidates.FirstOrDefault(x=>ReadString(x,"heroId","")==marriageB);
+                    if(first==null||second==null)errors.Add("Marriage requires current native standing and a monetary quote.");
+                    else
+                    {
+                        Dictionary<string,object> HeroRow(Dictionary<string,object> x)=>new Dictionary<string,object>{{"heroStringId",ReadString(x,"heroId","")},{"isRulingClanMember",true},{"clanFiefCount",ReadInt(x,"fiefCount",-1)}};
+                        Dictionary<string,object> ClanRow(Dictionary<string,object> x)=>new Dictionary<string,object>{{"clanId",ReadString(x,"clanId","")},{"leaderId",ReadString(x,"leaderId","")},{"tier",ReadInt(x,"clanTier",0)},{"fiefCount",ReadInt(x,"fiefCount",-1)}};
+                        var quote=MarriageQuote(ReadString(world,"campaignId",""),HeroRow(first),HeroRow(second),ClanRow(first),ClanRow(second),new List<Dictionary<string,object>>(),ReadInt(first,"nativeYear",-1));
+                        if(quote==null)errors.Add("Royal marriage opportunity is unavailable this year.");
+                        else { terms["marriageTerms"]=quote; candidate["terms"]=terms;
+                            string marriagePayer=ReadString(quote,"payerId","");var pay=ReadString(first,"leaderId","")==marriagePayer?first:second;
+                            if(ReadDouble(pay,"leaderGold",0)<ReadInt(quote,"fee",0))errors.Add("The lower-tier marriage clan cannot fund the required fee."); }
+                    }
+                }
+
                 if ((!string.IsNullOrWhiteSpace(marriageA) || !string.IsNullOrWhiteSpace(marriageB))
                     && !DirectorMarriageOptionExists(world, ReadString(actor, "kingdomId", ""), ReadString(target, "kingdomId", ""), marriageA, marriageB)) errors.Add("marriage pair is unavailable or includes a protected heir");
             }
@@ -2918,6 +2953,14 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (name, passed, detail) => tests.Add(new Dictionary<string, object> { ["name"] = name, ["passed"] = passed, ["detail"] = detail });
+            var stressActor = new Dictionary<string, object> { ["economicStress"] = new Dictionary<string, object>
+                { ["schemaVersion"] = 2, ["observedDay"] = 100d, ["maximum"] = .8d } };
+            add("war_economy_fresh_stress", CurrentEconomicStress(stressActor, 100d) == .8d, "Current versioned stress is used.");
+            add("war_economy_stale_stress", CurrentEconomicStress(stressActor, 102d) == 0d, "Stale evidence does not influence diplomacy.");
+            add("war_economy_invalid_day", CurrentEconomicStress(stressActor, double.NaN) == 0d, "Non-finite evidence is rejected.");
+            add("war_economy_pressure_is_maximum", Math.Abs(EconomyPeacePressure(50, .8, false) - .64) < .000001, "Economic pressure and fatigue are never added twice.");
+            add("war_economy_civil_war_preserved", EconomyPeacePressure(50, 1, true) == .25, "Civil-war resolution retains its own authority.");
+            add("war_economy_fatigue_preserved", EconomyPeacePressure(90, .3, false) == .81, "Existing greater fatigue pressure remains effective.");
             var payerActor = TestDirectorKingdom("payer_a", false);
             var payerTarget = TestDirectorKingdom("payer_b", false);
             payerActor["treasury"] = 2000000;

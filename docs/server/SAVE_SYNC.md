@@ -16,7 +16,11 @@ When deletion removes a campaign's final registered point, Reign permanently ret
 
 The Control Center and Reign MCP storage audit reconcile Save Sync against the physical Bannerlord `.sav` directory. The newest Reign registration owns a reused native slot; missing and older overwritten registrations are reported as stale rather than as matching saves. Confirmed cleanup requires the exact phrase `delete Reign campaigns with no saves`, re-audits with Bannerlord stopped, removes campaigns with no matching physical save, prunes stale registrations from retained campaigns, removes verified orphan campaign/Save Sync/portrait roots, and preserves imports awaiting first load plus `_shared`. If the native save directory is unavailable, cleanup preserves every campaign.
 
+The Control Center asks **Are you sure?** for single-campaign, zero-save, and delete-all operations; no typing is required. After acceptance, it supplies the existing API confirmation token. MCP/API callers still require their exact confirmation. Cleanup refreshes the inventory before displaying its final result, including per-campaign failures, so a refresh cannot overwrite an access error. The managed `reignctl repair-permissions` procedure repairs inherited campaign and campaign-portrait access for the `reign` account, including root-owned Windows UNC writes, while excluding `_shared` and symlink targets.
+
 ## Storage inventory and rollback policy
+
+Startup recovers interrupted filesystem staging before serving campaign requests, but the existing background retirement monitor executes pending final-save retirements after HTTP startup. Semantic vector deletion may take longer than the service startup deadline; it must not block the HTTP accept loop or `/health`. The pending ledger remains durable, confirmed new saves can still cancel retirement, and campaign requests retain the existing write-lock isolation while retirement runs. The isolated Save Sync suite covers preserving a pending campaign through startup recovery.
 
 | Store | Save Sync policy |
 |---|---|

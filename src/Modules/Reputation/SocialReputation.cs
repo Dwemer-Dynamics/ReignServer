@@ -1496,6 +1496,7 @@ VALUES($campaign,$timeline,$observer,$subject,$rumorTotal,$reputationTotal,$char
         private static List<Dictionary<string, object>> RunRumorSubsystemSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
+            results.AddRange(RunRulerFavorContactBatchSelfTests());
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             {
                 ["ok"] = true, ["passed"] = passed, ["suite"] = "character_social_reputation",

@@ -52,6 +52,7 @@ namespace ReignBetaServer
                 && ValidateReignXpOptions(TestDict("reignXpMultiplier", .25d)) == ""
                 && ValidateReignXpOptions(TestDict("reignXpMultiplier", 5d)) == "",
                 "The universal multiplier retains its existing quarter-to-five bounds.");
+            results.AddRange(RunWarEconomyOptionsSelfTests());
             return results;
         }
     }

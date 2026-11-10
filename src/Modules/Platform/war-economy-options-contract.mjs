@@ -1,0 +1,136 @@
+// Compiled production UI, intercepted HTTP, no live settings, providers or campaign access.
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
+const require = createRequire(import.meta.url);
+const {chromium} = require(process.env.REIGN_PLAYWRIGHT_MODULE || 'playwright');
+const fixturePath = path.resolve(process.argv[2]), output = path.resolve(process.argv[3]);
+const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8').replace(/^\uFEFF/, ''));
+assert.equal(fixture.schema, 'reign-war-economy-options-browser-fixture-v1');
+const template = fs.readFileSync(path.join(serverRoot, 'ui/index.html'), 'utf8');
+const prefix = template.slice(0, template.indexOf("<section id='general'"));
+const css = fs.readFileSync(path.join(serverRoot, 'src/Modules/Platform/ReignXpOptions.cs'), 'utf8').match(/<style>([\s\S]*?)<\/style>/)[1];
+assert.ok(template.includes('Object.assign(s, warEconomyPatchForSave());'));
+assert.ok(fs.readFileSync(path.join(serverRoot, 'src/Modules/Platform/ReignXpOptions.cs'), 'utf8').includes('loadWarEconomyOptions(settings);'));
+fs.mkdirSync(output, {recursive:true});
+const report = {schema:'reign-war-economy-options-browser-v1', fixturePath, providerCalls:0, liveSettingsAccess:false, screenshots:[], checks:[], errors:[]};
+const browser = await chromium.launch({headless:true, channel:'msedge'});
+try {
+  for (const width of [800,1280,1920]) {
+    const context = await browser.newContext({viewport:{width,height:1100}}), page = await context.newPage();
+    page.on('pageerror', e => report.errors.push(e.message));
+    let saved = {...fixture.defaults, unrelated:'preserve',settingsRevision:'revision0'}, mode='ok', release, posts=[];
+    await context.route('**/*', async route => {
+      const request=route.request(), url=new URL(request.url());
+      assert.equal(url.origin,'http://economy-options.local','External requests are forbidden');
+      if(url.pathname==='/assets/ReignLogo.png')return route.fulfill({contentType:'image/png',body:fs.readFileSync(path.join(serverRoot,'ui/assets/ReignLogo.png'))});
+      if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:prefix+"<section id='options' class='page active'><style>"+css+'</style><h2>Options</h2>'+fixture.markup+'</section></main><script>'+fixture.script+'</script></body></html>'});
+      if(url.pathname==='/api/settings'){
+        if(request.method()==='GET')return route.fulfill(mode==='load_error'?{status:503,json:{ok:false}}:{json:saved});
+        const patch=request.postDataJSON();posts.push(patch);
+        if(patch.expectedSettingsRevision!==saved.settingsRevision)return route.fulfill({status:409,json:{ok:false,error:'Settings changed since this page loaded. Refresh before saving.'}});
+        assert.ok(Object.keys(patch).every(k=>k==='expectedSettingsRevision'||Object.hasOwn(fixture.defaults,k)));
+        for(const key of fixture.switches)if(Object.hasOwn(patch,key))assert.equal(typeof patch[key],'boolean');
+        for(const key of fixture.numbers)if(Object.hasOwn(patch,key))assert.equal(typeof patch[key],'number');
+        if(mode==='hold')await new Promise(resolve=>release=resolve);
+        if(mode==='save_error')return route.fulfill({status:400,json:{ok:false,error:'Simulated save failure'}});
+        const {expectedSettingsRevision,...changes}=patch;
+        saved={...saved,...changes,settingsRevision:'revision'+posts.length};return route.fulfill({json:{...saved,ok:true}});
+      }
+      return route.fulfill({status:404,body:''});
+    });
+    const open=()=>page.goto('http://economy-options.local/');
+    const ready=()=>page.waitForFunction(()=>!document.getElementById('saveWarEconomyOptions').disabled);
+    const expand=()=>page.locator('#warEconomyOptions details').evaluateAll(rows=>rows.forEach(row=>row.open=true));
+    const capture=async label=>{
+      const file=path.join(output,`${width}-${label}.png`);await page.screenshot({path:file,fullPage:true});report.screenshots.push(file);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No horizontal overflow');
+      const box=await page.locator('#warEconomyOptions').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width+1);
+      for(const bounds of await page.locator('#warEconomyOptions input:visible').evaluateAll(rows=>rows.map(row=>{const b=row.getBoundingClientRect();return {x:b.x,right:b.right}})))assert.ok(bounds.x>=box.x&&bounds.right<=box.x+box.width+1);
+    };
+    await open();await ready();
+    assert.equal(await page.locator('#warEconomyOptions details[open]').count(),0);await capture('collapsed');
+    assert.equal(await page.locator('#warEconomyOptions details').count(),8);
+    await expand();
+    for(const [key,value] of Object.entries(fixture.defaults)){
+      const input=page.locator('#'+key);
+      if(typeof value==='boolean')assert.equal(await input.isChecked(),value);else assert.equal(Number(await input.inputValue()),value);
+    }
+    assert.ok((await page.locator('#warEconomyPreview').innerText()).includes('3 / 6 / 12 / 18 / 24 / 40 / 68 / 92'));
+    await capture('expanded-defaults');
+    await page.locator('#economyTroopWageTier5').fill('45');
+    await page.locator('#economyRecruitTier5').fill('9');
+    await page.locator('#economyVillageOutputScale').evaluate(e=>{e.value='1.5';e.dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.locator('#economyUpgradeReserveDays').fill('20');
+    await page.locator('#economyRaidPartialDays').fill('45');
+    await page.locator('#economyRaidFullDays').fill('90');
+    assert.ok((await page.locator('#warEconomyPreview').innerText()).includes('90.0 / 180.0'));
+    const land=page.locator('#economyNpcTradeCaravansEnabled'), sea=page.locator('#economyNpcTradeConvoysEnabled');
+    const landPrice=page.locator('#economyNpcTradeCaravanPrice'), seaPrice=page.locator('#economyNpcTradeConvoyPrice');
+    const share=page.locator('#economyNpcTradeCashPercent'), chance=page.locator('#economyNpcTradeDailyChance');
+    assert.ok(await landPrice.isDisabled() && await seaPrice.isDisabled() && await share.isDisabled());
+    await land.check();assert.ok(await landPrice.isEnabled() && await seaPrice.isDisabled() && await share.isEnabled());
+    await landPrice.fill('18000');await page.locator('#economyNpcTradeCaravanLimit').fill('3');
+    await sea.check();await seaPrice.fill('35000');await page.locator('#economyNpcTradeConvoyLimit').fill('2');
+    await land.uncheck();assert.ok(await landPrice.isDisabled() && await seaPrice.isEnabled() && await chance.isEnabled());
+    await share.fill('45');await chance.fill('6.5');
+    await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Saved.'}).waitFor();
+    assert.equal(saved.economyNpcTradeCaravansEnabled,false);assert.equal(saved.economyNpcTradeConvoysEnabled,true);
+    assert.equal(saved.economyNpcTradeCaravanPrice,18000);assert.equal(saved.economyNpcTradeConvoyPrice,35000);
+    assert.equal(saved.economyNpcTradeCaravanLimit,3);assert.equal(saved.economyNpcTradeConvoyLimit,2);
+    assert.equal(saved.economyNpcTradeCashPercent,45);assert.equal(saved.economyNpcTradeDailyChance,6.5);
+    await open();await ready();await expand();
+    assert.equal(await sea.isChecked(),true);assert.equal(await land.isChecked(),false);
+    assert.equal(await seaPrice.inputValue(),'35000');assert.equal(await chance.inputValue(),'6.5');
+    await land.check();
+    await capture('adjusted');
+    for(const key of fixture.switches)await page.locator('#'+key).uncheck();
+    assert.equal(await page.locator('#economyTroopWageTier5').inputValue(),'45');
+    for(const key of fixture.numbers)assert.ok(await page.locator('#'+key).isDisabled());
+    await capture('disabled-values-retained');
+    mode='hold';await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Saving'}).waitFor();
+    assert.ok(await page.locator('#saveWarEconomyOptions').isDisabled());await capture('saving');
+    mode='ok';release();await page.locator('#warEconomyOptionsStatus').filter({hasText:'Saved.'}).waitFor();
+    assert.equal(saved.unrelated,'preserve');assert.equal(saved.economyTroopWageTier5,45);
+    assert.equal(saved.economyRecruitTier5,9);assert.equal(saved.economyVillageOutputScale,1.5);
+    assert.equal(saved.economyRaidPartialDays,45);assert.equal(saved.economyRaidFullDays,90);
+    assert.equal(saved.economyRecruitTier0,fixture.defaults.economyRecruitTier0);
+    await open();await ready();await expand();
+    for(const key of fixture.switches)assert.equal(await page.locator('#'+key).isChecked(),false);
+    await page.locator('#economyTroopWagesEnabled').check();
+    assert.equal(await page.locator('#economyTroopWageTier5').inputValue(),'45');
+    assert.ok(await page.locator('#economyRecruitTier5').isDisabled());await capture('reloaded');
+    const before=posts.length;await page.locator('#economyTroopWageTier5').fill('100');await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Higher tiers'}).waitFor();assert.equal(posts.length,before);
+    await page.locator('#economyTroopWageTier5').fill('45.5');await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'shown range'}).waitFor();assert.equal(posts.length,before);
+    await page.locator('#economyTroopWageTier5').fill('45');
+    await page.locator('#economyRaidFoodEnabled').check();await page.locator('#economyRaidPartialDays').fill('100');
+    await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Full looting recovery'}).waitFor();assert.equal(posts.length,before);
+    await page.getByRole('button',{name:'Reset economy defaults',exact:true}).click();
+    assert.equal(await page.locator('#economyTroopWageTier5').inputValue(),'40');
+    saved.economyRecruitTier7=11.5;saved.settingsRevision='external-change';
+    const externalSaved=JSON.stringify(saved);
+    await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Settings changed'}).waitFor();
+    assert.equal(JSON.stringify(saved),externalSaved);await capture('stale-revision');
+    await open();await ready();await expand();await page.getByRole('button',{name:'Reset economy defaults',exact:true}).click();
+    mode='save_error';await page.locator('#saveWarEconomyOptions').click();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Simulated save failure'}).waitFor();await capture('save-error');
+    mode='load_error';const attempts=posts.length;await open();
+    await page.locator('#warEconomyOptionsStatus').filter({hasText:'Could not load'}).waitFor();
+    assert.ok(await page.locator('#saveWarEconomyOptions').isDisabled());
+    await page.getByRole('button',{name:'Reset economy defaults',exact:true}).click();
+    assert.ok(await page.locator('#saveWarEconomyOptions').isDisabled());await page.evaluate(()=>saveWarEconomyOptions());assert.equal(posts.length,attempts);await capture('load-error');
+    report.checks.push({width,defaults:true,collapsed:true,independentToggles:true,retainedValues:true,roundtrip:true,patchScope:true,staleRevision:true,strictNumbers:true,mergedCurves:true,raidRecoveryBounds:true,npcTradeRoundtrip:true,reset:true,saving:true,loadFailureGuard:true,saveFailure:true,noOverflow:true});
+    await context.close();
+  }
+  assert.deepEqual(report.errors,[]);report.ok=true;
+}catch(error){report.ok=false;report.failure=error.stack;process.exitCode=1;}
+finally{await browser.close();fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:report.ok,report:path.join(output,'report.json')}));}

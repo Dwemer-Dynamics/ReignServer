@@ -82,13 +82,14 @@ namespace ReignBetaServer
         {
             string speech = ConversationSpeech(playerText);
             bool clarification = Regex.IsMatch(speech, @"\b(?:what (?:do|did) you (?:mean|ask)|what did you ask|what are you (?:asking|talking)|(?:do not|don't|dont|didn't|didnt) understand|(?:confused|confusing)|explain (?:that|what|it))\b", RegexOptions.IgnoreCase);
-            bool correction = Regex.IsMatch(speech, @"\b(?:wasn'?t implying|was not implying|(?:that is|that's|thats) not what|already (?:said|told|answered)|because of what you said|(?:you|I) misunderstood)\b", RegexOptions.IgnoreCase);
+            bool correction = ActiveConversationCorrection(playerText, history).Length > 0;
             bool apology = Regex.IsMatch(speech, @"\b(?:sorry|apologi[sz]e|my mistake|forgive me)\b", RegexOptions.IgnoreCase);
             var hints = new List<string>();
             if (clarification) hints.Add("The latest player message asks for clarification. Explain your actual meaning and any outstanding request concretely before moving on. Confusion alone is not refusal or evasion.");
             if (correction) hints.Add("The latest player message corrects an interpretation. Reconcile it with both sides of the transcript and any earlier acknowledgement; do not promote your older suspicion into an established fact.");
             if (apology) hints.Add("The latest player message includes an apology. Decide whether to accept it in character; avoid adding a new tally, debt or repeated demand merely to continue the exchange.");
             if (group) hints.Add("This is a shared conversation. Treat earlier speakers' opinions as their own; give this NPC a distinct response to the current player message and relevant contributions.");
+            if (correction) hints.Add(ConversationCorrectionContract);
             if (IsExpressionCorrection(playerText)) hints.Add("The player is calling attention to repeated expression. Change the recurring theme or phrasing while preserving your facts, feelings and boundaries; do not rationalize repeating it.");
             var expressionHistory = ConversationExpressionHistory(history, heroId, heroName, payload);
             string ledger = BuildConversationExpressionLedger(expressionHistory);
@@ -111,6 +112,8 @@ namespace ReignBetaServer
         {
             var result = FindConversationExpressionViolations(parsed, playerText,
                 expressionHistory ?? ConversationExpressionHistory(sharedHistory ?? ownHistory, heroId, heroName), heroName);
+            result.AddRange(FindConversationCorrectionViolations(parsed, playerText, sharedHistory ?? ownHistory, heroId));
+            result.AddRange(FindGroupExpressionEchoes(parsed, playerText, sharedHistory, heroId, heroName));
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
             bool wordingCritique = Regex.IsMatch(reply ?? "", @"\b(?:say|said|word|saying|learned to say)\s+['""‘’“”]?(?:we|I|our)['""‘’“”]?(?:\s+(?:not|instead|rather)|[.!?,])", RegexOptions.IgnoreCase);
             bool askedAboutWords = Regex.IsMatch(playerText ?? "", @"\b(?:wording|pronouns?|how should I (?:say|phrase)|what word)\b", RegexOptions.IgnoreCase);

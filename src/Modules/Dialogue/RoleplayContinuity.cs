@@ -51,6 +51,7 @@ namespace ReignBetaServer
                 continuityLines, priorLines, heroId, heroName, expressionHistory));
             violations.AddRange(FindTemporaryGuestDepartureViolations(parsed, payload, heroId));
             violations.AddRange(FindCriticalConversationContinuityViolations(parsed, payload, heroId));
+            violations.AddRange(FindConversationCorrectionViolations(parsed, latestPlayerText, priorLines, heroId, payload));
             if (violations.Count == 0) return llm;
 
             // An unsupported durable write must not suppress an otherwise usable
@@ -63,6 +64,7 @@ namespace ReignBetaServer
                 latestPlayerText, continuityLines, priorLines, heroId, heroName, expressionHistory));
             originalRemaining.AddRange(FindTemporaryGuestDepartureViolations(originalForRepair, payload, heroId));
             originalRemaining.AddRange(FindCriticalConversationContinuityViolations(originalForRepair, payload, heroId));
+            originalRemaining.AddRange(FindConversationCorrectionViolations(originalForRepair, latestPlayerText, priorLines, heroId, payload));
 
             bool removedUnsupportedWrites = ReadDictionaryList(parsed, "continuityWrites").Count
                 != ReadDictionaryList(originalForRepair, "continuityWrites").Count;
@@ -169,7 +171,7 @@ namespace ReignBetaServer
                             + "The current NPC speaker is physically present and speaking now; they may refuse or end the exchange, but cannot describe themselves as absent. "
                             + "Never narrate the player's speech, thoughts, consent, feelings, or physical actions. An NPC may consent to a proposed gift or action, but must not narrate a transfer, payment, release, marriage, ownership change, or other world action as already completed in this reply; execution happens only after validation. Unknown identity should normally use second-person address; a supplied descriptive label may appear at most once and is never the person's name. "
                             + "Do not imitate repeated wording from earlier replies. Remove any belief, memory, comprehension, obligation, state update, continuityWrite, relationship assessment, or suggested action that depends on a corrected violation. Regenerate evidence quotes against the corrected visible reply. Add no new world fact or action. "
-                            + ConversationNaturalnessContract
+                            + ConversationNaturalnessContract + "\n" + ConversationCorrectionContract
                             + "\n" + DrinkingOutputContract + "\n"
                             + " When native temporary-guest state is supplied, reconcile parting dialogue with that state. "
                             + "If the NPC already chose to end this outing, classify that existing choice with actionGate needed=true, commitment=accepted, intent=end_temporary_party_guest. "
@@ -226,6 +228,7 @@ namespace ReignBetaServer
                     continuityLines, priorLines, heroId, heroName, expressionHistory));
                 remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
                 remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindConversationCorrectionViolations(repairedParsed, latestPlayerText, priorLines, heroId, payload));
                 if (!StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed))
                     remaining.Add(TestDict("type", "structured_action_decision_changed", "detail",
                         "The continuity repair omitted or changed the original structured action decision."));
@@ -246,6 +249,7 @@ namespace ReignBetaServer
                     continuityLines, priorLines, heroId, heroName, expressionHistory));
                 remaining.AddRange(FindTemporaryGuestDepartureViolations(repairedParsed, payload, heroId));
                 remaining.AddRange(FindCriticalConversationContinuityViolations(repairedParsed, payload, heroId));
+                remaining.AddRange(FindConversationCorrectionViolations(repairedParsed, latestPlayerText, priorLines, heroId, payload));
                 repaired["content"] = Json.Serialize(repairedParsed);
                 repairMethod = "compact_llm_rewrite_then_deterministic_stage_direction_removal";
             }

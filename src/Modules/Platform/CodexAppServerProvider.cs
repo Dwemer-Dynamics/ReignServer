@@ -329,6 +329,7 @@ namespace ReignBetaServer
             Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
             if (canceled?.Invoke() == true) throw new OperationCanceledException("Banter was canceled before provider startup.");
+            ProviderTestGuard.BeforeDispatch("codex_text");
             EnsureCodexAppServer(settings);
             CodexRuntimeRequestContext context = CaptureCodexRequestContext(settings, requestBody, ReadString(codexContext, "requestType", "dialogue"), model,
                 ReadString(codexContext, "correlationId", ""), codexContext);

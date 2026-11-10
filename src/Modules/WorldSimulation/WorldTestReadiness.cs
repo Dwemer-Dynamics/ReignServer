@@ -15,12 +15,25 @@ namespace ReignBetaServer
             var timer = Stopwatch.StartNew();
             var metadata = ReadJsonObject(CampaignFile(campaignId, "campaign.json"));
             string player = ReadFirstString(metadata, "mainHeroStringId", "mainHeroId");
+            // Read other stores before retaining any PostgreSQL table locks.
+            var events = ReadWorldTestDiplomacyEvents(campaignId);
+            var actions = ReadWorldTestActions(campaignId);
+            string generation = RelationshipCampaignGeneration(campaignId);
             using (var connection = OpenCampaignConnection(campaignId))
             {
-                EnsureWorldTestSchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
-                EnsurePoliticalPressureSchema(connection);
-                EnsureClanConflictSchema(connection);
+                // PostgreSQL aborts this explicit transaction on a statement
+                // error. Retrying that statement would mask it with 25P02.
+                // The connection-scoped synchronous lease also covers nested reads.
+                using var noStatementRetry = new SqlStatementRetrySuppression(connection);
+                try
+                {
+                // A status read must never queue CREATE INDEX behind an active
+                // data writer. Normal heartbeat/worker initialization owns schema
+                // migration; an old/missing shape fails this observation closed.
+                using var transaction = connection.BeginTransaction();
+                ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
+                ExecuteSql(connection, "SET LOCAL lock_timeout='200ms';");
+                ExecuteSql(connection, "SET LOCAL statement_timeout='3000ms';");
                 var parameters = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["player"] = player ?? "" };
                 Func<string, double> day = sql => ReadDouble(QuerySql(connection, sql, parameters).FirstOrDefault(), "day", -1d);
                 Func<string, long> count = sql => ReadLong(QuerySql(connection, sql, parameters).FirstOrDefault(), "count", -1);
@@ -33,13 +46,11 @@ namespace ReignBetaServer
                 long failed = count("SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status='failed'" + nativeFilter + ";");
                 var batch = QuerySql(connection, "SELECT client_failed FROM relationship_native_sync_batches WHERE timeline_id=$timeline ORDER BY world_day DESC,issued_ts DESC LIMIT 1;", parameters).FirstOrDefault();
                 failed = Math.Max(failed, ReadInt(batch, "client_failed", 0));
-                var events = ReadWorldTestDiplomacyEvents(campaignId);
-                var actions = ReadWorldTestActions(campaignId);
                 var result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["schema"] = "reign_world_readiness_v1",
                     ["campaignId"] = campaignId, ["timelineId"] = timelineId,
-                    ["campaignGeneration"] = RelationshipCampaignGeneration(campaignId),
+                    ["campaignGeneration"] = generation,
                     ["observationId"] = Guid.NewGuid().ToString("N"),
                     ["observedUtc"] = DateTime.UtcNow.ToString("O"),
                     ["latestObservedDay"] = Math.Max(0, latest),
@@ -83,6 +94,14 @@ namespace ReignBetaServer
                 };
                 result["readinessQueryMs"] = timer.ElapsedMilliseconds;
                 return result;
+                }
+                catch(Exception ex) when(IsStalePostgreSqlPreparedPlan(ex))
+                {
+                    // The transaction above has rolled back before this catch.
+                    // Fail this observation, but let a later GET prepare fresh plans.
+                    try { ResetPostgreSqlPreparedPlans(connection); } catch { }
+                    throw;
+                }
             }
         }
     }

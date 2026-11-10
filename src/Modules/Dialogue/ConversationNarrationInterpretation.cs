@@ -114,6 +114,7 @@ namespace ReignBetaServer
                     existingArrival["linkedWithPlayer"] = true;
                 }
             }
+            changes.AddRange(SpokenSceneCorrections(original, payload).Where(c => !changes.Any(old => ReadString(old, "quote", "") == ReadString(c, "quote", ""))));
             changes = changes.OrderBy(change => original.IndexOf(ReadString(change, "quote", ""), StringComparison.Ordinal)).ToList();
             var coverage = new List<Dictionary<string, object>>();
             int cursor = 0;
@@ -175,7 +176,12 @@ namespace ReignBetaServer
             var source = CapturePlayerInput(payload);
             if (source.Interpretation != null) return source.Interpretation;
             var blocks = InputNarrationBlocks(source.Original);
-            if (blocks.Count == 0) return source.Interpretation = TestDict("status", "not_needed", "providerCalls", 0);
+            if (blocks.Count == 0)
+            {
+                var local = ValidateNarrationInterpretation(source.Original, TestDict("narration", new object[0]), payload);
+                local["providerCalls"] = 0;
+                return source.Interpretation = local;
+            }
             // Tests and captured replays never dispatch a provider implicitly.
             if (responder == null && (source.InputId.Length == 0 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1"))
                 return source.Interpretation = TestDict("status", "local_only", "providerCalls", 0);

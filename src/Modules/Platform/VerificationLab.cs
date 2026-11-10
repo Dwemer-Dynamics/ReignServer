@@ -348,6 +348,8 @@ namespace ReignBetaServer
             bool includeBaselines)
         {
             bool explicitSuite = !string.IsNullOrWhiteSpace(requestedSuite);
+            if (explicitSuite && ShouldRunVerificationSuite(requestedSuite, "war_economy_options"))
+                AddSubsystemListSummary(checks, "contracts.war_economy_options", "war_economy_options", RunWarEconomyOptionsSelfTests());
             if (string.Equals(requestedSuite, "memory_evidence_replay", StringComparison.OrdinalIgnoreCase))
             {
                 var replay = RunMemoryEvidenceReplay();
@@ -406,7 +408,12 @@ namespace ReignBetaServer
             if (string.Equals(requestedSuite, "outfit_changes", StringComparison.OrdinalIgnoreCase))
             {
                 AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
-            AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
+                AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
+                return;
+            }
+            if (string.Equals(requestedSuite, "chat_view", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
                 return;
             }
             if (string.Equals(requestedSuite, "character_narrative", StringComparison.OrdinalIgnoreCase)
@@ -422,7 +429,7 @@ namespace ReignBetaServer
             if (string.Equals(requestedSuite, "conversation_intoxication", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", RunConversationIntoxicationSelfTests());
             if (string.Equals(requestedSuite, "relationships", StringComparison.OrdinalIgnoreCase))
-                AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RunCurrentRelationshipSelfTests());
+                AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RunCurrentRelationshipSelfTests(), caseResultLimit:512);
             if (string.Equals(requestedSuite, "wanderer_population", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", RunWandererPopulationTests());
             if (string.Equals(requestedSuite, "encountered_residents", StringComparison.OrdinalIgnoreCase))
@@ -509,7 +516,7 @@ namespace ReignBetaServer
             bool includeExpensiveSubsystems)
         {
             if (HasArg(Environment.GetCommandLineArgs(), "--run-verification") && ActiveServerPort <= 0)
-                AddSubsystemListSummary(checks, "contracts.campaign_provider_wait", "save_load", RunCampaignProviderWaitSelfTests());
+                AddSubsystemListSummary(checks, "contracts.campaign_provider_wait", "save_load", RunCampaignProviderWaitSelfTests(), caseResultLimit:64);
             AddSubsystemListSummary(checks, "contracts.wanderer_population", "characters", RunWandererPopulationTests());
             AddSubsystemListSummary(checks, "contracts.encountered_residents", "characters", RunEncounteredResidentTests());
             AddSubsystemListSummary(checks, "contracts.tavern_house", "characters", RunTavernHouseContractTests());
@@ -540,6 +547,7 @@ namespace ReignBetaServer
             AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
             AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
             AddSubsystemListSummary(checks, "contracts.image_generation_profiles", "portraits_images", RunPortraitProviderAdapterContractTests());
+            AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
             if (includeExpensiveSubsystems)
             {
                 AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", RunSpymasterSystemSelfTests());
@@ -2534,8 +2542,7 @@ namespace ReignBetaServer
 				&& !individualZoomBlock.Contains("reign_modern_portrait_oval_overlay", StringComparison.Ordinal);
 			bool individualChatTransparentTranscriptValid = individualTranscriptBlock.Contains("IsVisible=\"@IsPlayerLine\"", StringComparison.Ordinal)
 				&& individualTranscriptBlock.Contains("IsVisible=\"@IsNonPlayerLine\"", StringComparison.Ordinal)
-				&& !Regex.IsMatch(individualTranscriptBlock, @"\sSprite=""")
-				&& !Regex.IsMatch(individualTranscriptBlock, @"\sColor=""");
+				&& VerificationTranscriptBackingsValid(FindVerificationXmlElementById(individualChatDocument, "ReignChatList"));
 			bool nativeModernPortraitFramesValid = gameMenuPartyRectangularPlateValid
 				&& conversationRectangularPortraitsValid
 				&& conversationCoverGeometryValid
@@ -3465,6 +3472,7 @@ namespace ReignBetaServer
             add("prompts.efficiency_cache", "prompt_efficiency", new[] { "contracts.dialogue_prompt_budget", "pipeline.prompt_caching" });
             add("memory.precision", "memory_precision", new[] { "pipeline.memory_precision" });
             add("portraits.images", "portraits_images", new[] { "contracts.gui_xml", "contracts.portrait_identity_metadata", "contracts.image_generation_profiles", "faults.corrupt_image" });
+            add("chat_view", "portraits_images", new[] { "contracts.chat_view" });
             add("actions.trade", "actions_trade", new[] { "pipeline.canned_cases", "pipeline.settlement_authority", "shadow_world.all_actions", "shadow_world.atomic_trade" });
             add("diplomacy.world", "world_diplomacy", new[] { "baseline.diplomacy", "contracts.random_diplomacy_popup_debug", "long_run.five_years" });
             add("history.world", "world_history", new[] { "baseline.world_history", "pipeline.rumors" });
@@ -3527,11 +3535,30 @@ namespace ReignBetaServer
             AddVerificationCheck(checks, id, suite, passed, id + ": " + passedCount + "/" + total + " baseline checks passed.", CompactSelfTest(result));
         }
 
-        private static void AddSubsystemListSummary(List<Dictionary<string, object>> checks, string id, string suite, List<Dictionary<string, object>> rows)
+        private static void AddSubsystemListSummary(List<Dictionary<string, object>> checks, string id, string suite, List<Dictionary<string, object>> rows, int caseResultLimit=0)
         {
             rows = rows ?? new List<Dictionary<string, object>>();
             int passed = rows.Count(CheckPassed);
-            AddVerificationCheck(checks, id, suite, rows.Count > 0 && passed == rows.Count, id + ": " + passed + "/" + rows.Count + " checks passed.", new Dictionary<string, object> { ["failures"] = rows.Where(x => !CheckPassed(x)).Select(CompactVerificationFailure).ToList() });
+            var evidence=new Dictionary<string,object> { ["failures"] = rows.Where(x => !CheckPassed(x)).Select(CompactVerificationFailure).ToList() };
+            if(caseResultLimit>0)
+            {
+                if(caseResultLimit>512)throw new ArgumentOutOfRangeException(nameof(caseResultLimit));
+                var ids=new HashSet<string>(StringComparer.Ordinal);
+                bool invalid=false;
+                var caseResults=new List<Dictionary<string,object>>();
+                foreach(var row in rows.Take(caseResultLimit))
+                {
+                    string caseId=ReadFirstString(row,"caseId","id","name");
+                    bool valid=caseId.Length>0 && caseId.Length<=192 && caseId.All(c=>char.IsLetterOrDigit(c)||c=='_'||c=='.'||c=='-'||c==':') && ids.Add(ReadString(row,"suite","")+"\0"+caseId);
+                    invalid|=!valid;
+                    caseResults.Add(new Dictionary<string,object>{{"caseId",valid?caseId:""},{"passed",CheckPassed(row)}});
+                }
+                evidence["caseResults"]=caseResults;
+                evidence["caseResultsTotal"]=rows.Count;
+                evidence["caseResultsTruncated"]=rows.Count>caseResultLimit;
+                evidence["caseResultsInvalidIds"]=invalid;
+            }
+            AddVerificationCheck(checks, id, suite, rows.Count > 0 && passed == rows.Count, id + ": " + passed + "/" + rows.Count + " checks passed.", evidence);
         }
 
         private static Dictionary<string, object> CompactSelfTest(Dictionary<string, object> result)
@@ -4078,6 +4105,42 @@ namespace ReignBetaServer
         {
             if (document == null || string.IsNullOrWhiteSpace(id)) return null;
             return document.SelectSingleNode("//*[@Id='" + id + "']") as XmlElement;
+        }
+
+        private static bool VerificationTranscriptBackingsValid(XmlElement transcript)
+        {
+            if (transcript == null) return false;
+            var copy = (XmlElement)transcript.CloneNode(true);
+            foreach (XmlElement entry in copy.SelectNodes(".//*[@Id='ChatViewImageEntry']").Cast<XmlElement>().ToList())
+            {
+                var button = entry.SelectSingleNode("./Children/ButtonWidget[@Id='ChatViewInlineImage']") as XmlElement;
+                var art = button?.SelectSingleNode("./Children/ReignEventArtWidget") as XmlElement;
+                var background = button?.SelectSingleNode("./Children/Widget") as XmlElement;
+                var plate = button?.SelectSingleNode("./Children/ImageWidget") as XmlElement;
+                bool bounded = VerificationXmlAttributeEquals(entry, "IsVisible", "@IsViewLine")
+                    && VerificationXmlAttributeEquals(entry, "SuggestedWidth", "384")
+                    && VerificationXmlAttributeEquals(button, "WidthSizePolicy", "Fixed")
+                    && VerificationXmlAttributeEquals(button, "HeightSizePolicy", "Fixed")
+                    && VerificationXmlAttributeEquals(button, "SuggestedWidth", "384")
+                    && VerificationXmlAttributeEquals(button, "SuggestedHeight", "216")
+                    && VerificationXmlAttributeEquals(art, "SuggestedWidth", "282.375")
+                    && VerificationXmlAttributeEquals(art, "SuggestedHeight", "188.25")
+                    && VerificationXmlAttributeEquals(art, "EventImageId", "@SceneImageId")
+                    && VerificationXmlAttributeEquals(background, "WidthSizePolicy", "StretchToParent")
+                    && VerificationXmlAttributeEquals(background, "HeightSizePolicy", "StretchToParent")
+                    && VerificationXmlAttributeEquals(background, "Sprite", "BlankWhiteSquare")
+                    && VerificationXmlAttributeEquals(background, "Color", "#070808FF")
+                    && VerificationXmlAttributeEquals(plate, "Sprite", "reign_modern_memory_scene_overlay")
+                    && VerificationXmlAttributeEquals(plate, "WidthSizePolicy", "StretchToParent")
+                    && VerificationXmlAttributeEquals(plate, "HeightSizePolicy", "StretchToParent")
+                    && button?.SelectNodes("./Children/*")?.Count == 3
+                    && entry.SelectNodes(".//*[@Sprite or @Color]").Count == 2;
+                if (!bounded) return false;
+                entry.ParentNode.RemoveChild(entry);
+            }
+            // Ordinary speech and its containers must remain completely transparent.
+            return !copy.HasAttribute("Sprite") && !copy.HasAttribute("Color")
+                && copy.SelectNodes(".//*[@Sprite or @Color]").Count == 0;
         }
 
         private static bool VerificationXmlAttributeEquals(XmlElement element, string attributeName, string expected)
