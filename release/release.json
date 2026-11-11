@@ -23,7 +23,7 @@
     "productionBranch": "reign",
     "betaBranch": "dev",
     "developmentBranch": "unstable",
-    "serverPort": 8089,
+    "serverPort": 8091,
     "internalServerPort": 5101,
     "vectorWorkerPort": 5102,
     "postgresPort": 5432,
@@ -36,7 +36,7 @@
     "moduleIdentity": "ReignBeta",
     "record": "%USERPROFILE%/.reign/installation.json",
     "serverMode": "dwemerdistro-wsl",
-    "serverPort": 8089,
+    "serverPort": 8091,
     "postgresPort": 5432,
     "database": "reign"
   },
