@@ -19,7 +19,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ActivateRunningServer(Dictionary<string, object> payload)
         {
             return new Dictionary<string, object> { ["ok"] = true, ["port"] = ActiveServerPort,
-                ["managedBy"] = "DwemerDistro", ["url"] = "http://127.0.0.1:8089/" };
+                ["managedBy"] = "DwemerDistro", ["url"] = "http://127.0.0.1:8091/" };
         }
 
         private static bool IsLocalPortAvailable(int port)

@@ -57,7 +57,7 @@ Installation/activation can health-check a candidate and then restore the previo
 sudo ddistro_server startup reign
 sudo service apache2 start
 sudo ddistro_reign start
-curl --fail http://127.0.0.1:8089/health
+curl --fail http://127.0.0.1:8091/health
 curl --fail http://127.0.0.1:5102/health
 ```
 
@@ -66,7 +66,7 @@ An HTTP 503 before managed startup is not by itself an installation failure. Che
 ### Storage, rollback and acceptance
 
 - `/var/www/html/ReignServer/data` owns private settings/API keys, campaigns, logs and vectors. `/var/www/html/ReignServer/runtime` owns retained executables, models and dependency environments; `runtime/current` selects the active version. Preserve both directories during source updates and uninstall. PostgreSQL's lowercase `reign` database remains in PostgreSQL's normal storage, not inside the checkout.
-- Default locale is `C.UTF-8`; both `template1` and `reign` must use UTF-8. The database uses port 5432, Apache exposes 8089, Reign binds loopback 5101 and its worker uses loopback 5102. Do not interfere with MiniMe on 8082 or sibling mod services/databases.
+- Default locale is `C.UTF-8`; both `template1` and `reign` must use UTF-8. The database uses port 5432, Apache exposes 8091, Reign binds loopback 5101 and its worker uses loopback 5102. Do not interfere with MiniMe on 8082 or sibling mod services/databases.
 - Inspect `sudo ddistro_reign rollback-list`, then use `sudo ddistro_reign rollback <retained-version-id>` for an authorized compatible rollback. Code rollback does not undo database migrations. Preserve retained versions and player data; never restore a database merely to make a binary rollback succeed.
 - Use `sudo ddistro_reign stop` / `start` for lifecycle checks. The owned server and vector worker must stop together. `sudo ddistro_reign repair-permissions` repairs inherited campaign access; do not substitute broad world-writable permissions or clear ACLs.
 - Verify public health, version agreement, `databaseName: reign`, current schema and the worker's loaded 384-dimensional model after warm-up. Inspect fresh `data/logs/server.log`; server/LLM event logs are also available through `/api/logs` and Distro Debugger. Never print settings or credentials during diagnosis.

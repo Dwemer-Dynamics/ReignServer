@@ -122,8 +122,8 @@ if (-not $SkipServer) {
     if ($LASTEXITCODE -ne 0) { throw 'Linux activation failed; inspect the retained runtime and logs.' }
     & wsl.exe -d $Distro -u root -- /usr/local/bin/ddistro_reign start
     if ($LASTEXITCODE -ne 0) { throw 'Reign did not start.' }
-    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8089/health' -TimeoutSec 10
+    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8091/health' -TimeoutSec 10
     if (-not $health.ok -or $health.serverVersion -ne $release.version) { throw 'Deployed server version check failed.' }
-    Write-Output "ReignServer $($health.serverVersion) is healthy inside $Distro through port 8089."
+    Write-Output "ReignServer $($health.serverVersion) is healthy inside $Distro through port 8091."
 }
 Write-Output 'No game was started. In-game validation remains manual.'

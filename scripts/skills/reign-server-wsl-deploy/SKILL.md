@@ -11,7 +11,7 @@ For source development, obtain the canonical validation plan/status, run the man
 
 Deploy with `scripts/Deploy-LocalWsl.ps1 -Workspace <Reign checkout> -LinuxBuildReport <report path> -Distro <name> -SkipClient`. This activates the exact checked artifact and checks versioned HTTP health. A normal published-channel update instead uses `sudo ddistro_server update reign --branch reign`, `dev`, or `unstable`; preserve the current channel unless the user requests a change. Never substitute `main` as a real Reign branch.
 
-Verify public port 8089, internal server 5101, worker 5102, and fresh `/var/www/html/ReignServer/data/logs/server.log`. The worker must report a loaded 384-dimension embedding model. Stop/start only through `ddistro_reign`, and verify the owned worker stops too. Never stop MiniMe on 8082 or alter unrelated mod databases.
+Verify public port 8091, internal server 5101, worker 5102, and fresh `/var/www/html/ReignServer/data/logs/server.log`. The worker must report a loaded 384-dimension embedding model. Stop/start only through `ddistro_reign`, and verify the owned worker stops too. Never stop MiniMe on 8082 or alter unrelated mod databases.
 
 Data and secrets remain in `/var/www/html/ReignServer/data`; executables and dependencies live in `/var/www/html/ReignServer/runtime`. Both folders stay inside the checkout and survive source updates and uninstall. Never run campaign/destructive/provider tests on active data. A process/health check is not in-game or native portrait-renderer proof. Report exact source, artifact, version, deployment, validation, and remaining limits.
 
