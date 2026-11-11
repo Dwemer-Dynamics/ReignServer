@@ -265,6 +265,12 @@ namespace ReignBetaServer
                 var settings = (settingsSource ?? LoadSettings)();
                 string boundId = BoundKeyId(settings, slot);
                 if (!payload.ContainsKey("expectedKeyId") || ReadString(payload, "expectedKeyId", "") != boundId) return GlobalKeyFail("conflict");
+                // The custom endpoint key belongs to the endpoint the caller sees. An unsaved or stale URL is refused before any
+                // store call, so a key typed for a new endpoint is never filed under (and later sent to) the old one. If the
+                // endpoint changes after this check, the key is filed under the origin the caller confirmed and the binding CAS
+                // below refuses it (saved_not_bound).
+                if (slot == "apiKey" && NormalizedOrigin(ReadString(payload, "expectedApiUrl", "")) != NormalizedOrigin(ReadString(settings, "apiUrl", "")))
+                    return GlobalKeyFail("endpoint_changed");
                 var status = GlobalKeyCall("status", new Dictionary<string, object>());
                 if (!ReadBool(status, "ok", false)) return GlobalKeyFail(ReadString(status, "outcome", "unavailable"));
                 var target = GlobalKeyTarget(settings, slot, ReadDictionaryList(status, "providers"));
@@ -288,6 +294,10 @@ namespace ReignBetaServer
                 {
                     if (boundId.Length == 0 || keyId != boundId || ReadString(GlobalKeyBinding(settings, slot), "origin", "") != target.Origin)
                         return GlobalKeyFail("conflict");
+                    // The stored key itself must still be this slot's provider and origin; another origin's key is never edited.
+                    var current = ReadDictionaryList(status, "keys").FirstOrDefault(k => ReadString(k, "key_id", "") == keyId);
+                    if (current == null) return GlobalKeyFail("missing");
+                    if (ReadString(current, "provider", "") != target.Provider || ReadString(current, "origin", "") != target.Origin) return GlobalKeyFail("wrong_provider");
                     if (IsMaskedSecretValue(secret)) secret = "";
                     reply = GlobalKeyCall("edit", new Dictionary<string, object> { ["key_id"] = keyId, ["revision"] = ReadInt(payload, "revision", 0),
                         ["label"] = label, ["secret"] = secret });

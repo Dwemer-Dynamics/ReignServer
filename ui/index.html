@@ -1480,6 +1480,7 @@
       displayedChatProvider = s.llmProvider || 'openai_compatible';
       codexPerformanceSetLoadedSettings(s);
       updateSettingsInfo(s);
+      globalKeyState.savedApiUrl = s.apiUrl || '';
       await loadGlobalKeys();
       updateLlmProviderUi();
       await loadCodexStatus();
@@ -1631,11 +1632,13 @@
     async function saveSettings() {
       const status = document.getElementById('status');
       const button = document.getElementById('saveChangesButton');
-      // Typed provider keys are never sent with the main Save and never dropped: they stay in their inputs.
-      const typedKeys = globalKeySlotIds.filter(id => { const el = document.getElementById(id); return el && el.value && el.value !== el.dataset.savedMask; });
-      if (typedKeys.length) { status.textContent = (globalKeyState.available ? 'Provider keys are stored in Global API Keys. Use Save key beside each changed key.'
-        : globalKeyUnavailableText()) + ' Your typed key was kept; nothing was saved.'; return; }
       if (button.disabled || !beginWarEconomySave()) return;
+      // Typed provider keys are never sent with the main Save and never dropped: everything else (including a new API URL)
+      // saves, and the typed keys stay in their inputs for Save key.
+      const typedKeys = Object.fromEntries(globalKeySlotIds.map(id => [id, document.getElementById(id)])
+        .filter(([, el]) => el && el.value && el.value !== el.dataset.savedMask).map(([id, el]) => [id, el.value]));
+      const keptKeyText = !Object.keys(typedKeys).length ? '' : ' ' + (globalKeyState.available ? 'Typed provider key kept: use Save key beside it to store it in Global API Keys.'
+        : globalKeyUnavailableText() + ' Your typed key was kept.');
       button.disabled = true;
       status.textContent = 'Saving changes...';
       let settingsSaved = false;
@@ -1648,7 +1651,7 @@
         if (boolIds.has(id)) s[id] = el.checked;
         else if (intIds.has(id)) s[id] = parseInt(el.value || '0', 10);
         else if (floatIds.has(id)) s[id] = parseFloat(el.value || '0');
-        else if (secretIds.has(id) && el.dataset.hasSavedSecret === 'true' && el.value === el.dataset.savedMask) s[id] = '';
+        else if (id in typedKeys || (secretIds.has(id) && el.dataset.hasSavedSecret === 'true' && el.value === el.dataset.savedMask)) s[id] = '';
         else s[id] = el.value;
       });
       Object.assign(s, npcLivesSettingsForSave(true));
@@ -1661,12 +1664,15 @@
       await savePromptDrafts();
       try { await loadSettings(); }
       catch (e) { status.textContent = 'Changes saved; settings refresh failed: ' + e.message; return; }
-      status.textContent = 'Changes saved';
+      status.textContent = 'Changes saved.' + keptKeyText;
       updateImagePresetHints();
       updateReasoningPolicyHint();
       } catch (e) {
-        status.textContent = (settingsSaved ? 'Settings saved; prompts not saved: ' : 'Save failed: ') + e.message;
-      } finally { endWarEconomySave(); }
+        status.textContent = (settingsSaved ? 'Settings saved; prompts not saved: ' : 'Save failed: ') + e.message + keptKeyText;
+      } finally {
+        Object.entries(typedKeys).forEach(([id, value]) => { document.getElementById(id).value = value; });
+        endWarEconomySave();
+      }
     }
 
     function updateReasoningPolicyHint() {
@@ -1728,11 +1734,12 @@
     // stored value back. Rows are always shown (disabled with the reason when not set up or stopped). Each row saves on
     // its own and refreshes only itself, so other unsaved inputs survive. Nothing is selected or imported automatically.
     const globalKeySlotIds = ['apiKey','openRouterApiKey','nanoGptApiKey','portraitNanoGptApiKey','portraitAtlasApiKey'];
-    const globalKeyState = { enrolled:false, available:false, outcome:'', slots:{} };
+    const globalKeyState = { enrolled:false, available:false, outcome:'', slots:{}, savedApiUrl:'' };
     const globalKeyMessages = { created:'Saved to Global API Keys', updated:'Global key updated', unchanged:'No change', bound:'Using the selected global key',
       unbound:'No longer using the global key.', unknown:'Result unknown. Reload and check Global API Keys before trying again.',
       conflict:'The key or its selection changed elsewhere. Reload and try again.', missing:'That global key no longer exists.',
-      wrong_provider:'That key belongs to another provider or endpoint.', busy:'Global API Keys is busy; try again.',
+      wrong_provider:'That key belongs to another provider or endpoint.',
+      endpoint_changed:'The saved API URL differs from the one shown. Save Changes (or reload) first; your typed key was kept and nothing was sent.', busy:'Global API Keys is busy; try again.',
       limit:'The global key limit is reached.', invalid:'The key or name was refused.', invalid_endpoint:'Set a valid API URL first.',
       not_configured:'Global API Keys is not set up in DwemerDistro.', forbidden:'Refused: open this page from the Reign server on this PC.',
       not_enrolled:'Global API Keys is not connected. Run scripts/Connect-GlobalKeys.ps1 once.' };
@@ -1825,6 +1832,11 @@
         body = { slot:id, mode:'bind', keyId:choice };
       } else { status.textContent = 'Choose a global key or + New global key.'; return; }
       body.expectedKeyId = bound;
+      // The custom endpoint key belongs to the URL shown; the server refuses it unless that URL is the saved one.
+      if (id === 'apiKey') {
+        body.expectedApiUrl = document.getElementById('apiUrl')?.value.trim() || '';
+        if (body.expectedApiUrl !== globalKeyState.savedApiUrl.trim()) { status.textContent = globalKeyMessages.endpoint_changed; return; }
+      }
       button.disabled = true;
       status.textContent = 'Saving key...';
       let j;
@@ -1832,6 +1844,7 @@
         j = await (await fetch('/api/global-keys/save', { method:'POST', headers:{'Content-Type':'application/json','X-Reign-Keys':'1'}, body:JSON.stringify(body) })).json();
       } catch (e) { j = { ok:false, outcome:'unknown' }; }
       body.secret = '';
+      if (j.outcome === 'endpoint_changed') { button.disabled = false; status.textContent = globalKeyMessages.endpoint_changed; return; }
       input.value = '';
       const message = j.outcome === 'saved_not_bound' ? 'Saved to Global API Keys but not selected here. Reload and choose it from the list.'
         : globalKeyMessages[j.outcome] || 'Global API Keys unavailable; nothing changed here.';

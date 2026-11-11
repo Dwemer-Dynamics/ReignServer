@@ -34,6 +34,7 @@ namespace ReignBetaServer
             string previousProvider = ReadString(settings, "llmProvider", "");
             var previousBank = ReadDictionary(settings, "llmModelProfiles");
             var clearKeys = ReadStringList(incoming, "clearKeys");
+            string previousOrigin = NormalizedOrigin(ReadString(settings, "apiUrl", ""));
             foreach (var pair in incoming ?? new Dictionary<string, object>())
             {
                 // Bindings change only through the Global API Keys routes, which choose provider and origin themselves.
@@ -50,6 +51,13 @@ namespace ReignBetaServer
                     && (pair.Value == null || string.IsNullOrWhiteSpace(Convert.ToString(pair.Value)) || IsMaskedSecretValue(Convert.ToString(pair.Value)))) continue;
                 settings[pair.Key] = pair.Value;
             }
+            // A legacy local custom key belongs to the origin it was saved for. A new origin clears it (settings and, through
+            // the explicit-clear vault write, the installed vault) unless this merge supplies its own key; a bound slot
+            // already fails closed on mismatch and keeps its reference.
+            string suppliedApiKey = ReadString(incoming, "apiKey", "");
+            if (NormalizedOrigin(ReadString(settings, "apiUrl", "")) != previousOrigin && GlobalKeyBinding(settings, "apiKey") == null
+                && (string.IsNullOrWhiteSpace(suppliedApiKey) || IsMaskedSecretValue(suppliedApiKey)) && !clearKeys.Contains("apiKey"))
+                clearKeys.Add("apiKey");
             foreach (string key in clearKeys) if (SensitiveSettingsKeys().Contains(key)) settings[key] = "";
             MergeChatProviderProfiles(settings, incoming, previousBank, previousProvider);
             NormalizeLlmProviderSettings(settings);

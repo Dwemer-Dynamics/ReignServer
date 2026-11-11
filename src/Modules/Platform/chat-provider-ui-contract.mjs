@@ -24,7 +24,7 @@ let settings = { llmProvider:'nanogpt', nanoGptApiKeyPresent:true, nanoGptApiKey
     structuredOutputs:false,compactMetadata:false,stablePromptMapping:false,parallelContextPreparation:false,reuseThreads:false,asyncThreadCleanup:false},
   codex: {runtimeVersion:'fixture-runtime',catalogFreshness:'fresh',discoveryErrors:[],models:[{id:'gpt-5.5',displayName:'GPT-5.5',supportedReasoningEfforts:['minimal','low','medium','high','xhigh']}],modelVerification:'unverified'} };
 Object.assign(settings, settings.llmModelProfiles.nanogpt);
-let globalKeys = null, globalSaves = [], globalClears = [], settingsGets = 0;
+let globalKeys = null, globalSaves = [], globalClears = [], settingsGets = 0, globalSaveReply = null;
 const dialogs = [];
 let saved, codexCheckCalls = 0, lastCodexCheck, modelRefreshCalls = 0, failModelRefresh = false;
 const results = [], errors = [];
@@ -53,7 +53,7 @@ try {
     }
     if (url.pathname === '/api/global-keys/save') {
       globalSaves.push({body:route.request().postDataJSON(),header:route.request().headers()['x-reign-keys']});
-      body = {ok:true,outcome:'created',keyId:'99999999-2222-4333-8444-555555555555'};
+      body = globalSaveReply || {ok:true,outcome:'created',keyId:'99999999-2222-4333-8444-555555555555'};
     }
     if (url.pathname === '/api/codex/status') body = {...settings.codex,ok:true,models:settings.codex.models || []};
     if (url.pathname === '/api/codex/models/refresh') {
@@ -201,13 +201,14 @@ try {
   assert.equal(await page.inputValue('#dialogueModel'),'nano-draft');
   await page.selectOption('#llmProvider','openrouter');
   assert.equal(await page.inputValue('#dialogueModel'),'openai/router-draft');
-  // Provider keys are never sent by the main Save (they go only to Global API Keys) and a refused Save keeps them typed.
+  // Provider keys are never sent by the main Save (they go only to Global API Keys); other settings save and the key stays typed.
   const savedBeforeTypedKey = saved;
   await page.fill('#openRouterApiKey','fixture-replacement');
   await page.evaluate(() => saveSettings());
-  assert.equal(saved,savedBeforeTypedKey,'Main Save must not send a provider key');
-  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-replacement','A refused main Save keeps the typed key');
-  assert.match(await page.textContent('#status'),/nothing was saved/);
+  assert.notEqual(saved,savedBeforeTypedKey);
+  assert.equal(saved.openRouterApiKey,'','Main Save must not send a provider key');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-replacement','Main Save keeps the typed key');
+  assert.match(await page.textContent('#status'),/typed key was kept/);
   await page.evaluate(() => { const el = document.getElementById('openRouterApiKey'); el.value = el.dataset.savedMask; });
   await page.evaluate(() => saveSettings());
   assert.notEqual(saved,savedBeforeTypedKey);
@@ -288,7 +289,8 @@ try {
   const savedBefore = saved;
   await page.fill('#openRouterApiKey','fixture-global');
   await page.evaluate(() => saveSettings());
-  assert.equal(saved,savedBefore,'Main Save must neither send nor silently drop a typed provider key');
+  assert.equal(saved.openRouterApiKey,'','Main Save must not send a typed provider key');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-global','Main Save must not drop a typed provider key');
   assert.match(await page.textContent('#status'),/Save key/);
   await page.selectOption('#openRouterApiKeyGlobalRow select','new');
   await page.click('#openRouterApiKeyGlobalRow button');
@@ -335,10 +337,45 @@ try {
   const savedBeforeUnenrolled = saved;
   await page.fill('#openRouterApiKey','fixture-unenrolled');
   await page.evaluate(() => saveSettings());
-  assert.equal(saved,savedBeforeUnenrolled);
+  assert.notEqual(saved,savedBeforeUnenrolled);
+  assert.equal(saved.openRouterApiKey,'');
   assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-unenrolled');
   assert.match(await page.textContent('#status'),/Connect-GlobalKeys/);
-  results.push({globalKeys:true,noAutoSelect:true,mainSaveGuard:true,rowOnlyRefresh:true,unbind:true,rename:true,unavailable:true,notEnrolled:true,passed:true});
+  // Custom endpoint: a key typed for an unsaved URL is never sent; main Save stores the URL and keeps the key, then Save key
+  // sends the shown URL for the server's check, and a server-side endpoint mismatch keeps the typed key.
+  globalKeys = {ok:true,available:true,outcome:'listed',slots:[{slot:'apiKey',name:'Custom endpoint',provider:'custom_openai',
+    origin:'https://fixture.invalid:443',legacy:false,binding:null,keys:[]}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('apiKeyGlobalRow'));
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openai_compatible');
+  const savesBeforeEndpoint = globalSaves.length, oldApiUrl = await page.inputValue('#apiUrl');
+  await page.fill('#apiUrl','https://new-endpoint.invalid/v1/chat/completions');
+  await page.fill('#apiKey','fixture-custom-new');
+  await page.selectOption('#apiKeyGlobalRow select','new');
+  await page.click('#apiKeyGlobalRow button');
+  assert.equal(globalSaves.length,savesBeforeEndpoint,'A key typed beside an unsaved API URL is never sent');
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new');
+  assert.match(await page.textContent('#apiKeyGlobalRow [role=status]'),/Save Changes/);
+  assert.notEqual(oldApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.apiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  assert.equal(saved.apiKey,'');
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new','Saving the URL keeps the typed endpoint key');
+  globalSaveReply = {ok:false,outcome:'endpoint_changed'};
+  await page.selectOption('#apiKeyGlobalRow select','new');
+  await page.click('#apiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length === savesBeforeEndpoint; i++) await page.waitForTimeout(20);
+  assert.deepEqual(globalSaves.at(-1).body,{slot:'apiKey',mode:'create',label:'',secret:'fixture-custom-new',expectedKeyId:'',
+    expectedApiUrl:'https://new-endpoint.invalid/v1/chat/completions'});
+  await page.waitForFunction(() => /Save Changes/.test(document.querySelector('#apiKeyGlobalRow [role=status]').textContent));
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new','A server endpoint refusal keeps the typed key');
+  globalSaveReply = null;
+  await page.click('#apiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length < savesBeforeEndpoint + 2; i++) await page.waitForTimeout(20);
+  await page.waitForFunction(() => document.getElementById('apiKey').value === '');
+  assert.equal(globalSaves.at(-1).body.expectedApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  results.push({globalKeys:true,noAutoSelect:true,endpointGuard:true,mainSaveGuard:true,rowOnlyRefresh:true,unbind:true,rename:true,unavailable:true,notEnrolled:true,passed:true});
   globalKeys = null;
   assert.deepEqual(errors,[]);
   const report=path.join(output,'ui-report.json');

@@ -39,9 +39,10 @@ Then run `scripts/Connect-GlobalKeys.ps1` once from Windows. It is the only setu
   two concurrent runs can never commit each other's token. If a run crashed, wait 10 minutes and drop its stage with
   `wsl -d DwemerAI4Skyrim3 -u root --exec /usr/local/bin/ddistro_keys_api discard reign --abandoned`, then rerun.
 - It starts the socket and records `globalKeysDistro` in `~/.reign/installation.json` (atomic replace).
+  `scripts/Deploy-LocalWsl.ps1` keeps that value when it rewrites the record for the same dedicated installation.
 
-Until setup is done the key controls are shown disabled with this instruction, and the main Save refuses typed keys
-while keeping them in their fields. `Start-ReignServer-Wsl.ps1` then also starts a hidden, flock-guarded
+Until setup is done the key controls are shown disabled with this instruction. The main Save never sends a typed key:
+it saves the other settings and keeps typed keys in their fields. `Start-ReignServer-Wsl.ps1` then also starts a hidden, flock-guarded
 `ddistro_keys_api hold` session in `DwemerAI4Skyrim3`. That session does not start PostgreSQL; the DwemerDistro launcher
 does. Stopping DwemerDistro makes bound keys unavailable and the UI says so.
 
@@ -55,6 +56,14 @@ Each provider key field has a selector, an optional name and **Save key**. Choos
 value as a new global key. Choose the selected key to replace its value (same UUID, revision checked, after a warning
 that every product using it changes) or, with only a new name, to rename it. Choose another listed key to use it.
 Nothing is selected or imported automatically. A key save refreshes only its own row, so other unsaved settings stay.
+The custom endpoint key belongs to the API URL shown: with an unsaved URL, **Save key** sends nothing and asks for
+**Save Changes** first (the typed key is kept). The save carries that URL (`expectedApiUrl`) and the server refuses it
+with `endpoint_changed`, before any store call, unless its origin is the saved `apiUrl` origin (for example from a stale
+tab). Replacing a key's value also requires the stored key to have the slot's provider and origin.
+A legacy local custom key belongs to its saved origin. A settings save that changes the `apiUrl` origin clears it in
+settings and in the installed vault, using the normal explicit-clear write, so the old key is never sent to the new
+host. A path-only change keeps it. A bound reference, a merge that supplies its own key, and the other slots are unchanged.
+A key typed for the new URL stays in its field until **Save key**.
 **Clear** on a bound slot only removes Reign's reference; the global key stays.
 
 `GET /api/global-keys` returns masked rows (optionally `?slot=`). `POST /api/global-keys/save`, `/unbind` and

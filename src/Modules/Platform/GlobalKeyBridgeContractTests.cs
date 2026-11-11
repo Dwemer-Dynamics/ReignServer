@@ -22,7 +22,7 @@ namespace ReignBetaServer
             const string keyId = "11111111-2222-4333-8444-555555555555", other = "99999999-2222-4333-8444-555555555555";
             const string secret = "fixture-global-secret-value", openAi = "https://api.openai.com:443";
             var calls = new List<Dictionary<string, object>>();
-            string resolveOutcome = "resolved", writeOutcome = "updated", createdOrigin = NanoGptOrigin;
+            string resolveOutcome = "resolved", writeOutcome = "updated", createdOrigin = NanoGptOrigin, createdProvider = "nano_gpt";
             var store = new List<Dictionary<string, object>> {
                 new Dictionary<string, object> { ["key_id"] = keyId, ["provider"] = "openrouter", ["origin"] = OpenRouterOrigin, ["label"] = "Reign", ["preview"] = "...abcd", ["revision"] = 3 },
                 new Dictionary<string, object> { ["key_id"] = other, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin, ["label"] = "Other", ["preview"] = "...zz", ["revision"] = 1 } };
@@ -39,7 +39,7 @@ namespace ReignBetaServer
                     ? new Dictionary<string, object> { ["ok"] = true, ["outcome"] = "resolved", ["secret"] = secret, ["revision"] = 3 } : GlobalKeyFail(resolveOutcome);
                 bool ok = writeOutcome == "updated" || writeOutcome == "created" || writeOutcome == "unchanged";
                 return ok ? new Dictionary<string, object> { ["ok"] = true, ["outcome"] = writeOutcome, ["key"] = op == "create"
-                        ? new Dictionary<string, object> { ["key_id"] = other, ["provider"] = "nano_gpt", ["origin"] = createdOrigin }
+                        ? new Dictionary<string, object> { ["key_id"] = other, ["provider"] = createdProvider, ["origin"] = createdOrigin }
                         : new Dictionary<string, object> { ["key_id"] = keyId } }
                     : GlobalKeyFail(writeOutcome);
             };
@@ -155,6 +155,41 @@ namespace ReignBetaServer
                 bound.Clear();
                 check("masked_or_blank_create_refused", ReadString(save(new Dictionary<string, object> { ["slot"] = "apiKey", ["mode"] = "create", ["secret"] = "x", ["expectedKeyId"] = "" }), "outcome", "") == "invalid_endpoint"
                     && ReadString(save(new Dictionary<string, object> { ["slot"] = "nanoGptApiKey", ["mode"] = "create", ["secret"] = "************", ["expectedKeyId"] = "" }), "outcome", "") == "invalid" && bound.Count == 0);
+                // Custom endpoint: the key follows the endpoint the caller sees. An unsaved or stale URL is refused before any
+                // store call; rotation never edits a key filed under another origin.
+                const string oldUrl = "https://old.invalid/v1/chat/completions", newOrigin = "https://new.invalid:443", customId = "33333333-2222-4333-8444-555555555555";
+                store.Add(new Dictionary<string, object> { ["key_id"] = customId, ["provider"] = "custom_openai", ["origin"] = "https://old.invalid:443", ["label"] = "Old", ["revision"] = 1 });
+                var newEndpoint = new Dictionary<string, object> { ["llmProvider"] = "openai_compatible", ["apiUrl"] = "https://new.invalid/v1/chat/completions" };
+                Func<Dictionary<string, object>, Dictionary<string, object>, Dictionary<string, object>> saveAt = (s, payload) => SaveGlobalKey(payload, bind, () => s);
+                writeOutcome = "created";
+                bound.Clear();
+                int beforeEndpoint = calls.Count;
+                check("custom_key_for_unsaved_or_stale_endpoint_refused_before_any_call",
+                    ReadString(saveAt(newEndpoint, new Dictionary<string, object> { ["slot"] = "apiKey", ["mode"] = "create", ["secret"] = "x-new", ["expectedKeyId"] = "", ["expectedApiUrl"] = oldUrl }), "outcome", "") == "endpoint_changed"
+                    && ReadString(saveAt(new Dictionary<string, object> { ["apiUrl"] = oldUrl }, new Dictionary<string, object> { ["slot"] = "apiKey", ["mode"] = "create", ["secret"] = "x-new",
+                        ["expectedKeyId"] = "", ["expectedApiUrl"] = "https://new.invalid/v1" }), "outcome", "") == "endpoint_changed"
+                    && ReadString(saveAt(newEndpoint, new Dictionary<string, object> { ["slot"] = "apiKey", ["mode"] = "create", ["secret"] = "x-new", ["expectedKeyId"] = "" }), "outcome", "") == "endpoint_changed"
+                    && calls.Count == beforeEndpoint && bound.Count == 0);
+                createdProvider = "custom_openai";
+                createdOrigin = newOrigin;
+                var customCreated = saveAt(newEndpoint, new Dictionary<string, object> { ["slot"] = "apiKey", ["mode"] = "create", ["secret"] = "x-new", ["expectedKeyId"] = "",
+                    ["expectedApiUrl"] = "https://NEW.invalid/other" });
+                var customCreate = ReadDictionary(calls.Last(), "body");
+                check("custom_key_for_saved_endpoint_created_and_bound", ReadBool(customCreated, "ok", false) && ReadString(customCreate, "provider", "") == "custom_openai"
+                    && ReadString(customCreate, "origin", "") == newOrigin && bound.SequenceEqual(new[] { "apiKey=" + other + "<" }));
+                createdProvider = "nano_gpt";
+                createdOrigin = NanoGptOrigin;
+                writeOutcome = "updated";
+                bound.Clear();
+                Func<string, Dictionary<string, object>> boundTo = origin => new Dictionary<string, object>(newEndpoint) { ["globalKeyBindings"] = new Dictionary<string, object> {
+                    ["apiKey"] = new Dictionary<string, object> { ["keyId"] = customId, ["provider"] = "custom_openai", ["origin"] = origin } } };
+                Func<Dictionary<string, object>> rotateCustom = () => new Dictionary<string, object> { ["slot"] = "apiKey", ["mode"] = "rotate", ["keyId"] = customId, ["revision"] = 1,
+                    ["secret"] = "x-new", ["expectedKeyId"] = customId, ["expectedApiUrl"] = newEndpoint["apiUrl"] };
+                int edits = calls.Count(c => ReadString(c, "op", "") == "edit");
+                check("custom_rotation_never_edits_other_origin_key", ReadString(saveAt(boundTo("https://old.invalid:443"), rotateCustom()), "outcome", "") == "conflict"
+                    && ReadString(saveAt(boundTo(newOrigin), rotateCustom()), "outcome", "") == "wrong_provider"
+                    && calls.Count(c => ReadString(c, "op", "") == "edit") == edits && bound.Count == 0);
+                store.RemoveAt(store.Count - 1);
                 writeOutcome = "created";
                 bindResult = false;
                 int creates = calls.Count(c => ReadString(c, "op", "") == "create");
@@ -177,6 +212,33 @@ namespace ReignBetaServer
                 check("vault_never_resurrects_or_stores_bound_slot", ReadString(reloaded, "openRouterApiKey", "x") == "" && ReadString(reloaded, "qdrantApiKey", "") == "qdrant-local"
                     && ReadString(fullRestore, "openRouterApiKey", "") == "" && ReadString(afterWrite, "openRouterApiKey", "x") == ""
                     && !File.ReadAllText(vault).Contains("leaked"));
+
+                // A legacy local custom key never survives a new origin, in settings or the vault; same-origin edits, a bound
+                // reference, an explicitly supplied key and the other slots keep theirs.
+                const string newUrl = "https://new.invalid/v1/chat/completions";
+                var legacy = new Dictionary<string, object> { ["llmProvider"] = "openai_compatible", ["apiUrl"] = oldUrl, ["apiKey"] = "old-secret",
+                    ["nanoGptApiKey"] = "fixture-local", ["openRouterApiKey"] = "router-local", ["chatProviderProfilesInitialized"] = true };
+                Func<Dictionary<string, object>, Dictionary<string, object>, (Dictionary<string, object> S, List<string> Clears)> mergeInto = (start, incoming) =>
+                { var s = new Dictionary<string, object>(start); return (s, MergeProviderSettings(s, incoming)); };
+                var same = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = "https://OLD.invalid/v2", ["apiKey"] = "" });
+                var moved = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "" });
+                var maskedMove = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "************" });
+                var explicitKey = mergeInto(legacy, new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "fixture-explicit" });
+                var boundMove = mergeInto(boundTo("https://old.invalid:443"), new Dictionary<string, object> { ["apiUrl"] = "https://third.invalid/v1" });
+                WriteSettingsSecretsVault(vault, legacy);
+                bool plainWriteSkipped = !CanSafelyPersistSettingsSecretVault(vault, new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "" }, false);
+                bool clearWriteAllowed = CanSafelyPersistSettingsSecretVault(vault, moved.S, moved.Clears.Count > 0);
+                if (clearWriteAllowed) WriteSettingsSecretsVault(vault, moved.S);
+                var afterMove = new Dictionary<string, object> { ["apiUrl"] = newUrl, ["apiKey"] = "", ["nanoGptApiKey"] = "", ["openRouterApiKey"] = "" };
+                RecoverSettingsSecretsFromVault(vault, afterMove, false, out _);
+                check("legacy_custom_key_cleared_on_origin_change", moved.Clears.SequenceEqual(new[] { "apiKey" }) && ReadString(moved.S, "apiKey", "x") == ""
+                    && ProviderSecret(moved.S, "apiKey", LlmApiUrl(moved.S)) == "" && ReadString(maskedMove.S, "apiKey", "x") == ""
+                    && ReadString(moved.S, "nanoGptApiKey", "") == "fixture-local" && ReadString(moved.S, "openRouterApiKey", "") == "router-local");
+                check("legacy_custom_key_kept_for_same_origin_or_explicit_key", same.Clears.Count == 0 && ReadString(same.S, "apiKey", "") == "old-secret"
+                    && explicitKey.Clears.Count == 0 && ReadString(explicitKey.S, "apiKey", "") == "fixture-explicit"
+                    && boundMove.Clears.Count == 0 && BoundKeyId(boundMove.S, "apiKey") == customId);
+                check("vault_does_not_restore_cleared_custom_key", plainWriteSkipped && clearWriteAllowed && ReadString(afterMove, "apiKey", "x") == ""
+                    && ReadString(afterMove, "nanoGptApiKey", "") == "fixture-local" && ReadString(afterMove, "openRouterApiKey", "") == "router-local");
 
                 // Mutation guard: custom header, exact same-origin, loopback direct peer, Apache-overwritten peer/host only.
                 Func<string, bool> peers = address => address == "127.0.0.1" || address == "172.20.0.1";
