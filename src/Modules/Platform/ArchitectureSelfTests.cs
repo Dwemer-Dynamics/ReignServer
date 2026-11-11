@@ -1695,11 +1695,23 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     ["schemaVersion"] = 2, ["observedDay"] = 10d,
                     ["observedUtc"] = DateTime.UtcNow.ToString("O"),
                     ["active"] = true, ["allHooksHealthy"] = true, ["allModelsHealthy"] = true,
-                    ["behavioralCoverageComplete"] = true
+                    ["behavioralCoverageComplete"] = true,
+                    ["raidFoodEvidenceVersion"] = 1,
+                    ["raidFoodVillagesTruncated"] = false,
+                    ["raidFoodHoldingsTruncated"] = false,
+                    ["raidFood"] = new Dictionary<string, object>
+                    {
+                        ["schema"] = "reign-raid-food-v1",
+                        ["hooksHealthy"] = true, ["unsupported"] = 0,
+                        ["fixtureTainted"] = false, ["nativeAcceptance"] = "passed"
+                    }
                 };
                 var coveragePayload = new Dictionary<string, object> { ["warEconomy"] = coverageSample };
                 var freshCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
                 var staleCoverage = BuildWorldTestWarEconomy(coveragePayload, 12d);
+                coverageSample["raidFoodEvidenceVersion"] = 0;
+                var missingRaidFoodCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
+                coverageSample["raidFoodEvidenceVersion"] = 1;
                 coverageSample["schemaVersion"] = 1;
                 var legacyCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
                 add("war_economy_current_coverage_requires_fresh_schema",
@@ -1709,8 +1721,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && ReadString(staleCoverage, "status", "") == "insufficient_data"
                     && !ReadBool(legacyCoverage, "behavioralCoverageComplete", true)
                     && ReadString(legacyCoverage, "status", "") == "insufficient_data"
+                    && !ReadBool(missingRaidFoodCoverage, "behavioralCoverageComplete", true)
                     && ReadBool(coverageSample, "behavioralCoverageComplete", false),
-                    "Current coverage clears stale/legacy claims without mutating the original historical telemetry.",
+                    "Current coverage requires fresh schema and raid-food acceptance evidence, and clears stale/legacy claims without mutating the original historical telemetry.",
                     new Dictionary<string, object>());
                 string qualificationRunnerPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""

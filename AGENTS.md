@@ -1,24 +1,24 @@
 # ReignServer local workflow
 
-This public repository owns the local Reign server, shared contracts/helpers, native portrait tooling and release packaging. Its only publishing destination is https://github.com/Dwemer-Dynamics/ReignServer.git. Development targets unstable, beta promotion targets dev, and production/default is reign. Use one draft PR per repository and coordinate paired client/server promotion. Private client source, credentials, campaigns, verification workspaces, built binaries, model downloads and bulk portrait payloads do not belong in Git.
+This public repository owns the local Reign server, shared contracts/helpers, native portrait tooling and release packaging. Its only publishing destination is https://github.com/Dwemer-Dynamics/ReignServer.git. Development targets unstable, beta promotion targets dev, and production/default is reign. Use one draft PR per repository and coordinate paired client/server promotion. Client source, credentials, campaigns, verification workspaces, built binaries, model downloads and bulk portrait payloads do not belong in Git.
 
-For paired development, clone the private Reign repository beside this checkout and run scripts/Connect-Repositories.ps1. Follow ../Reign/AGENTS.md and obtain the Reign MCP validation plan before code changes. Use the shared canonical validation engine and its OS lease; never start a second server against the same runtime data or bypass provider/campaign gates. The separately registered `ReignServer` WSL distro runs the Linux server under `reignctl` and `reignserver.service`; Windows is reserved for the game client and portrait renderer. All development and testing stay local. Preserve source/save identities and edit shared source here only.
+For paired development, clone the public Reign repository beside this checkout and run scripts/Connect-Repositories.ps1. Follow ../Reign/AGENTS.md and obtain the Reign MCP validation plan before code changes. Use the shared canonical validation engine and its OS lease; never start a second server against the same runtime data or bypass provider/campaign gates. The separately registered `ReignServer` WSL distro runs the Linux server under `reignctl` and `reignserver.service`; Windows is reserved for the game client and portrait renderer. All development and testing stay local. Preserve source/save identities and edit shared source here only.
 
 Stage explicit reviewed paths only. Validate and audit both repositories before publication. Source publication is authorized when the user requests it; keep implementation PRs as drafts targeting unstable. A source PR does not establish clean-install or in-game acceptance.
 
-Approved first-party shared portraits belong in the private Reign module at ReignBeta/PortraitCache/_shared, with the tracked ReignBeta/PortraitCache/shared-portrait-inventory.json. Deploy and package the verified module inventory; do not rely on a separate or machine-local first-party portrait payload.
+Approved first-party shared portraits belong in the Reign client module at ReignBeta/PortraitCache/_shared, with the tracked ReignBeta/PortraitCache/shared-portrait-inventory.json. Deploy and package the verified module inventory; do not rely on a separate or machine-local first-party portrait payload.
 
 ## Dedicated ReignServer WSL operations
 
 ### Work and build
 
-- Confirm both sibling repositories' origins, branches, HEADs and dirty state before changes. Use the private Reign checkout as the canonical MCP workspace; edit public server source here. Compare current `unstable`, `dev` and `reign` heads before promotion rather than assuming channel parity.
+- Confirm both sibling repositories' origins, branches, HEADs and dirty state before changes. Use the Reign client checkout as the canonical MCP workspace; edit public server source here. Compare current `unstable`, `dev` and `reign` heads before promotion rather than assuming channel parity.
 - Read the installed `reign-server-wsl-deploy` skill when available; use `reign-full-deploy` for combined client/server work. The checked-in deployment entry point is `scripts/Deploy-LocalWsl.ps1`. See the paired client workflow for client builds, dependency/module inventory and portrait assets.
 - For server changes that affect runtime files shared by startup, the HTTP server, the vector worker or maintenance commands, use the [runtime file access procedure](scripts/skills/reign-server-wsl-deploy/references/runtime-file-permissions.md). Probe affected paths as their actual process identities before dependent operations and after activation; preserve private keys and active locks.
 - Obtain the canonical validation plan and status, use the current task UUID and manifest-selected scope, then produce the Linux artifact through the same build lease. Do not call `dotnet build`, `dotnet test`, MSBuild or verification executables directly. Documentation-only changes use the Tier 1 no-build plan.
 
 ```powershell
-# Run from the private Reign checkout after obtaining its validation plan/status.
+# Run from the Reign client checkout after obtaining its validation plan/status.
 & .\ReignMcp\scripts\reign-validate.ps1 -Profile changed -ChangedPath $changedPaths -Restore -RequestingTaskId $env:CODEX_THREAD_ID
 & .\ReignMcp\scripts\reign-validate.ps1 -LinuxServer -Restore -RequestingTaskId $env:CODEX_THREAD_ID
 ```
