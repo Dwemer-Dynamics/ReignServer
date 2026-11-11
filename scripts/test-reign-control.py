@@ -295,7 +295,7 @@ class ControlTests(unittest.TestCase):
         self.assertIn("ProxyPass / http://127.0.0.1:5101/ timeout=900\n", site)
         with tempfile.TemporaryDirectory(prefix="reign-control-config-") as directory:
             root = Path(directory)
-            modules = ["mpm_event", "authz_core", "proxy", "proxy_http", "alias", "cgid"]
+            modules = ["mpm_event", "authz_core", "proxy", "proxy_http", "alias", "cgid", "headers"]
             config = f'ServerRoot "/etc/apache2"\nServerName localhost\nDefaultRuntimeDir "{root}"\nErrorLog "{root}/error.log"\n'
             config += "\n".join(f"LoadModule {name}_module /usr/lib/apache2/modules/mod_{name}.so" for name in modules)
             config += "\n" + site.replace("${APACHE_LOG_DIR}", str(root)) + "\n"

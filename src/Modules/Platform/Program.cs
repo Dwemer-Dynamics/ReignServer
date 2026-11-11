@@ -919,6 +919,7 @@ namespace ReignBetaServer
                     {
                         return;
                     }
+                    request.RemoteAddress = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "";
 
                     if (!string.IsNullOrEmpty(request.ReignProtocol)
                         && request.ReignProtocol != Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol.ToString(CultureInfo.InvariantCulture))
@@ -991,6 +992,15 @@ namespace ReignBetaServer
                     {
                         response = ReignXpOptionsForClient();
                     }
+                    else if (request.Method == "GET" && request.Path == "/api/global-keys")
+                    {
+                        response = GlobalKeysStatus(request.Query.TryGetValue("slot", out string onlySlot) && GlobalKeySlots.Contains(onlySlot) ? onlySlot : null);
+                    }
+                    else if (request.Method == "POST" && (request.Path == "/api/global-keys/save" || request.Path == "/api/global-keys/unbind"))
+                    {
+                        response = !GlobalKeyRequestAllowed(request) ? GlobalKeyFail("forbidden")
+                            : request.Path.EndsWith("/save", StringComparison.Ordinal) ? SaveGlobalKey(request.JsonBody) : UnbindGlobalKey(request.JsonBody);
+                    }
                     else if (request.Method == "POST" && request.Path == "/api/settings")
                     {
                         response = SaveSettings(request.JsonBody);
@@ -1001,7 +1011,7 @@ namespace ReignBetaServer
                     }
                     else if (request.Method == "POST" && request.Path == "/api/settings/clear-key")
                     {
-                        response = ClearSettingsKey(request.JsonBody);
+                        response = ClearSettingsKey(request.JsonBody, request);
                     }
                     else if (request.Method == "GET" && request.Path == "/api/diagnostics")
                     {
@@ -18405,7 +18415,13 @@ The previous attempt did not complete a JSON object within its output budget.
             bool namedApiProvider = ReadString(settings, "llmProvider", "") == OpenRouterProvider || ReadString(settings, "llmProvider", "") == NanoGptProvider;
             string apiUrl = namedApiProvider ? LlmApiUrl(settings) : ReadString(payload, "apiUrl", LlmApiUrl(settings));
             if (codexSubscription) apiUrl = "codex-app-server://local";
-            string apiKey = namedApiProvider ? LlmApiKey(settings) : ReadString(payload, "apiKey", LlmApiKey(settings));
+            // The subscription runtime never resolves a key; a caller-supplied key is the caller's own. Otherwise the bound
+            // key is checked against the actual destination, including a payload apiUrl override, and fails closed.
+            string apiKey = codexSubscription ? ""
+                : !namedApiProvider && payload.ContainsKey("apiKey") ? ReadString(payload, "apiKey", "")
+                : ProviderSecret(settings, LlmApiKeySlot(settings), apiUrl);
+            if (!codexSubscription && !(!namedApiProvider && payload.ContainsKey("apiKey")) && ProviderKeyUnavailable(settings, LlmApiKeySlot(settings), apiKey))
+                return TestDict("ok", false, "error", GlobalKeyUnavailableError, "errorCode", "global_key_unavailable", "providerCallCount", 0);
             string requestType = ReadString(payload, "requestType", "dialogue");
             string model = ReadString(payload, "model", ModelForRequest(settings, requestType));
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -23244,6 +23260,7 @@ Return exactly this JSON shape:
                 }
             }
             bool secretsRecovered = RecoverInstalledSettingsSecrets(settings, !settingsFileExisted);
+            SanitizeBoundKeySlots(settings);
             bool portraitSettingsChanged = NormalizePortraitImageSettings(settings);
             bool constructionBudgetChanged = NormalizeCharacterConstructionBudget(settings);
             bool memorySettingsChanged = NormalizeMemorySettings(settings);
@@ -23326,6 +23343,8 @@ Return exactly this JSON shape:
             string imageProviderError = ValidateCodexImageSettings(incoming);
             if (!string.IsNullOrEmpty(imageProviderError))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = imageProviderError };
+            string localKeyRefusal = LocalProviderKeyWriteRefusal(incoming);
+            if (localKeyRefusal != null) return TestDict("ok", false, "error", localKeyRefusal, "outcome", "global_keys_required");
             string visionError = ValidatePortraitVisionSettings(incoming);
             if (!string.IsNullOrEmpty(visionError)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = visionError };
             Dictionary<string, object> settings = DefaultSettings();
@@ -23386,6 +23405,7 @@ Return exactly this JSON shape:
             {
                 var unchanged=SettingsForUi(settings);unchanged["ok"]=true;unchanged["unchanged"]=true;return unchanged;
             }
+            SanitizeBoundKeySlots(settings);
             settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
             Directory.CreateDirectory(DataDir);
             WriteJsonObject(SettingsPath, settings);
@@ -23579,7 +23599,7 @@ Return exactly this JSON shape:
             return changed;
         }
 
-        private static Dictionary<string, object> ClearSettingsKey(Dictionary<string, object> payload)
+        private static Dictionary<string, object> ClearSettingsKey(Dictionary<string, object> payload, HttpRequest request = null)
         {
             string key = ReadString(payload, "key", "");
             if (!SensitiveSettingsKeys().Contains(key))
@@ -23587,6 +23607,9 @@ Return exactly this JSON shape:
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Unknown or non-sensitive key cannot be cleared." };
             }
 
+            // Clearing a bound slot unbinds it (the global key stays) and is a key mutation: same guard as the key routes.
+            if (GlobalKeySlots.Contains(key) && GlobalKeyBinding(LoadSettings(), key) != null)
+                return request == null || !GlobalKeyRequestAllowed(request) ? GlobalKeyFail("forbidden") : UnbindGlobalKey(new Dictionary<string, object> { ["slot"] = key });
             Dictionary<string, object> incoming = new Dictionary<string, object>
             {
                 ["clearKeys"] = new List<string> { key }
@@ -23624,6 +23647,7 @@ Return exactly this JSON shape:
                 result[key] = present ? new string('*', Math.Min(Math.Max(length, 12), 32)) : "";
                 result[key + "Present"] = present;
                 result[key + "Length"] = length;
+                result[key + "Bound"] = GlobalKeyBinding(settings, key) != null;
             }
 
             result["settingsPath"] = SettingsPath;
@@ -23636,21 +23660,22 @@ Return exactly this JSON shape:
         private static string SettingsFingerprint(Dictionary<string, object> settings)
         {
             settings = settings ?? LoadSettings();
-            string apiKey = LlmApiKey(settings);
+            string apiKey = ReadString(settings, LlmApiKeySlot(settings), "");
             return "llmProvider=" + NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider))
                 + "|apiUrl=" + LlmApiUrl(settings)
                 + "|codexExecutable=" + ReadString(settings, "codexExecutable", "codex")
                 + "|dialogueModel=" + ModelForRequest(settings, "dialogue")
                 + "|constructionModel=" + ModelForRequest(settings, "character_construction")
                 + "|constructionMaxTokens=" + ReadInt(settings, "characterConstructionMaxTokens", CharacterConstructionTokenCeiling)
-                + "|apiKeyPresent=" + (!string.IsNullOrWhiteSpace(apiKey))
+                + "|apiKeyPresent=" + ProviderKeyConfigured(settings, LlmApiKeySlot(settings))
+                + "|apiKeyBinding=" + ReadString(GlobalKeyBinding(settings, LlmApiKeySlot(settings)), "keyId", "")
                 + "|apiKeyLength=" + apiKey.Length;
         }
 
         private static Dictionary<string, object> ServerDiagnostics()
         {
             Dictionary<string, object> settings = LoadSettings();
-            string apiKey = LlmApiKey(settings);
+            string apiKey = ReadString(settings, LlmApiKeySlot(settings), "");
             string nanoKey = ReadString(settings, "portraitNanoGptApiKey", "");
             string atlasKey = ReadString(settings, "portraitAtlasApiKey", "");
             FileInfo settingsInfo = File.Exists(SettingsPath) ? new FileInfo(SettingsPath) : null;
@@ -23717,8 +23742,8 @@ Return exactly this JSON shape:
                 ["provider"] = ReadString(llm, "provider", NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider))),
                 ["apiUrl"] = LlmApiUrl(settings),
                 ["model"] = ReadString(llm, "model", ModelForRequest(settings, requestType)),
-                ["apiKeyPresent"] = !string.IsNullOrWhiteSpace(LlmApiKey(settings)),
-                ["apiKeyLength"] = LlmApiKey(settings).Length,
+                ["apiKeyPresent"] = ProviderKeyConfigured(settings, LlmApiKeySlot(settings)),
+                ["apiKeyLength"] = ReadString(settings, LlmApiKeySlot(settings), "").Length,
                 ["providerDurationMs"] = ReadLong(llm, "durationMs", 0),
                 ["totalMs"] = timer.ElapsedMilliseconds,
                 ["content"] = ReadString(llm, "content", ""),
@@ -27715,8 +27740,18 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 JsonBody = jsonBody,
                 UploadFilePath = uploadFilePath,
                 BodyLength = length,
-                ContentType = contentType
+                ContentType = contentType,
+                Host = BoundedHeader(headers, "Host"),
+                Origin = BoundedHeader(headers, "Origin"),
+                ProxyPeer = BoundedHeader(headers, "X-Reign-Peer"),
+                ProxyHost = BoundedHeader(headers, "X-Reign-Host"),
+                KeysHeader = BoundedHeader(headers, "X-Reign-Keys")
             };
+        }
+
+        private static string BoundedHeader(Dictionary<string, string> headers, string name)
+        {
+            return headers.TryGetValue(name, out string value) && value.Length <= 256 ? value : "";
         }
 
         private static void WriteFile(NetworkStream stream, string path, string contentType)
@@ -30144,6 +30179,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             public string UploadFilePath;
             public long BodyLength;
             public string ContentType;
+            public string Host, Origin, ProxyPeer, ProxyHost, KeysHeader, RemoteAddress;
         }
     }
 }

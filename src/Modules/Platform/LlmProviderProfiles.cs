@@ -34,9 +34,11 @@ namespace ReignBetaServer
             string previousProvider = ReadString(settings, "llmProvider", "");
             var previousBank = ReadDictionary(settings, "llmModelProfiles");
             var clearKeys = ReadStringList(incoming, "clearKeys");
+            string previousOrigin = NormalizedOrigin(ReadString(settings, "apiUrl", ""));
             foreach (var pair in incoming ?? new Dictionary<string, object>())
             {
-                if (pair.Key == "clearKeys" || pair.Key == "chatProviderProfilesInitialized") continue;
+                // Bindings change only through the Global API Keys routes, which choose provider and origin themselves.
+                if (pair.Key == "clearKeys" || pair.Key == "chatProviderProfilesInitialized" || pair.Key == "globalKeyBindings") continue;
                 if (pair.Key == "codexOptions")
                 {
                     var suppliedCodexOptions = ReadDictionary(incoming, "codexOptions");
@@ -49,6 +51,13 @@ namespace ReignBetaServer
                     && (pair.Value == null || string.IsNullOrWhiteSpace(Convert.ToString(pair.Value)) || IsMaskedSecretValue(Convert.ToString(pair.Value)))) continue;
                 settings[pair.Key] = pair.Value;
             }
+            // A legacy local custom key belongs to the origin it was saved for. A new origin clears it (settings and, through
+            // the explicit-clear vault write, the installed vault) unless this merge supplies its own key; a bound slot
+            // already fails closed on mismatch and keeps its reference.
+            string suppliedApiKey = ReadString(incoming, "apiKey", "");
+            if (NormalizedOrigin(ReadString(settings, "apiUrl", "")) != previousOrigin && GlobalKeyBinding(settings, "apiKey") == null
+                && (string.IsNullOrWhiteSpace(suppliedApiKey) || IsMaskedSecretValue(suppliedApiKey)) && !clearKeys.Contains("apiKey"))
+                clearKeys.Add("apiKey");
             foreach (string key in clearKeys) if (SensitiveSettingsKeys().Contains(key)) settings[key] = "";
             MergeChatProviderProfiles(settings, incoming, previousBank, previousProvider);
             NormalizeLlmProviderSettings(settings);
@@ -82,12 +91,9 @@ namespace ReignBetaServer
                 : provider == NanoGptProvider ? NanoGptChatCompletionsUrl : ReadString(settings, "apiUrl", "");
         }
 
-        private static string LlmApiKey(Dictionary<string, object> settings)
-        {
-            string provider = NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
-            return ReadString(settings, provider == OpenRouterProvider ? "openRouterApiKey"
-                : provider == NanoGptProvider ? "nanoGptApiKey" : "apiKey", "");
-        }
+        // Outbound use only: resolves a bound global key for the configured endpoint. Presence checks use ProviderKeyConfigured.
+        private static string LlmApiKey(Dictionary<string, object> settings) =>
+            ProviderSecret(settings, LlmApiKeySlot(settings), LlmApiUrl(settings));
 
         // Flat active model fields remain the runtime contract. The bank contains only model IDs, never credentials.
         private static Dictionary<string, object> ChatModelProfile(Dictionary<string, object> source, string fallback)

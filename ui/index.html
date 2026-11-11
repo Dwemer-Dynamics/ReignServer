@@ -1480,6 +1480,8 @@
       displayedChatProvider = s.llmProvider || 'openai_compatible';
       codexPerformanceSetLoadedSettings(s);
       updateSettingsInfo(s);
+      globalKeyState.savedApiUrl = s.apiUrl || '';
+      await loadGlobalKeys();
       updateLlmProviderUi();
       await loadCodexStatus();
       updateImagePresetHints();
@@ -1631,6 +1633,12 @@
       const status = document.getElementById('status');
       const button = document.getElementById('saveChangesButton');
       if (button.disabled || !beginWarEconomySave()) return;
+      // Typed provider keys are never sent with the main Save and never dropped: everything else (including a new API URL)
+      // saves, and the typed keys stay in their inputs for Save key.
+      const typedKeys = Object.fromEntries(globalKeySlotIds.map(id => [id, document.getElementById(id)])
+        .filter(([, el]) => el && el.value && el.value !== el.dataset.savedMask).map(([id, el]) => [id, el.value]));
+      const keptKeyText = !Object.keys(typedKeys).length ? '' : ' ' + (globalKeyState.available ? 'Typed provider key kept: use Save key beside it to store it in Global API Keys.'
+        : globalKeyUnavailableText() + ' Your typed key was kept.');
       button.disabled = true;
       status.textContent = 'Saving changes...';
       let settingsSaved = false;
@@ -1643,7 +1651,7 @@
         if (boolIds.has(id)) s[id] = el.checked;
         else if (intIds.has(id)) s[id] = parseInt(el.value || '0', 10);
         else if (floatIds.has(id)) s[id] = parseFloat(el.value || '0');
-        else if (secretIds.has(id) && el.dataset.hasSavedSecret === 'true' && el.value === el.dataset.savedMask) s[id] = '';
+        else if (id in typedKeys || (secretIds.has(id) && el.dataset.hasSavedSecret === 'true' && el.value === el.dataset.savedMask)) s[id] = '';
         else s[id] = el.value;
       });
       Object.assign(s, npcLivesSettingsForSave(true));
@@ -1656,12 +1664,15 @@
       await savePromptDrafts();
       try { await loadSettings(); }
       catch (e) { status.textContent = 'Changes saved; settings refresh failed: ' + e.message; return; }
-      status.textContent = 'Changes saved';
+      status.textContent = 'Changes saved.' + keptKeyText;
       updateImagePresetHints();
       updateReasoningPolicyHint();
       } catch (e) {
-        status.textContent = (settingsSaved ? 'Settings saved; prompts not saved: ' : 'Save failed: ') + e.message;
-      } finally { endWarEconomySave(); }
+        status.textContent = (settingsSaved ? 'Settings saved; prompts not saved: ' : 'Save failed: ') + e.message + keptKeyText;
+      } finally {
+        Object.entries(typedKeys).forEach(([id, value]) => { document.getElementById(id).value = value; });
+        endWarEconomySave();
+      }
     }
 
     function updateReasoningPolicyHint() {
@@ -1707,11 +1718,137 @@
     }
 
     async function clearKey(key) {
-      if (!confirm(`Clear saved ${key}?`)) return;
-      const r = await fetch('/api/settings/clear-key', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key}) });
+      const bound = globalKeyState.slots[key]?.binding?.keyId || '';
+      // A bound slot unbinds only; the global key stays in DwemerDistro for every other product.
+      if (!confirm(bound ? `Stop using the global key for ${key}? The key itself stays in Global API Keys.` : `Clear saved ${key}?`)) return;
+      const headers = {'Content-Type':'application/json'};
+      if (bound) headers['X-Reign-Keys'] = '1';
+      const r = await fetch('/api/settings/clear-key', { method:'POST', headers, body:JSON.stringify({key}) });
       const j = await r.json();
+      if (bound) { await refreshGlobalKeyRow(key, j.ok ? 'No longer using the global key.' : (globalKeyMessages[j.outcome] || 'Unbind failed; nothing changed.')); return; }
       document.getElementById('status').textContent = j.ok ? 'Key cleared' : 'Clear failed';
       await loadSettings();
+    }
+
+    // Provider keys are saved only to DwemerDistro Global API Keys; Reign keeps the reference and never receives the
+    // stored value back. Rows are always shown (disabled with the reason when not set up or stopped). Each row saves on
+    // its own and refreshes only itself, so other unsaved inputs survive. Nothing is selected or imported automatically.
+    const globalKeySlotIds = ['apiKey','openRouterApiKey','nanoGptApiKey','portraitNanoGptApiKey','portraitAtlasApiKey'];
+    const globalKeyState = { enrolled:false, available:false, outcome:'', slots:{}, savedApiUrl:'' };
+    const globalKeyMessages = { created:'Saved to Global API Keys', updated:'Global key updated', unchanged:'No change', bound:'Using the selected global key',
+      unbound:'No longer using the global key.', unknown:'Result unknown. Reload and check Global API Keys before trying again.',
+      conflict:'The key or its selection changed elsewhere. Reload and try again.', missing:'That global key no longer exists.',
+      wrong_provider:'That key belongs to another provider or endpoint.',
+      endpoint_changed:'The saved API URL differs from the one shown. Save Changes (or reload) first; your typed key was kept and nothing was sent.', busy:'Global API Keys is busy; try again.',
+      limit:'The global key limit is reached.', invalid:'The key or name was refused.', invalid_endpoint:'Set a valid API URL first.',
+      not_configured:'Global API Keys is not set up in DwemerDistro.', forbidden:'Refused: open this page from the Reign server on this PC.',
+      not_enrolled:'Global API Keys is not connected. Run scripts/Connect-GlobalKeys.ps1 once.' };
+
+    function globalKeyUnavailableText() {
+      return globalKeyState.outcome === 'not_enrolled' ? 'Global API Keys not set up: run scripts/Connect-GlobalKeys.ps1 once. Keys cannot be saved until then.'
+        : 'Global API Keys unavailable; start DwemerDistro to save or use this key.';
+    }
+
+    function applyGlobalKeyStatus(j) {
+      globalKeyState.outcome = j.outcome || 'unavailable';
+      globalKeyState.enrolled = j.enrolled !== false && j.outcome !== 'not_enrolled';
+      globalKeyState.available = globalKeyState.enrolled && !!j.available;
+    }
+
+    async function loadGlobalKeys() {
+      let j;
+      try { j = await (await fetch('/api/global-keys')).json(); } catch (e) { j = { outcome:'unavailable' }; }
+      applyGlobalKeyStatus(j);
+      (Array.isArray(j.slots) ? j.slots : globalKeySlotIds.map(slot => ({slot}))).forEach(renderGlobalKeyRow);
+    }
+
+    // Refreshes one row and its own input only; every other pending setting and key input stays as typed.
+    async function refreshGlobalKeyRow(id, message) {
+      let j;
+      try { j = await (await fetch('/api/global-keys?slot=' + encodeURIComponent(id))).json(); } catch (e) { j = { outcome:'unavailable' }; }
+      applyGlobalKeyStatus(j);
+      const slot = (Array.isArray(j.slots) ? j.slots : []).find(x => x.slot === id) || { ...globalKeyState.slots[id], keys:[] };
+      const input = document.getElementById(id);
+      if (input) {
+        const local = !!slot.legacy;
+        const mask = local ? (input.dataset.hasSavedSecret === 'true' && input.dataset.savedMask ? input.dataset.savedMask : makeSecretMask(12)) : '';
+        input.value = mask;
+        input.dataset.savedMask = mask;
+        input.dataset.hasSavedSecret = local ? 'true' : 'false';
+      }
+      renderGlobalKeyRow(slot);
+      const row = document.getElementById(id + 'GlobalRow');
+      if (row && message) row.lastElementChild.textContent = message;
+    }
+
+    function renderGlobalKeyRow(slot) {
+      const input = document.getElementById(slot.slot);
+      if (!input) return;
+      let row = document.getElementById(slot.slot + 'GlobalRow');
+      globalKeyState.slots[slot.slot] = slot;
+      if (!row) {
+        row = document.createElement('div');
+        row.id = slot.slot + 'GlobalRow';
+        row.className = 'actions';
+        row.innerHTML = `<select aria-label='Global key'></select><input aria-label='Global key name' maxlength='64'><button type='button'>Save key</button><span role='status' aria-live='polite' class='hint'></span>`;
+        row.querySelector('button').addEventListener('click', () => saveGlobalKey(slot.slot));
+        (input.closest('label') || input).after(row);
+      }
+      const [select, label, button, status] = row.children;
+      const bound = slot.binding?.keyId || '';
+      const options = [];
+      if (!bound) options.push(new Option(slot.legacy ? 'Local key (not in Global API Keys)' : 'No key selected', ''));
+      (slot.keys || []).forEach(k => options.push(new Option(`${k.label} ${k.preview}`.trim(), k.keyId)));
+      if (bound && !(slot.keys || []).some(k => k.keyId === bound)) options.push(new Option('Selected global key (not listed)', bound));
+      options.push(new Option('+ New global key', 'new'));
+      select.replaceChildren(...options);
+      select.value = bound;
+      label.value = '';
+      label.placeholder = 'Reign - ' + (slot.name || slot.slot);
+      [select, label, button].forEach(el => el.disabled = !globalKeyState.available);
+      status.textContent = !globalKeyState.available ? globalKeyUnavailableText()
+        : bound && slot.binding.originMatches === false ? 'The endpoint changed; choose a key for the new endpoint.'
+        : bound ? 'Using a global key.' : slot.legacy ? 'Local key in use until you save it to Global API Keys.' : '';
+      input.placeholder = bound ? 'Using a global key. Type a new value, then Save key, to change it.'
+        : input.dataset.hasSavedSecret === 'true' ? 'Saved key is masked. Type a new key, then Save key.' : 'Type a key, then Save key.';
+    }
+
+    async function saveGlobalKey(id) {
+      const slot = globalKeyState.slots[id], input = document.getElementById(id), row = document.getElementById(id + 'GlobalRow');
+      const [select, labelInput, button, status] = row.children;
+      const choice = select.value, bound = slot.binding?.keyId || '', label = labelInput.value.trim();
+      const secret = input.value && input.value !== input.dataset.savedMask ? input.value.trim() : '';
+      let body;
+      if (choice === 'new') {
+        if (!secret) { status.textContent = 'Type the key above first.'; return; }
+        body = { slot:id, mode:'create', label, secret };
+      } else if (choice && choice === bound) {
+        const key = (slot.keys || []).find(k => k.keyId === bound);
+        if (!secret && !label) { status.textContent = 'No change.'; return; }
+        if (!confirm(secret ? 'Replace the value of this global key? Every product using it will use the new value.' : 'Rename this global key for every product using it?')) return;
+        body = { slot:id, mode:'rotate', keyId:bound, revision:key?.revision || 0, label:label || key?.label || '', secret };
+      } else if (choice) {
+        if (secret) { status.textContent = 'To save the typed key choose + New global key, or clear the field to use the selected key.'; return; }
+        body = { slot:id, mode:'bind', keyId:choice };
+      } else { status.textContent = 'Choose a global key or + New global key.'; return; }
+      body.expectedKeyId = bound;
+      // The custom endpoint key belongs to the URL shown; the server refuses it unless that URL is the saved one.
+      if (id === 'apiKey') {
+        body.expectedApiUrl = document.getElementById('apiUrl')?.value.trim() || '';
+        if (body.expectedApiUrl !== globalKeyState.savedApiUrl.trim()) { status.textContent = globalKeyMessages.endpoint_changed; return; }
+      }
+      button.disabled = true;
+      status.textContent = 'Saving key...';
+      let j;
+      try {
+        j = await (await fetch('/api/global-keys/save', { method:'POST', headers:{'Content-Type':'application/json','X-Reign-Keys':'1'}, body:JSON.stringify(body) })).json();
+      } catch (e) { j = { ok:false, outcome:'unknown' }; }
+      body.secret = '';
+      if (j.outcome === 'endpoint_changed') { button.disabled = false; status.textContent = globalKeyMessages.endpoint_changed; return; }
+      input.value = '';
+      const message = j.outcome === 'saved_not_bound' ? 'Saved to Global API Keys but not selected here. Reload and choose it from the list.'
+        : globalKeyMessages[j.outcome] || 'Global API Keys unavailable; nothing changed here.';
+      await refreshGlobalKeyRow(id, message);
     }
 
     function makeSecretMask(length) {

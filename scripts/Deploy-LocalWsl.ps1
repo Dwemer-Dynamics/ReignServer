@@ -11,6 +11,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ClientDeploymentStorage.ps1')
+# Connect-GlobalKeys.ps1 records the Global API Keys distro; an update of the same dedicated installation keeps it.
+function Get-ReignPreservedGlobalKeysDistro($PreviousRecord, [string]$Distro) {
+    if ($PreviousRecord -and $PreviousRecord.schema -ceq 'reign-installation-v1' -and $PreviousRecord.serverMode -ceq 'dwemerdistro-wsl' -and
+        $PreviousRecord.wslDistro -ceq $Distro -and $PreviousRecord.PSObject.Properties['globalKeysDistro'] -and
+        $PreviousRecord.globalKeysDistro -ceq 'DwemerAI4Skyrim3') { return 'DwemerAI4Skyrim3' }
+    return $null
+}
 if ($SkipClient -and $SkipServer) { throw 'Select at least one component.' }
 if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$') { throw 'Invalid WSL distribution name.' }
 $workspaceRoot = (Resolve-Path -LiteralPath $Workspace).Path
@@ -141,6 +148,8 @@ if (-not $SkipClient) {
         contentRoot=$module;dataRoot="$prefix\var\www\html\ReignServer\data"
         bannerlordRoot=$game;moduleRoot=$module;postgresBin='';postgresPort=5432;nativeGeneratorRoot=$helper
     }
+    $globalKeysDistro = Get-ReignPreservedGlobalKeysDistro $previousRecord $Distro
+    if ($globalKeysDistro) { $record.globalKeysDistro = $globalKeysDistro }
     [IO.File]::WriteAllText("$recordPath.next",($record | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath "$recordPath.next" -Destination $recordPath -Force
     $generator = ConvertTo-WslPath (Join-Path $helper 'Bannerlord.NativeCharacterImageGenerator.App.exe')

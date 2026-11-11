@@ -24,13 +24,15 @@ let settings = { llmProvider:'nanogpt', nanoGptApiKeyPresent:true, nanoGptApiKey
     structuredOutputs:false,compactMetadata:false,stablePromptMapping:false,parallelContextPreparation:false,reuseThreads:false,asyncThreadCleanup:false},
   codex: {runtimeVersion:'fixture-runtime',catalogFreshness:'fresh',discoveryErrors:[],models:[{id:'gpt-5.5',displayName:'GPT-5.5',supportedReasoningEfforts:['minimal','low','medium','high','xhigh']}],modelVerification:'unverified'} };
 Object.assign(settings, settings.llmModelProfiles.nanogpt);
+let globalKeys = null, globalSaves = [], globalClears = [], settingsGets = 0, globalSaveReply = null;
+const dialogs = [];
 let saved, codexCheckCalls = 0, lastCodexCheck, modelRefreshCalls = 0, failModelRefresh = false;
 const results = [], errors = [];
 const browser = await chromium.launch({channel:process.env.REIGN_BROWSER_CHANNEL || 'msedge',headless:true});
 try {
   const page = await browser.newPage();
   page.on('pageerror', e => errors.push(e.message));
-  page.on('dialog', dialog => dialog.accept());
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); dialog.accept(); });
   await page.addInitScript(() => { window.setInterval = () => 0; });
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
@@ -41,7 +43,17 @@ try {
         saved = route.request().postDataJSON();
         settings = {...settings,...saved};
       }
+      else settingsGets++;
       body = {...settings,ok:true};
+    }
+    if (url.pathname === '/api/global-keys' && globalKeys) body = globalKeys;
+    if (url.pathname === '/api/settings/clear-key') {
+      globalClears.push({body:route.request().postDataJSON(),header:route.request().headers()['x-reign-keys']});
+      body = {ok:true,outcome:'unbound'};
+    }
+    if (url.pathname === '/api/global-keys/save') {
+      globalSaves.push({body:route.request().postDataJSON(),header:route.request().headers()['x-reign-keys']});
+      body = globalSaveReply || {ok:true,outcome:'created',keyId:'99999999-2222-4333-8444-555555555555'};
     }
     if (url.pathname === '/api/codex/status') body = {...settings.codex,ok:true,models:settings.codex.models || []};
     if (url.pathname === '/api/codex/models/refresh') {
@@ -189,9 +201,17 @@ try {
   assert.equal(await page.inputValue('#dialogueModel'),'nano-draft');
   await page.selectOption('#llmProvider','openrouter');
   assert.equal(await page.inputValue('#dialogueModel'),'openai/router-draft');
+  // Provider keys are never sent by the main Save (they go only to Global API Keys); other settings save and the key stays typed.
+  const savedBeforeTypedKey = saved;
   await page.fill('#openRouterApiKey','fixture-replacement');
   await page.evaluate(() => saveSettings());
-  assert.equal(saved.openRouterApiKey,'fixture-replacement');
+  assert.notEqual(saved,savedBeforeTypedKey);
+  assert.equal(saved.openRouterApiKey,'','Main Save must not send a provider key');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-replacement','Main Save keeps the typed key');
+  assert.match(await page.textContent('#status'),/typed key was kept/);
+  await page.evaluate(() => { const el = document.getElementById('openRouterApiKey'); el.value = el.dataset.savedMask; });
+  await page.evaluate(() => saveSettings());
+  assert.notEqual(saved,savedBeforeTypedKey);
   assert.equal(saved.nanoGptApiKey,'');
   assert.equal(saved.codexOptions.fastMode,true,'Non-Codex save must preserve the Codex bank');
   assert.equal(saved.codexOptions.stablePromptMapping,true,'Non-Codex save must preserve independent Codex experiments');
@@ -257,6 +277,106 @@ try {
     await page.locator('#llm').screenshot({path:screenshot});
     results.push({width,lookupMode:'direct',reload:true,screenshot,passed:true});
   }
+  // Global API Keys rows: no automatic selection, main Save cannot drop a typed key, per-row save sends the guarded create.
+  const sharedKey = {keyId:'11111111-2222-4333-8444-555555555555',label:'Shared',preview:'...abcd',revision:2,configured:true};
+  globalKeys = {ok:true,available:true,outcome:'listed',slots:[{slot:'openRouterApiKey',name:'OpenRouter',provider:'openrouter',
+    origin:'https://openrouter.ai:443',legacy:true,binding:null,keys:[sharedKey]}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyGlobalRow'));
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openrouter');
+  assert.equal(await page.inputValue('#openRouterApiKeyGlobalRow select'),'','A single matching global key is never selected automatically');
+  const savedBefore = saved;
+  await page.fill('#openRouterApiKey','fixture-global');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.openRouterApiKey,'','Main Save must not send a typed provider key');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-global','Main Save must not drop a typed provider key');
+  assert.match(await page.textContent('#status'),/Save key/);
+  await page.selectOption('#openRouterApiKeyGlobalRow select','new');
+  await page.click('#openRouterApiKeyGlobalRow button');
+  for (let i = 0; i < 100 && !globalSaves.length; i++) await page.waitForTimeout(20);
+  assert.deepEqual(globalSaves[0],{body:{slot:'openRouterApiKey',mode:'create',label:'',secret:'fixture-global',expectedKeyId:''},header:'1'});
+  await page.waitForFunction(() => document.getElementById('openRouterApiKey').value === '');
+  // Saving one key refreshes only its row: other unsaved settings and key inputs survive, and settings are not reloaded.
+  globalKeys.slots.push({slot:'nanoGptApiKey',name:'NanoGPT text',provider:'nano_gpt',origin:'https://nano-gpt.com:443',legacy:false,binding:null,keys:[]});
+  globalKeys.slots[0] = {...globalKeys.slots[0],legacy:false,binding:{keyId:sharedKey.keyId,provider:'openrouter',origin:'https://openrouter.ai:443',originMatches:true}};
+  await page.evaluate(() => loadGlobalKeys());
+  await page.fill('#nanoGptApiKey','other-pending-key');
+  await page.evaluate(() => { document.getElementById('dialogueModel').value = 'pending-model'; });
+  const getsBefore = settingsGets;
+  await page.fill('#openRouterApiKeyGlobalRow input','Renamed');
+  await page.click('#openRouterApiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length < 2; i++) await page.waitForTimeout(20);
+  assert.equal(globalSaves[1].body.mode,'rotate');
+  assert.equal(globalSaves[1].body.secret,'');
+  assert.equal(globalSaves[1].body.expectedKeyId,sharedKey.keyId);
+  assert.match(dialogs.at(-1),/Rename/,'A label-only change is a rename, not a value replacement');
+  await page.waitForFunction(() => /Saved|updated|unknown|No change/.test(document.querySelector('#openRouterApiKeyGlobalRow [role=status]').textContent));
+  assert.equal(settingsGets,getsBefore,'A key save must not reload all settings');
+  assert.equal(await page.inputValue('#nanoGptApiKey'),'other-pending-key');
+  assert.equal(await page.inputValue('#dialogueModel'),'pending-model');
+  // Clearing a bound slot unbinds it through the guarded route; the global key itself is untouched.
+  await page.evaluate(() => clearKey('openRouterApiKey'));
+  assert.deepEqual(globalClears.at(-1),{body:{key:'openRouterApiKey'},header:'1'});
+  assert.match(dialogs.at(-1),/stays in Global API Keys/);
+  assert.equal(await page.inputValue('#nanoGptApiKey'),'other-pending-key');
+  globalKeys.slots[0] = {...globalKeys.slots[0],legacy:false,binding:{keyId:sharedKey.keyId,provider:'openrouter',origin:'https://openrouter.ai:443',originMatches:true}};
+  globalKeys.available = false;
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyGlobalRow'));
+  assert.equal(await page.locator('#openRouterApiKeyGlobalRow button').isDisabled(),true,'Stopped DwemerDistro disables key saves');
+  assert.match(await page.textContent('#openRouterApiKeyGlobalRow [role=status]'),/unavailable/);
+  // Not set up: rows are still shown (disabled, with the one-time setup step) and a typed key is kept, never saved locally.
+  globalKeys = {ok:true,available:false,enrolled:false,outcome:'not_enrolled',slots:[{...globalKeys.slots[0],binding:null,legacy:false}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyGlobalRow'));
+  assert.equal(await page.locator('#openRouterApiKeyGlobalRow select').isDisabled(),true);
+  assert.match(await page.textContent('#openRouterApiKeyGlobalRow [role=status]'),/Connect-GlobalKeys/);
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openrouter');
+  const savedBeforeUnenrolled = saved;
+  await page.fill('#openRouterApiKey','fixture-unenrolled');
+  await page.evaluate(() => saveSettings());
+  assert.notEqual(saved,savedBeforeUnenrolled);
+  assert.equal(saved.openRouterApiKey,'');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-unenrolled');
+  assert.match(await page.textContent('#status'),/Connect-GlobalKeys/);
+  // Custom endpoint: a key typed for an unsaved URL is never sent; main Save stores the URL and keeps the key, then Save key
+  // sends the shown URL for the server's check, and a server-side endpoint mismatch keeps the typed key.
+  globalKeys = {ok:true,available:true,outcome:'listed',slots:[{slot:'apiKey',name:'Custom endpoint',provider:'custom_openai',
+    origin:'https://fixture.invalid:443',legacy:false,binding:null,keys:[]}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('apiKeyGlobalRow'));
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openai_compatible');
+  const savesBeforeEndpoint = globalSaves.length, oldApiUrl = await page.inputValue('#apiUrl');
+  await page.fill('#apiUrl','https://new-endpoint.invalid/v1/chat/completions');
+  await page.fill('#apiKey','fixture-custom-new');
+  await page.selectOption('#apiKeyGlobalRow select','new');
+  await page.click('#apiKeyGlobalRow button');
+  assert.equal(globalSaves.length,savesBeforeEndpoint,'A key typed beside an unsaved API URL is never sent');
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new');
+  assert.match(await page.textContent('#apiKeyGlobalRow [role=status]'),/Save Changes/);
+  assert.notEqual(oldApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.apiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  assert.equal(saved.apiKey,'');
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new','Saving the URL keeps the typed endpoint key');
+  globalSaveReply = {ok:false,outcome:'endpoint_changed'};
+  await page.selectOption('#apiKeyGlobalRow select','new');
+  await page.click('#apiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length === savesBeforeEndpoint; i++) await page.waitForTimeout(20);
+  assert.deepEqual(globalSaves.at(-1).body,{slot:'apiKey',mode:'create',label:'',secret:'fixture-custom-new',expectedKeyId:'',
+    expectedApiUrl:'https://new-endpoint.invalid/v1/chat/completions'});
+  await page.waitForFunction(() => /Save Changes/.test(document.querySelector('#apiKeyGlobalRow [role=status]').textContent));
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new','A server endpoint refusal keeps the typed key');
+  globalSaveReply = null;
+  await page.click('#apiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length < savesBeforeEndpoint + 2; i++) await page.waitForTimeout(20);
+  await page.waitForFunction(() => document.getElementById('apiKey').value === '');
+  assert.equal(globalSaves.at(-1).body.expectedApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  results.push({globalKeys:true,noAutoSelect:true,endpointGuard:true,mainSaveGuard:true,rowOnlyRefresh:true,unbind:true,rename:true,unavailable:true,notEnrolled:true,passed:true});
+  globalKeys = null;
   assert.deepEqual(errors,[]);
   const report=path.join(output,'ui-report.json');
   await fs.writeFile(report,JSON.stringify({ok:true,isolated:true,htmlPath,results,errors,saveReload:true,maskedKeysPreserved:true},null,2));

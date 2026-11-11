@@ -2218,7 +2218,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> settings = LoadSettings();
             if (!SupportsPromptCacheProbe(settings)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The GLM cache diagnostic requires NanoGPT. Select and save NanoGPT before running it." };
-            if (string.IsNullOrWhiteSpace(LlmApiKey(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
+            if (!ProviderKeyConfigured(settings, LlmApiKeySlot(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
             string staticPrefix = BuildDialogueGlobalPrefix(false, false, CompactActionCatalog(ActionCatalog()));
             string characterPrefix = "CACHE PROBE CHARACTER\nThis synthetic diagnostic character contains no campaign or player data.";
             Dictionary<string, object> first = RunPromptCacheProbeCall(staticPrefix, characterPrefix, "Probe suffix one. Return {\"ok\":true}.");

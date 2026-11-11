@@ -241,8 +241,8 @@ namespace ReignBetaServer
             Func<List<Dictionary<string, object>>> catalog = null, Func<string, string, string, Dictionary<string, object>, string> send = null)
         {
             ValidateCodexPng(source);
-            string key = ReadString(settings, "nanoGptApiKey", "");
-            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Save your NanoGPT text API key in API Settings before using NanoGPT portrait vision.");
+            string key = ProviderSecret(settings, "nanoGptApiKey", NanoPortraitVisionChatUrl);
+            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException(ProviderKeyUnavailable(settings, "nanoGptApiKey", key) ? GlobalKeyUnavailableError : "Save your NanoGPT text API key in API Settings before using NanoGPT portrait vision.");
             string model = ReadString(settings, "portraitVisionNanoGptModel", DefaultNanoPortraitVisionModel);
             var selected = (catalog ?? GetNanoPortraitVisionModels)().FirstOrDefault(x => ReadString(x, "id", "") == model);
             if (selected == null || !ReadBool(ReadDictionary(selected, "capabilities"), "vision", false))
