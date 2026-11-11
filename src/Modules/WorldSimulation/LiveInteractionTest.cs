@@ -5269,7 +5269,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && saveCoordinatorSource.Contains("recorded without opening a modal during an automated checkpoint")
                 && hostSource.Contains("SetAutomationSaveNotificationSuppressed(true)")
                 && hostSource.Contains("SetAutomationSaveNotificationSuppressed(false)")
-                && liveClientSource.Contains("[\"nativeSave\"] = BuildNativeSaveDiagnostics()")
+                && liveClientSource.Contains("[\"nativeSave\"] = HeartbeatSection(sections, \"nativeSave\", () => BuildNativeSaveDiagnostics())")
                 && liveClientSource.Contains("[\"mainThreadDispatch\"]")
                 && mainThreadSource.Contains("public static int PendingCount")
                 && mainThreadSource.Contains("public static DateTime LastDrainUtc"),
@@ -5315,7 +5315,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && passiveWorldControlSource.Contains("ReadLong(relationshipClient, \"clientOutboxDays\", -1) == 0")
                 && passiveWorldControlSource.Contains("!ReadBoolean(relationshipClient, \"uploadInFlight\")")
                 && passiveWorldControlSource.Contains("ReadLong(worldHistory, \"pendingCount\", -1) == 0")
-                && liveClientSource.Contains("[\"relationshipClient\"] = BuildRelationshipOutboxDiagnostics()")
+                && liveClientSource.Contains("[\"relationshipClient\"] = HeartbeatSection(sections, \"relationships\", () => BuildRelationshipOutboxDiagnostics())")
                 && passiveWorldControlSource.Contains("String(result, \"saveName\")")
                 && passiveWorldControlSource.Contains("ReadDoubleValue(result, \"worldDay\", -1d)")
                 && passiveWorldControlSource.Contains("ReadObject(result, \"nativeSave\")")
