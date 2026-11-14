@@ -15,6 +15,13 @@ namespace ReignBetaServer
         {
             foreach (var pair in incoming.Where(p => p.Key.StartsWith("ruler", StringComparison.Ordinal)))
             {
+                // Older saved settings/clients may retain this retired Boolean.
+                // Accept it without advertising or applying an obsolete option.
+                if (pair.Key == RulerOptions.GovernorCulture)
+                {
+                    if (!(pair.Value is bool)) return "The retired governor-culture option must be on or off.";
+                    continue;
+                }
                 if (!RulerOptions.Switches.ContainsKey(pair.Key)) return "Unknown ruler option: " + pair.Key;
                 if (!(pair.Value is bool)) return RulerOptions.Switches[pair.Key] + " must be on or off.";
             }
@@ -25,7 +32,7 @@ namespace ReignBetaServer
             var html = new StringBuilder("<div class='xpOptions' id='rulerOptions'><h3>Rulers, capitals and captivity</h3>");
             foreach (var pair in RulerOptions.Switches)
                 html.Append("<label class='xpRow'><input type='checkbox' checked id='").Append(pair.Key).Append("' onchange='renderRulerOptions()'> ").Append(WebUtility.HtmlEncode(pair.Value)).Append("</label>");
-            html.Append("<p class='xpHelp'>All switches default to on. Changes apply across campaigns and refresh in the game within five seconds. The master switch controls every feature above. Turning off judgments cancels pending sentences and their uncommitted consequences; completed executions, payments, allegiance changes and memories remain. Settlement effects stop while disabled and keep their original expiry. Turning residence off releases AI travel restrictions. Turning off the governor option restores the native foreign-governor penalty; foreign-owner culture is unchanged. Turning off the life-and-death requirement allows the normal game option again.</p>");
+            html.Append("<p class='xpHelp'>All switches default to on. Changes apply across campaigns and refresh in the game within five seconds. The master switch controls every feature above. Turning off judgments cancels pending sentences and their uncommitted consequences; completed executions, payments, allegiance changes and memories remain. Settlement effects stop while disabled and keep their original expiry. Turning residence off releases AI travel restrictions. Foreign-owner culture pressure remains active. Turning off the life-and-death requirement allows the normal game option again.</p>");
             return html.Append("<div id='rulerOptionsPreview' class='xpHelp' aria-live='polite'></div><button type='button' onclick='resetRulerOptions()'>Reset to defaults</button> <button type='button' id='saveRulerOptions' disabled onclick='saveRulerOptions()'>Save ruler options</button><div id='rulerOptionsStatus' role='status' aria-live='polite'></div></div>").ToString();
         }
         private static string RulerOptionsScript() => "const rulerSwitchIds=" + Json.Serialize(RulerOptions.Switches.Keys.ToArray()) + @";

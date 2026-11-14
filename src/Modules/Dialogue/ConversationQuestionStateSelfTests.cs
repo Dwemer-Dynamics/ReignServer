@@ -18,6 +18,19 @@ namespace ReignBetaServer
             const string question = "How will we build an independent nation?";
             const string answer = "Tournaments fund neutral caravans, intelligence and elite units, then we buy land from indebted lords.";
             const string ack = "I understand the plan you explained, though I am not convinced it will work.";
+            var floorAnswer = TestDict("eventId", "group_input_exact", "sourceAlias", "current_player", "role", "player",
+                "sessionId", "shared", "beatId", "beat_12", "groupInputStage", true, "sequence", long.MaxValue, "worldDay", 6d);
+            var laterQuestion = TestDict("eventId", "ira_response", "role", "npc", "sessionId", "shared", "beatId", "beat_12",
+                "sequence", 12L, "worldDay", 5d);
+            Check("floor_input_cannot_answer_same_beat_other_event", QuestionSourceOrder(floorAnswer, laterQuestion) == "before");
+            var unknownAnswer = CloneDictionary(floorAnswer); unknownAnswer.Remove("groupInputStage"); unknownAnswer.Remove("beatId");
+            Check("unstored_alias_is_unknown_not_infinitely_later", QuestionSourceOrder(unknownAnswer, laterQuestion) == "unknown");
+            var laterAnswer = CloneDictionary(floorAnswer); laterAnswer["beatId"] = "beat_13"; laterAnswer["sequence"] = 13L;
+            Check("actual_later_beat_answer_is_valid", QuestionSourceOrder(laterAnswer, laterQuestion) == "after");
+            var otherSession = CloneDictionary(floorAnswer); otherSession["sessionId"] = "other"; otherSession["sequence"] = 13L;
+            Check("same_beat_string_in_other_session_is_not_same_stage", QuestionSourceOrder(otherSession, laterQuestion) == "after");
+            var sameEventQuestion = TestDict("eventId", "same", "sourceAlias", "current_npc");
+            Check("same_event_player_still_precedes_npc", QuestionSourceOrder(TestDict("eventId", "same", "sourceAlias", "current_player"), sameEventQuestion) == "before");
             try
             {
                 ConversationStartApi(TestDict("campaignId", campaign, "timelineId", "question_timeline", "sessionId", "question_session",
@@ -330,6 +343,34 @@ namespace ReignBetaServer
                 update["evidenceQuote"] = ack; update["expectedRevision"] = 1;
                 update["questionState"] = TestDict("addresseeIds", new[] { "player" }, "answerState", "answered",
                     "answers", new[] { TestDict("turnId", "a_answer", "speakerId", "player", "quote", answer) }, "evaluation", "unconvincing", "followUpTo", "");
+                var omittedAddressees = CloneDictionary(update);
+                ReadDictionary(omittedAddressees, "questionState").Remove("addresseeIds");
+                ReadDictionary(omittedAddressees, "questionState")["question"] = TestDict("turnId", "", "speakerId", "", "quote", "");
+                Check("empty_placeholder_and_omitted_addressees_bind_original", PrepareQuestionContinuityWrite(connection, omittedAddressees, payload, "npc", "player", "ack_event", ack) == ""
+                    && ReadStringList(ReadDictionary(omittedAddressees, "questionState"), "addresseeIds").SequenceEqual(new[] { "player" }));
+                var emptyAddressees = CloneDictionary(update);
+                ReadDictionary(emptyAddressees, "questionState")["addresseeIds"] = new string[0];
+                Check("explicit_empty_addressees_still_rejected", PrepareQuestionContinuityWrite(connection, emptyAddressees, payload, "npc", "player", "ack_event", ack) == "question_addressee_unverified");
+                var eventAlias = CloneDictionary(update);
+                ReadDictionaryList(ReadDictionary(eventAlias, "questionState"), "answers")[0]["turnId"] = "a_answer_event";
+                Check("exact_visible_exchange_alias_binds_canonical_turn", PrepareQuestionContinuityWrite(connection, eventAlias, payload, "npc", "player", "ack_event", ack) == ""
+                    && ReadString(ReadDictionaryList(ReadDictionary(eventAlias, "questionState"), "answers")[0], "turnId", "") == "a_answer");
+                Turn("ambiguous_alias", "player", answer);
+                ExecuteSql(connection, "UPDATE conversation_turns SET event_id='a_answer_event' WHERE turn_id='ambiguous_alias';");
+                var ambiguousAlias = CloneDictionary(update);
+                ReadDictionaryList(ReadDictionary(ambiguousAlias, "questionState"), "answers")[0]["turnId"] = "a_answer_event";
+                Check("ambiguous_exchange_alias_still_rejected", PrepareQuestionContinuityWrite(connection, ambiguousAlias, payload, "npc", "player", "ack_event", ack) == "question_answer_source_unverified");
+                ExecuteSql(connection, "UPDATE conversation_turns SET status='inactive' WHERE turn_id='ambiguous_alias';");
+                var redundantAnswer = CloneDictionary(update);
+                redundantAnswer["relationKind"] = "answer"; redundantAnswer["relatedTurnId"] = "a_answer"; redundantAnswer["relatedQuote"] = answer;
+                Check("validated_answer_relation_binds_original_question", PrepareQuestionContinuityWrite(connection, redundantAnswer, payload, "npc", "player", "ack_event", ack) == ""
+                    && ConversationContinuityLinkError(connection, redundantAnswer, "npc", "review_timeline", 5d) == ""
+                    && !redundantAnswer.ContainsKey("relatedTurnId")
+                    && ReadString(ReadDictionary(redundantAnswer, "questionAnswerLinkNormalization"), "questionTurnId", "") == "z_original");
+                var unrelatedLink = CloneDictionary(update);
+                unrelatedLink["relationKind"] = "answer"; unrelatedLink["relatedTurnId"] = "later_no_limit"; unrelatedLink["relatedQuote"] = "There is nothing I would exclude.";
+                Check("unvalidated_answer_relation_keeps_generic_guard", PrepareQuestionContinuityWrite(connection, unrelatedLink, payload, "npc", "player", "ack_event", ack) == ""
+                    && ConversationContinuityLinkError(connection, unrelatedLink, "npc", "review_timeline", 5d) == "related_source_not_question");
                 var substitution = CloneDictionary(update);
                 ReadDictionary(substitution, "questionState")["question"] = TestDict("turnId", "reasked_question", "speakerId", "npc", "quote", "What would you actually do for me?");
                 Check("real_reask_cannot_replace_original_identity", PrepareQuestionContinuityWrite(connection, substitution, payload, "npc", "player", "ack_event", ack) == "question_identity_changed");

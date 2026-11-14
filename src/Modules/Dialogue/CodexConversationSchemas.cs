@@ -40,7 +40,7 @@ namespace ReignBetaServer
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
             "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites",
             "courtKnowledgeWrites", "pregnancyDisclosures", "sceneStateUpdates", "viewWardrobeEvidence", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
-            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "raisedGossip",
+            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "publicWitnessSignals", "raisedGossip",
             "npcStoryAssessments", "npcLeaveAssessment", "announcementReactions", "announcementReview", "communicationPlans"
         };
 
@@ -285,6 +285,13 @@ namespace ReignBetaServer
                 ["drinkConsumptions"] = Array(DrinkConsumption()),
                 ["drinkSceneUpdates"] = Array(DrinkSceneUpdate()),
                 ["gossipSignals"] = Array(GossipSignal()),
+                ["publicWitnessSignals"] = Array(Object(new Dictionary<string, object> {
+                    ["topic"] = String(new[] { "shared_activity", "relationship", "politics", "gift", "conversation" }),
+                    ["evidenceQuote"] = String(), ["privacy"] = String(new[] { "public", "personal", "intimate", "secret" }),
+                    ["existencePrivacy"] = String(new[] { "public", "personal", "intimate", "secret" }), ["promisedSecrecy"] = Boolean(),
+                    ["salience"] = new Dictionary<string, object> {
+                        ["type"] = "integer", ["enum"] = new[] { 0, 25, 50, 75, 100 } }, ["confidence"] = Number(0, 1)
+                }, null, false)),
                 ["raisedGossip"] = Array(Object(new Dictionary<string, object> {
                     ["receiptId"] = String(), ["evidenceQuote"] = String() }, null, false)),
                 ["continuityWrites"] = Array(ContinuityWrite()),
@@ -424,7 +431,7 @@ namespace ReignBetaServer
             ["proposalId"] = String(), ["revision"] = Integer(), ["termsHash"] = String(), ["reason"] = String(),
             ["clauses"] = Array(Object(new Dictionary<string, object>
             {
-                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible).Select(d => d.Id)),
+                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible && (d.Id != Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id || Program.TavernActionScopeEnabled)).Select(d => d.Id)),
                 ["actorId"] = String(), ["recipientId"] = String(),
                 ["arguments"] = Array(Object(new Dictionary<string, object> { ["key"] = String(), ["value"] = String() }, null, false)),
                 ["dueDay"] = Number(0, null), ["durationDays"] = Number(0, null), ["installments"] = Integer(), ["intervalDays"] = Number(0, null),

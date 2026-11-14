@@ -285,7 +285,7 @@ VALUES($key,$a,$b,$ab,$ba,1,1,1) ON CONFLICT(pair_key) DO UPDATE SET affinity_a_
             check("public_source_does_not_gain_an_automatic_confidence_owner", GossipResolveConfidenceOwners(publicSource,
                 "confidant_id", "current_heir_id", Array.Empty<string>(), entrustedPlan).Count == 0, null);
             RunPersonalGossipCompositionReviewTests(check);
-            try { RunPersonalGossipPersistenceTests(check, spiteful); }
+            try { RunPublicWitnessGossipSelfTests(check); RunPersonalGossipPersistenceTests(check, spiteful); }
             catch (Exception ex) { check("persistence_fixture", false, ex.ToString()); }
             return results;
         }
@@ -674,11 +674,39 @@ FROM personal_gossip_messages WHERE message_id=$original;", GossipFields("copy",
                         && ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")).ToList();
                     check("native_identity_survives_final_message_structure_as_system", identityMessages.Count == 1
                         && ReadString(identityMessages[0], "content", "").Contains("\"isFemale\":false")
+                        && identityEnvelope.Messages.Count(m => ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")) == 1
                         && identityEnvelope.Messages.Any(m => ReadString(m, "role", "") == "user" && ReadString(m, "content", "").Contains("Earlier mistaken recollection"))
                         && ReadBool(ReadDictionary(identityEnvelope.Diagnostics, "continuityPreflight"), "requiredSourceCoverageComplete", false)
                         && ReadInt(ReadDictionary(identityEnvelope.Diagnostics, "personalGossipIdentity"), "additionalProviderCalls", -1) == 0, null);
                     check("native_identity_message_keeps_player_turn_and_accounting", ReadString(identityEnvelope.Messages.Last(), "content", "").EndsWith("How credible is that story?", StringComparison.Ordinal)
                         && identityEnvelope.TotalChars == identityEnvelope.Messages.Sum(m => ReadString(m, "content", "").Length), null);
+                    foreach (bool eventMode in new[] { false, true })
+                    {
+                        string whole = "Protected ongoing concern.\n" + own + "\nProtected native scene.";
+                        var savedContinuity = ReadDictionary(payload, "continuityEvidence");
+                        try
+                        {
+                            payload["continuityEvidence"] = GossipFields("sourceIds", new string[0], "requiredContent", new[] {
+                                GossipFields("id", "protected_continuity_content", "text", NormalizePromptSegment(whole), "hash", PromptHash(whole)) });
+                            var protectedEnvelope = IdentityEnvelope(payload, "target", whole, eventMode);
+                            check("protected_identity_reference_is_preserved_" + (eventMode ? "event_tavern" : "individual"),
+                                ReadBool(ReadDictionary(protectedEnvelope.Diagnostics, "continuityPreflight"), "requiredSourceCoverageComplete", false)
+                                && protectedEnvelope.Messages.Count(m => ReadString(m, "role", "") == "system"
+                                    && ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")) == 1
+                                && protectedEnvelope.Messages.Count(m => ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")) == 2,
+                                null);
+                        }
+                        finally
+                        {
+                            if (savedContinuity == null) payload.Remove("continuityEvidence");
+                            else payload["continuityEvidence"] = savedContinuity;
+                        }
+                    }
+
+                    var distinctIdentityEnvelope = IdentityEnvelope(payload, "target", own.Replace("AUTHORITATIVE KNOWN NPC IDENTITIES",
+                        "AUTHORITATIVE KNOWN NPC IDENTITIES — distinct reference", StringComparison.Ordinal), finalize: false);
+                    check("native_identity_reference_dedup_requires_exact_body", distinctIdentityEnvelope.Messages.Any(m => ReadString(m, "role", "") == "user"
+                        && ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES — distinct reference")), null);
                     var outsiderEnvelope = IdentityEnvelope(payload, "outsider", "No private gossip supplied.", finalize: false);
                     check("native_identity_system_context_is_observer_scoped", !outsiderEnvelope.Messages.Any(m => ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")), null);
                     var forgedIdentity = presence(20 + 2d / 24);
@@ -699,7 +727,9 @@ FROM personal_gossip_messages WHERE message_id=$original;", GossipFields("copy",
                     string eventIdentityContext = BuildPersonalGossipPrompt(campaign, "target", eventIdentityPayload, new List<string>());
                     var eventIdentityEnvelope = IdentityEnvelope(eventIdentityPayload, "target", eventIdentityContext, true);
                     check("native_gossip_identity_uses_same_event_structure_path", eventIdentityEnvelope.Messages.Any(m => ReadString(m, "role", "") == "system"
-                        && ReadString(m, "content", "").Contains("\"isFemale\":false")) && ConversationStructureMatches(eventIdentityEnvelope.Diagnostics, eventIdentityEnvelope.Messages), null);
+                        && ReadString(m, "content", "").Contains("\"isFemale\":false"))
+                        && eventIdentityEnvelope.Messages.Count(m => ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")) == 1
+                        && ConversationStructureMatches(eventIdentityEnvelope.Diagnostics, eventIdentityEnvelope.Messages), null);
                     check("received_exchange_current_time_and_scene_bounds", own.Contains("current dialogue day 20.08333")
                         && own.Contains("less than one campaign hour ago") && own.Contains("about 1 campaign hour ago")
                         && own.Contains("not the underlying encounter") && own.Contains("Do not invent its place, purchases, or other business"), null);

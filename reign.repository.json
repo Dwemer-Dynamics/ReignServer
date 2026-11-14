@@ -78,6 +78,7 @@
     ".md",
     ".props",
     ".ps1",
+    ".psm1",
     ".py",
     ".sln",
     ".slnx",
@@ -130,5 +131,8 @@
     "github-token:ReignMcp/tests/Reign.Mcp.Tests/Validation/ReignRepositoryHygieneAuditTests.cs"
   ],
   "maxOrdinaryFileBytes": 26214400,
-  "largeFileAllowlist": []
+  "largeFileAllowlist": [
+    "profiles/profile_catalog.json",
+    "profiles/profile_catalog_v4.json"
+  ]
 }

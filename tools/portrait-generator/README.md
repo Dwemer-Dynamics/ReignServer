@@ -29,7 +29,7 @@ The Windows interface:
 - keeps the rotatable standalone 3D renderer as a secondary preview;
 - opens at a head-to-waist portrait zoom, allows full-body through head-close-up zoom, and saves the visible crop as PNG.
 - builds a complete source set in one persistent engine session, with per-character `source.png` folders, progress/cancel controls, and a `manifest.json` that records every success or failure.
-- builds or resumes a separate AI-ready 1,260-character `_shared` source package without contacting the Reign server or changing Reign's installed portrait cache.
+- builds or resumes a separate AI-ready 1,338-character `_shared` source package without contacting the Reign server or changing Reign's installed portrait cache.
 
 The first startup indexes the relevant native asset packages and may take a few seconds.
 
@@ -81,7 +81,7 @@ The **Generate new native source** view starts the installed render host, loads 
 
 ### AI-ready shared source cache
 
-**Build Full AI Source Cache** uses the canonical installed XML and Reign's shipped profile library to build exactly 397 Native lords, 78 Native story/special characters, 65 War Sails heroes, and 720 Reign court characters. **Resume Source Cache Build** revalidates source, metadata, catalog, and render hashes and renders only missing or stale entries. **Open Cache Folder** opens the most recent package.
+**Build Full AI Source Cache** uses the canonical installed XML and Reign's shipped profile library to build exactly 397 Native lords, 78 Native story/special characters, 65 War Sails heroes, and 798 Reign court characters (including 78 Nord court nobles). **Resume Source Cache Build** revalidates source, metadata, catalog, and render hashes and renders only missing or stale entries. **Open Cache Folder** opens the most recent package.
 
 The standalone package has this contract:
 
@@ -100,9 +100,9 @@ The default WAN portrait preset renders at 1536×2048 through one persistent Tal
 
 Before publication, the worker safely preloads scene resources and requires two independently clean captures. An 8/16-pixel periodic-edge validator rejects Bannerlord's incomplete tiled material placeholders and retries up to 20 times. The persistent tableau scene also removes the preceding renderer-owned light rig before installing the next one, preventing exposure from increasing across a long batch. These checks are part of the versioned render-contract hash, so a cache built by an older contract is never silently accepted by Resume.
 
-`portrait_input.json` records canonical identity, age/gender/culture, occupation, clan/station and provenance, body and face data, exact visible equipment, profile and physical-confidence data, render framing, and hashes needed by the later AI pass. The 1,117 characters covered by Reign's profile library use those shipped profiles; 65 War Sails and 78 special Native records explicitly use the neutral physical-confidence score of 50.
+`portrait_input.json` records canonical identity, age/gender/culture, occupation, clan/station and provenance, body and face data, exact visible equipment, profile and physical-confidence data, render framing, and hashes needed by the later AI pass. The 1,195 characters covered by Reign's profile library use those shipped profiles; 65 War Sails and 78 special Native records explicitly use the neutral physical-confidence score of 50.
 
-Reign and the offline worker share `reign_court_shared_v1`: parents are generated first, children inherit from their generated parents, and both paths use the same stable seeds, face constraints, culture-valid non-bald hair selection, and 720-face uniqueness check.
+Reign and the offline worker share `reign_court_shared_v1`: parents are generated first, children inherit from their generated parents, and both paths use the same stable seeds, face constraints, culture-valid non-bald hair selection, and 798-face uniqueness check.
 
 This workflow makes no AI or network request, creates no prompt or derived portrait files, and never writes into the installed `PortraitCache\_shared` directory. Cache installation and AI generation remain separate future operations.
 

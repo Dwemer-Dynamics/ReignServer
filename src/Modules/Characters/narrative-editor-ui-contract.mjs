@@ -91,8 +91,41 @@ try {
   await page.evaluate(() => { characterEditorState.data.documents.narrative = {}; renderCharacterEditorPanel(); });
   if (!(await page.locator('.narrativeEditor').innerText()).includes('earlier background')) throw new Error('Legacy empty-state missing.');
   await page.screenshot({ path: path.join(outputDirectory, 'legacy-empty.png') });
+  const traitResults = [];
+  for (const width of [1672, 1024, 600]) {
+    await page.setViewportSize({ width, height: 941 });
+    for (const state of ['canonical', 'first-contact-pending', 'missing']) {
+      const observed = await page.evaluate(state => {
+        const keys = Array.from({ length: 43 }, (_, i) => `trait${i}`);
+        const complete = state !== 'missing';
+        characterEditorState.data = {
+          documents: { traits: complete ? { foundationTraits: Object.fromEntries(keys.map(k => [k, 0])),
+            traitPercentages: Object.fromEntries(keys.map(k => [k, 50])), personalityPortrait: {}, basePersonalitySummary: 'Complete deterministic personality foundation.' } : {},
+            constructed: { status: state === 'canonical' ? 'canonical_ready' : 'first_contact_pending' } },
+          traitKeys: keys, profileLibrary: { status: state === 'canonical' ? 'canonical_ready' : 'first_contact_pending' },
+          mbtiProfile: complete ? { type: 'ISTJ', title: 'A complete personality', description: 'An existing trait foundation.',
+            source: state === 'canonical' ? 'pregenerated_noble_catalog' : 'derived_from_personality_traits', assignedDay: -1 } : {}
+        };
+        document.getElementById('characterEditorPanel').innerHTML = renderTraits();
+        return { cards: document.querySelectorAll('.traitEditor').length,
+          percentages: document.querySelectorAll('.traitPercent input').length,
+          overflow: document.documentElement.scrollWidth > innerWidth + 1,
+          text: document.getElementById('characterEditorPanel').innerText };
+      }, state);
+      const expected = state === 'missing' ? 0 : 43;
+      if (observed.cards !== expected || observed.percentages !== expected || observed.overflow
+        || (state !== 'missing' && observed.text.includes('Personality not generated'))
+        || (state === 'canonical' && !observed.text.includes('Pregenerated character profile'))
+        || (state === 'first-contact-pending' && !observed.text.includes('Derived from personality traits'))
+        || (state === 'missing' && !observed.text.includes('Personality not generated')))
+        throw new Error('Trait readiness contract failed: ' + JSON.stringify({ width, state, observed }));
+      await page.evaluate(() => scrollTo(0, 0));
+      await page.screenshot({ path: path.join(outputDirectory, `${width}-traits-${state}.png`) });
+      traitResults.push({ width, state, cards: observed.cards, percentages: observed.percentages, passed: true });
+    }
+  }
   const report = { schema: 'reign-narrative-editor-ui-v1', ok: true, isolated: true, results,
-    editing: edit, storyInternalsHidden: true, legacyEmpty: true, source: fixtureDirectory,
+    traitResults, editing: edit, storyInternalsHidden: true, legacyEmpty: true, source: fixtureDirectory,
     fidelityScope: 'Existing Control Center web editor; exact palette tokens and responsive behavior. No new native shell, portrait aperture or approved-reference raster is modified.' };
   await fs.writeFile(path.join(outputDirectory, 'ui-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ ok: true, report: path.join(outputDirectory, 'ui-report.json'), matrixCases: results.length }));

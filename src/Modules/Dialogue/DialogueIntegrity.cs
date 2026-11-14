@@ -66,6 +66,19 @@ namespace ReignBetaServer
             string campaignId, string correlationId, string auditMode, string heroId, string eventId,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null, bool persist = true)
         {
+            var checkedReply = RetryDialogueIntegrityViolationCore(llm, request, payload, priorLines, campaignId, correlationId,
+                auditMode, heroId, eventId, responder, persist);
+            // This gate also runs when no exact contradiction was found, and on
+            // the final text returned by every existing correction path.
+            return ApplyAnswerSupportGuard(checkedReply, request, payload, priorLines, heroId, responder);
+        }
+
+        private static Dictionary<string, object> RetryDialogueIntegrityViolationCore(
+            Dictionary<string, object> llm, Dictionary<string, object> request,
+            Dictionary<string, object> payload, List<Dictionary<string, object>> priorLines,
+            string campaignId, string correlationId, string auditMode, string heroId, string eventId,
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder, bool persist)
+        {
             if (!ReadBool(llm, "ok", false)) return llm;
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             if (parsed == null) return llm;
@@ -83,10 +96,10 @@ namespace ReignBetaServer
                 claimReceipt["correction"] = "exact_source_speaker_only";
                 claimReceipt["changedFields"] = new[] { new[] { "reply", "body", "response", "text" }.FirstOrDefault(parsed.ContainsKey) ?? "reply" };
                 claimReceipt["remainingExactSourceViolations"] = 0;
-                claimReceipt["acceptedSemanticCoverage"] = "not_rechecked_after_prose_correction";
                 MarkRepairedVisibleResponse(localCorrection, true, "visible_prose_correction");
-                claimReceipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(localCorrection, "reply", "body", "response", "text")).ToLowerInvariant();
+                claimReceipt = RecheckCorrectedDialogueClaims(localCorrection, payload, priorLines, heroId, claimReceipt);
                 localCorrection["dialogueClaimValidation"] = claimReceipt;
+                llm["dialogueClaimValidation"] = claimReceipt;
                 llm["content"] = Json.Serialize(localCorrection);
                 if (persist) WriteAudit(campaignId, correlationId, "server", auditMode, "llm.dialogue_claim_validation",
                     heroId, "", eventId, "completed", 0, "Recalled speaker corrected from the exclusive exact original clause.", claimReceipt);
@@ -121,6 +134,8 @@ namespace ReignBetaServer
                             + Json.Serialize(violations) + "\n\nCHARACTER CONTEXT\n"
                             + Json.Serialize(DialogueValidationRepairCharacterContext(request))
                             + BuildDialogueClaimRepairGuidance(claimReceipt, violations)
+                            + "\n\nCURRENT INPUT STAGE (engine observed; null means unavailable)\n"
+                            + Json.Serialize(ObservedGroupTurnStageFromRequest(request))
                             + "\n\nORIGINAL JSON TO REPAIR\n" + originalJson
                     }
                 }
@@ -139,12 +154,9 @@ namespace ReignBetaServer
             if (cleared)
             {
                 claimReceipt["remainingExactSourceViolations"] = 0;
-                claimReceipt["acceptedSemanticCoverage"] = "not_rechecked_after_prose_correction";
-                claimReceipt["withheldRevisedEffects"] = QuarantineDialogueClaimEffects(repairedParsed, payload, priorLines, heroId);
-                claimReceipt["withheldRevisedIncompleteFacts"] = QuarantineUncoveredDialogueFacts(repairedParsed, payload, priorLines, heroId);
                 CarryConversationRepairState(parsed, repairedParsed);
                 MarkRepairedVisibleResponse(repairedParsed, cleared);
-                claimReceipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(repairedParsed, "reply", "body", "response", "text")).ToLowerInvariant();
+                claimReceipt = RecheckCorrectedDialogueClaims(repairedParsed, payload, priorLines, heroId, claimReceipt);
                 repairedParsed["dialogueClaimValidation"] = claimReceipt;
                 repaired["dialogueClaimValidation"] = claimReceipt;
                 repaired["content"] = Json.Serialize(repairedParsed);
@@ -170,9 +182,8 @@ namespace ReignBetaServer
                         claimReceipt["correction"] = "unsupported_attribution_withheld_after_rewrite_failure";
                         claimReceipt["semanticRewriteFailed"] = true;
                         claimReceipt["remainingExactSourceViolations"] = 0;
-                        claimReceipt["acceptedSemanticCoverage"] = "not_rechecked_after_false_clause_withholding";
                         MarkRepairedVisibleResponse(recovered, true, "visible_prose_correction");
-                        claimReceipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(recovered, "reply", "body", "response", "text")).ToLowerInvariant();
+                        claimReceipt = RecheckCorrectedDialogueClaims(recovered, payload, priorLines, heroId, claimReceipt);
                         recovered["dialogueClaimValidation"] = claimReceipt;
                         llm["content"] = Json.Serialize(recovered);
                         llm["dialogueClaimValidation"] = claimReceipt;
@@ -200,6 +211,29 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["detected"] = violations, ["remaining"] = remaining, ["accepted"] = cleared,
                     ["revalidationCleared"] = cleared, ["markedVisibleFailure"] = markedFailure, ["deterministicFallback"] = markedFailure });
             return repaired;
+        }
+
+        private static Dictionary<string, object> RecheckCorrectedDialogueClaims(Dictionary<string, object> corrected,
+            Dictionary<string, object> payload, List<Dictionary<string, object>> prior, string speaker, Dictionary<string, object> original)
+        {
+            string hash = MemorySelectionTextHash(ReadFirstString(corrected, "reply", "body", "response", "text")).ToLowerInvariant();
+            bool unchanged = ReadString(original, "draftReplyHash", "") == hash;
+            var receipt = unchanged ? CloneDictionary(original) : CompareDialogueRecallClaims(corrected, payload, prior, speaker);
+            receipt["proposedDraftReplyHash"] = ReadString(original, "draftReplyHash", "");
+            receipt["coverageStage"] = "accepted_response_after_prose_correction";
+            receipt["acceptedSemanticCoverage"] = unchanged ? "unchanged_reply_comparison_reused" : "rechecked_comparison_hints_only";
+            receipt["semanticAccuracyCertified"] = false;
+            foreach (string key in new[] { "correction", "changedFields", "semanticRewriteFailed" })
+                if (original.TryGetValue(key, out var value)) receipt[key] = value;
+            receipt["proposedExactSourceViolations"] = original.GetValueOrDefault("exactSourceViolations");
+            receipt["withheldRevisedEffects"] = QuarantineDialogueClaimEffects(corrected, payload, prior, speaker);
+            receipt["withheldRevisedIncompleteFacts"] = QuarantineUncoveredDialogueFacts(corrected, payload, prior, speaker);
+            var remaining = FindDialogueIntegrityViolations(corrected, payload, prior, speaker);
+            receipt["exactSourceViolations"] = remaining;
+            receipt["remainingExactSourceViolations"] = remaining.Count;
+            receipt["acceptedReplyHash"] = MemorySelectionTextHash(ReadFirstString(corrected, "reply", "body", "response", "text")).ToLowerInvariant();
+            receipt["replyHashMatchesEvaluatedText"] = ReadString(receipt, "acceptedReplyHash", "") == ReadString(receipt, "draftReplyHash", "");
+            return receipt;
         }
 
         private static List<Dictionary<string, object>> FindDialogueIntegrityViolations(

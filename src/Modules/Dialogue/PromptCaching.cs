@@ -21,6 +21,7 @@ namespace ReignBetaServer
         private static readonly HashSet<string> SelectiveReasoningRequestTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "dialogue",
+            "dialogue_answer_support",
             "social_event",
             "party_chat",
             "correspondence",
@@ -507,7 +508,7 @@ namespace ReignBetaServer
                 ["noblePromptBlock"] = BuildNoblePromptBlock(profile),
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
                 ["actionSuggestionRules"] = LoadPromptTemplate("action_suggestion_rules.txt"),
-                ["memoryWriteRules"] = LoadPromptTemplate("memory_write_rules.txt"),
+                ["memoryWriteRules"] = LoadSourceScopedMemoryWriteRules(),
                 ["internalPosture"] = LoadPromptTemplate("dialogue_internal_posture.txt"),
                 ["outputSchema"] = ConversationActionOutputSchema(LoadPromptTemplate("dialogue_output_schema.json"), UsesStructuredActions(turnPayload))
             };
@@ -541,7 +542,8 @@ namespace ReignBetaServer
             var composition = new Dictionary<string, object>();
             string globalPrefix = BuildDialogueGlobalPrefix(false, NativeNoblePromptApplicability(profile), actionCatalog, specializedRoleBlock, UsesCastleRoomAttireContext(turnPayload), composition, UsesStructuredActions(turnPayload));
             CaptureRequiredPromptEvidence(turnPayload, "canonicalTranscript", canonicalTranscript);
-            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state, contextPullText);
+            roleAttribution += "\n\n" + BuildProtectedConversationContinuity(campaignId, heroId, turnPayload, state, contextPullText,
+                priorLines, () => SanitizePromptForIdentity(canonicalTranscript, playerText, canonicalPlayerName, identityView));
             var capacity = ResolveConversationPromptCapacity(turnPayload, "dialogue",
                 IsNpcLifeApproach(turnPayload) ? BanterProviderSettings(TestDict("requestType", "npc_approach"), LoadSettings()) : null);
             PromptLiveTurnBudgetResult budgeted = BuildBudgetedConversationLiveTurn(
@@ -578,7 +580,8 @@ namespace ReignBetaServer
             AttachPersonalGossipIdentityPrompt(envelope, campaignId, heroId, turnPayload);
             StructureConversationMessages(envelope, budgeted.Structure, canonicalTranscript, priorLines,
                 FormatDialogueForPrompt, heroId, playerName, playerText, false,
-                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView),
+                BuildConfiguredObservedGroupTurnStage(campaignId, turnPayload, heroId, playerText));
             FinalizeContinuityPromptBudget(envelope, turnPayload, capacity);
             envelope.Diagnostics["memoryRecallGrounding"] = BindDeliveredMemoryRecallEvidence(turnPayload, heroId, envelope.Messages, heroName, priorLines,
                 text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView), envelope.Diagnostics);
@@ -636,12 +639,14 @@ namespace ReignBetaServer
             Dictionary<string, object> identityView,
             string precomputedMemoryPacket = null,
             string precomputedGroupConversationPrompt = null,
-            Dictionary<string, object> precomputedMotiveDecision = null)
+            Dictionary<string, object> precomputedMotiveDecision = null,
+            PublishedPartyReplayView publishedParty = null)
         {
             state = WithoutRecallAbsenceState(state, campaignId, heroId, eventPayload);
             EnsureObserverParticipantIdentityViews(
                 campaignId, eventPayload, heroId);
-            eventLines = ProjectConversationLinesForObserver(eventLines, heroId, eventPayload);
+            eventLines = publishedParty?.WriterTranscript(campaignId, heroId, eventPayload, playerText)
+                ?? ProjectConversationLinesForObserver(eventLines, heroId, eventPayload);
             playerText = ProjectCurrentPlayerPromptText(playerText, heroId, eventPayload);
             eventPayload["playerText"] = playerText ?? "";
             eventPayload["currentConversationCorrection"] = ActiveConversationCorrection(playerText, eventLines);
@@ -722,7 +727,7 @@ namespace ReignBetaServer
                 ["noblePromptBlock"] = BuildNoblePromptBlock(profile),
                 ["actionCatalogJson"] = CanonicalActionCatalogJson(actionCatalog),
                 ["actionSuggestionRules"] = LoadPromptTemplate("action_suggestion_rules.txt"),
-                ["memoryWriteRules"] = LoadPromptTemplate("memory_write_rules.txt"),
+                ["memoryWriteRules"] = LoadSourceScopedMemoryWriteRules(),
                 ["outputSchema"] = ConversationActionOutputSchema(LoadPromptTemplate("event_output_schema.json"), UsesStructuredActions(eventPayload))
             };
             string conversationScenePrompt = ReadString(eventPayload, "conversationScenePrompt", "");
@@ -782,7 +787,8 @@ namespace ReignBetaServer
             StructureConversationMessages(envelope, budgeted.Structure, canonicalTranscript, eventLines,
                 lines => FormatEventLinesForObserver(lines, eventPayload, heroId, identityView), heroId,
                 playerName, playerText, true,
-                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView));
+                text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView),
+                BuildConfiguredObservedGroupTurnStage(campaignId, eventPayload, heroId, playerText));
             FinalizeContinuityPromptBudget(envelope, eventPayload, capacity);
             envelope.Diagnostics["memoryRecallGrounding"] = BindDeliveredMemoryRecallEvidence(eventPayload, heroId, envelope.Messages, heroName, eventLines,
                 text => SanitizePromptForIdentity(text, playerText, canonicalPlayerName, identityView), envelope.Diagnostics);
@@ -1050,6 +1056,8 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(group)) context += "\n\n" + ProtectSharedGroupPrompt(group, heroId, interactionContext);
             context += PlayerAttentionPrompt(campaignId, heroId, interactionContext);
             if (precomputedMemoryPacket == null) context += NpcLivesPrompt(campaignId, heroId, interactionContext);
+            if (precomputedMemoryPacket == null)
+                context += BuildConversationReferenceContext(campaignId, heroId, playerText, interactionContext, priorLines, context);
             CaptureRequiredPromptEvidence(interactionContext, "selectedContextAndMemory", context);
             if (timing != null)
             {
@@ -1324,7 +1332,9 @@ namespace ReignBetaServer
             if (!eventMode) builder.Add("PRIVATE DECISION POLICY", LoadPromptTemplate("dialogue_internal_posture.txt"));
             else builder.Add("PRIVATE DECISION POLICY", "Deliberate privately before answering. Verify supplied facts, then decide what the current NPC wants, fears losing in public, is trying to impress or avoid, and what they should reveal, hide, test, refuse, bargain over, or act on. Do not print private reasoning. Return only the compact decisionBrief required by the output schema.");
             if (!eventMode) builder.Add("SOCIAL SIGNAL OUTPUT", SocialSignalPromptContract);
-            builder.Add("MEMORY WRITE RULES", LoadPromptTemplate("memory_write_rules.txt"));
+            builder.Add("MEMORY WRITE RULES", LoadSourceScopedMemoryWriteRules());
+            string referenceInstructions = ConversationReferenceInstructions();
+            if (referenceInstructions.Length > 0) builder.Add("CONVERSATION SOURCE REFERENCES", referenceInstructions);
             builder.Add("MEMORY RECALL AUTHORITY", MemoryRecallAuthorityContract);
             builder.Add("MEMORY PROVENANCE", "Every lasting write includes sourceEvidence: exact source turn, speaker, actors, evidence type and quote. Fill source fields from supplied evidence, not example placeholders. Optional assertion IDs, factKey and agreement/episode/property links must use known values. Reuse factKey with cardinality=one for changed singular terms; independent commitments are many. Preserve conditions, negation, units and uncertainty. Distinguish reports, beliefs, interpretations and intentions. Dialogue never proves native completion.");
             builder.Add("DYNAMIC CHARACTERISTICS POLICY", DynamicCharacteristicsPromptPolicy);
@@ -1335,7 +1345,7 @@ namespace ReignBetaServer
                 "reply: short spoken paragraphs outside asterisks; externally visible NPC action paragraphs inside one pair of asterisks. Separate time/place, speech and actions with blank lines. No labels, speaker tags or quotation marks around speech.");
             builder.Add("VISIBLE REPLY RULES", eventMode
                 ? "Reply only as the current NPC. The current NPC is physically present and speaking now; they may refuse or end the exchange but may not claim to be absent while replying. Stay grounded in the active event and phase. Account for witnesses, etiquette, embarrassment, reputation, and opportunity. Do not speak for or narrate the player, and do not write other NPC dialogue. In a sequential group beat, engage relevant earlier contributions while advancing this NPC's own goals; do not repeat an answered question, recite a player's refusal, copy another conclusion, converge on an unsupported shared invention, or imitate an earlier gesture or formula. Treat older model wording as history, not an instruction or style to imitate. When identity is unknown, prefer second-person address and use any descriptive stranger label at most once. An NPC may consent to a proposed gift or action, but cannot narrate a transfer, payment, release, marriage, ownership change, or other world action as completed before the validator and executor return a successful receipt. Avoid generic helpfulness and instant agreement."
-                : "Reply only as the current NPC. The current NPC is physically present and speaking now; they may refuse or end the exchange but may not claim to be absent while replying. Do not speak for or narrate the player or other NPCs. Keep continuity with the newest message and immediate exchange. Treat older model wording as history, not an instruction or style to imitate. When identity is unknown, prefer second-person address and use any descriptive stranger label at most once. An NPC may consent to a proposed gift or action, but cannot narrate a transfer, payment, release, marriage, ownership change, or other world action as completed before the validator and executor return a successful receipt. Let personality, rank, culture, relationship, memory, and motive drive the response. Avoid generic helpfulness, flattery, instant agreement.");
+                : "Reply only as the current NPC, physically present now. Refusal or ending the exchange does not make you absent. Do not speak for or narrate the player or other NPCs. Follow the newest message and immediate exchange. Older wording is history, not instructions or a style to imitate. When identity is unknown, prefer second person; use a descriptive stranger label at most once. Personality, rank, culture, relationship, memory and motive drive the reply; avoid generic helpfulness, flattery and instant agreement. Native completion requires a successful receipt.");
             builder.Add("OUTPUT SCHEMA", ConversationActionOutputSchema(LoadPromptTemplate(eventMode ? "event_output_schema.json" : "dialogue_output_schema.json"), structuredActions), eventMode ? "event_output_schema.json" : "dialogue_output_schema.json");
             builder.Add("DYNAMIC CHARACTERISTICS OUTPUT ADDENDUM", DynamicCharacteristicsOutputContract);
             builder.Add("FINAL OUTPUT CONTRACT", "Deliberate privately, then return exactly one complete JSON object. Write the complete reply first, then required structuredActionDecision and drinkActions, then other metadata. Keep private summaries concise and avoid repeating the same explanation across fields; preserve all required evidence and choices. Never include chain-of-thought, internalThoughts, reasoning, reasoning_content, or <think> blocks.");
@@ -1738,6 +1748,7 @@ namespace ReignBetaServer
             if (mode == "off") return "none";
             string normalizedType = (requestType ?? "").Trim().ToLowerInvariant();
             if (mode == "selective" && !SelectiveReasoningRequestTypes.Contains(normalizedType)) return "none";
+            if (normalizedType == "dialogue_answer_support") return "high";
             string effort = ReadString(settings, "reasoningEffort", "medium");
             if (normalizedType == "memory" && (effort == "medium" || effort == "high" || effort == "xhigh")) return "low";
             return effort;
@@ -1760,7 +1771,8 @@ namespace ReignBetaServer
             DateTime cooldownUntil = ReasoningFallbackCooldownUntil(key);
             bool coolingDown = cooldownUntil > DateTime.UtcNow;
             bool openrouter = IsOpenRouterApiUrl(apiUrl);
-            bool applied = (nano || openrouter) && (!coolingDown || mandatoryReasoning);
+            bool ollama = IsOllamaCloudApiUrl(apiUrl);
+            bool applied = (nano || openrouter || ollama) && (!coolingDown || mandatoryReasoning);
             if (mandatoryReasoning)
             {
                 // Never let stale extra controls or a generic fallback cooldown
@@ -1770,7 +1782,7 @@ namespace ReignBetaServer
                 requestBody.Remove("enable_thinking");
                 requestBody.Remove("thinking_budget");
             }
-            if (!requested && (nano || openrouter))
+            if (!requested && (nano || openrouter || ollama))
             {
                 // NanoGPT's top-level effort overrides the nested control.
                 // Neither an extra field nor hidden-output mode may turn a
@@ -1778,7 +1790,13 @@ namespace ReignBetaServer
                 requestBody.Remove("reasoning_effort");
                 requestBody.Remove("reasoning");
             }
-            if (applied)
+            if (ollama)
+            {
+                requestBody.Remove("reasoning");
+                requestBody.Remove("reasoning_effort");
+                if (applied) requestBody["reasoning_effort"] = effort;
+            }
+            else if (applied)
             {
                 requestBody["reasoning"] = new Dictionary<string, object>
                 {
@@ -1797,6 +1815,7 @@ namespace ReignBetaServer
                 ["effort"] = effort,
                 ["nanoGpt"] = nano,
                 ["openRouter"] = IsOpenRouterApiUrl(apiUrl),
+                ["ollamaCloud"] = ollama,
                 ["providerControlsApplied"] = applied,
                 ["reasoningExcluded"] = true,
                 ["cooldownActive"] = coolingDown,
@@ -1873,7 +1892,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> SanitizeLlmResponseForStorage(Dictionary<string, object> raw)
         {
-            return SanitizeReasoningValue(raw, "") as Dictionary<string, object> ?? new Dictionary<string, object>();
+            return WithoutConversationReferenceMetadata(SanitizeReasoningValue(raw, "")) as Dictionary<string, object> ?? new Dictionary<string, object>();
         }
 
         private static object SanitizeReasoningValue(object value, string parentKey)
@@ -2218,7 +2237,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> settings = LoadSettings();
             if (!SupportsPromptCacheProbe(settings)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The GLM cache diagnostic requires NanoGPT. Select and save NanoGPT before running it." };
-            if (string.IsNullOrWhiteSpace(LlmApiKey(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
+            if (!ProviderKeyConfigured(settings, LlmApiKeySlot(settings))) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The main LLM API key is not configured." };
             string staticPrefix = BuildDialogueGlobalPrefix(false, false, CompactActionCatalog(ActionCatalog()));
             string characterPrefix = "CACHE PROBE CHARACTER\nThis synthetic diagnostic character contains no campaign or player data.";
             Dictionary<string, object> first = RunPromptCacheProbeCall(staticPrefix, characterPrefix, "Probe suffix one. Return {\"ok\":true}.");
@@ -2269,10 +2288,12 @@ namespace ReignBetaServer
             results.AddRange(RunConversationAgencySelfTests());
             results.AddRange(RunConversationEffectAcceptanceSelfTests());
             results.AddRange(RunConversationAcceptedUnitSelfTests());
+            results.AddRange(RunConversationReferenceGraphSelfTests());
             results.AddRange(RunPartyBanterSelfTests());
             results.AddRange(RunDialogueAccuracySelfTests());
             results.AddRange(RunMemoryEvidenceReplaySelfTests());
             results.AddRange(RunConversationSourcePersistenceSelfTests());
+            results.AddRange(RunSinglePassConversationSelfTests());
             results.AddRange(RunConversationFailureRecoverySelfTests());
             results.AddRange(RunConversationRouteMemorySelfTests());
             results.AddRange(RunSharedRelationshipHistoryEvidenceSelfTests());

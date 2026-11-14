@@ -154,7 +154,8 @@ namespace ReignBetaServer
             {
                 LogOperational("dialogue.action_publication_failed", TestDict("campaignId", campaign,
                     "correlationId", EnsureCorrelationId(payload), "error", ex.GetType().Name));
-                response["ok"] = false;
+                if (!IsSinglePassConversation(payload) || string.IsNullOrWhiteSpace(ReadString(response, "reply", "")))
+                    response["ok"] = false;
                 response["stage"] = "action_publication";
                 response["actionPublication"] = TestDict("status", "failed", "committed", false,
                     "error", "The action batch was not published. Retry the same turn.");
@@ -175,7 +176,7 @@ namespace ReignBetaServer
             response["queuedDialogueActions"] = merged;
             response["playerActionOutcomes"] = outcomes;
             response["correlationId"] = EnsureCorrelationId(payload);
-            if (intents.Count > 0 && !ReadBool(response, "ok", false))
+            if (!IsSinglePassConversation(payload) && intents.Count > 0 && !ReadBool(response, "ok", false))
             {
                 response["dialogueSucceeded"] = false;
                 response["ok"] = true;

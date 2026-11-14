@@ -610,12 +610,13 @@ namespace ReignBetaServer
             add("flirtatiousness",flirtWeights&&ReadBool(reachability.First(row=>ReadString(row,"trait","")=="flirtatiousness"),"reachable",false),"Flirtatiousness is 55 percent native Calculating, 30 percent signed Charm, and 15 percent native Generosity with all levels reachable.",flirt);
             Dictionary<string,XElement> skillSets=new Dictionary<string,XElement>(StringComparer.OrdinalIgnoreCase)
             {
-                ["foundation_vnext_skill_template"]=XElement.Parse("<SkillSet id='foundation_vnext_skill_template'><skill id='Charm' value='140'/><skill id='Leadership' value='120'/></SkillSet>")
+                ["foundation_vnext_skill_template"]=XElement.Parse("<SkillSet id='foundation_vnext_skill_template'><skill id='Charm' value='140'/><skill id='Leadership' value='120'/><skill id='Polearms' value='65'/></SkillSet>")
             };
             XElement emptySkillsNpc=XElement.Parse("<NPCCharacter skill_template='SkillSet.foundation_vnext_skill_template'><skills /></NPCCharacter>");
             XElement partialSkillsNpc=XElement.Parse("<NPCCharacter skill_template='SkillSet.foundation_vnext_skill_template'><skills><skill id='Charm' value='180'/></skills></NPCCharacter>");
             Dictionary<string,object> emptyResolved=ResolveCatalogNativeSkills(emptySkillsNpc,skillSets),partialResolved=ResolveCatalogNativeSkills(partialSkillsNpc,skillSets);
-            bool skillMerge=ReadInt(emptyResolved,"charm",0)==140&&ReadInt(emptyResolved,"leadership",0)==120&&ReadInt(partialResolved,"charm",0)==180&&ReadInt(partialResolved,"leadership",0)==120;
+            bool skillMerge=ReadInt(emptyResolved,"charm",0)==140&&ReadInt(emptyResolved,"leadership",0)==120&&ReadInt(partialResolved,"charm",0)==180&&ReadInt(partialResolved,"leadership",0)==120
+                &&ReadInt(emptyResolved,"polearm",0)==65&&ReadInt(partialResolved,"polearm",0)==65&&!emptyResolved.ContainsKey("polearms");
             add("skill_template_merge",skillMerge,"Skill templates populate empty skill blocks and direct NPC skills override individual template values without discarding the remaining template.",new Dictionary<string,object>{{"empty",emptyResolved},{"partial",partialResolved}});
             Dictionary<string,object> hero=FoundationTraitRangeVNextTestHero("foundation_vnext_a"),familyHero=new Dictionary<string,object>(hero,StringComparer.OrdinalIgnoreCase){{"spouseId","spouse"},{"fatherId","father"},{"motherId","mother"}};
             string withoutFamily=Json.Serialize(CalculateFoundationTraitsVNext(hero)),withFamily=Json.Serialize(CalculateFoundationTraitsVNext(familyHero));

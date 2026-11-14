@@ -54,6 +54,7 @@ namespace ReignBetaServer
                 ["playerApproaches"] = PlayerApproachOptionsForClient(settings),
                 ["npcLives"] = NpcLivesOptionsForClient(settings),
                 ["rulers"] = RulerOptionsForClient(settings),
+                ["warEconomy"] = WarEconomyOptionsForClient(settings),
                 ["announcements"] = AnnouncementOptionsForClient(settings)
             };
             foreach (string key in ReignXpCategoryOptionKeys)
@@ -110,7 +111,7 @@ namespace ReignBetaServer
         <button id='saveReignXpOptions' onclick='saveReignXpOptions()'>Save XP options</button>
         <div id='reignXpStatus' role='status' aria-live='polite'></div>
       </div>
-" + CorrespondenceOptionsHtml() + BanterOptionsHtml() + PlayerApproachOptionsHtml() + NpcLivesOptionsHtml() + RulerOptionsHtml() + AnnouncementOptionsHtml() + PersonalGossipOptionsHtml() + @"    </section>";
+" + CorrespondenceOptionsHtml() + BanterOptionsHtml() + PlayerApproachOptionsHtml() + NpcLivesOptionsHtml() + WarEconomyOptionsHtml() + RulerOptionsHtml() + AnnouncementOptionsHtml() + PersonalGossipOptionsHtml() + @"    </section>";
 
         private static string ReignXpOptionsScript() => @"
     ids.push('reignXpEnabled','reignXpMultiplier');
@@ -136,6 +137,7 @@ namespace ReignBetaServer
       loadBanterOptions(settings);
       loadPlayerApproachOptions(settings);
       loadNpcLivesOptions(settings);
+      loadWarEconomyOptions(settings);
       loadAnnouncementOptions(settings);
       loadPersonalGossipOptions(settings);
       const status=document.getElementById('reignXpStatus');status.className='';status.textContent='';
@@ -160,6 +162,6 @@ namespace ReignBetaServer
       }catch(error){status.className='xpError';status.textContent=error.message;}
       finally{button.disabled=false;}
     }
-    renderReignXpOptions();" + CorrespondenceOptionsScript() + BanterOptionsScript() + PlayerApproachOptionsScript() + NpcLivesOptionsScript() + RulerOptionsScript() + AnnouncementOptionsScript() + PersonalGossipOptionsScript();
+    renderReignXpOptions();" + CorrespondenceOptionsScript() + BanterOptionsScript() + PlayerApproachOptionsScript() + NpcLivesOptionsScript() + WarEconomyOptionsScript() + RulerOptionsScript() + AnnouncementOptionsScript() + PersonalGossipOptionsScript();
     }
 }

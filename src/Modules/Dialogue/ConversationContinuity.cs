@@ -136,11 +136,10 @@ CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continui
             // Earlier versions could accept a spoken scene correction as dialogue
             // without retaining the room. Recover only its exact witnessed source
             // within the same native hour and compatible physical anchor.
-            if (ConversationWorldHour(payload) == (long)Math.Floor(ReadDouble(row, "world_day", 0d) * 24d + .000001d)
-                && !ReadBool(CurrentNarrativeClock(payload), "advanced", false))
+            if (ConversationWorldHour(payload) == (long)Math.Floor(ReadDouble(row, "world_day", 0d) * 24d + .000001d))
                 foreach (var exchange in ProjectSceneHandoffExchanges(connection, result, owner, payload))
                 {
-                    if (ReadString(exchange, "narrativeEpoch", "") != ReadString(CurrentNarrativeClock(payload), "epoch", "")) continue;
+                    if (ReadString(exchange, "narrativeEpoch", "").Length > 0) continue;
                     var correction = SpokenSceneCorrections(ReadString(exchange, "playerText", ""), payload).LastOrDefault();
                     string answer = ReadString(exchange, "reply", "");
                     if (correction == null || Regex.IsMatch(ConversationSpeech(answer), @"\b(?:we are not|we remain|I remain|I am still|stay here instead)\b", RegexOptions.IgnoreCase)) continue;
@@ -222,15 +221,12 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                     row["location_override"] = ReadString(preparedState, "location", "");
                     row["location_class"] = ReadString(preparedState, "locationClass", "formal");
                 }
-                bool advanced = ReadBool(CurrentNarrativeClock(payload), "advanced", false);
-                row["acceptedPrivateScene"] = !advanced && sameAnchor && ReadBool(previous, "acceptedPrivateScene", ReadBool(preparedState, "acceptedPrivateScene", false));
-                if (advanced && ReadString(row, "source_turn_id", "") != turnId)
-                    row["location_override"] = "";
+                row["acceptedPrivateScene"] = sameAnchor && ReadBool(previous, "acceptedPrivateScene", ReadBool(preparedState, "acceptedPrivateScene", false));
                 foreach (var proposal in ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "proposals")
                     .Where(p => ReadString(p, "subject_id", "") == owner && ReadString(row, "source_turn_id", "") == turnId))
                     row["acceptedPrivateScene"] = ExplicitClosedScene(ReadString(proposal, "sourceQuote", ""));
-                if (owner == speakerId) row["narrativeClock"] = CurrentNarrativeClock(payload);
-                else if (sameAnchor && previous.TryGetValue("narrativeClock", out var priorClock)) row["narrativeClock"] = priorClock;
+                // Retain old diagnostic evidence unchanged, without reading it as time.
+                if (sameAnchor && previous.TryGetValue("narrativeClock", out var priorClock)) row["narrativeClock"] = priorClock;
                 var exchanges = ProjectSceneHandoffExchanges(connection, previous, owner, payload)
                     .Where(e => ReadString(e, "turnId", "") != turnId || ReadString(e, "speakerId", "") != speakerId).ToList();
                 string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
@@ -239,7 +235,6 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
                     ["playerText"] = ProjectCurrentPlayerPromptText(playerText, owner, payload),
                     ["validatedPlayerProjection"] = ReadInt(payload, "playerNarrationProjectionVersion", 0) == 2 && ReadString(payload, "inputSourceId", "").Length > 0,
                     ["reply"] = ObserverConversationText(reply, speakerId, owner), ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
-                    ["narrativeEpoch"] = ReadString(CurrentNarrativeClock(payload), "epoch", ""),
                     ["sessionId"] = ReadFirstString(payload, "conversationSessionId", "sessionId", "eventId") });
                 row["acceptedExchanges"] = exchanges.Skip(Math.Max(0, exchanges.Count - 2)).ToList();
                 ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_handoffs
@@ -386,7 +381,7 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
         {
             if (string.IsNullOrEmpty(suppliedContext)) return protectedText;
             string Key(ContinuityPromptRecord record) => record.SourceId + "|" + record.Kind + "|" + record.Observer + "|" + record.Session
-                + "|" + record.WorldDay.ToString("R", CultureInfo.InvariantCulture) + "|"
+                + "|" + record.WorldDay.ToString("R", CultureInfo.InvariantCulture) + "|" + record.Required + "|"
                 + record.Text.Substring(record.Text.IndexOf('\n') + 1);
             var supplied = ContinuityPromptRecords(suppliedContext, false).Where(r => r.Kind != "legacy_complete_block")
                 .Select(Key).ToHashSet(StringComparer.Ordinal);
@@ -395,8 +390,65 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
             return protectedText;
         }
 
+        private static bool RequiredLetterAlreadySupplied(MemoryEvidence letter, Dictionary<string, object> selected, string context)
+        {
+            string alias = ReadString(selected, "alias", "");
+            if (string.IsNullOrEmpty(context) || alias.Length == 0 || !ReadBool(selected, "required", false)
+                || ReadString(selected, "kind", "") != "letter" || ReadString(selected, "sourceId", "") != letter.SourceId
+                || ReadString(selected, "sourceHash", "") != letter.SourceHash || ReadInt(selected, "revision", 0) != letter.Revision)
+                return false;
+            // Precision carries the same ledger record under its allocated alias.
+            // The required block and its full attribution must already be present.
+            string expected = RenderMemoryEvidence(letter, alias);
+            return ReadString(selected, "rendered", "") == expected && context.Contains(expected, StringComparison.Ordinal);
+        }
+
+        private static Dictionary<string, Dictionary<string, object>> LoadContinuityEpisodeSources(ReignDbConnection connection,
+            List<Dictionary<string, object>> records, string owner)
+        {
+            var ids = records.Where(row => ReadString(row, "kind", "") == "episode")
+                .Select(row => ReadString(row, "source_turn_id", "")).Where(id => id.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+            if (ids.Length == 0 || !TableExists(connection, "conversation_turns"))
+                return new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
+            return QuerySql(connection, @"SELECT turn.* FROM conversation_turns turn
+JOIN jsonb_array_elements_text(CAST($ids AS jsonb)) requested ON requested.value=turn.turn_id
+WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
+                TestDict("ids", Json.Serialize(ids), "owner", owner)).ToDictionary(turn => ReadString(turn, "turn_id", ""), StringComparer.Ordinal);
+        }
+
+        private static string RenderContinuityEpisodeEvidence(ReignDbConnection connection, Dictionary<string, object> row,
+            Dictionary<string, object> episode, Dictionary<string, object> turn, KnowledgeAccessContext access,
+            Dictionary<string, string> supplied = null)
+        {
+            string turnId = ReadString(row, "source_turn_id", "");
+            string eventId = ReadString(row, "source_event_id", "");
+            string owner = ReadString(row, "owner_id", "");
+            if (turnId.Length == 0 || eventId.Length == 0 || owner.Length == 0 || owner != access.NpcId) return "";
+            if (turn == null || ReadString(turn, "turn_id", "") != turnId || ReadString(turn, "event_id", "") != eventId
+                || ReadString(turn, "speaker_id", "") != owner || ReadString(turn, "role", "") != "npc"
+                || !PrecisionTurnVisible(turn, owner, access, connection)
+                || MemorySourceAlreadySupplied(turn, supplied)) return "";
+
+            string body = ConversationTurnTextForRecall(turn);
+            var source = ReadDictionary(episode, "sourceEvidence");
+            if (source != null && (ReadString(source, "turnId", "") != turnId
+                || ReadString(source, "speakerId", "") != owner || ReadString(source, "sourceHash", "") != PromptHash(body)))
+                return "";
+            var quotes = AcceptedContinuityEvidenceSpans(episode, body).Select(span => ReadString(span, "quote", "")).ToList();
+            string visible = ObserverConversationSourceText(turn, owner);
+            if (quotes.Count == 0 || quotes.Any(quote => !visible.Contains(quote, StringComparison.Ordinal))) return "";
+
+            // An episode cites accepted speech or narration. Its generated lifecycle
+            // and interpretation fields cannot establish a present world condition.
+            return "id=" + ReadString(row, "record_id", "") + "; revision=" + ReadInt(row, "revision", 1)
+                + "; excerpt from your accepted dialogue or narration on day "
+                + ReadDouble(turn, "world_day", 0d).ToString("0.#####", CultureInfo.InvariantCulture) + ": "
+                + string.Join(" […] ", quotes) + " Use current engine state for present conditions.";
+        }
+
         private static string BuildProtectedConversationContinuity(string campaignId, string heroId,
-            Dictionary<string, object> payload, Dictionary<string, object> state, string suppliedContext = "")
+            Dictionary<string, object> payload, Dictionary<string, object> state, string suppliedContext = "",
+            List<Dictionary<string, object>> priorLines = null, Func<string> projectTranscript = null)
         {
             state = WithoutRecallAbsenceState(state, campaignId, heroId, payload);
             var text = new StringBuilder(ConversationContinuityContract).AppendLine(ConversationSourceContract).AppendLine(ConversationQuestionContract).AppendLine(CharacterCommitmentContract);
@@ -428,11 +480,15 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
                     text.Append(BuildPendingContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
                     text.AppendLine().Append(BuildCommunicationPrompt(activityConnection, heroId, payload, sourceIds));
                     var mailAccess = BuildKnowledgeAccessContext(heroId, peer, "", payload);
+                    var selectedLetters = ReadDictionaryList(ReadDictionary(payload, "memoryPrecisionEvidence"), "records")
+                        .Where(record => ReadString(record, "kind", "") == "letter")
+                        .ToLookup(record => ReadString(record, "sourceId", ""), StringComparer.Ordinal);
                     foreach (var letter in LoadCorrespondenceMemory(activityConnection, heroId, peer,
                         ReadFirstString(payload, "playerText", "text", "message"), payload, mailAccess))
                     {
                         sourceIds.Add(letter.SourceId);
-                        text.AppendLine(RenderContinuityRecord(letter.SourceId, letter.Kind, letter.Owner, letter.Session, letter.Day, 119, true, letter.Text));
+                        if (!selectedLetters[letter.SourceId].Any(record => RequiredLetterAlreadySupplied(letter, record, suppliedContext)))
+                            text.AppendLine(RenderContinuityRecord(letter.SourceId, letter.Kind, letter.Owner, letter.Session, letter.Day, 119, true, letter.Text));
                     }
                     text.AppendLine().Append(BuildQuestionContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
                     text.AppendLine().Append(BuildSharedActivityContinuity(activityConnection, timeline, peer, heroId, payload, state, sourceIds));
@@ -449,24 +505,37 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
                         sourceIds.Add(evidence.SourceId);
                         text.AppendLine(RenderContinuityRecord(evidence.SourceId, evidence.Kind, heroId, evidence.Session, evidence.Day, 105, true, evidence.Text));
                     }
-                    text.Append(BuildEstablishedRelationshipContinuity(connection, campaignId, timeline, heroId, peer, sourceIds, ReadDouble(payload,"worldDay",0d)));
+                    text.Append(BuildEstablishedRelationshipContinuity(connection, campaignId, timeline, heroId, peer, sourceIds,
+                        ReadDouble(payload, "worldDay", 0d), priorLines, projectTranscript, linkAccess));
                     var records = QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: linkAccess) + @"
 AND status<>'invalidated' AND kind<>'question' AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) AND (kind<>'relationship' OR peer_id=$peer)
 ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 END,importance DESC,updated_ts DESC;",
                         new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = heroId, ["peer"] = peer });
+                    var episodeSources = LoadContinuityEpisodeSources(connection, records, heroId);
                     string section = "";
                     foreach (var row in records)
                     {
                         var record = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                         if (ReadDouble(record, "worldDay", 0d) > ReadDouble(payload, "worldDay", 0d)) continue;
                         string kind = ReadString(row, "kind", "");
+                        string id = ReadString(row, "record_id", "");
+                        if (kind == "episode")
+                        {
+                            episodeSources.TryGetValue(ReadString(row, "source_turn_id", ""), out var source);
+                            string episode = RenderContinuityEpisodeEvidence(connection, row, record, source, linkAccess);
+                            if (episode.Length == 0) continue;
+                            if (section != kind) text.AppendLine().AppendLine("PAST EPISODE EXCERPTS");
+                            section = kind;
+                            sourceIds.Add(id);
+                            text.Append("- ").AppendLine(episode);
+                            continue;
+                        }
                         if (kind != section)
                         {
                             section = kind;
                             text.AppendLine().AppendLine(kind == "relationship" ? "FOUNDATIONAL SHARED RELATIONSHIP"
-                                : kind == "agenda" ? "ONGOING CONCERNS AND INTENTIONS" : "ESTABLISHED IMPORTANT EPISODES");
+                                : "ONGOING CONCERNS AND INTENTIONS");
                         }
-                        string id = ReadString(row, "record_id", "");
                         sourceIds.Add(id);
                         text.Append("- id=").Append(id).Append(" revision=").Append(ReadInt(row, "revision", 0))
                             .Append(" status=").Append(ReadString(row, "status", ""))
@@ -527,7 +596,9 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
         }
 
         private static string BuildEstablishedRelationshipContinuity(ReignDbConnection connection, string campaignId,
-            string timeline, string observer, string peer, List<string> sourceIds, double worldDay)
+            string timeline, string observer, string peer, List<string> sourceIds, double worldDay,
+            List<Dictionary<string, object>> priorLines = null, Func<string> projectTranscript = null,
+            KnowledgeAccessContext readAccess = null)
         {
             if (string.IsNullOrWhiteSpace(observer) || string.IsNullOrWhiteSpace(peer)) return "";
             var parameters = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timeline,
@@ -566,26 +637,43 @@ WHERE subject_id=$observer AND target_id=$peer AND status='active' ORDER BY stab
             var receipts = TableExists(connection, "conversation_relationship_receipts") ? QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
 WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @" AND observer_id=$observer AND target_id=$peer
 AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", parameters) : new List<Dictionary<string, object>>();
+            var protectedExchanges = priorLines?.Count > 0 && projectTranscript != null && receipts.Count > 0
+                ? ContinuityPromptRecords(projectTranscript(), true).Where(r => r.Required && r.Kind == "accepted_exchange").ToList()
+                : new List<ContinuityPromptRecord>();
             foreach (var row in receipts.Where(r => !IsUnsupportedWordingJudgment(ReadString(r, "summary", "")))
                 .GroupBy(r => ReadString(r, "act_kind", "") + ":" + ReadString(r, "valence", ""))
                 .SelectMany(g => new[] { g.First(), g.Last() }).GroupBy(r => ReadString(r, "receipt_id", "")).Select(g => g.First()))
             {
                 string id = ReadString(row, "receipt_id", "");
                 sourceIds.Add(id);
+                string quote = ReadString(row, "current_conduct_quote", "");
                 text.Append("- Significant shared conduct [").Append(id).Append("; ").Append(ReadString(row, "valence", ""))
-                    .Append("]: ").Append(ReadString(row, "summary", "")).Append("; accepted conduct quote: ")
-                    .AppendLine(ReadString(row, "current_conduct_quote", ""));
+                    .Append("]: ").Append(ReadString(row, "summary", ""));
+                if (!AcceptedConductAlreadyInTranscript(row, quote, timeline, priorLines, protectedExchanges))
+                    text.Append("; accepted conduct quote: ").Append(quote);
+                text.AppendLine();
             }
             // Consolidation is not forgetting. These older, explicitly tagged
             // personal memories still have an accepted source in this exact pair's
             // history. Ordinary topical retrieval used to discard them after a
             // summary replaced the active rows, losing quiet care and closeness.
             bool hasAcceptedHistory = TableExists(connection, "conversation_turns") && TableExists(connection, "conversation_sessions");
+            var historyAccess = new KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = worldDay,
+                AsOfAcceptedSequence = readAccess?.AsOfAcceptedSequence ?? long.MaxValue,
+                AsOfTimestamp = readAccess?.AsOfTimestamp ?? long.MaxValue };
+            parameters["sequence"] = historyAccess.AsOfAcceptedSequence;
+            parameters["asOf"] = historyAccess.AsOfTimestamp;
+            string visibleTurn = "t.status='active' AND t.world_day<=$day AND t.accepted_sequence<=$sequence AND t.ts<=$asOf AND "
+                + MemorySourceTimelineSql("conversation_turns", "t");
+            bool HeardByPair(Dictionary<string, object> turn) =>
+                PrecisionTurnVisible(turn, observer, null) && PrecisionTurnVisible(turn, peer, null);
+
             var sharedMemories = hasAcceptedHistory && TableExists(connection, "memories") ? QuerySql(connection, @"SELECT m.*,t.turn_id AS accepted_turn_id,t.world_day AS accepted_world_day,
 t.session_id AS accepted_session_id FROM memories m JOIN conversation_turns t ON t.event_id=m.event_id
 JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE m.owner_id=$observer AND m.status IN ('active','consolidated') AND t.speaker_id=$observer
-AND t.role='npc' AND t.status='active' AND s.player_id=$peer AND t.world_day<=$day
+AND t.role='npc' AND s.player_id=$peer AND " + visibleTurn + @"
+AND m.ts<=$asOf AND m.world_day<=$day AND " + MemorySourceTimelineSql("memories", "m") + @"
 AND (lower(m.tags_json) LIKE '%intima%' OR lower(m.tags_json) LIKE '%milestone%'
  OR lower(m.tags_json) LIKE '%vulnerability%' OR lower(m.tags_json) LIKE '%trust%'
  OR lower(m.tags_json) LIKE '%betray%' OR lower(m.tags_json) LIKE '%boundary%') ORDER BY t.ts,m.ts;", parameters) : new List<Dictionary<string, object>>();
@@ -599,6 +687,9 @@ AND (lower(m.tags_json) LIKE '%intima%' OR lower(m.tags_json) LIKE '%milestone%'
                     || participants.Count != 2 || !participants.Contains(observer,StringComparer.OrdinalIgnoreCase)
                     || !participants.Contains(peer,StringComparer.OrdinalIgnoreCase)
                     || !KnowledgeRowVisibleToNpc("memories",row,new KnowledgeAccessContext { NpcId=observer })) continue;
+                var originals = ReadConversationDerivativeOriginals(connection, "memories", row);
+                if (originals.Count == 0 || originals.Any(source => !HeardByPair(source) || !MemoryTimeVisible(source, historyAccess, connection)))
+                    continue;
                 string id = ReadString(row,"memory_id","");
                 sourceIds.Add(id);
                 text.Append("- FOUNDATIONAL PAIR EXPERIENCE [").Append(id).Append("; accepted source=")
@@ -613,11 +704,11 @@ AND (lower(m.tags_json) LIKE '%intima%' OR lower(m.tags_json) LIKE '%milestone%'
             // another NPC's private interpretation or a new score/consent decision.
             var prior = hasAcceptedHistory ? QuerySql(connection, @"SELECT t.* FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id
-WHERE t.speaker_id=$observer AND t.role='npc' AND t.status='active' AND s.player_id=$peer AND t.world_day<=$day
+WHERE t.speaker_id=$observer AND t.role='npc' AND s.player_id=$peer AND " + visibleTurn + @"
 AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.text) LIKE '%slept together%'
  OR lower(t.text) LIKE '%our night%' OR lower(t.text) LIKE '%trust you%' OR lower(t.text) LIKE '%betrayed me%'
  OR lower(t.text) LIKE '%our partnership%' OR lower(t.text) LIKE '%shared a bed%') ORDER BY t.ts,t.turn_order;", parameters) : new List<Dictionary<string, object>>();
-            var dimensions = prior.Where(r => PairHistoryDimension(ReadString(r, "text", "")).Length > 0)
+            var dimensions = prior.Where(r => HeardByPair(r) && PairHistoryDimension(ReadString(r, "text", "")).Length > 0)
                 .GroupBy(r => PairHistoryDimension(ReadString(r, "text", "")));
             foreach (var dimension in dimensions)
             {
@@ -631,12 +722,14 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 {
                     string exchange = ReadString(row, "exchange_id", "");
                     var turns = exchange.Length == 0 ? new List<Dictionary<string, object>> { row } : QuerySql(connection,
-                        "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY turn_order;",
-                        TestDict("session", ReadString(row,"session_id",""), "exchange", exchange));
+                        "SELECT t.* FROM conversation_turns t WHERE t.session_id=$session AND t.exchange_id=$exchange AND "
+                        + visibleTurn + " ORDER BY t.turn_order;", new Dictionary<string, object>(parameters) {
+                            ["session"] = ReadString(row, "session_id", ""), ["exchange"] = exchange });
                     text.Append("HISTORICAL session=").Append(ReadString(row,"session_id", "")).Append("; source day=")
                         .Append(ReadDouble(row,"world_day",0d).ToString("0.#####",CultureInfo.InvariantCulture)).AppendLine(". Listed speakers heard this exchange; that is not evidence they witnessed events being described.");
-                    var access = new KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = worldDay };
-                    foreach (var turn in ExpandConversationSequence(connection, turns, access)) text.AppendLine(RenderExactHistoryTurn(turn, access));
+                    var eligible = turns.Where(HeardByPair).ToList();
+                    foreach (var turn in ExpandConversationSequence(connection, eligible, historyAccess).Where(HeardByPair))
+                        text.AppendLine(RenderExactHistoryTurn(turn, historyAccess));
                 }
             }
             return text.ToString();
@@ -763,6 +856,46 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 || type == "current_speaker_claimed_absent" || type == "player_sex_misidentification"
                 || type == "unverified_action_completion"
                 || type == "repeated_wording_lecture";
+        }
+
+        private static bool AcceptedConductAlreadyInTranscript(Dictionary<string, object> receipt, string quote, string timeline,
+            List<Dictionary<string, object>> priorLines, List<ContinuityPromptRecord> protectedExchanges)
+        {
+            if (protectedExchanges.Count == 0 || string.IsNullOrWhiteSpace(quote)) return false;
+            string turnId = ReadString(receipt, "source_turn_id", ""), exchange = ReadString(receipt, "exchange_id", "");
+            string target = ReadString(receipt, "target_id", "");
+            if (turnId.Length == 0 || exchange.Length == 0 || target.Length == 0 || turnId.Contains(',')) return false;
+            string publishedPlayerTurn = exchange + "_player";
+            var matches = priorLines.Where(line =>
+            {
+                string id = ReadFirstString(line, "id", "turnId", "turn_id");
+                return id == turnId || id == publishedPlayerTurn;
+            }).Take(2).ToList();
+            if (matches.Count != 1) return false;
+            var source = matches[0];
+            string sourceId = ReadFirstString(source, "id", "turnId", "turn_id");
+            if (ConversationTranscriptSourceId(source) != sourceId || sourceId.Contains(',')
+                || ReadFirstString(source, "exchangeId", "exchange_id") != exchange
+                || RecallSourceSpeakerId(source) != target || ReadString(source, "role", "") != "player"
+                || !ReadString(source, "text", "").Contains(quote, StringComparison.Ordinal)) return false;
+            if (sourceId != turnId)
+            {
+                // The in-person publisher derives the accepted exchange from the
+                // scene-turn ID saved by the relationship assessment.
+                string session = ReadFirstString(source, "sessionId", "session_id");
+                string campaign = ReadString(receipt, "campaign_id", ""), observer = ReadString(receipt, "observer_id", "");
+                string sourceTimeline = FirstNonEmpty(ReadString(receipt, "timeline_id", ""), timeline);
+                if (session.Length == 0 || campaign.Length == 0 || observer.Length == 0 || sourceTimeline.Length == 0
+                    || AcceptedConversationEventId(campaign, observer, TestDict("sessionId", session, "timelineId", sourceTimeline,
+                        "sceneTurnId", turnId, "correlationId", turnId)) != exchange) return false;
+            }
+
+            // Only the required, identity-projected transcript can replace this copy.
+            // Compare the whole attributed line so a redaction or different author cannot qualify.
+            string attributed = NormalizePromptSegment(FormatDialogueForPrompt(new() { source }));
+            return attributed.Contains(quote, StringComparison.Ordinal) && protectedExchanges.Any(record =>
+                record.SourceId.Split(',').Contains(sourceId, StringComparer.Ordinal)
+                && NormalizePromptSegment(record.Text).Contains("\n" + attributed + "\n", StringComparison.Ordinal));
         }
 
         private sealed class ContinuityPromptRecord
@@ -920,9 +1053,9 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 ["requiredSourceCoverageComplete"] = missingSources.Count == 0
             };
             if (missingSources.Count > 0) throw new InvalidOperationException("Required continuity evidence was lost during prompt assembly: " + string.Join(",", missingSources));
-            // Keep the complete envelope and its diagnostics. The final provider
-            // preflight returns the normal recoverable failure without dispatching;
-            // throwing here bypassed input recovery and left an empty HTTP 500.
+            // Keep the complete envelope and its size diagnostics. Preparation
+            // budgets are best effort; final estimates do not prevent dispatch.
+            // Exact required-source and current-generation checks remain enforced.
         }
 
         private static List<string> MissingContinuityContent(string rendered, Dictionary<string, object> evidence, bool serialized = false)
@@ -1017,6 +1150,8 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 ["selectedInputAllowance"] = Math.Min(allowance, SelectConversationInputStep(estimate)),
                 ["fits"] = estimate <= allowance && capacityFits && ReadBool(policy, "outputFits", false) && missingSources.Count == 0,
                 ["physicalCapacityFits"] = capacityFits,
+                ["estimatePolicy"] = "advisory_after_best_effort_preparation",
+                ["dispatchAllowed"] = missingSources.Count == 0,
                 ["capacityAccounting"] = runtimeManaged ? "conservative_estimate_with_codex_runtime_enforcement" : "utf8_byte_upper_bound",
                 ["missingSourceIds"] = missingSources, ["requiredSourceCoverageComplete"] = missingSources.Count == 0,
                 ["estimator"] = "ascii_divided_by_three_plus_unicode_utf8_bytes_plus_128; not an exact tokenizer",

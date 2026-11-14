@@ -13,6 +13,10 @@ namespace ReignBetaServer
         private const int ConversationUnverifiedInputLimit = 48000;
         private const int ConversationCapacitySafetyReserve = 1024;
         private const int CodexConversationRuntimeReserve = 16384;
+        // Preparation uses the capacity estimates to choose optional context.
+        // Final dispatch enforces source integrity, never an estimated token ceiling.
+        private static bool ConversationProviderPreflightAllowsDispatch(Dictionary<string, object> preflight) =>
+            preflight == null || ReadBool(preflight, "requiredSourceCoverageComplete", false);
         private static readonly AsyncLocal<string> CodexCapacityMetadataOverride = new AsyncLocal<string>();
         private static readonly object CodexCapacityMetadataGate = new object();
         private static string CodexCapacityRefreshHome = "";
@@ -180,6 +184,12 @@ namespace ReignBetaServer
             estimate <= 32000 ? 32000 : estimate <= 48000 ? 48000 :
                 (int)Math.Min(int.MaxValue / 3, ((long)estimate + 7999) / 8000 * 8000);
 
+        private static bool NeedsContinuityProviderPreflight(Dictionary<string, object> settings,
+            Dictionary<string, object> payload, string requestType, bool codexSubscription) =>
+            codexSubscription || settings?.ContainsKey("conversationInputTokenLimit") == true
+                || ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight") != null
+                || (requestType ?? "").IndexOf("continuity_repair", StringComparison.OrdinalIgnoreCase) >= 0;
+
         private static int ConversationPromptHardCharacterLimit(Dictionary<string, object> settings,
             Dictionary<string, object> preflight)
         {
@@ -222,10 +232,22 @@ namespace ReignBetaServer
             int allowance = verified
                 ? (int)Math.Min(int.MaxValue / 3, Math.Max(0L, (long)context - output - ConversationCapacitySafetyReserve - runtimeReserve))
                 : ConversationUnverifiedInputLimit;
+            // The user's operating budget is independent of the model window.
+            // All builders, retries and final serialized preflights share this
+            // policy, including optional graph evidence and provider adapters.
+            int configuredInputLimit = 0;
+            if (settings != null && settings.ContainsKey("conversationInputTokenLimit"))
+            {
+                configuredInputLimit = PositiveCapacityInteger(settings, "conversationInputTokenLimit");
+                if (configuredInputLimit == 0 || configuredInputLimit > 1000000)
+                    throw new InvalidOperationException("conversationInputTokenLimit must be a positive integer no greater than 1000000.");
+                allowance = Math.Min(allowance, configuredInputLimit);
+            }
             return new Dictionary<string, object>
             {
                 ["routeKey"] = routeKey, ["capacityVerified"] = verified, ["verifiedContextTokens"] = verified ? context : 0,
                 ["inputAllowance"] = allowance, ["outputReserve"] = output, ["safetyReserve"] = ConversationCapacitySafetyReserve,
+                ["configuredInputTokenLimit"] = configuredInputLimit,
                 ["runtimeManagedContext"] = runtimeManaged, ["runtimeReserve"] = runtimeReserve,
                 ["outputFits"] = output > 0 && (!verified || maxOutput == 0 || output <= maxOutput),
                 ["maxOutputTokens"] = maxOutput, ["capacitySource"] = verified ? ReadString(certificate, "source", "") : "",

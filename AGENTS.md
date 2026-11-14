@@ -27,6 +27,8 @@ Use `product` for requested product-wide confidence and `all` where the manifest
 
 ### Deploy local changes
 
+Use the paired primary physical roots and the machine's reviewed deployment-source authority. Follow `../Reign/docs/agent/testing/UI_AND_DEPLOYMENT.md#reviewed-deployment-source` to prepare/review/promote exact report, source and artifact receipts, retained on E:. Deploy never creates or changes authority. Old worktree scripts are recovery-only. A fresh Linux-only candidate may use the retained qualified verifier; a client rebuild is not required solely for server deployment. Do not bypass a missing/stale checkpoint or delete recovery worktrees.
+
 1. Verify that `ReignServer` is separately registered with its own virtual disk; the deployment script selects it by default. Confirm `reignctl`, PostgreSQL, Apache and UTF-8 setup exist.
 2. Sync only the reviewed server source into `/var/www/html/ReignServer`, preserving its `.git`, ignored `data/` and ignored `runtime/`. Run `sudo reignctl prepare` inside that distro for pinned dependencies and models.
 3. Activate the exact successful `reign-linux-build-v1` artifact without rebuilding or changing source:

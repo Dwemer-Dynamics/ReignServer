@@ -76,6 +76,15 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             return context;
         }
 
+        private static void PrepareCountedRouteProviderRequest(Dictionary<string, object> input, Dictionary<string, object> writerRequest)
+        {
+            // Reference identity is minted only by the audit constructor/dispatch.
+            // Matching JSON flags or an unsealed clone confer no exemption.
+            if (IsSealedAnswerSupportAudit(input)) return;
+            input["politicalAuthors"] = writerRequest.TryGetValue("politicalAuthors", out object authors) ? authors : new object[0];
+            input["messages"] = RequiredPoliticalMessages(input, ReadDictionaryList(input, "messages"));
+        }
+
         private static Dictionary<string, object> GenerateRouteConversation(RouteConversationMemory context,
             Dictionary<string, object> request, string domainContract, int maximumReplyCharacters,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
@@ -150,14 +159,12 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             bool Valid(Dictionary<string, object> draft)
             {
                 string reply = ConversationSpeechForRecall(ReadString(draft, "reply", ""));
-                return !string.IsNullOrWhiteSpace(reply) && reply.Length <= maximumReplyCharacters
-                    && !Reign.Core.Contracts.Court.ReignRulerDocketRules.ContainsForbiddenNobleDocketStatistics(reply);
+                return !string.IsNullOrWhiteSpace(reply) && reply.Length <= maximumReplyCharacters;
             }
             var call = responder ?? ChatWithLlm;
             Dictionary<string, object> Counted(Dictionary<string, object> input)
             {
-                input["politicalAuthors"] = request.TryGetValue("politicalAuthors", out object authors) ? authors : new object[0];
-                input["messages"] = RequiredPoliticalMessages(input, ReadDictionaryList(input, "messages"));
+                PrepareCountedRouteProviderRequest(input, request);
                 context.ProviderCalls++; return call(input);
             }
             Dictionary<string, object> Failed(Dictionary<string, object> failure)
@@ -176,19 +183,11 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
                 }
                 return context.Result;
             }
-            var result = EnsureConversationDelivery(Counted(request));
+            var result = GenerateSinglePassConversation(request, context.Payload, context.Channel, responder: Counted);
             if (!ReadBool(result, "ok", false)) return Failed(result);
             var parsed = TryParseJsonObject(ReadString(result, "content", ""));
             if (!Valid(parsed))
                 return Failed(TestDict("ok", false, "error", "The speaker did not return a complete bounded dialogue response."));
-            result = RetryDialogueIntegrityViolation(result, request, context.Payload, context.Prior,
-                context.Campaign, EnsureCorrelationId(request), context.Channel, context.Observer, context.Unit, Counted, persist: false);
-            if (!ReadBool(result, "ok", false)) return Failed(result);
-            result = RetryRoleplayContinuityViolation(result, request, context.Payload, TestDict(), context.Prior,
-                context.Campaign, EnsureCorrelationId(request), context.Channel, context.Observer, context.Observer, "Player", context.Unit, Counted);
-            if (!ReadBool(result, "ok", false)) return Failed(result);
-            parsed = TryParseJsonObject(ReadString(result, "content", ""));
-            if (!Valid(parsed)) return Failed(TestDict("ok", false, "error", "The corrected route reply did not satisfy its original bounded contract."));
             parsed["reply"] = SanitizeVisibleReply(ReadString(parsed, "reply", ""));
             string finalReply = ReadString(parsed, "reply", "");
             finalReply = RenderGroundedSceneHeading(context.Payload, context.Observer, parsed, finalReply);

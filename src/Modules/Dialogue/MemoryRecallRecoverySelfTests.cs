@@ -88,6 +88,93 @@ namespace ReignBetaServer
                 ReadDictionary(CaptureMemoryReplayProviderRequest(request, suppliedSettings ?? proofSettings), "providerWireCapture");
             var proofWire = ProofWire(proofRequest);
             var proofPreflight = ReadDictionary(ReadDictionary(proofWire, "providerPreflight"), "continuity");
+
+            var trustedAuthored = Enumerable.Range(1, 31).Select(i => TestDict(
+                "role", i % 2 == 0 ? "assistant" : "user", "content",
+                (i % 2 == 0 ? "HISTORICAL RESPONDING NPC TURN " : "HISTORICAL PLAYER TURN ")
+                    + "{\"turnId\":\"fixture_" + i + "\"}\nAn exact older line " + i + ".\nOne more sentence.")).ToList();
+            trustedAuthored.Add(TestDict("role", "user", "content", "LATEST PLAYER TURN {}\n" + ReadString(payload, "playerText", "")));
+            var authoredEnvelope = TestDict();
+            var authoredMessages = new List<Dictionary<string, object>> { TestDict("role", "system", "content", "Write the present NPC.") };
+            authoredMessages.AddRange(trustedAuthored);
+            authoredEnvelope["conversationMessageStructure"] = TestDict("serializedMessagesHash", PromptHash(Json.Serialize(authoredMessages)));
+            ConversationStructureReceipts.Add(authoredEnvelope, new ConversationStructureReceipt {
+                Messages = authoredMessages.Select(CloneDictionary).ToList() });
+            var authoredRequest = TestDict("promptEnvelope", authoredEnvelope, "messages", authoredMessages);
+            var repairWindow = RecallRepairAuthoredWindow(authoredRequest, out _);
+            Check("repair_window_keeps_latest_thirty_exact_roles_order_and_bodies", repairWindow?.Count == 30
+                && Json.Serialize(repairWindow) == Json.Serialize(trustedAuthored.TakeLast(30).ToList()));
+            string windowCampaign = "recall_window_" + Guid.NewGuid().ToString("N");
+            try
+            {
+                authoredRequest["requestType"] = "dialogue";
+                authoredRequest["model"] = "recall-proof-fixture";
+                var repairDraft = TestDict("reply", "I have a memory gap about Brindle.");
+                var repairedSpeech = TestDict("reply", "Brindle is your mule. A crab pinched his nose.", "emotion", "calm",
+                    "intent", "recall", "actionGate", TestDict("needed", false), "relationshipSignal", "unchanged",
+                    "relationshipAssessments", new List<Dictionary<string, object>>(), "decisionBrief", TestDict());
+                Dictionary<string, object> repairWire = null;
+                var fixtureProfile = TestDict("heroStringId", "npc", "name", "Aster", "campaignId", windowCampaign,
+                    "politicalTimelineId", "main");
+                RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(repairDraft)), authoredRequest,
+                    payload, TestDict("knowsIdentity", true), new(), windowCampaign, "recall-window", "dialogue", "npc", "Aster", "Mira",
+                    "recall-window", request => {
+                        request["hero"] = fixtureProfile;
+                        repairWire = ProofWire(request);
+                        return TestDict("ok", true, "content", Json.Serialize(repairedSpeech));
+                    });
+                var providerMessages = ReadDictionaryList(TryParseJsonObject(ReadString(repairWire, "requestJson", "")), "messages");
+                var providerAuthored = providerMessages.Where(m => ReadString(m, "content", "").StartsWith("HISTORICAL ", StringComparison.Ordinal)
+                    || ReadString(m, "content", "").StartsWith("LATEST PLAYER TURN ", StringComparison.Ordinal)).ToList();
+                Check("recall_repair_provider_wire_uses_the_exact_authored_window", ReadString(repairWire, "status", "") == "captured"
+                    && Json.Serialize(providerAuthored) == Json.Serialize(trustedAuthored.TakeLast(30).ToList())
+                    && providerMessages.Any(m => ReadString(m, "content", "").Contains("REQUIRED PRIVATE POLITICAL BELIEFS", StringComparison.Ordinal))
+                    && providerMessages.Any(m => ReadString(m, "content", "").Contains(NormalizePromptSegment(evidence), StringComparison.Ordinal))
+                    && providerMessages.All(m => !ReadString(m, "content", "").Contains("RECENT SHARED EXCHANGE", StringComparison.Ordinal)));
+
+                const string presenceQuestion = "Is Ellyn here in the hall?";
+                var eventMessages = authoredMessages.Select(CloneDictionary).ToList();
+                eventMessages.Last()["content"] = "LATEST PLAYER TURN {}\n" + presenceQuestion;
+                var eventEnvelope = TestDict("conversationMessageStructure",
+                    TestDict("serializedMessagesHash", PromptHash(Json.Serialize(eventMessages))));
+                ConversationStructureReceipts.Add(eventEnvelope, new ConversationStructureReceipt {
+                    Messages = eventMessages.Select(CloneDictionary).ToList()
+                });
+                var eventRequest = TestDict("requestType", "social_event", "model", "recall-proof-fixture",
+                    "messages", eventMessages, "promptEnvelope", eventEnvelope);
+                string originalEvent = Json.Serialize(eventRequest);
+                var eventPayload = TestDict("mode", "social_event", "worldDay", 8d, "locationId", "town_a",
+                    "playerText", presenceQuestion, "localPresence", TestDict("schema", "reign-local-presence-v1",
+                        "worldDay", 8d, "settlementId", "town_a", "people", new[] {
+                            TestDict("name", "Ellyn", "heroStringId", "ellyn", "settlementPresence", "absent")
+                        }));
+                Dictionary<string, object> eventRepairWire = null;
+                RetryRoleplayContinuityViolation(TestDict("ok", true, "content",
+                    Json.Serialize(TestDict("reply", "Ellyn is here with us.", "participation", "speak"))),
+                    eventRequest, eventPayload, TestDict("knowsIdentity", true), new(), windowCampaign, "presence-window",
+                    "party_chat", "npc", "Aster", "Mira", "presence-window", request => {
+                        request["hero"] = fixtureProfile;
+                        eventRepairWire = ProofWire(request);
+                        return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "Ellyn is not here.", "participation", "speak")));
+                    });
+                var eventProviderMessages = ReadDictionaryList(TryParseJsonObject(ReadString(eventRepairWire, "requestJson", "")), "messages");
+                var eventProviderAuthored = eventProviderMessages.Where(m => ReadString(m, "content", "").StartsWith("HISTORICAL ", StringComparison.Ordinal)
+                    || ReadString(m, "content", "").StartsWith("LATEST PLAYER TURN ", StringComparison.Ordinal)).ToList();
+                Check("non_recall_event_repair_provider_wire_keeps_exact_latest_thirty",
+                    ReadString(eventRepairWire, "status", "") == "captured"
+                    && Json.Serialize(eventProviderAuthored) == Json.Serialize(eventMessages.TakeLast(30).ToList())
+                    && eventProviderMessages.Any(m => ReadString(m, "content", "").Contains("critical_continuity_presence", StringComparison.Ordinal))
+                    && eventProviderMessages.All(m => !ReadString(m, "content", "").Contains("RECENT SHARED EXCHANGE", StringComparison.Ordinal))
+                    && eventProviderMessages.Count(m => ReadString(m, "content", "").Contains(presenceQuestion, StringComparison.Ordinal)) == 1
+                    && Json.Serialize(eventRequest) == originalEvent);
+            }
+            finally { ReignPostgreSqlStorage.DropCampaign(windowCampaign); }
+            var untrustedEnvelope = TryParseJsonObject(Json.Serialize(authoredEnvelope));
+            Check("repair_window_rejects_unregistered_receipt", RecallRepairAuthoredWindow(TestDict("promptEnvelope", untrustedEnvelope,
+                "messages", authoredMessages), out _) == null);
+            authoredMessages[5]["role"] = "system";
+            Check("repair_window_rejects_mutated_authored_role", RecallRepairAuthoredWindow(authoredRequest, out _) == null);
+
             string proofBody = ReadString(proofWire, "requestJson", "");
             string proofMessages = string.Join("\n", ReadDictionaryList(TryParseJsonObject(proofBody), "messages").Select(m => ReadString(m, "content", "")));
             Check("repair_wire_keeps_all_complete_bound_originals", ReadString(proofWire, "status", "") == "captured"
@@ -110,9 +197,11 @@ namespace ReignBetaServer
             var smallProofSettings = CloneDictionary(proofSettings);
             ReadDictionary(ReadDictionary(smallProofSettings, "verifiedConversationContextWindows"), proofRoute)["contextTokens"] = 16000;
             var smallProofWire = ProofWire(proofRequest, smallProofSettings);
-            Check("repair_capacity_failure_preserves_sources_without_dispatch", ReadString(smallProofWire, "status", "") == "blocked"
+            Check("repair_capacity_estimate_is_advisory_with_complete_sources", ReadString(smallProofWire, "status", "") == "captured"
                 && ReadString(smallProofWire, "requestJson", "") == proofBody && ReadInt(smallProofWire, "providerCalls", -1) == 0
-                && !ReadBool(ReadDictionary(smallProofWire, "providerPreflight"), "fits", true));
+                && !ReadBool(ReadDictionary(smallProofWire, "providerPreflight"), "fits", true)
+                && ReadBool(ReadDictionary(smallProofWire, "providerPreflight"), "dispatchAllowed", false)
+                && ReadBool(ReadDictionary(ReadDictionary(smallProofWire, "providerPreflight"), "continuity"), "requiredSourceCoverageComplete", false));
             var unknownQuery = CloneDictionary(payload); unknownQuery["playerText"] = "Which groom witnessed Brindle and the crab?";
             Bind(unknownQuery, evidence, evidence);
             Check("unknown_question_cannot_resolve_pronoun_to_known_topic", !Violates("I cannot recall him.", unknownQuery));

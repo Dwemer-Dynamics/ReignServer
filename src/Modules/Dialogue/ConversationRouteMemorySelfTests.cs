@@ -155,12 +155,14 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 var recoveryPayload = Payload("recovery_1");
                 var recoveryContext = PrepareRouteConversationMemory(recoveryPayload, "npc", "recovery_route",
                     "recovery_session", "recovery_1", new[] { "npc" }, settingsOverride: settings);
-                var failedDraft = VisibleFailedRepairWithoutEffects(TestDict("reply", safeQuestion), "memory_rewrite");
+                // Live providers return authored speech. Historical engine notices
+                // are covered by the immutable-source recovery tests, and must not
+                // be injected as provider output through the retired repair path.
                 var recovered = GenerateRouteConversation(recoveryContext, CloneDictionary(request), "No native effects.", 800,
-                    _ => TestDict("ok", true, "visibleRepairFailure", true, "content", Json.Serialize(failedDraft)));
+                    _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", safeQuestion))));
                 string recoveredReply = ReadString(TryParseJsonObject(ReadString(recovered, "content", "")), "reply", "");
-                Check("failed_check_keeps_usable_route_dialogue", ReadBool(recovered, "ok", false)
-                    && ConversationSpeechForRecall(recoveredReply) == safeQuestion);
+                Check("single_pass_keeps_usable_route_dialogue", ReadBool(recovered, "ok", false)
+                    && ConversationSpeechForRecall(recoveredReply) == safeQuestion && recoveryContext.ProviderCalls == 1, recovered);
                 if (ReadBool(recovered, "ok", false))
                     PublishRouteConversation(recoveryContext, recoveredReply, "Mira", _ => { });
                 var nextPayload = Payload("recovery_2"); nextPayload["playerText"] = "Use the east gate.";

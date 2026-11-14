@@ -30,6 +30,8 @@ namespace ReignBetaServer
                 RunCampaignProviderWaitCase(campaign, marker, true, false, add);
                 RunCampaignProviderWaitCase(campaign, marker, true, true, add);
                 RunCampaignProviderWaitCase(campaign, marker, false, true, add);
+                RunCampaignWorkLockDiagnosticsCase(add);
+                RunCampaignSchemaLockSelfTests(add);
 
                 CampaignDataGate.EnterWriteLock();
                 try
@@ -50,6 +52,45 @@ namespace ReignBetaServer
                     && Path.GetFileName(exact) == campaign && Directory.Exists(exact)) Directory.Delete(exact, true);
             }
             return results;
+        }
+
+        private static void RunCampaignWorkLockDiagnosticsCase(Action<string,bool,string> add)
+        {
+            object gate=new object();
+            bool restored=false,waitCaptured=false,joined=false,wrongThreadRejected=false;
+            Exception failure=null;
+            using var waiting=new ManualResetEventSlim();
+            var waiter=new Thread(() => {
+                try
+                {
+                    CampaignWorkLockWaitObserverForTests=_=>waiting.Set();
+                    using var owned=EnterCampaignWorkLock(gate,"fixture_waiter");
+                    waitCaptured=owned.OwnerAtWaitStart=="fixture_outer";
+                }
+                catch(Exception ex) { failure=ex; }
+                finally { CampaignWorkLockWaitObserverForTests=null; }
+            }) { IsBackground=true };
+            var outer=EnterCampaignWorkLock(gate,"fixture_outer");
+            using(outer)
+            {
+                outer.SetStage("fixture_work");
+                try { using var inner=EnterCampaignWorkLock(gate,"fixture_inner"); throw new IOException("fixture"); }
+                catch(IOException) { restored=CampaignWorkLockOwner(gate)=="fixture_outer" && outer.CurrentStage=="fixture_work"; }
+                var wrongThread=new Thread(()=> {
+                    try { outer.Dispose(); }
+                    catch(SynchronizationLockException) { wrongThreadRejected=true; }
+                }) { IsBackground=true };
+                wrongThread.Start();
+                if(!wrongThread.Join(5000)) throw new TimeoutException("Wrong-thread contract exceeded its bound.");
+                waiter.Start();
+                if(!waiting.Wait(5000)) throw new TimeoutException("Lock waiter was not observed.");
+            }
+            joined=waiter.Join(5000);
+            outer.Dispose(); // Idempotent; cannot release another owner's scope.
+            add("work_lock_diagnostics_restore_nested_owner",restored && wrongThreadRejected && CampaignWorkLockOwner(gate)=="unknown",
+                "Nested and exceptional scopes restore ownership and leave no stale owner.");
+            add("work_lock_diagnostics_attribute_wait_start",joined && waitCaptured && failure==null,
+                "A real contending thread captures the helper owner observed when its wait starts.");
         }
 
         private static void RunCampaignProviderWaitCase(string campaign, string marker, bool restore, bool providerFails,

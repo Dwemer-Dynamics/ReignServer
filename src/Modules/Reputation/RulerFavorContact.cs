@@ -64,11 +64,56 @@ AND (rst.tag_id='ruler_favoring' OR rst.tag_id LIKE 'ruler_favoring:%');",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day });
         }
 
+        private const int RulerFavorContactLookupBatchSize = 256;
+
+        private static Dictionary<(string RulerId, string FavoriteId), Dictionary<string, object>> InitializeRulerFavorContacts(
+            ReignDbConnection connection, string campaignId, string timelineId, double day,
+            List<Dictionary<string, object>> tags)
+        {
+            // PostgreSQL's text keys are case sensitive. Dedupe only lookup keys;
+            // the original tag order and repeated expiry writes remain authoritative.
+            var keys = tags.Select(tag => (RulerId: ReadString(tag, "subject_id", ""),
+                    FavoriteId: ReadString(TryParseJsonObject(ReadString(tag, "snapshot_json", "{}")), "linkedHeroId", "")))
+                .Where(key => !string.IsNullOrWhiteSpace(key.FavoriteId)).Distinct()
+                .OrderBy(key => key.RulerId, StringComparer.Ordinal)
+                .ThenBy(key => key.FavoriteId, StringComparer.Ordinal).ToList();
+            var contacts = new Dictionary<(string RulerId, string FavoriteId), Dictionary<string, object>>();
+            for (int offset = 0; offset < keys.Count; offset += RulerFavorContactLookupBatchSize)
+            {
+                var batch = keys.Skip(offset).Take(RulerFavorContactLookupBatchSize)
+                    .Select(key => new Dictionary<string, object> {
+                        ["ruler_id"] = key.RulerId, ["favorite_id"] = key.FavoriteId }).ToList();
+                var parameters = new Dictionary<string, object> {
+                    ["campaign"] = campaignId, ["timeline"] = timelineId,
+                    ["day"] = day, ["keys"] = Json.Serialize(batch) };
+                // Expiring one pair never changes another pair's exchange anchor.
+                // Initialize all anchors before expiry writes, then retain the
+                // existing per-tag effects, including duplicate-pair tags.
+                ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
+(campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
+SELECT $campaign,$timeline,ids.ruler_id,ids.favorite_id,
+(SELECT last_world_day FROM court_player_favoring_exchanges exchanges
+ WHERE exchanges.campaign_id=$campaign AND exchanges.timeline_id=$timeline
+ AND exchanges.ruler_id=ids.ruler_id AND exchanges.favorite_id=ids.favorite_id AND exchange_count>0),$day
+FROM jsonb_to_recordset(CAST($keys AS jsonb)) AS ids(ruler_id TEXT,favorite_id TEXT)
+WHERE TRUE
+ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;", parameters);
+                foreach (var contact in QuerySql(connection, @"SELECT contact.* FROM court_ruler_favor_contact contact
+JOIN jsonb_to_recordset(CAST($keys AS jsonb)) AS ids(ruler_id TEXT,favorite_id TEXT)
+ ON contact.ruler_id=ids.ruler_id AND contact.favorite_id=ids.favorite_id
+WHERE contact.campaign_id=$campaign AND contact.timeline_id=$timeline;", parameters))
+                    contacts.Add((ReadString(contact, "ruler_id", ""), ReadString(contact, "favorite_id", "")), contact);
+            }
+            return contacts;
+        }
+
         private static List<string> ExpireRulerFavorContact(ReignDbConnection connection, string campaignId, string timelineId, double day)
         {
             EnsureRulerFavorContactSchema(connection);
             var changed = new List<string>();
-            foreach (var tag in ActiveRulerFavorRows(connection, campaignId, timelineId, day))
+            var tags = ActiveRulerFavorRows(connection, campaignId, timelineId, day);
+            var contacts = InitializeRulerFavorContacts(connection, campaignId, timelineId, day, tags);
+            foreach (var tag in tags)
             {
                 var snapshot = TryParseJsonObject(ReadString(tag, "snapshot_json", "{}"));
                 string rulerId = ReadString(tag, "subject_id", ""), favoriteId = ReadString(snapshot, "linkedHeroId", "");
@@ -76,13 +121,8 @@ AND (rst.tag_id='ruler_favoring' OR rst.tag_id LIKE 'ruler_favoring:%');",
                 var p = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["ruler"] = rulerId, ["favorite"] = favoriteId, ["day"] = day, ["tag"] = ReadString(tag, "tag_id", ""),
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
-                // The old exchange timestamp is evidence; proximity is deliberately not contact.
-                ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
-(campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
-VALUES($campaign,$timeline,$ruler,$favorite,
-(SELECT last_world_day FROM court_player_favoring_exchanges WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite AND exchange_count>0),$day)
-ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;", p);
-                var contact = QuerySql(connection, @"SELECT * FROM court_ruler_favor_contact WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p).First();
+                if (!contacts.TryGetValue((rulerId, favoriteId), out var contact))
+                    throw new InvalidOperationException("Ruler-favor contact initialization returned no matching row.");
                 object contactDay;
                 double anchor = contact.TryGetValue("last_contact_day", out contactDay) && contactDay != null && contactDay != DBNull.Value
                     ? ReadDouble(contact, "last_contact_day", day) : ReadDouble(contact, "grace_day", day);

@@ -28,6 +28,15 @@ namespace ReignBetaServer
                     var sent = Recall("npc");
                     Check("author_knows_exact_accepted_letter_at_dispatch", sent.Count == 1 && sent[0].Text.Contains(body)
                         && sent[0].Text.Contains("You authored and sent") && sent[0].Required);
+                    var precision = SelectPrecisionEvidence(sent);
+                    var selected = ReadDictionaryList(PrecisionEvidenceAudit(precision, new MemoryQueryPlan { Observer = "npc" }, "precision"),
+                        "records").Single();
+                    Check("precision_alias_matches_required_exact_letter", RequiredLetterAlreadySupplied(sent[0], selected, precision.Text));
+                    Check("optional_or_changed_precision_letter_preserves_protected_copy",
+                        !RequiredLetterAlreadySupplied(sent[0], new Dictionary<string, object>(selected) { ["required"] = false }, precision.Text)
+                        && !RequiredLetterAlreadySupplied(sent[0], new Dictionary<string, object>(selected) { ["sourceHash"] = "changed" }, precision.Text)
+                        && !RequiredLetterAlreadySupplied(sent[0], new Dictionary<string, object>(selected) { ["revision"] = 2 }, precision.Text)
+                        && !RequiredLetterAlreadySupplied(sent[0], selected, precision.Text.Replace(body, "Different words.", StringComparison.Ordinal)));
                     Check("recipient_cannot_read_in_transit", Recall("player").Count == 0);
                     Check("other_group_member_cannot_read_private_letter", Recall("bystander").Count == 0);
                     Check("official_firewall", Recall("npc", new Dictionary<string, object>(context) { ["officialMemoryFirewall"] = true }).Count == 0);
@@ -111,6 +120,39 @@ namespace ReignBetaServer
                     Check("actual_final_prompt_" + memoryMode + "_" + mode, Json.Serialize(envelope.Messages).Contains(body)
                         && ReadBool(ReadDictionary(envelope.Diagnostics, "continuityPreflight"), "requiredSourceCoverageComplete", false));
                 }
+
+                var precisionPayload = PromptParityPayload("in_person", false);
+                precisionPayload["officialMemoryFirewall"] = false; precisionPayload["timelineId"] = "main";
+                precisionPayload["playerHeroStringId"] = "player"; precisionPayload["worldDay"] = 20d;
+                precisionPayload["playerText"] = "You wrote to me about the carved wooden horse.";
+                var precisePacket = BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(precisionPayload, "playerText", ""), 4000,
+                    precisionPayload, TestDict("memoryPrecisionMode", "precision", "enableSemanticMemory", false));
+                precisionPayload["memoryPrecisionEvidence"] = ReadDictionary(precisePacket, "precisionEvidence");
+                string priorReferenceMode = ConversationReferenceValidationMode.Value;
+                try
+                {
+                    foreach (string referenceMode in new[] { "off", "enabled" })
+                    {
+                        ConversationReferenceValidationMode.Value = referenceMode;
+                        var modePayload = CloneDictionary(precisionPayload);
+                        var modePacket = BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(modePayload, "playerText", ""), 4000,
+                            modePayload, TestDict("memoryPrecisionMode", "precision", "enableSemanticMemory", false));
+                        modePayload["memoryPrecisionEvidence"] = ReadDictionary(modePacket, "precisionEvidence");
+                        var preciseEnvelope = BuildDialoguePromptEnvelope(campaign, "npc", "Author", "Player", "Player",
+                            ReadString(modePayload, "playerText", ""), "On the road.", profile, PromptParityCharacteristics(),
+                            empty, empty, empty, noLines, noLines, noLines, noLines, PromptParityIdentity(), modePayload,
+                            precomputedMemoryPacket: "REIGN KNOWLEDGE PACKET\n" + ReadString(modePacket, "memoryPacket", ""), precomputedGroupConversationPrompt: "");
+                        var letterCopies = ContinuityPromptRecords(ConversationEvidenceText(preciseEnvelope.Diagnostics, preciseEnvelope.Messages), false)
+                            .Where(record => record.Kind == "letter" && record.Text.Contains("source=" + letterId + ";", StringComparison.Ordinal)).ToList();
+                        Check("final_precision_prompt_preserves_one_required_exact_letter_" + referenceMode,
+                            letterCopies.Count == 1 && letterCopies[0].Required
+                            && (referenceMode == "off" ? letterCopies[0].SourceId.StartsWith("m", StringComparison.Ordinal) : letterCopies[0].SourceId == letterId)
+                            && letterCopies[0].Text.Contains(body, StringComparison.Ordinal)
+                            && ReadBool(ReadDictionary(preciseEnvelope.Diagnostics, "continuityPreflight"), "requiredSourceCoverageComplete", false),
+                            TestDict("letterCopies", letterCopies.Count, "sourceIds", letterCopies.Select(record => record.SourceId).ToList()));
+                    }
+                }
+                finally { ConversationReferenceValidationMode.Value = priorReferenceMode; }
 
                 var point = TestDict("savePointId", "letter_before", "timelineId", "restored_main", "campaignTimeDays", 20d,
                     "worldHistorySequence", 8L, "worldHistoryHeadEventId", "history_head");

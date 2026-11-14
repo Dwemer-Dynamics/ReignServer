@@ -164,16 +164,34 @@ namespace ReignBetaServer
                 ["enableSemanticMemory"] = false, ["enableMinimeMemoryWorker"] = false,
                 ["enableMinimeMemoryReranking"] = false
             };
-            var packet = BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
-                "Lady Itaria, I was disappointed I did not see you compete in the last tournament here. I am Michael of Howarton.", 2500, context, offlineSettings);
-            string prompt = ReadString(packet, "memoryPacket", "");
-            // The protected recall policy precedes the authoritative history;
-            // history must still lead the evidence after that policy wrapper.
-            check("production_packet_injects_recorded_result", prompt.Contains("Michael won the tournament at Phycaon.")
-                && prompt.StartsWith(ProtectMemoryRecallSourcePolicy("itaria_fixture")
-                    + "\n\nKNOWN NATIVE WORLD HISTORY", StringComparison.Ordinal));
-            check("production_packet_provenance_and_budget", prompt.Contains("public tournament news; secondhand")
-                && ReadStringList(packet, "sourceEventIds").Contains("dialogue_win") && prompt.Length <= 10000);
+            foreach (bool legacyMode in new[] { true, false })
+            {
+                var modeSettings = new Dictionary<string, object>(offlineSettings) { ["legacyMemoryMode"] = legacyMode };
+                var packet = BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
+                    "Lady Itaria, I was disappointed I did not see you compete in the last tournament here. I am Michael of Howarton.", 2500, context, modeSettings);
+                string prompt = ReadString(packet, "memoryPacket", "");
+                var eventIds = ReadStringList(packet, "sourceEventIds");
+                var evidence = ReadDictionary(packet, "precisionEvidence");
+                bool factPresent = prompt.Contains("Michael won the tournament at Phycaon.");
+                bool modeCorrect = legacyMode ? evidence == null : ReadString(evidence, "mode", "") == "precision";
+                bool prefixCorrect = prompt.StartsWith(ProtectMemoryRecallSourcePolicy("itaria_fixture")
+                    + (legacyMode ? "\n\nKNOWN NATIVE WORLD HISTORY" : "\n\nMEMORY EVIDENCE"), StringComparison.Ordinal);
+                bool typedFact = legacyMode || ContinuityPromptRecords(prompt, false).Any(record => record.Kind == "native_confirmed"
+                    && record.Text.Contains("Michael won the tournament at Phycaon.") && record.Text.Contains("event dialogue_win"));
+                bool privateFutureForeignAbsent = !new[] { "dialogue_private", "dialogue_future", "dialogue_other", "dialogue_delayed" }
+                    .Any(eventIds.Contains) && !prompt.Contains("Michael won the hidden tournament.")
+                    && !prompt.Contains("Michael won the future tournament.") && !prompt.Contains("Michael won a tournament in another timeline.");
+                var diagnostic = TestDict("legacyMode", legacyMode, "factPresent", factPresent, "modeCorrect", modeCorrect,
+                    "prefixCorrect", prefixCorrect, "typedFact", typedFact, "secondhand", prompt.Contains("public tournament news; secondhand"),
+                    "eventIdPresent", eventIds.Contains("dialogue_win"), "privateFutureForeignAbsent", privateFutureForeignAbsent,
+                    "characters", prompt.Length, "sourceEventIds", eventIds);
+                string prefix = legacyMode ? "production_packet_" : "precision_packet_";
+                void PacketCheck(string name, bool passed) => checks.Add(TestDict("name", "dialogue_history_" + prefix + name,
+                    "passed", passed, "summary", name + (passed ? "" : ": " + Json.Serialize(diagnostic))));
+                PacketCheck("injects_recorded_result", factPresent && modeCorrect && prefixCorrect && typedFact);
+                PacketCheck("provenance_and_budget", prompt.Contains("public tournament news; secondhand")
+                    && eventIds.Contains("dialogue_win") && privateFutureForeignAbsent && prompt.Length <= 10000);
+            }
             return checks;
         }
     }

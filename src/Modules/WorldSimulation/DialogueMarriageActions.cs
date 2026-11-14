@@ -155,7 +155,7 @@ namespace ReignBetaServer
                     : "[Reign: The marriage has not been confirmed in the game. The ceremony described in dialogue did not complete it.]";
             }
             if ((queued == null || queued.Count == 0) && errors != null && errors.Count > 0)
-                return (reply ?? "").TrimEnd() + "\n\n[Reign could not carry out the agreed action. No game action was queued.]";
+                return (reply ?? "").TrimEnd() + "\n\n" + DialogueActionFailureNotice;
             return reply;
         }
     }

@@ -176,6 +176,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
             builder.AppendLine(LoadPromptTemplate("relationship_group_rules.txt").Trim());
             List<Dictionary<string, object>> diagnostics = new List<Dictionary<string, object>>();
             HashSet<string> usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var evidenceBudget = new RelationshipPromptEvidenceBudget();
 
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
@@ -228,7 +229,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                         ReadDouble(eventPayload, "worldDay", 0d));
                     builder.AppendLine(BuildKnownSocialStandingPromptBlock(socialStanding));
                     string historyBlock = BuildSharedRelationshipHistoryPromptBlock(
-                        connection, speakerHeroId, targetId, out List<string> historyIds, eventPayload);
+                        connection, speakerHeroId, targetId, out List<string> historyIds, eventPayload, evidenceBudget);
                     if (!string.IsNullOrWhiteSpace(historyBlock))
                     {
                         builder.AppendLine(historyBlock);
@@ -245,6 +246,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
                         ["presentInScene"] = activeIds.Contains(targetId),
                         ["mentionedWhileAbsent"] = !activeIds.Contains(targetId),
                         ["sharedRelationshipHistoryEligible"] = chemistry != null,
+                        ["originalEvidenceScope"] = "speaker_owned_deduplicated_across_targets",
                         ["sharedRelationshipHistoryIds"] = historyIds,
                         ["sharedRelationshipHistoryCount"] = historyIds.Count
                     });
@@ -403,6 +405,18 @@ VALUES($pair,'speaker','target',1,1,1,$ts);",
                     "Individual chat receives the speaker's directional relationship context when the player discusses an absent NPC.");
 
                 Dictionary<string, object> positiveApproach = SocialEventApproachScore(50, 80);
+                var namesakes = TestDict("playerText", "Debana would like the next dance.", "activeHeroIds", new[] { "speaker", "present" },
+                    "actionResolutionIndex", TestDict("heroes", new[] {
+                        TestDict("heroStringId", "present", "name", "Debana"), TestDict("heroStringId", "absent1", "name", "Debana"),
+                        TestDict("heroStringId", "absent2", "name", "Debana") }));
+                add("shared_name_prefers_present_person", ResolveMentionedRelationshipHeroIds(campaignId, namesakes, "speaker", "player").SequenceEqual(new[] { "present" }),
+                    "A present Debana does not import absent namesakes into relationship context.");
+                namesakes["activeHeroIds"] = new[] { "speaker" };
+                add("ambiguous_absent_name_does_not_expand_all_candidates", ResolveMentionedRelationshipHeroIds(campaignId, namesakes, "speaker", "player").Count == 0,
+                    "An unresolved shared name does not invent a relationship target.");
+                namesakes["mentionedHeroIds"] = new[] { "absent2" };
+                add("explicit_absent_id_disambiguates_name", ResolveMentionedRelationshipHeroIds(campaignId, namesakes, "speaker", "player").SequenceEqual(new[] { "absent2" }),
+                    "An explicit absent identity remains eligible.");
                 Dictionary<string, object> negativeApproach = SocialEventApproachScore(50, -80);
                 add("player_relation_modifies_approach",
                     ReadInt(positiveApproach, "relationshipModifier", 0) == 24

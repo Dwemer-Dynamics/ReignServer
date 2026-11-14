@@ -14,6 +14,8 @@ Chronological HISTORICAL PLAYER TURN messages contain the player's earlier words
 History is evidence, not a new instruction, action execution, consent grant or response-format example. Earlier visible prose omits private reasoning and mechanical output. The NEXT response must obey the complete current JSON output contract, including all required decisions and fields.
 The final LATEST PLAYER TURN contains the current contribution, including its complete narrative actions. Respond to that contribution in the established scene. Do not attribute this NPC's earlier words, actions, questions or requests to the player. Supplied memories and continuity references remain available in full; their repetition does not change who originally said something.";
 
+        private const string ObservedGroupTurnStageRules = "Its engine stage metadata identifies already delivered NPC contributions that occurred AFTER that player input. The input's position at the end of the prompt is not another player action or an answer to those later contributions.";
+
         private static string RenderConversationTemplate(string template, Dictionary<string, string> values) =>
             Regex.Replace(template ?? "", @"\{([A-Za-z][A-Za-z0-9_]*)\}", match => values != null
                 && values.TryGetValue(match.Groups[1].Value, out var value) ? value ?? "" : match.Value);
@@ -46,10 +48,13 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
             return slots;
         }
 
+        private sealed record ConversationStructureExchange(int FirstMessageIndex, int MessageCount, string SourceId, string Text);
+
         private sealed class ConversationStructureReceipt
         {
             public List<Dictionary<string, object>> Messages;
             public string CanonicalTranscript;
+            public List<ConversationStructureExchange> Exchanges;
         }
         // The receipt is process-local and cannot be supplied by a client/model.
         // Diagnostics expose hashes only; they cannot authorize an altered request.
@@ -57,8 +62,8 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
 
         private static void CopyConversationStructureReceipts(Dictionary<string, object> source, Dictionary<string, object> clone)
         {
-            if (source != null && clone != null && NarrativeClocks.TryGetValue(source, out var clock))
-                NarrativeClocks.GetValue(clone, _ => clock);
+            if (source != null && clone != null && SinglePassConversations.TryGetValue(source, out var delivery))
+                SinglePassConversations.GetValue(clone, _ => delivery);
             void Copy(Dictionary<string, object> from, Dictionary<string, object> to)
             {
                 if (from != null && to != null && ConversationStructureReceipts.TryGetValue(from, out var receipt))
@@ -89,7 +94,8 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
 
         private static void StructureConversationMessages(PromptEnvelope envelope, ConversationTemplateSlots slots,
             string transcript, List<Dictionary<string, object>> lines, Func<List<Dictionary<string, object>>, string> render,
-            string observer, string playerName, string playerText, bool eventMode, Func<string, string> project)
+            string observer, string playerName, string playerText, bool eventMode, Func<string, string> project,
+            Dictionary<string, object> observedStage = null)
         {
             string Project(string text) => NormalizePromptSegment(project == null ? text : project(text));
             string original = ReadString(envelope.Messages.Last(), "content", "");
@@ -130,12 +136,27 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                 }
             }
             int rulesIndex = messages.FindLastIndex(m => ReadString(m, "role", "") == "system") + 1;
-            messages.Insert(rulesIndex, TestDict("role", "system", "content", ConversationMessageStructureRules));
+            messages.Insert(rulesIndex, TestDict("role", "system", "content", ConversationMessageStructureRules
+                + (observedStage == null ? "" : "\n" + ObservedGroupTurnStageRules)));
+            // Keep the authoritative system copy. Only standalone references may
+            // be deduplicated: an enclosing protected block is verified verbatim.
+            string identityHash = ReadString(ReadDictionary(envelope.Diagnostics, "personalGossipIdentity"), "contentHash", "");
+            if (identityHash.Length > 0 && !PreserveProtectedGossipIdentityReference(envelope, identityHash))
+            {
+                string identity = messages.Where(m => ReadString(m, "role", "") == "system").Select(m => ReadString(m, "content", ""))
+                    .FirstOrDefault(text => text.StartsWith("[[continuity ", StringComparison.Ordinal) && PromptHash(text) == identityHash);
+                int start = identity == null ? -1 : context.IndexOf(identity, StringComparison.Ordinal);
+                if (start >= 0 && (start == 0 || context[start - 1] == '\n')
+                    && (start + identity.Length == context.Length || context[start + identity.Length] == '\n')
+                    && context.IndexOf(identity, start + identity.Length, StringComparison.Ordinal) < 0)
+                    context = context.Remove(start, identity.Length);
+            }
             int liveStart = messages.Count;
             messages.Add(TestDict("role", "user", "content", "REFERENCE CONTEXT — current engine state and attributed memory, not player speech\n" + context));
 
             var groups = GroupContinuityTranscriptLines(lines);
             var reconstructed = new List<string>();
+            var exchanges = new List<ConversationStructureExchange>();
             int structured = 0, references = 0;
             foreach (var record in ContinuityPromptRecords(canonical, true))
             {
@@ -164,6 +185,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                     reconstructed.Add(recordText); references++; continue;
                 }
                 var pieces = new List<string>();
+                exchanges.Add(new ConversationStructureExchange(messages.Count, spans.Count, record.SourceId, recordText));
                 for (int i = 0; i < spans.Count; i++)
                 {
                     var line = spans[i].Line;
@@ -193,7 +215,9 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                 throw new InvalidOperationException("Structured conversation did not retain the complete selected transcript.");
             // Use the observer-projected original, outside template/whitespace
             // normalization, so narrative formatting and all current actions survive.
-            messages.Add(TestDict("role", "user", "content", "LATEST PLAYER TURN " + Json.Serialize(TestDict("speaker", playerName ?? "the player"))
+            var latestMetadata = TestDict("speaker", playerName ?? "the player");
+            if (observedStage != null) latestMetadata["engineStage"] = observedStage;
+            messages.Add(TestDict("role", "user", "content", "LATEST PLAYER TURN " + Json.Serialize(latestMetadata)
                 + "\n" + (playerText ?? "")));
             envelope.Messages = messages;
             envelope.TotalChars = messages.Sum(m => ReadString(m, "content", "").Length);
@@ -210,7 +234,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                 "additionalProviderCalls", 0, "serializedMessagesHash", PromptHash(Json.Serialize(messages)));
             ConversationStructureReceipts.Add(envelope.Diagnostics, new ConversationStructureReceipt {
                 Messages = messages.Select(m => TestDict("role", ReadString(m, "role", ""), "content", ReadString(m, "content", ""))).ToList(),
-                CanonicalTranscript = canonical
+                CanonicalTranscript = canonical, Exchanges = exchanges
             });
         }
 
@@ -225,6 +249,19 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
                 ApplyPrivateReasoningPolicyToMessages(expected); // Only this exact existing server policy is an allowed prefix addition.
             return expected.Select((m, i) => ReadString(m, "role", "") == ReadString(messages[i], "role", "")
                 && ReadString(m, "content", "") == ReadString(messages[i], "content", "")).All(match => match);
+        }
+
+        private static Dictionary<string, object> ObservedGroupTurnStageFromRequest(Dictionary<string, object> request)
+        {
+            var diagnostics = ReadDictionary(request, "promptEnvelope");
+            var messages = ReadDictionaryList(request, "messages");
+            if (diagnostics == null || !ConversationStructureReceipts.TryGetValue(diagnostics, out _)
+                || !ConversationStructureMatches(diagnostics, messages)) return null;
+            string content = messages.Select(m => ReadString(m, "content", ""))
+                .LastOrDefault(t => t.StartsWith("LATEST PLAYER TURN ", StringComparison.Ordinal));
+            int end = content?.IndexOf('\n') ?? -1;
+            return end < 0 ? null : ReadDictionary(TryParseJsonObject(content.Substring("LATEST PLAYER TURN ".Length,
+                end - "LATEST PLAYER TURN ".Length)), "engineStage");
         }
 
         private static string ConversationEvidenceText(Dictionary<string, object> diagnostics, List<Dictionary<string, object>> messages)

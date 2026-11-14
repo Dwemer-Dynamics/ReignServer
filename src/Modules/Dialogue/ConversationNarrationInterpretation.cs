@@ -248,7 +248,7 @@ WHERE input_id=$id AND restore_generation=$generation;",
             List<Dictionary<string, object>> attendees, out string publicText, out bool privateForListener)
         {
             return ProjectPlayerInputForAudience(CapturePlayerInput(payload).Original, listener, attendees, out publicText, out privateForListener,
-                validatedNarration: true);
+                validatedNarration: true, privateFocusId: CapturePlayerInput(payload).PrivateFocusId);
         }
     }
 }

@@ -237,6 +237,12 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             double latestIngestedDay = events.Select(item =>
                 ReadDouble(item, "worldDay", ReadDouble(item, "world_day", 0d)))
                 .DefaultIfEmpty(0d).Max();
+            bool hasSpouseLetter = events.Any(item => IsSpouseLetterPayload(ReadDictionary(item, "payload")
+                ?? TryParseJsonObject(ReadString(item,"payload_json","{}"))));
+            // Spouse-letter projections enter the relationship monitor. Reserve
+            // it before the ingest transaction takes any table/advisory locks.
+            using var relationshipOwnership = hasSpouseLetter
+                ? EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId)) : null;
 
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
@@ -245,7 +251,6 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                 // retention compaction cannot retain that lock for its entire batch.
                 EnsureWorldHistorySchema(connection);
                 EnsureSharedActivityMemorySchema(connection);
-                bool hasSpouseLetter = events.Any(item => ReadString(ReadDictionary(item, "payload"), "source", "") == "explicit_spouse_letter");
                 if (hasSpouseLetter)
                 {
                     EnsureRelationshipAndCorrespondenceSchema(connection);

@@ -789,11 +789,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = ReadString(settings, "portraitNanoGptApiKey", "");
+            string apiKey = ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
+                ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl));
             string model = imageProfile.NanoGptModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("NanoGPT", model, "No NanoGPT image API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("NanoGPT", model, ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
             }
 
             if (UsesGeminiChatImageAdapter(model))
@@ -899,11 +900,12 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = ReadString(settings, "portraitAtlasApiKey", "");
+            string apiKey = ProviderSecret(settings, "portraitAtlasApiKey", ReadString(settings, "portraitAtlasUploadMediaUrl", AtlasUploadMediaUrl),
+                ReadString(settings, "portraitAtlasGenerateImageUrl", AtlasGenerateImageUrl), ReadString(settings, "portraitAtlasPredictionUrlPrefix", AtlasPredictionUrlPrefix));
             string model = imageProfile.AtlasModel;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                return PortraitImageCallResult.Fail("AtlasCloud", model, "No AtlasCloud API key is set in the server AI Image Generation tab.");
+                return PortraitImageCallResult.Fail("AtlasCloud", model, ProviderKeyUnavailable(settings, "portraitAtlasApiKey", apiKey) ? GlobalKeyUnavailableError : "No AtlasCloud API key is set in the server AI Image Generation tab.");
             }
 
             Stopwatch total = Stopwatch.StartNew();
@@ -1143,6 +1145,7 @@ namespace ReignBetaServer
 
         private static string UploadAtlasMedia(string uploadUrl, string apiKey, byte[] sourceImagePng, out int responseChars)
         {
+            ProviderTestGuard.BeforeDispatch("atlas_reference_upload");
             responseChars = 0;
             string boundary = "----BannerlordReign" + Guid.NewGuid().ToString("N");
             byte[] prefix = Encoding.UTF8.GetBytes("--" + boundary + "\r\n"
@@ -1593,6 +1596,7 @@ namespace ReignBetaServer
 
         private static string GetTextWithBearer(string url, string apiKey)
         {
+            ProviderTestGuard.BeforeDispatch("image_prediction_poll");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Accept = "application/json";
@@ -1603,6 +1607,7 @@ namespace ReignBetaServer
 
         private static byte[] DownloadBytes(string url)
         {
+            ProviderTestGuard.BeforeDispatch("image_download");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.Timeout = 360000;

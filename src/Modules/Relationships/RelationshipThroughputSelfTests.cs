@@ -231,6 +231,11 @@ VALUES($campaign,'main',7,7,'processing',1,$now);", new Dictionary<string, objec
                     add("startup_recovers_recent_interrupted_day", ReadString(QuerySql(connection,
                         "SELECT status FROM relationship_daily_inputs WHERE day_key=7;").Single(), "status", "") == "pending",
                         "Startup does not wait five minutes to retry a day left processing by the previous worker; its cursor stays intact.");
+                    // Readiness is now strictly read-only. The fixture must model
+                    // normal writer initialization before observing its counters.
+                    EnsureWorldTestSchema(connection);
+                    EnsureRumorSchema(connection);
+                    EnsureClanConflictSchema(connection);
                     var readinessA = BuildWorldTestReadiness(campaign, "main");
                     var readinessB = BuildWorldTestReadiness(campaign, "main");
                     ResetRelationshipCampaignScheduling(campaign);

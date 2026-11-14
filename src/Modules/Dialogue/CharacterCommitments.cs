@@ -12,6 +12,20 @@ namespace ReignBetaServer
 PERSISTENT PROMISES AND COMMITMENTS: Treat the protected ledger as current character knowledge, separate from recalled conversation. Keep promises, conditions, refusals and fulfilled or withdrawn commitments distinct. Do not renew a closed commitment or claim an intention has happened. A promise does not execute a gameplay action or override current consent or native authority.
 When this exchange creates or changes a durable promise, use hidden obligationWrites. Write one independently supported commitment per item; this collection may contain several items when several distinct promises are made. Keep conditions in the same item as the promise they qualify and quote the entire qualified promise in sourceEvidence. For closure or revision use the supplied obligation_id and status (fulfilled, withdrawn, superseded, unresolved or active). Never close a promise merely because its subject was mentioned. Only create a promise actually expressed by its owner, not an expectation, hypothetical, request or third-party report.";
 
+        // Preserve older and native rows without dialogue-validation metadata.
+        // When validation exists, an exact quote alone cannot turn a hypothesis into a promise.
+        private const string PromptObligationPayloadSql = "COALESCE(NULLIF(BTRIM(payload_json),''),'{}')::jsonb";
+        private const string PromptObligationEvidenceSql = $@"(
+    (COALESCE({PromptObligationPayloadSql}->>'sourceValidation','')=''
+        AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'status','')='')
+    OR ({PromptObligationPayloadSql}->>'sourceValidation'='supported_span'
+        AND {PromptObligationPayloadSql}->'sourceEvidence'->>'status'='supported_span')
+)
+AND COALESCE({PromptObligationPayloadSql}->>'evidenceType','') NOT IN ('hypothesis','unverified_summary','subjective_belief')
+AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','') NOT IN ('hypothesis','unverified_summary','subjective_belief')";
+
+        private const string PromptActiveObligationSql = "status IN ('unresolved','active','open','pending') AND " + PromptObligationEvidenceSql;
+
         private static void EnsureCharacterCommitmentTimeline(ReignDbConnection connection)
         {
             // Dialogue predates the Court timeline column. Its accepted-source
@@ -161,7 +175,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
         {
             if (!TableExists(connection, "obligations")) return "";
             var access = BuildKnowledgeAccessContext(observer, peer, "", payload);
-            var rows = QuerySql(connection, "SELECT * FROM obligations WHERE status IN ('unresolved','active','open','pending') AND "
+            var rows = QuerySql(connection, "SELECT * FROM obligations WHERE " + PromptActiveObligationSql + " AND "
                 + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations", access: access)
                 + " AND COALESCE(payload_json,'{}') NOT LIKE '%\"continuityQuarantined\":true%' ORDER BY created_day,obligation_id;",
                 new Dictionary<string, object> { ["observer"] = observer, ["timeline"] = access.TimelineId });

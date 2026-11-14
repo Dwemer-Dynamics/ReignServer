@@ -16,13 +16,15 @@ namespace ReignBeta.Shared.Rulers
         public const string Effects = "rulerSettlementEffectsEnabled";
         public const string CivilWars = "rulerCivilWarJudgmentsEnabled";
         public const string Reactions = "rulerUnauthorizedExecutionReactionsEnabled";
+        // Retain the old settings identifier without exposing an ineffective switch:
+        // Bannerlord 1.5.7 itself removed the foreign-governor loyalty penalty.
         public const string GovernorCulture = "rulerRemoveForeignGovernorPenalty";
         public const string Mortality = "rulerRequireLifeDeathEnabled";
         public static readonly IReadOnlyDictionary<string, string> Switches = new Dictionary<string, string>(StringComparer.Ordinal) {
             [Master] = "Ruler system", [Capitals] = "Capital residence and army departure rules",
             [Capture] = "Ruler capture protection", [Judgments] = "Captured ruler judgments",
             [Effects] = "Judgment settlement bonuses and penalties", [CivilWars] = "Civil-war ruler judgments",
-            [Reactions] = "Unauthorized ruler execution reactions", [GovernorCulture] = "Remove foreign-governor loyalty penalty",
+            [Reactions] = "Unauthorized ruler execution reactions",
             [Mortality] = "Require life and death"
         };
         private readonly Func<string, bool> _read;

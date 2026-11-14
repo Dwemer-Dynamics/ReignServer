@@ -1,46 +1,35 @@
 # Character Construction Policy
 
-## Required Runtime Behavior
+## Runtime behavior
 
-- The server ships the fixed character catalog in `ProfileLibrary/profile_catalog.json`.
-- Campaign launch must not upload or rewrite every fixed noble profile.
-- Opening chat history must not create or update a character profile.
-- Passive wilderness-event planning must not create or construct a dynamic character profile. It may read an existing profile, read the shipped catalog, or use compact live baseline facts only.
-- A dialogue, party-chat, or event request may carry the one live speaker profile needed for that interaction.
-- Shipped characters materialize their canonical campaign files without an LLM call.
-- Uncatalogued dynamic characters receive a deterministic baseline and the status `first_contact_pending`.
-- Before that dynamic character produces their first interactive response, Reign synchronously:
-  1. updates the one live character profile from the game request;
-  2. constructs the complete campaign character with at most two LLM attempts;
-  3. writes the public background, private history, traits, voice, motives, secrets, and state;
-  4. generates the requested response only after construction succeeds.
-- If both construction attempts fail, the response pipeline stops and returns a diagnostic. It must not answer using an incomplete character.
-- Once construction succeeds, later interactions reuse the saved campaign profile.
+Shipped characters materialize their canonical campaign files without an LLM call. Campaign launch does not upload or regenerate every fixed noble. Notable startup preparation assigns the deterministic MBTI/native-trait foundation; it does not author the full personal narrative.
 
-## Prohibited Behavior
+On **player town entry**, Reign starts full profile creation for every living notable belonging to that town. Loading a save already in town also submits once campaign preparation and Save Sync alignment finish. NPC-only settlement entry, villages and castles do not trigger this feature. Native profiles are captured on the application thread; transport and construction run outside it. There is no progress popup or native-time advance.
 
-- No character-construction worker may run at server startup.
-- No pending character queue may be consumed while the game is idle or closed.
-- No server process may scan all campaigns and issue character LLM calls.
-- The retired `background_enrichment` source is blocked before provider access.
-- The general `constructCharactersWithLlm` setting authorizes explicit and first-contact construction only. It does not authorize background work.
+The client obtains a server generation scope, then submits batches of at most 128 profiles to `POST /notables/profiles/prewarm`. The endpoint only admits work and returns counts; it never waits for construction. A single bounded pool admits up to 256 pending profiles across visits, coalescing `(replacement generation, campaign, hero)` identities. It fills the configured `providerMaxConcurrency` allowance (default 4, supported range 1–16), while all actual requests retain their provider-specific limits, interactive priority, circuit and retry behavior. The implementation does not raise configured limits or switch models/providers/billing. `constructCharactersWithLlm=false` disables speculative admission.
 
-## Legacy Queue Migration
+Completed and editor-owned profiles are reused. The full first-contact construction path remains authoritative: a foreground request can create a queued profile immediately, or wait on the same character gate for an already running creation. Its remaining model requests receive foreground priority. A successful prewarm makes the next conversation reuse the complete stored profile. No partial profile may speak. If speculative generation fails, its failure must not poison the original first-contact status; input-fingerprinted authoring checkpoints remain available for the normal route to resume. An unsuccessful normal foreground construction retains its existing diagnostic/retry policy.
 
-At server startup, old `pending`, `running`, and `failed` enrichment records are changed to `deferred_until_interaction`. Completed profiles and shipped canonical profiles are preserved. No model call is made during migration.
+An unsuccessful speculative attempt suppresses that hero for ten minutes for the same settings fingerprint and campaign generation. It does not suppress foreground creation. Capacity overflow returns `full` counts rather than creating more workers or retrying provider calls. Deferred profiles retain the normal first-contact fallback and can be admitted on a later visit. Transport failures retry after 30 seconds while the loaded campaign remains current. Admitted work can finish after leaving town; completed profiles remain useful. Pending jobs are in memory only and are never restored/scanned at server startup.
 
-## Diagnostics And Regression Gates
+Workers use campaign read leases and the common character construction gate. Provider and character-lock waits release their read lease through the existing campaign provider-wait contract. Restore/import/deletion invalidates queued and in-flight jobs before publication, including staged checkpoints. The scope handshake and client campaign-instance guard prevent a previous save's submission from being admitted as new work after same-campaign restoration. Snapshot creation does not invalidate ordinary current work; a restored incomplete profile retains normal first-contact recovery.
 
-`GET /api/diagnostics` exposes `characterConstructionPolicy` with:
+Pre-generation records `completed_on_town_entry`, never `completed_on_first_contact`, and grants no encounter, identity knowledge, witness access, relationship, portrait or gameplay action. It retains the existing notable MBTI/native-trait foundation policy. It cannot replace a newer native observation or Character Editor authority. First-contact generation for uncatalogued characters outside these town candidates remains unchanged.
 
-- `policy: first_interaction_only`
-- `backgroundWorkerStarted: false`
-- `automaticProfileUploadsEnabled: false`
-- `pendingBackgroundCalls: 0`
-- campaign queue-state counts
+## Prohibited background behavior
 
-The character-profile test suite verifies canonical no-LLM materialization, passive-event non-materialization, dynamic first-contact deferral, and the hard background-source block. Verification contracts also fail if the removed launch uploader or background worker symbols return.
+- No all-campaign construction scan or periodic population generator.
+- No startup consumption of historical enrichment queues.
+- No construction when opening chat history or during passive wilderness-event planning.
+- No revival of the retired `background_enrichment` source; its provider guard remains.
+- No automatic upload or rewrite of the fixed noble catalog.
 
-## Separate Live-State Synchronization
+The November 12, 2026 town-entry request authorizes this bounded exception to the former first-interaction-only rule. Existing `pending`, `running` and `failed` legacy enrichment records still migrate to `deferred_until_interaction` without a model call.
 
-Identity-network synchronization remains a separate compact roster operation because kingdom, clan, family, ruler, and living-status membership can change during a campaign. It does not construct character profiles and does not call an LLM.
+## Diagnostics and proof
+
+Operational events `notable_prewarm.queued`, `.completed` and `.failed` report bounded admission/failure evidence. `characterConstructionPolicy` reports the town-entry/fallback policy and pending work. Ready profiles and Character Editor corrections must not be rerolled.
+
+`RunTownNotableProfileSelfTests`, explicitly invoked by the focused `character_narrative` quick suite and the offline character-profile pipeline, uses isolated run-owned files/database and fake construction work. It exercises actual worker fanout at 1/4/16, capacity, duplicate/revisit admission, per-job callback handoff, priority promotion, mixed-case foreground locking, failure restoration/cooldown, completed/editor/deceased profile reuse, and campaign-generation/lease cleanup. Record these focused results separately from generic quick totals. Existing campaign-provider-wait contracts establish the restore barrier; the narrative suite also checks complete narrative publication. See the paired workspace's `docs/agent/testing/DIALOGUE_AND_PROVIDERS.md#town-notable-profile-pre-generation`.
+
+Canonical validation and Linux artifact publication do not establish native acceptance. After separately authorized deployment, observe town entry and save load in-town, all local notables, zero native-time/UI blocking, concurrent actual requests within the configured allowance, chat before/during/after completion, failed-provider fallback, repeated visits without regeneration, editor preservation, and same-campaign Save Sync restoration. Real provider/native tests retain their normal explicit authorization and disposable-save gates.

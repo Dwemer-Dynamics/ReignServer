@@ -155,6 +155,22 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                     && ReadInt(summariesOnly, "unreadCount", 0) == 1
                     && ReadDictionaryList(summariesOnly, "contactStates").Count == summaries.Count
                     && System.Text.Json.JsonSerializer.Serialize(summariesOnly).Length < 10000);
+                using (var connection = OpenCampaignConnection(campaign))
+                    ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
+('arranged_arrived','arranged_thread','unmet_leader','player','Marriage terms','delivered','reign_marriage_offer',5001,5001,5001),
+('arranged_courier','arranged_other_thread','unmet_other_leader','player','In transit','in_transit','reign_marriage_offer',5002,5002,5002),
+('arranged_answer','arranged_thread','player','unmet_leader','Signed answer','in_transit','reign_marriage_answer',5003,5003,5003),
+('arranged_meeting','arranged_thread','player','unmet_leader','Request to meet','read','reign_marriage_meeting',5004,5004,5004);");
+                var marriageInbox = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
+                    "contactIds", new[] { "bulk" }, "summaryOnly", true));
+                var marriageContacts = ReadDictionaryList(marriageInbox, "contactStates");
+                var marriageThread = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
+                    "contactIds", new[] { "bulk" }, "correspondentId", "unmet_leader"));
+                Check("arranged_offer_from_unmet_leader_appears_after_delivery",
+                    marriageContacts.Any(row => ReadString(row, "contactId", "") == "unmet_leader" && ReadInt(row, "unreadCount", 0) == 1)
+                    && !marriageContacts.Any(row => ReadString(row, "contactId", "") == "unmet_other_leader")
+                    && ReadDictionaryList(marriageThread, "letters").Select(row => ReadString(row, "letter_id", ""))
+                        .SequenceEqual(new[] { "arranged_arrived", "arranged_answer", "arranged_meeting" }));
                 var slimThread = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
                     "contactIds", new[] { "bulk", "old_contact" }, "correspondentId", "old_contact"));
                 var slimLetter = ReadDictionaryList(slimThread, "letters").Single();

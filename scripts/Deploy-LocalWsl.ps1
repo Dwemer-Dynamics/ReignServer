@@ -11,9 +11,23 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ClientDeploymentStorage.ps1')
+# Connect-GlobalKeys.ps1 records the Global API Keys distro; an update of the same dedicated installation keeps it.
+function Get-ReignPreservedGlobalKeysDistro($PreviousRecord, [string]$Distro) {
+    if ($PreviousRecord -and $PreviousRecord.schema -ceq 'reign-installation-v1' -and $PreviousRecord.serverMode -ceq 'dwemerdistro-wsl' -and
+        $PreviousRecord.wslDistro -ceq $Distro -and $PreviousRecord.PSObject.Properties['globalKeysDistro'] -and
+        $PreviousRecord.globalKeysDistro -ceq 'DwemerAI4Skyrim3') { return 'DwemerAI4Skyrim3' }
+    return $null
+}
 if ($SkipClient -and $SkipServer) { throw 'Select at least one component.' }
 if ($Distro -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$') { throw 'Invalid WSL distribution name.' }
 $workspaceRoot = (Resolve-Path -LiteralPath $Workspace).Path
+Import-Module (Join-Path $PSScriptRoot 'ReignDeploymentAuthority.psm1') -Force
+$selectedClientReport = if (-not $SkipClient) { $ValidationReport } else { '' }
+$selectedLinuxReport = if (-not $SkipServer) { $LinuxBuildReport } else { '' }
+# Fail before touching the installed module, private data, controls or runtime.
+$deploymentAuthority = Assert-ReignDeploymentAuthority -Workspace $workspaceRoot `
+    -ServerRoot (Join-Path $PSScriptRoot '..') -ValidationReport $selectedClientReport -LinuxBuildReport $selectedLinuxReport
+$approvedClientSources = Get-ReignClientSourceHashes $deploymentAuthority
 $release = Get-Content (Join-Path $PSScriptRoot '../release/release.json') -Raw | ConvertFrom-Json
 $recordPath = Join-Path $env:USERPROFILE '.reign\installation.json'
 $previousRecord = if (Test-Path -LiteralPath $recordPath) { Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json } else { $null }
@@ -104,10 +118,11 @@ if (-not $SkipClient) {
         Copy-Item -LiteralPath $file.FullName -Destination $bin
         if ((Get-FileHash -LiteralPath (Join-Path $bin $file.Name)).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) { throw 'Client copy checksum failed.' }
     }
-    & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $stage
+    & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $stage -ApprovedSourceHashes $approvedClientSources
     if (Test-Path -LiteralPath $helper) { throw 'The helper deployment path already exists.' }
     New-Item -ItemType Directory -Path (Split-Path $helper) -Force | Out-Null
     Copy-Item -LiteralPath $native -Destination $helper -Recurse
+    Assert-ReignStagedClient $deploymentAuthority $stage $helper
     $backup = Join-Path $deploymentRoot "before-$deploymentId"
     $legacyArenaBackup = Join-Path $deploymentRoot "arena-overhaul-before-$deploymentId"
     # Fixed children of the verified game directory; backups remain outside Modules.
@@ -130,7 +145,7 @@ if (-not $SkipClient) {
     if ((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $legacyArenaBackup)) { throw 'Deployment backup path already exists.' }
     $activation = Invoke-ReignClientActivation -Module $module -Stage $stage -Backup $backup -LegacyArena $legacyArena -LegacyArenaBackup $legacyArenaBackup -DeploymentRoot $deploymentRoot -DeploymentId $deploymentId -Verify {
         param($activatedModule)
-        & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $activatedModule
+        & (Join-Path $PSScriptRoot 'Test-ReignClientContent.ps1') -Workspace $workspaceRoot -StagedModule $activatedModule -ApprovedSourceHashes $approvedClientSources
     }
     New-Item -ItemType Directory -Path (Split-Path $recordPath) -Force | Out-Null
     if (Test-Path -LiteralPath $recordPath) { Copy-Item -LiteralPath $recordPath -Destination "$recordPath.before-$runId" }
@@ -141,6 +156,8 @@ if (-not $SkipClient) {
         contentRoot=$module;dataRoot="$prefix\var\www\html\ReignServer\data"
         bannerlordRoot=$game;moduleRoot=$module;postgresBin='';postgresPort=5432;nativeGeneratorRoot=$helper
     }
+    $globalKeysDistro = Get-ReignPreservedGlobalKeysDistro $previousRecord $Distro
+    if ($globalKeysDistro) { $record.globalKeysDistro = $globalKeysDistro }
     [IO.File]::WriteAllText("$recordPath.next",($record | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath "$recordPath.next" -Destination $recordPath -Force
     $generator = ConvertTo-WslPath (Join-Path $helper 'Bannerlord.NativeCharacterImageGenerator.App.exe')
@@ -170,6 +187,7 @@ if (-not $SkipServer) {
     & wsl.exe -d $Distro -u root -- /bin/sh $installer $control $versions $service
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the dedicated ReignServer service controls.' }
     $artifact = ConvertTo-WslPath $linux.ArtifactRoot
+    if ((Get-ReignFileSha (Join-Path $linux.ArtifactRoot 'reign-linux-artifact.json')) -ne $deploymentAuthority.LinuxManifestSha256) { throw 'Approved Linux manifest changed before activation.' }
     & wsl.exe -d $Distro -u root -- systemctl start postgresql apache2
     if ($LASTEXITCODE -ne 0) { throw 'ReignServer PostgreSQL or Apache could not start.' }
     $gameModules = Join-Path (Resolve-Path -LiteralPath $BannerlordPath).Path 'Modules'
@@ -191,8 +209,8 @@ if (-not $SkipServer) {
         if ($wasManagedRunning -and -not $LeaveStopped) { & wsl.exe -d $Distro -u root -- systemctl start reignserver }
         throw 'Linux activation failed; inspect the retained runtime and logs.'
     }
-    $verifyRuntime = 'import hashlib,json,pathlib,sys; source=pathlib.Path(sys.argv[1]); current=pathlib.Path("/var/www/html/ReignServer/runtime/current"); manifest=json.loads((source/"reign-linux-artifact.json").read_text()); expected=manifest["files"]; actual={p.relative_to(current).as_posix() for p in current.rglob("*") if p.is_file() and p.name!="reign-linux-artifact.json"}; assert set(expected)==actual, "runtime inventory mismatch"; assert not any(p.is_symlink() for p in current.rglob("*")), "runtime symlink"; assert all(hashlib.sha256((current/name).read_bytes()).hexdigest()==digest for name,digest in expected.items()), "runtime checksum mismatch"'
-    & wsl.exe -d $Distro -u root -- python3 -c $verifyRuntime $artifact
+    $verifyRuntime = 'import hashlib,json,pathlib,sys; source=pathlib.Path(sys.argv[1]); current=pathlib.Path("/var/www/html/ReignServer/runtime/current"); raw=(source/"reign-linux-artifact.json").read_bytes(); assert hashlib.sha256(raw).hexdigest()==sys.argv[2], "approved manifest changed"; manifest=json.loads(raw); expected=manifest["files"]; actual={p.relative_to(current).as_posix() for p in current.rglob("*") if p.is_file() and p.name!="reign-linux-artifact.json"}; assert set(expected)==actual, "runtime inventory mismatch"; assert not any(p.is_symlink() for p in current.rglob("*")), "runtime symlink"; assert all(hashlib.sha256((current/name).read_bytes()).hexdigest()==digest for name,digest in expected.items()), "runtime checksum mismatch"'
+    & wsl.exe -d $Distro -u root -- python3 -c $verifyRuntime $artifact $deploymentAuthority.LinuxManifestSha256
     if ($LASTEXITCODE -ne 0) {
         if ($previousVersion -match '^[0-9]{14}-[0-9]+$') {
             & wsl.exe -d $Distro -u root -- /usr/local/bin/reignctl rollback $previousVersion @activationOptions

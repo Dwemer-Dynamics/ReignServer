@@ -3,12 +3,46 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
     internal static partial class Program
     {
         private const int ConversationResponseRecoveryCharacterLimit = 1024 * 1024;
+        private const string DialogueActionQueuedNoticePrefix = "[Bannerlord Reign action queued:";
+        private const string DialogueActionFailureNotice = "[Reign could not carry out the agreed action. No game action was queued.]";
+        private static readonly Regex EmbeddedProviderDialogueMetadata = new Regex(
+            @"\{\s*""(?:decision_?brief|structuredActionDecision|stateUpdates|suggestedActions|drinkActions|(?:memory|belief|obligation|comprehension|continuity|dynamicCharacteristic)Writes)""\s*:\s*[\[{]",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        private static bool ContainsProviderDialogueOutcomeNotice(string reply)
+        {
+            reply ??= "";
+            return reply.Contains(DialogueActionQueuedNoticePrefix, StringComparison.OrdinalIgnoreCase)
+                || reply.Contains(DialogueActionFailureNotice, StringComparison.OrdinalIgnoreCase)
+                || TechnicalConversationNoticePrefixes.Any(notice => reply.Contains(notice, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Engine notices and structured metadata belong outside authored speech.
+        // Check the provider text before any effects are accepted.
+        private static Dictionary<string, object> RejectProviderReservedSpeech(Dictionary<string, object> response,
+            Dictionary<string, object> parsed)
+        {
+            string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
+            bool outcomeNotice = ContainsProviderDialogueOutcomeNotice(reply);
+            if (!outcomeNotice && !EmbeddedProviderDialogueMetadata.IsMatch(reply))
+                return response;
+            var rejected = CloneDictionary(response);
+            rejected["ok"] = false;
+            rejected["content"] = "";
+            rejected["errorCode"] = outcomeNotice ? "provider_dialogue_outcome_notice" : "provider_dialogue_embedded_metadata";
+            rejected["error"] = outcomeNotice
+                ? "The character's response included a reserved Reign notice. No NPC reply or effect was accepted from it."
+                : "The character's response included internal structured metadata. No NPC reply or effect was accepted from it.";
+            return rejected;
+        }
+
         private sealed class ConversationResponseEnvelope
         {
             internal Dictionary<string, object> Fields = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -148,8 +182,11 @@ namespace ReignBetaServer
             if (!ReadBool(llm, "ok", false) || !IsConversationStructuredMode(NormalizeLookup(auditMode).Replace(' ', '_')))
                 return llm;
             string original = ReadString(llm, "content", "");
-            if (TryParseStrictJsonObject(original) != null) return llm;
+            var parsed = TryParseStrictJsonObject(original);
+            if (parsed != null) return RejectProviderReservedSpeech(llm, parsed);
             var envelope = ReadConversationResponseEnvelope(original);
+            var checkedResponse = RejectProviderReservedSpeech(llm, envelope.Fields);
+            if (!ReadBool(checkedResponse, "ok", false)) return checkedResponse;
             bool hasReply = envelope.ReplyStart >= 0 && !string.IsNullOrWhiteSpace(ReadString(envelope.Fields, "reply", ""));
             bool incompleteEffect = envelope.IncompleteField.Length > 0;
             bool missingDrinks = ConversationResponseNeedsDrinkActions(request) && !envelope.Fields.ContainsKey("drinkActions");

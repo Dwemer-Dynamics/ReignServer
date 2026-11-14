@@ -27,6 +27,11 @@ namespace ReignBetaServer
                 data.Remove("sourceEncounterTurns");
                 return;
             }
+            if (ReadString(data, "sourceOrigin", "") == "public_witness")
+            {
+                BindPublicWitnessGossipSources(data, activeTurns);
+                return;
+            }
             string speaker = ReadString(data, "speakerId", ""), player = ReadString(data, "playerId", "");
             data["sourceEncounterTurns"] = activeTurns.Where(turn =>
                     ReadString(turn, "speaker_id", "") == speaker || ReadString(turn, "speaker_id", "") == player)
@@ -48,6 +53,8 @@ namespace ReignBetaServer
             if (ReadInt(data, "hop", 1) > 1)
                 return GossipFields("kind", "received_report", "communicatedAccount", ReadString(data, "sourceQuote", ""));
 
+            if (ReadString(data, "sourceOrigin", "") == "public_witness")
+                return PublicWitnessGossipEncounterContext(data);
             string speaker = ReadString(data, "speakerId", ""), player = ReadString(data, "playerId", "");
             int used = 0, omitted = Math.Max(0, Math.Min(2, ReadInt(data, "sourceContextOmittedWholeTurns", 0)));
             var turns = new List<Dictionary<string, object>>();

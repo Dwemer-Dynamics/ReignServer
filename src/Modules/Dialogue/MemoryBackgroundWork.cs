@@ -242,7 +242,9 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
                 var result = new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaign,
                     ["jobs"] = QuerySql(connection, "SELECT * FROM memory_background_jobs ORDER BY updated_ts DESC LIMIT 100;"),
                     ["counts"] = counts, ["precision"] = ReadMemoryPrecisionState(connection), ["leaseSeconds"] = 120,
-                    ["heartbeatSeconds"] = 30, ["reconciliationSeconds"] = 60 };
+                    ["heartbeatSeconds"] = 30, ["reconciliationSeconds"] = 60,
+                    ["effectiveMemoryMode"] = ResolveMemoryMode(LoadSettings()),
+                    ["referenceGraphMode"] = ConversationReferenceMode() };
                 foreach (string status in new[] { "pending", "running", "failed", "incomplete", "completed", "no_op" })
                     result[status] = ReadInt(counts.FirstOrDefault(r => ReadString(r, "status", "") == status), "count", 0);
                 return result;

@@ -459,8 +459,21 @@ namespace ReignBetaServer
             check("major_event_not_universal_growth", !NarrativeMajorEventRelevant(catConcern, death, "parent", new List<string>(), new List<string> { "parent" }, "Since the death I have come to care more about kittens."),
                 "The presence of a major event alone cannot change an unrelated hobby.");
             RunNarrativePersistenceTests(written, check);
+            RunTownNotableNarrativePublicationTests(written, check);
+            tests.AddRange(RunTownNotableProfileSelfTests());
             var catalog = ReadShippedNarrativeCatalog();
             var catalogProfiles = ReadDictionaryList(catalog, "profiles");
+            var nordKing = catalogProfiles.FirstOrDefault(x => ReadString(x, "heroStringId", "") == "lord_7_1");
+            if (nordKing != null)
+            {
+                string originalNord = Json.Serialize(nordKing);
+                var nordFacts = NarrativePremadeFacts(nordKing, catalogProfiles);
+                check("native_nord_authoring_role_context", ReadString(nordFacts, "clanName", "") == "Throsniring"
+                    && ReadString(nordFacts, "kingdomName", "") == "Kingdom of the Nordvyg"
+                    && ReadBool(nordFacts, "isRuler", false) && ReadBool(nordFacts, "isClanLeader", false)
+                    && Json.Serialize(nordKing) == originalNord,
+                    "War Sails native clan/kingdom context identifies Halthdar as ruler and clan leader without changing source canon.");
+            }
             var unspecified = catalogProfiles.FirstOrDefault(x => ReadString(x, "heroStringId", "") == "lord_6_6");
             if (unspecified != null)
             {

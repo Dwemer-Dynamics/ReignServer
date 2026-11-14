@@ -10,6 +10,87 @@ namespace ReignBetaServer
         private static readonly string[] DialogueFactualWriteFields = {
             "memoryWrites", "beliefWrites", "comprehensionWrites", "continuityWrites", "obligationWrites", "dynamicCharacteristicWrites" };
         private const string DialogueNonFactTypes = "subjective_belief|hypothesis|future_intention";
+        private static readonly HashSet<string> DialogueClaimQuestionWords = new(StringComparer.OrdinalIgnoreCase) {
+            "who", "whom", "whose", "what", "whether", "why", "how" };
+
+        // Read the field that actually persists. Legacy aliases remain readable
+        // when a continuity record has no canonical meaning.
+        private static string DialogueFactualWriteText(string field, Dictionary<string, object> write) =>
+            field == "continuityWrites" ? ReadFirstString(write, "meaning", "text", "summary", "claim", "description")
+                : ReadFirstString(write, "text", "summary", "claim", "description");
+
+        private static readonly string[] DialogueSmallCardinals = {
+            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+            "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty" };
+        private const string DialogueNumericWords = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million";
+
+        private static bool DialogueStandaloneCardinal(string text, int start, int length)
+        {
+            string before = text.Substring(0, start), after = text.Substring(start + length);
+            if (start < text.Length && char.IsUpper(text[start]) && Regex.IsMatch(after, @"^\s+[A-Z][\p{L}-]+\b")) return false;
+            if (Regex.IsMatch(before, @"\b(?:" + DialogueNumericWords + @")(?:\s+and)?[\s-]+$", RegexOptions.IgnoreCase)
+                || Regex.IsMatch(after, @"^[\s-]+(?:and\s+)?(?:" + DialogueNumericWords + @")\b", RegexOptions.IgnoreCase)) return false;
+            // This expression describes indecision, not a count of objects.
+            return !(Regex.IsMatch(before, @"\bin\s+$", RegexOptions.IgnoreCase)
+                && Regex.IsMatch(after, @"^\s+minds?\b", RegexOptions.IgnoreCase));
+        }
+
+        private static string DialogueSpecificityComparisonText(string text)
+        {
+            text ??= "";
+            // Comparison only: never rewrite source prose, citations or offsets.
+            // Larger unsupported compounds stay lexical, rather than treating
+            // "two hundred" as evidence for exactly two.
+            string normalized = Regex.Replace(text,
+                @"\b(?<tens>twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[ -](?<unit>one|two|three|four|five|six|seven|eight|nine)\b", match => {
+                    if (!DialogueStandaloneCardinal(text, match.Index, match.Length)) return match.Value;
+                    int tens = Array.IndexOf(new[] { "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety" }, match.Groups["tens"].Value.ToLowerInvariant()) + 2;
+                    int unit = Array.IndexOf(DialogueSmallCardinals, match.Groups["unit"].Value.ToLowerInvariant());
+                    return (tens * 10 + unit).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }, RegexOptions.IgnoreCase);
+            string comparable = normalized;
+            return Regex.Replace(comparable, @"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b", match =>
+                DialogueStandaloneCardinal(comparable, match.Index, match.Length)
+                    ? Array.IndexOf(DialogueSmallCardinals, match.Value.ToLowerInvariant()).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : match.Value, RegexOptions.IgnoreCase);
+        }
+
+        private static bool DialogueHasSpecificityQualifier(string text, string qualifier) => Regex.IsMatch(qualifier, @"^\d+$")
+            ? Regex.IsMatch(DialogueSpecificityComparisonText(text), @"(?<![\p{L}\p{N}])" + Regex.Escape(qualifier) + @"(?![\p{L}\p{N}])", RegexOptions.IgnoreCase)
+            : (text ?? "").Contains(qualifier, StringComparison.OrdinalIgnoreCase);
+
+        private const string SourceScopedMemoryWriteRules = "memoryWrites: Source-linked NPC/world-perspective episodes, not transcripts. Attribute reports; preserve speaker, recipient, conditions and certainty per clause. An uncertain event must stay uncertain, never confirmed with only its actor unknown. Plans/vague failures prove no event/cause. Keep disjunctions/pronouns unresolved without evidence. Only independent support resolves unknowns; guesses belong in beliefWrites/comprehensionWrites.";
+
+        // Compact only the complete stock template. Custom or partially edited rules
+        // remain verbatim; they receive the additional source-scope requirement once.
+        private static readonly (string Original, string Compact)[] StockMemoryWriteRuleLines = {
+            ("Classify durable consequences from this turn into the narrowest correct output layer. Return empty arrays when nothing qualifies.", "Record durable changes in the narrowest output layer; return empty arrays when none qualify."),
+            ("memoryWrites: Specific episodic facts the NPC should recall later. Write concise NPC/world-perspective facts, not transcripts.", SourceScopedMemoryWriteRules),
+            ("beliefWrites: Claims this NPC now believes or suspects. Beliefs may be false; include confidence and known canonical entity IDs.", "beliefWrites: This NPC's beliefs/suspicions, possibly false; include confidence and known canonical entity IDs."),
+            ("obligationWrites: Promises, threats, favors, debts, oaths, blackmail, schemes, bargains, secrets, or commitments. Identify owed_by and owed_to with canonical IDs when known. Use one item per distinct supported promise, preserving all conditions and its exact source quote; several distinct promises may produce several items despite generic one-write guidance. Update an existing supplied obligation_id to revise or close that promise; fulfilled, withdrawn and superseded commitments must not be renewed as unresolved.", "obligationWrites: Promises, threats, favors, debts, oaths, blackmail, schemes, bargains, secrets or commitments. Identify owed_by/owed_to, with canonical IDs when known. One item per distinct supported promise, with all conditions and its exact source quote, despite generic one-write guidance. Revise/close a supplied obligation_id; never renew fulfilled, withdrawn or superseded commitments as unresolved."),
+            ("comprehensionWrites: The NPC's private interpretation of what happened, why it matters, and what motive or danger they perceive. This is subjective and known only to that NPC by default.", "comprehensionWrites: Subjective interpretation of events, meaning, motives or danger; private to this NPC by default."),
+            ("stateUpdates: Only current mood, plan, or crisis changes that should affect the next scenes.", "stateUpdates: Only current mood, plan or crisis changes affecting later scenes."),
+            ("Remember vows, threats, bargains, insults, favors, secrets, confessions, debts, betrayals, attraction, fear, public humiliation, and politically meaningful offers.", "Retain vows, threats, bargains, insults, favors, secrets, confessions, debts, betrayals, attraction, fear, public humiliation and political offers."),
+            ("Do not write routine greetings, filler, facts already present in the profile, speculative IDs, duplicate entries, or temporary details that do not change belief, obligation, comprehension, state, or future behavior.", "Omit routine greetings, filler, existing profile facts, speculative IDs, duplicates and temporary details with no lasting effect."),
+            ("Use concise text and meaningful retrieval tags. Never invent hero, clan, kingdom, settlement, party, item, event, or action IDs.", "Use concise text and useful retrieval tags. Never invent hero, clan, kingdom, settlement, party, item, event or action IDs."),
+        };
+
+        private static string ComposeSourceScopedMemoryWriteRules(string rules)
+        {
+            rules ??= "";
+            var lines = rules.Replace("\r\n", "\n").Split('\n')
+                .Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => line.TrimEnd()).ToArray();
+            if (lines.SequenceEqual(StockMemoryWriteRuleLines.Select(line => line.Original), StringComparer.Ordinal))
+                return string.Join("\n", StockMemoryWriteRuleLines.Select(line => line.Compact));
+            return rules.Contains(SourceScopedMemoryWriteRules, StringComparison.Ordinal) ? rules
+                : rules.TrimEnd() + "\n\n" + SourceScopedMemoryWriteRules;
+        }
+
+        private static string LoadSourceScopedMemoryWriteRules() => ComposeSourceScopedMemoryWriteRules(LoadPromptTemplate("memory_write_rules.txt"));
+
+        private static bool HasPastDeliveryOrAccessClaim(string text) => Regex.IsMatch(text ?? "",
+            @"\b(?:arrived|reached|opened|intercepted|delivered|received)\b|\b(?:did(?:\s+not|n't)?|failed\s+to)\s+(?:arrive|reach|open|intercept|deliver|receive|read)\b|\b(?:was|were|has|have|had)\s+(?:already\s+)?read\b|\b(?:who|whose)\b.{0,80}\bread\b",
+            RegexOptions.IgnoreCase);
 
         private static bool DialogueClaimIsUncertain(string text) => Regex.IsMatch(text ?? "",
             @"\b(?:if|perhaps|maybe|imagine|suppose|whether|might|could|would|intend|intends|intended|plans?|hopes?|wishes?|suspect|suspects|believe|believes|I think|I thought|not sure|lying|deliberately mislead)\b",
@@ -35,7 +116,8 @@ namespace ReignBetaServer
                 string value = sentence.Value.Trim();
                 if (value.Length < 12 || value.EndsWith("?", StringComparison.Ordinal)) continue;
                 if (DialogueClaimIsUncertain(value)) continue;
-                if (!lasting && !Regex.IsMatch(value, @"\b(?:met|married|unmarried|refused|accepted|arranged|left|departed|wrote|sent|received|promised|agreed|answered|asked|told|said|before|after|first|last|never|yesterday|previously|remember)\b", RegexOptions.IgnoreCase)) continue;
+                if (!lasting && !Regex.IsMatch(value, @"\b(?:met|married|unmarried|refused|accepted|arranged|left|departed|wrote|sent|received|promised|agreed|answered|asked|told|said|proposed|suggested|offered|requested|insisted|meant|clarified|described|claimed|before|after|first|last|never|yesterday|previously|remember)\b|\b(?:your|my|our|his|her|their)\s+(?:original|earlier|previous)\s+(?:proposal|offer|request|words|answer)\b", RegexOptions.IgnoreCase)
+                    && !HasPastDeliveryOrAccessClaim(value)) continue;
                 // Split independent finite clauses. Keep shared-subject fragments
                 // attached: a missing actor must not be invented during splitting.
                 foreach (Match part in Regex.Matches(sentence.Value,
@@ -66,7 +148,7 @@ namespace ReignBetaServer
                 {
                     string type = ReadString(write, "evidenceType", ReadString(ReadDictionary(write, "sourceEvidence"), "evidenceType", ""));
                     if (!Regex.IsMatch(type, "^(?:" + DialogueNonFactTypes + ")$"))
-                        result.AddRange(ExtractDialogueFactualClaims(ReadFirstString(write, "text", "summary", "claim", "description"), payload, parsed, speaker, field, index, write));
+                        result.AddRange(ExtractDialogueFactualClaims(DialogueFactualWriteText(field, write), payload, parsed, speaker, field, index, write));
                     index++;
                 }
             }
@@ -153,7 +235,10 @@ namespace ReignBetaServer
                     var sourceTerms = DialogueClaimTerms(match.Value);
                     int overlap = terms.Count(sourceTerms.Contains);
                     bool exact = CanonicalDialogueClause(match.Value, ReadString(source, "speakerId", ""), "") == claim.Canonical;
-                    if (!exact && (overlap == 0 || terms.Count > 3 && overlap < 2)) continue;
+                    // Question words alone are no topical evidence. Keep the
+                    // shared term counts/scores intact for all other candidates.
+                    bool topicalOverlap = terms.Any(term => sourceTerms.Contains(term) && !DialogueClaimQuestionWords.Contains(term));
+                    if (!exact && (!topicalOverlap || overlap == 0 || terms.Count > 3 && overlap < 2)) continue;
                     int start = match.Index, end = start + match.Length;
                     // Include adjacent context when it qualifies the assertion or
                     // supplies its question/answer. Never silently clip a sentence.
@@ -209,6 +294,8 @@ namespace ReignBetaServer
                 string claimHash = MemorySelectionTextHash(claim.Quote).ToLowerInvariant();
                 var row = TestDict("claimId", claimId, "claimHash", claimHash, "field", claim.Field, "writeIndex", claim.WriteIndex,
                     "kind", claim.Kind, "claim", claim.Quote, "start", claim.Start, "length", claim.Quote.Length, "status", "evidence_missing");
+                bool answerRelation = Regex.IsMatch(claim.Quote, @"\b(?:asked|question)\b.{1,500}\b(?:answered|replied|responded)\b|\b(?:answered|replied|responded)\b.{1,500}\b(?:asked|question)\b", RegexOptions.IgnoreCase);
+                if (answerRelation) row["status"] = "answer_relation_context_missing";
                 coverage.Add(row);
                 if (claim.ClaimedActor.Length == 0) { row["status"] = "actor_unresolved"; continue; }
                 if (pairs.Count >= 8) { row["status"] = "comparison_capacity"; continue; }
@@ -249,7 +336,9 @@ namespace ReignBetaServer
                         var questionClauses = Regex.Matches(DialogueClaimSpeech(ReadString(question, "text", "")), @"[^.!?\r\n]+\?").Cast<Match>().ToList();
                         var lastQuestion = questionClauses.Count == 1 ? questionClauses[0] : null;
                         string conversation = ReadString(source, "conversationId", ""), questionConversation = ReadString(question, "conversationId", "");
-                        bool ordered = ReadLong(question, "acceptedSequence", 0) <= ReadLong(source, "acceptedSequence", long.MaxValue)
+                        bool ordered = QuestionSourceOrder(
+                                TestDict("sequence", ReadLong(source, "acceptedSequence", 0), "worldDay", ReadDouble(source, "worldDay", double.NaN)),
+                                TestDict("sequence", ReadLong(question, "acceptedSequence", 0), "worldDay", ReadDouble(question, "worldDay", double.NaN))) == "after"
                             && ReadLong(question, "timestamp", 0) <= ReadLong(source, "timestamp", long.MaxValue);
                         if (lastQuestion != null && questionTo == actor && ordered
                             && (conversation.Length == 0 || questionConversation.Length == 0 || conversation == questionConversation))
@@ -260,6 +349,10 @@ namespace ReignBetaServer
                                 "start", lastQuestion.Index + lastQuestion.Value.IndexOf(quote, StringComparison.Ordinal), "length", quote.Length, "quote", quote));
                         }
                     }
+                    // A question alone cannot ground a compound claim that
+                    // someone answered it. Record the missing relationship
+                    // coverage instead of presenting it as an atomic full pair.
+                    if (answerRelation && evidenceSpans.Count < 2) { row["status"] = "answer_relation_context_missing"; continue; }
                     var targets = ReadStringList(parsed, "addressedHeroStringIds");
                     string draftTo = targets.Count == 1 ? targets[0] : GroupConversationParticipantIds(payload).Count > 2 ? "" : player;
                     if (draftTo.Length == 0 && Regex.IsMatch(claim.Clause, @"\b(?:you|your|yours|yourself)\b", RegexOptions.IgnoreCase)) { row["status"] = "actor_unresolved"; continue; }
@@ -310,7 +403,7 @@ namespace ReignBetaServer
                 {
                     string type = ReadString(write, "evidenceType", ReadString(ReadDictionary(write, "sourceEvidence"), "evidenceType", ""));
                     var claims = Regex.IsMatch(type, "^(?:" + DialogueNonFactTypes + ")$") ? new List<RecalledDialogueClaim>()
-                        : ExtractDialogueFactualClaims(ReadFirstString(write, "text", "summary", "claim", "description"), payload, parsed, speaker, field, index, write);
+                        : ExtractDialogueFactualClaims(DialogueFactualWriteText(field, write), payload, parsed, speaker, field, index, write);
                     var gaps = new List<Dictionary<string, object>>();
                     foreach (var claim in claims)
                     {
@@ -318,23 +411,25 @@ namespace ReignBetaServer
                         // Ordinary paraphrases remain under the existing source
                         // validator; absent checker scores never manufacture error.
                         var qualifiers = Regex.Matches(claim.Clause,
-                            @"\b(?i:before|after|first|last|only|never|\d+)\b|\b(?i:leaving|left|departing|departed(?: from)?)\s+[A-Z][\p{L}-]+").Cast<Match>().Select(m => m.Value).ToList();
+                            @"\b(?i:before|after|first|last|only|never|\d+)\b|\b(?i:leaving|left|departing|departed(?: from)?)\s+[A-Z][\p{L}-]+").Cast<Match>().Select(m => m.Value)
+                            .Concat(Regex.Matches(DialogueSpecificityComparisonText(claim.Clause), @"\b\d+\b").Cast<Match>().Select(m => m.Value))
+                            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                         if (qualifiers.Count == 0) continue;
                         var spans = DialogueClaimPinnedSpans(claim, sources);
                         if (spans.Count == 0) continue; // Existing source binding owns missing citations.
                         string supporting = string.Join("\n", spans.Select(s => ReadString(s, "text", "")));
                         var terms = DialogueClaimTerms(claim.Clause);
                         var identityTerms = MergedInteractionParticipantProfiles(payload).SelectMany(p => DialogueClaimTerms(ReadString(p, "name", ""))).ToList();
-                        var contentTerms = terms.Where(t => !Regex.IsMatch(t, @"^\d+$") && !identityTerms.Contains(t)).ToList();
+                        var contentTerms = terms.Where(t => !Regex.IsMatch(DialogueSpecificityComparisonText(t), @"^\d+$") && !identityTerms.Contains(t)).ToList();
                         bool anchoredContent = contentTerms.Count > 0
                             && contentTerms.Count(t => DialogueClaimTerms(supporting).Contains(t)) >= Math.Min(2, contentTerms.Count);
                         // The same "before" or number in an unrelated directive
                         // is not support for this claim's relation or quantity.
-                        var missing = qualifiers.Where(q => !supporting.Contains(q, StringComparison.OrdinalIgnoreCase) || !anchoredContent).ToList();
+                        var missing = qualifiers.Where(q => !DialogueHasSpecificityQualifier(supporting, q) || !anchoredContent).ToList();
                         if (missing.Count == 0) continue;
                         // Another eligible original can justify added detail. Do
                         // not mistake one narrow citation for the whole evidence.
-                        bool otherSupport = sources.Where(s => !ReadBool(s, "provisionalDraft", false)).Any(s => missing.All(q => ReadString(s, "text", "").Contains(q, StringComparison.OrdinalIgnoreCase))
+                        bool otherSupport = sources.Where(s => !ReadBool(s, "provisionalDraft", false)).Any(s => missing.All(q => DialogueHasSpecificityQualifier(ReadString(s, "text", ""), q))
                             && terms.Count(t => DialogueClaimTerms(ReadString(s, "text", "")).Contains(t)) >= Math.Max(2, terms.Count - 1));
                         if (!otherSupport) gaps.Add(TestDict("claim", claim.Quote, "missingSpecificity", missing,
                             "sourceIds", spans.Select(s => ReadString(ReadDictionary(s, "source"), "id", "")).ToList()));

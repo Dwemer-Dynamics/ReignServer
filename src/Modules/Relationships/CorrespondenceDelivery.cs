@@ -18,6 +18,9 @@ last_error TEXT NOT NULL DEFAULT '',created_ts BIGINT NOT NULL,updated_ts BIGINT
 CREATE INDEX IF NOT EXISTS idx_correspondence_delivery_work ON correspondence_delivery_jobs(status,next_attempt_ts,lease_until);");
         }
 
+        private static bool IsDeterministicMarriageLetter(string source) => source == "reign_marriage_offer"
+            || source == "reign_marriage_answer" || source == "reign_marriage_meeting";
+
         private static Dictionary<string, object> EmptyCorrespondenceDeliveryResult() => TestDict(
             "ok", true, "deliveredLetters", new List<Dictionary<string, object>>(),
             "queuedReplies", new List<Dictionary<string, object>>(), "nativeRelationChanges", new List<Dictionary<string, object>>(),
@@ -40,6 +43,7 @@ ORDER BY delivery_day,letter_id LIMIT 100 FOR UPDATE SKIP LOCKED;", TestDict("da
                     if (!CorrespondenceDispatchOnTimeline(connection, letter, timeline)) continue;
                     string id = ReadString(letter, "letter_id", "");
                     bool toPlayer = ReadString(letter, "recipient_id", "") == player;
+                    bool marriage = IsDeterministicMarriageLetter(ReadString(letter, "source", ""));
                     string status = toPlayer ? "delivered" : "read";
                     ExecuteSql(connection, @"UPDATE letters SET status=$status,delivered_day=$day,read_day=$read,
 delivery_timeline_id=$timeline,updated_ts=$ts WHERE letter_id=$id AND status='in_transit';",
@@ -48,12 +52,12 @@ delivery_timeline_id=$timeline,updated_ts=$ts WHERE letter_id=$id AND status='in
                     letter["read_day"] = toPlayer ? 0d : day; letter["delivery_timeline_id"] = timeline;
                     arrived.Add(letter);
                     var result = EmptyCorrespondenceDeliveryResult();
-                    if (toPlayer) result["deliveredLetters"] = new[] { letter };
+                    if (toPlayer || marriage) result["deliveredLetters"] = new[] { letter };
                     ExecuteSql(connection, @"INSERT INTO correspondence_delivery_jobs
 (letter_id,player_id,timeline_id,restore_generation,source_hash,status,result_json,created_ts,updated_ts)
 VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now) ON CONFLICT(letter_id) DO NOTHING;",
                         TestDict("id", id, "player", player, "timeline", timeline, "generation", generation,
-                            "hash", LetterContentHash(letter), "status", toPlayer ? "completed" : "pending",
+                            "hash", LetterContentHash(letter), "status", toPlayer || marriage ? "completed" : "pending",
                             "result", Json.Serialize(result), "now", now));
                 }
                 transaction.Commit();

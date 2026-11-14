@@ -835,7 +835,7 @@ namespace ReignBetaServer
             if (provider == "OpenRouter")
             {
                 model = ReadString(settings, "portraitOpenRouterImageModel", DefaultOpenRouterImageModel);
-                error = string.IsNullOrWhiteSpace(ReadString(settings, "openRouterApiKey", ""))
+                error = !ProviderKeyConfigured(settings, "openRouterApiKey")
                     ? "Save your OpenRouter key in API Settings." : "";
                 return string.IsNullOrWhiteSpace(error);
             }
@@ -843,10 +843,7 @@ namespace ReignBetaServer
             model = atlas
                 ? ReadString(settings, "portraitAtlasImageModel", DefaultAtlasImageModel)
                 : ReadString(settings, "portraitNanoGptImageModel", "gpt-image-1.5");
-            string key = atlas
-                ? ReadString(settings, "portraitAtlasApiKey", "")
-                : ReadString(settings, "portraitNanoGptApiKey", "");
-            error = string.IsNullOrWhiteSpace(key)
+            error = !ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
                 ? "No " + provider + " image API key is configured in AI Image Generation."
                 : "";
             return string.IsNullOrWhiteSpace(error);

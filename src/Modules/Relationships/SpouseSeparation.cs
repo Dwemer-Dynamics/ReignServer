@@ -8,6 +8,9 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private static bool IsSpouseLetterPayload(Dictionary<string,object> payload)
+            => ReadString(payload,"source","")==ReignSpouseSeparation.Source;
+
         // Runs inside the history-ingest transaction, against its immutable stored event.
         // The letter doubles as the once-only projection receipt. Failed ingestion retries all effects together.
         private static void ProjectSpouseSeparation(ReignDbConnection connection, string campaignId,
@@ -16,7 +19,7 @@ namespace ReignBetaServer
             if (ReadString(evt, "event_type", "") != "divorce" || ReadString(evt, "source", "") != "reign_system"
                 || ReadString(evt, "phase", "") != "completed") return;
             var data = TryParseJsonObject(ReadString(evt, "payload_json", "{}"));
-            if (ReadString(data, "source", "") != ReignSpouseSeparation.Source) return;
+            if (!IsSpouseLetterPayload(data)) return;
             string operation = ReadString(data, "operationId", ""), actor = ReadString(data, "actorId", ""),
                 spouse = ReadString(data, "spouseId", "");
             if (operation.Length == 0 || actor.Length == 0 || spouse.Length == 0 || actor == spouse
@@ -72,7 +75,8 @@ VALUES($id,$thread,$actor,$actorName,$spouse,$spouseName,$body,'delivered',$sour
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool pass) => results.Add(TestDict("caseId", "spouse_letter_" + id, "passed", pass, "summary", id));
-            string campaign = "spouse_letter_test_" + Guid.NewGuid().ToString("N");
+            string campaign = "__spouse_letter_test_" + Guid.NewGuid().ToString("N");
+            Check("fixture_is_internal",IsInternalCampaignId(campaign));
             try
             {
                 using var connection = OpenCampaignConnection(campaign);
@@ -92,11 +96,24 @@ VALUES($id,'INTJ','Fixture','','fixture',1,1,'{}',1,1);", TestDict("id", hero));
                         TestDict("heroId", "clansperson", "before", 0, "after", -50) });
                 var evt = TestDict("event_type", "divorce", "phase", "completed", "source", "reign_system",
                     "correlation_id", "agreement:clause:0", "world_day", 10d, "payload_json", Json.Serialize(data));
-                using (var transaction = connection.BeginTransaction())
-                {
-                    ProjectSpouseSeparation(connection, campaign, "main", evt);
-                    transaction.Commit();
-                }
+                Dictionary<string,object> ingestion=null;
+                Check("history_ingest_wait_does_not_hold_database_locks",
+                    MarriageWorkWaitLeavesDatabaseAvailable(campaign, () =>
+                        ingestion=WorldHistoryIngestBatchApi(TestDict("campaignId",campaign,"timelineId","main",
+                            "events",new[]{TestDict("eventId","spouse_lock_fixture","eventType","divorce",
+                                "phase","completed","source","reign_system","correlationId","agreement:clause:0",
+                                "worldDay",10d,"payload",data)}))));
+                Check("history_ingest_committed_projection",ReadBool(ingestion,"ok",false)
+                    && ReadInt(ingestion,"accepted",0)==1);
+                Check("legacy_payload_source_is_recognized",IsSpouseLetterPayload(TryParseJsonObject(Json.Serialize(data))));
+                Dictionary<string,object> legacyProbe=null;
+                bool legacyAvailable=MarriageWorkWaitLeavesDatabaseAvailable(campaign, () =>
+                        WorldHistoryIngestBatchApi(TestDict("campaignId",campaign,"timelineId","main",
+                            "events",new[]{TestDict("eventId","spouse_lock_legacy_fixture","eventType","divorce",
+                                "phase","completed","source","reign_system","correlationId","agreement:clause:0",
+                                "worldDay",10d,"payload_json",Json.Serialize(data))})), observation => legacyProbe=observation);
+                Check("legacy_payload_history_ingest_uses_same_lock_order",legacyAvailable);
+                results.Last()["data"]=legacyProbe;
                 var letters = QuerySql(connection, "SELECT * FROM letters WHERE source='explicit_spouse_letter';");
                 Check("one_private_notice_from_npc_to_spouse", letters.Count == 1 && ReadString(letters[0], "sender_id", "") == "leaver"
                     && ReadString(letters[0], "recipient_id", "") == "spouse" && ReadString(letters[0], "status", "") == "delivered"

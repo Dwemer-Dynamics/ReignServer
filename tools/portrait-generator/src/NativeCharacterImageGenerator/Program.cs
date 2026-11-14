@@ -101,7 +101,7 @@ internal static class Program
               --transparent        Use a transparent background
               --list-morphs        Print accepted facial morph names and indices
               --verify-ai-cache-catalog
-                                   Validate the canonical 1,260-character AI cache contract
+                                   Validate the canonical 1,338-character AI cache contract
               --help               Show this help
 
             Example:
@@ -141,13 +141,13 @@ internal static class Program
                     && record.ClanTier.HasValue)
                 .All(record => record.ClanProvenance == "module_heroes_xml_and_clans_xml"),
             "A ranked War Sails hero did not resolve through heroes.xml and clans.xml.");
-        Require(reign == 720, $"Expected 720 Reign court characters; found {reign}.");
+        Require(reign == 798, $"Expected 798 Reign court characters; found {reign}.");
         var eligibleAdults = catalog.Characters.Count(record =>
             record.AgeYears >= AiSourceCacheContract.MinimumAiPortraitAge);
-        Require(eligibleAdults == 1228,
-            $"Expected 1,228 adult AI portrait subjects; found {eligibleAdults}.");
+        Require(eligibleAdults == 1306,
+            $"Expected 1,306 adult AI portrait subjects; found {eligibleAdults}.");
         Require(catalog.Characters.Select(record => record.CacheKey)
-                .Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1260,
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1338,
             "The canonical cache keys are not unique.");
         Require(catalog.Characters.Count(record =>
                 record.PhysicalConfidence.Source.Equals("neutral_fallback", StringComparison.Ordinal)) == 143,

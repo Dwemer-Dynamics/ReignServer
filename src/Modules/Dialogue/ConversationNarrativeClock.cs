@@ -8,72 +8,14 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private sealed class NarrativeClockReceipt { public Dictionary<string, object> Clock; }
-        private static readonly ConditionalWeakTable<Dictionary<string, object>, NarrativeClockReceipt> NarrativeClocks = new();
-
-        // Never read a client/model-supplied clock as authority. This receipt is
-        // constructed from saved accepted state and the admitted input projection.
-        private static Dictionary<string, object> CurrentNarrativeClock(Dictionary<string, object> payload) =>
-            payload != null && NarrativeClocks.TryGetValue(payload, out var receipt) ? receipt.Clock : TestDict();
-
-        private static double NarrativeEffectiveHour(Dictionary<string, object> payload, double nativeHour)
-        {
-            double hour = ReadDouble(CurrentNarrativeClock(payload), "hour", nativeHour);
-            return double.IsFinite(nativeHour) && double.IsFinite(hour) ? Math.Max(nativeHour, hour) : nativeHour;
-        }
-
-        private static (double Hours, string Label) NarratedTimeAdvance(Dictionary<string, object> payload, double previousHour)
-        {
-            if (!PlayerInputSources.TryGetValue(payload, out var source)
-                || ReadString(source.Interpretation, "status", "") != "validated") return (0, "");
-            var observable = ReadDictionaryList(source.Interpretation, "spans")
-                .Where(s => ReadString(s, "kind", "") == "observable").Select(s => ReadString(s, "text", "")).ToList();
-            foreach (string span in observable)
-            {
-                // Explicit scene transitions only. Recollections, plans, uncertain
-                // duration and coerced claims of another person's sleep grant no clock.
-                if (Regex.IsMatch(span, @"\b(?:if|would|could|might|tomorrow|yesterday|remember|imagine|wish|plan|will|whisper|say|tell|read|quote)\b", RegexOptions.IgnoreCase)) continue;
-                var duration = Regex.Match(span, @"\b(?:(?<n>\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|twelve)\s+(?<unit>hours?|days?)\s+(?:later|pass(?:es|ed)?)|after\s+(?<n>\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|twelve)\s+(?<unit>hours?|days?))\b", RegexOptions.IgnoreCase);
-                if (duration.Success)
-                {
-                    string number = duration.Groups["n"].Value.ToLowerInvariant();
-                    string[] numbers = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve" };
-                    int n = int.TryParse(number, out int parsed) ? parsed : Array.IndexOf(numbers, number);
-                    double hours = n * (duration.Groups["unit"].Value.StartsWith("day", StringComparison.OrdinalIgnoreCase) ? 24d : 1d);
-                    if (hours > 0 && hours <= 168) return (hours, duration.Value);
-                }
-                var morning = Regex.Match(span, @"\b(?:the\s+)?(?:next|following) morning\b", RegexOptions.IgnoreCase);
-                if (morning.Success)
-                {
-                    double target = Math.Floor(previousHour / 24d) * 24d + 8d;
-                    if (target <= previousHour) target += 24d;
-                    return (target - previousHour, morning.Value);
-                }
-            }
-            return (0, "");
-        }
-
+        // Retained historical clock fields never grant elapsed time. Campaign
+        // snapshots include fractional days; ordinary native progression remains.
+        private static Dictionary<string, object> CurrentNarrativeClock(Dictionary<string, object> payload) => TestDict();
+        private static double NarrativeEffectiveHour(Dictionary<string, object> payload, double nativeHour) => nativeHour;
+        private static (double Hours, string Label) NarratedTimeAdvance(Dictionary<string, object> payload, double previousHour) => (0d, "");
         private static void PrepareNarrativeClock(ReignDbConnection connection, Dictionary<string, object> payload, string speaker)
         {
-            double native = ReadDouble(payload, "worldDay", 0d) * 24d;
-            var handoff = QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE handoff_id=$id;",
-                TestDict("id", ContinuityTimeline(payload) + ":" + speaker)).SingleOrDefault();
-            var saved = ReadDictionary(TryParseJsonObject(ReadString(handoff, "payload_json", "{}")), "narrativeClock") ?? TestDict();
-            double previous = Math.Max(native, ReadDouble(saved, "hour", native));
-            if (!double.IsFinite(previous)) previous = native;
-            string contribution = ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId");
-            var advance = NarratedTimeAdvance(payload, previous);
-            bool alreadyAccepted = contribution.Length > 0 && ReadString(saved, "contributionId", "") == contribution;
-            bool changed = contribution.Length > 0 && advance.Hours > 0 && !alreadyAccepted;
-            var clock = TestDict("schema", "reign-narrative-clock-v1", "nativeHour", native,
-                "hour", previous + (changed ? advance.Hours : 0d), "advanced", changed,
-                "label", changed ? advance.Label : ReadDouble(saved, "hour", 0d) > native ? ReadString(saved, "label", "") : "",
-                "epoch", changed ? contribution : ReadString(saved, "epoch", ""),
-                "contributionId", changed ? contribution : ReadString(saved, "contributionId", ""),
-                "authority", "accepted_roleplay_only_no_native_time_or_actions");
-            NarrativeClocks.Remove(payload);
-            NarrativeClocks.Add(payload, new NarrativeClockReceipt { Clock = clock });
-            payload["narrativeClockDiagnostic"] = clock;
+            payload.Remove("narrativeClockDiagnostic");
         }
 
         private static List<Dictionary<string, object>> SpokenSceneCorrections(string text, Dictionary<string, object> payload)
@@ -130,20 +72,20 @@ namespace ReignBetaServer
             check("narrative_privacy_never_erases_native_outside_witness", !ReadBool(ConversationSceneSnapshot("party_chat", exposed), "private", true), null);
             var advance = Input("*Eight hours later, we meet again.*", "eight_hours");
             var advanced = PrepareConversationSceneState(campaign, advance, "npc", ReadString(advance, "playerText", ""), new(), "party_chat");
-            check("roleplay_time_invalidates_old_room_and_privacy", ReadString(advanced, "conversationVenue", "") == "Lords Hall"
-                && !ReadBool(ConversationSceneSnapshot("party_chat", advance), "private", true), advanced);
-            check("roleplay_recovery_uses_separate_clock", IntoxicationWorldHour(advance) == 488d && ReadDouble(advance, "worldDay", 0) == 20d
-                && ConversationWorldHour(advance) == 480 && RecoverIntoxication(TestDict("drinks", 4d, "hour", 480d, "hasClock", true), 4d, IntoxicationWorldHour(advance)).Drinks == 0d, null);
+            check("narrated_time_does_not_invalidate_room_or_privacy", ReadString(advanced, "conversationVenue", "") == "study"
+                && ReadBool(ConversationSceneSnapshot("party_chat", advance), "private", false), advanced);
+            check("narrated_time_grants_no_recovery", IntoxicationWorldHour(advance) == 480d && ReadDouble(advance, "worldDay", 0) == 20d
+                && ConversationWorldHour(advance) == 480 && RecoverIntoxication(TestDict("drinks", 4d, "hour", 480d, "hasClock", true), 4d, IntoxicationWorldHour(advance)).Drinks == 4d, null);
             advance["conversationDateLabel"] = "1085 Spring 25 Morning";
-            check("narrative_heading_does_not_reassert_stale_native_time", RenderGroundedSceneHeading(advance, "npc", TestDict(), "Hello.").StartsWith("Eight hours later —", StringComparison.OrdinalIgnoreCase), null);
+            check("heading_keeps_native_campaign_date", RenderGroundedSceneHeading(advance, "npc", TestDict(), "Hello.").StartsWith("1085 Spring 25 Morning —", StringComparison.OrdinalIgnoreCase), null);
             FinalizeConversationSceneState(campaign, advance, "npc", ReadString(advance, "playerText", ""), "Here we are again.", "party_chat", TestDict());
             var retry = Input("*Eight hours later, we meet again.*", "eight_hours");
             PrepareConversationSceneState(campaign, retry, "npc", ReadString(retry, "playerText", ""), new(), "party_chat");
-            check("accepted_time_advance_is_idempotent", IntoxicationWorldHour(retry) == 488d && !ReadBool(CurrentNarrativeClock(retry), "advanced", true), null);
-            check("old_scene_correction_cannot_cross_narrative_epoch", ReadString(ReadDictionary(retry, "conversationSceneState"), "conversationVenue", "") == "Lords Hall"
-                && !ReadBool(ConversationSceneSnapshot("party_chat", retry), "private", true), ReadDictionary(retry, "conversationSceneState"));
+            check("accepted_time_advance_is_zero", IntoxicationWorldHour(retry) == 480d && !ReadBool(CurrentNarrativeClock(retry), "advanced", false), null);
+            check("narrated_time_creates_no_scene_epoch", ReadString(ReadDictionary(retry, "conversationSceneState"), "conversationVenue", "") == "study"
+                && ReadBool(ConversationSceneSnapshot("party_chat", retry), "private", false), ReadDictionary(retry, "conversationSceneState"));
             var cloned = CloneDictionary(retry);
-            check("internal_payload_clone_retains_clock_receipt", IntoxicationWorldHour(cloned) == 488d, null);
+            check("internal_payload_clone_retains_clock_receipt", IntoxicationWorldHour(cloned) == 480d, null);
             var native = Input("Hello.", "native_catchup"); native["worldDay"] = 20.5d;
             PrepareConversationSceneState(campaign, native, "npc", "Hello.", new(), "party_chat");
             check("native_catchup_does_not_add_narrative_duration_twice", IntoxicationWorldHour(native) == 492d, null);

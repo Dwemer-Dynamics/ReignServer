@@ -1093,7 +1093,15 @@ FROM political_pressure_native_effects WHERE incident_id=$incident ORDER BY effe
                     ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='fetched',updated_ts=$ts WHERE incident_id=$id;",
                         new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
                 }
-                return new Dictionary<string, object> { ["ok"] = true, ["count"] = incidents.Count, ["notices"] = incidents };
+                // Current directed state, including zeros after consumed diplomacy; incident history is not readiness.
+                var readinessRows = QuerySql(connection, @"SELECT actor_kingdom_id,target_kingdom_id,pressure_value,dominant_channel
+FROM political_pressure_state WHERE campaign_id=$campaign AND timeline_id=$timeline
+ORDER BY actor_kingdom_id,target_kingdom_id LIMIT 1025;",
+                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
+                return new Dictionary<string, object> { ["ok"] = true, ["count"] = incidents.Count, ["notices"] = incidents,
+                    ["readinessPressure"] = new Dictionary<string, object> { ["version"] = 1, ["campaignId"] = campaignId,
+                        ["timelineId"] = timelineId, ["complete"] = readinessRows.Count <= 1024,
+                        ["pairs"] = readinessRows.Take(1024).ToList() } };
             }
         }
 
@@ -1427,6 +1435,16 @@ WHERE campaign_id=$campaign AND timeline_id='main' AND day_key=9;",
                     add("daily_processing_claim_is_concurrency_safe",
                         firstClaim != secondClaim && claimRows == 1,
                         "Concurrent daily pressure workers leave one durable claim and exactly one worker owns side effects.");
+                    ExecuteSql(connection, @"INSERT INTO political_pressure_state(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,pressure_value)
+VALUES($campaign,'main','ours','hostile',60),($campaign,'main','ours','resolved',0),($campaign,'other','ours','foreign-timeline',100);",
+                        new Dictionary<string, object> { ["campaign"] = campaignId });
+                    var readinessResponse = NextPoliticalPressureNotices(new Dictionary<string, string> { ["campaignId"] = campaignId, ["timelineId"] = "main" });
+                    var readinessSnapshot = ReadDictionary(readinessResponse, "readinessPressure");
+                    var readinessPairs = ReadDictionaryList(readinessSnapshot, "pairs");
+                    add("readiness_uses_current_scoped_directed_state", ReadBool(readinessSnapshot, "complete", false)
+                        && readinessPairs.Count == 2 && readinessPairs.Any(x => ReadString(x, "target_kingdom_id", "") == "hostile" && ReadInt(x, "pressure_value", -1) == 60)
+                        && readinessPairs.Any(x => ReadString(x, "target_kingdom_id", "") == "resolved" && ReadInt(x, "pressure_value", -1) == 0),
+                        "Readiness polling sees current hostile and consumed-zero directions from only the selected campaign timeline, without replaying incident effects.");
                 }
             }
             finally

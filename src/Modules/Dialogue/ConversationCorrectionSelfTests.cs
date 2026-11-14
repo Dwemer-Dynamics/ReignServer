@@ -66,6 +66,10 @@ namespace ReignBetaServer
             Check("older_other_speaker_gesture_is_not_same_beat", FindGroupExpressionEchoes(TestDict("reply", mirrored), "Something else.", group, "npc", "Rhagaea").Count == 0);
             string record = RenderContinuityRecord("source", "letter", "npc", "session", 1d, 119, true, "An exact supplied letter.");
             Check("exact_source_dedup_retains_original_once", OmitExactSuppliedContinuityRecords("RULES\n" + record + "\nOTHER", record) == "RULES\n\nOTHER");
+            string optionalCopy = record.Replace("required=true", "required=false", StringComparison.Ordinal);
+            Check("optional_duplicate_cannot_displace_required_source",
+                SelectSharedPromptRecords(optionalCopy, "", 0, new List<object>()).Context.Length == 0
+                && OmitExactSuppliedContinuityRecords(record, optionalCopy) == record);
             Check("same_id_different_revision_is_not_dropped", OmitExactSuppliedContinuityRecords(record.Replace("supplied", "revised"), record).Contains("revised"));
             Check("observer_and_session_dedup_boundaries", OmitExactSuppliedContinuityRecords(record.Replace("observer=npc", "observer=other"), record).Contains("observer=other")
                 && OmitExactSuppliedContinuityRecords(record.Replace("session=session", "session=other"), record).Contains("session=other"));

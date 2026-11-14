@@ -1,0 +1,779 @@
+{
+  "schema": "reign-war-economy-manifest-v2",
+  "version": 29,
+  "tool": "reign_start_war_economy_test",
+  "operation": "world_economy_test",
+  "modelRoutes": [
+    "direct",
+    "reviewed_naval_base",
+    "unsupported"
+  ],
+  "observedNonEnlistment": [
+    "native_ai_prisoner_transfer"
+  ],
+  "observedNativeFinance": [
+    "clan_daily_payout",
+    "kingdom_budget_credit",
+    "kingdom_support_withdrawal",
+    "caravan_remittance",
+    "military_party_remittance",
+    "town_market_wallet_adjustment",
+    "lord_purse_top_up",
+    "field_lord_purses",
+    "native_prisoner_awards",
+    "lord_loot_sale_proceeds",
+    "payer_identity",
+    "actual_wallet_mutations",
+    "native_finance_components",
+    "gold_barter_transfers",
+    "civilian_market_cash_component",
+    "horse_and_nonfood_market_sales"
+  ],
+  "observedNativeFood": [
+    "native_explanation",
+    "market_contribution",
+    "market_inventory",
+    "prosperity",
+    "garrison",
+    "event_and_espionage",
+    "civilian_consumption"
+  ],
+  "providerGuard": {
+    "schema": "reign-native-provider-free-guard-v1",
+    "tools": [
+      "reign_get_war_economy_provider_guard",
+      "reign_set_war_economy_provider_guard"
+    ],
+    "confirmation": "manage Reign provider-free economy test guard",
+    "operations": [
+      "prepare",
+      "release"
+    ],
+    "gates": "Enrolled exact run/task, verification control, game/BLSE closed, installed managed server inactive/dead with PID zero, selected WSL distro already running. No service startup, credential or provider-setting changes.",
+    "evidence": "Fresh provider status nativeProviderTestGuard for every process, marker hash/owner, zero allowed dispatches, zero blocked attempts and retained per-process attempt files. Blocked attempts fail the test precondition. A marker alone cannot certify provider-free execution.",
+    "cleanup": "Stop game and managed server; release only the owning run/task marker, retaining it as evidence. An observed guard stays latched until process exit. Restore independently backed-up producer settings."
+  },
+  "profiles": [
+    "snapshot",
+    "cohort_control",
+    "recruitment",
+    "production_probe",
+    "relief_probe",
+    "funding_probe",
+    "market_food_probe",
+    "household_probe",
+    "raid_food_probe",
+    "raid_partial_setup",
+    "raid_setup",
+    "readiness_probe",
+    "funding_trace",
+    "save_prepare",
+    "save_verify",
+    "civilian_crew_probe",
+    "npc_caravan_probe",
+    "household_stipend_probe",
+    "ship_funding_probe",
+    "replacement_setup"
+  ],
+  "nativeRecruitmentSources": [
+    "ai_volunteer",
+    "native_auto_garrison",
+    "native_base_garrison",
+    "native_naval_garrison"
+  ],
+  "separateNativeScenarios": [
+    "player volunteer cart success/cancel/stale/partial",
+    "Castle-Guard cadence, Harvest Exemption, term, cap and refunds",
+    "household party generation: repeated callback, destroyed/recreated party and player-clan lord",
+    "militia conversion integration audit; unsupported routes cannot certify coverage",
+    "prisoner recruitment, upgrades, patrol transfers and expedition returns debit zero population"
+  ],
+  "gates": [
+    "verification control",
+    "exact armed paused enrolled disposable Current",
+    "campaign/timeline/instance identity",
+    "retained drained recovery checkpoint before recruitment and controlled probes",
+    "invalid economy steps rejected before live run creation",
+    "provider authorization remains separate"
+  ],
+  "limits": {
+    "controlledReliefMaxHoldings": 64,
+    "productionProbeHearths": [
+      0,
+      1,
+      9.99,
+      10,
+      10.01,
+      50,
+      100,
+      199.99,
+      200,
+      200.01,
+      299.99,
+      300,
+      300.01,
+      400,
+      599.99,
+      600,
+      600.01,
+      1200,
+      2000
+    ],
+    "productionProbeRecovery": [
+      0,
+      0.3,
+      1
+    ],
+    "recruitmentFixtureMaxNativeIncrement": 20,
+    "nativeFixtureReceipts": 128,
+    "operationalReceipts": 512,
+    "saveSyncUniqueStates": 15,
+    "fundingTraceRows": 8192,
+    "fundingTraceNativeDays": 3,
+    "fundingTraceRealHours": 1,
+    "fundingTraceClans": 64,
+    "fundingProbePrisoners": 6,
+    "fundingProbeLootUnits": 40,
+    "foodProbeMaxGrain": 450,
+    "foodProbeMaxNonFood": 200,
+    "foodProbeCases": 8,
+    "foodProbeConsumptionCalls": 16,
+    "householdProbeParties": 3,
+    "householdProbeCancellationTrials": 2,
+    "fundingTraceVersion": 6,
+    "consumptionCashObserverVersion": 1,
+    "balanceCensusVersion": 1,
+    "nativeMarketSalesVersion": 1,
+    "horseSaleNativeCallSites": 2,
+    "horseProbeMaxMounts": 2,
+    "fundingTraceRecommendedApiBytes": 16777216,
+    "purchaseProbeNativeCalls": 10,
+    "purchaseProbeMaxMarketUnits": 10,
+    "purchaseProbeMaxPayerCash": 100000,
+    "purchaseProbeBuyers": 2,
+    "reliefProbeNativeAdapterPasses": 2,
+    "reliefProbeMaxFoodPerHolding": 10000,
+    "reliefProbeMaxTotalCapacity": 100000,
+    "foodProbeMaxFish": 150,
+    "fundingTraceWallets": 32768,
+    "leaderlessWageStoreObserverVersion": 1,
+    "shipFundingVersion": 1,
+    "shipProbeSyntheticHulls": 5,
+    "shipProbeAuxiliaryParties": 2,
+    "shipProbeMaxGoldPerWallet": 1000000
+  },
+  "isolation": "All probes require a retained checkpoint and exact paused armed Current. Recruitment uses native callbacks and real resources. Production temporarily quotes fixed hearth/recovery inputs, restoring them in finally. Relief arranges 20-percent stocks in at most64 current-realm holdings, one45-percent declining donor and one empty recipient, then invokes the native stock-transfer adapter. Setup stock adjustments are reported separately; every stock/counter/loyalty input is restored in finally. No treasury reset, native time advance, save or provider invocation. Interrupted fixtures require checkpoint recovery. Identical operations replay only saved receipts.",
+  "candidateDiscovery": "Snapshot supplies exact currently present NPC volunteer parties, garrison party IDs, functioning production villages and declining donor IDs; eligibility remains checked again at execution.",
+  "cleanup": "Restore the exact guarded run-owned recovery checkpoint; delete only exact enrolled run-owned saves through confirmation-gated campaign cleanup. Never delete or overwrite a baseline.",
+  "evidence": "reign-war-economy-native-test-v2; exact save, operation and native instance; before/after troop, hearth, cash and liability observations; native source counters; reign-war-economy-persistence-v3 fingerprint across distinct-process reload includes active assistance, shipments, expeditions, government/accord benefits, edict escrow and payment receipts. Snapshot/structural hooks never establish behavioral or balance acceptance.",
+  "balanceScenarios": [
+    {
+      "name": "controlled_village",
+      "initialHearth": 300,
+      "recruitsPerDay": 8,
+      "warDays": 32,
+      "recoveryDays": 64,
+      "targetDraftHearth": 176.63,
+      "targetRecoveredHearth": 216.57,
+      "externalBonuses": false
+    },
+    {
+      "name": "matched_campaigns",
+      "baselines": [
+        "verified Michael/AlphaFive immutable original",
+        "verified fresh campaign immutable original"
+      ],
+      "arms": [
+        "peace",
+        "costly war",
+        "peace with active benefits",
+        "war with active benefits"
+      ],
+      "observationDays": 63,
+      "recoveryDays": 64,
+      "historicalInitialObservationDays": 32
+    },
+    {
+      "name": "declining_relief_donor",
+      "assertions": [
+        "donor contributes below old 60-percent floor",
+        "current and projected donor floors respected",
+        "shipment=delivery+spoilage",
+        "no same-pass aid re-export"
+      ]
+    },
+    {
+      "name": "provider_free_stability",
+      "days": 126,
+      "assertions": [
+        "repeated wars",
+        "ownership/realm changes",
+        "save/reload",
+        "bounded history",
+        "no free troops or funds",
+        "zero provider dispatches"
+      ]
+    }
+  ],
+  "acceptance": {
+    "native": "pending",
+    "human": "pending",
+    "balance": "pending",
+    "providerFreeSoak": "pending"
+  },
+  "fundingProbeSources": [
+    "lord_purse",
+    "kingdom_support",
+    "market_balance",
+    "loot_sale",
+    "horse_sale",
+    "prisoner_sale",
+    "gold_barter",
+    "market_purchase"
+  ],
+  "fundingTraceControls": [
+    "trace_begin",
+    "trace_observe",
+    "trace_end"
+  ],
+  "fundingAudit": "Exact armed paused owned Current and retained recovery. Funding probes use closed native components, explicit synthetic inputs and finally-restored wallets/rosters/inventories/counters. Restore Current afterwards to discard native event/skill side effects before saving, advancing or measuring a natural campaign. Trace controls observe a fixed current-realm clan cohort, distinct hero/kingdom/market wallets, exact transfer counterparties and applied native finance components. No provider, time, consent or political-decision authority. Process-local evidence expires after three native days or one real hour, caps32768 wallets,8192 shared mutation/component/origin/population rows and8192 transfer rows, and fails on missing/dropped/error/unexplained evidence. Export before ending/reloading.",
+  "subsistenceConsumption": "Subsistence version3 forecasts seven days from the original native spendable category budgets, actual inventory-capped food units and loaded no-market food net, never yesterday's redirected SoldItems. Below20-percent current or counterfactual projected reserves, reallocate only existing nonfood purchasing power to the total subsistence target without reducing native food allocations. Finite linear negative demand still contributes zero purchasing power. Preserve original demand when no redirect occurs; never write persistent market demand. Native prices, rounding, goods removal and market credits remain. Eight native baseline/priority pairs cover supplied, empty, poor budget, funded healthy, negative demand, negative grain with funded alternative fish, projected shortage and projected-empty inputs. One NPC town, at most450 grain,150 alternative fish,200 nonfood units,150 required food units,100000 spendable budget per call and16 native consumption calls. Restore resources/RNG/latest observations and reload exact Current before advancement/save. Native abstract food-category definitions remain unchanged.",
+  "householdGeneration": "Registration version2: native assigns MBGUID after InitializeLordPartyProperties. Unique saved monotonic provisional tokens distinguish unregistered object instances; MobilePartyCreated finalizes only matching receipts to real native IDs. Existing parties are seeded on load without retroactive charges; legacy zero-ID evidence remains historical. household_probe requires a safe NPC fortification with thirty available recruits and an actual funded free NPC lord. It creates at most three parties, verifies duplicate initialization, destroy/recreate with reused string ID and distinct native ID, and zero troops from an empty payer. No cash or population is injected. Restore exact Current before natural advancement/save; numeric payer/population cleanup does not erase native side effects. Native cancellation trials (at most two transient single recruits) verify rollback restores payer cash, roster, Village-component-keyed hearths and strain, with zero committed expense. Finally restores numeric fixture inputs; full Current reload remains mandatory. Temporary maps use CLR reference identity because MBObjectBase.GetHashCode changes with native Id assignment; native registration2 evidence is required. Cancellation assertions compare their own immediate before-state independently from duplicate-callback assertions.",
+  "readOnlyBalanceCensus": [
+    "village_settlement_and_bound_ids",
+    "holding_security_loyalty_prosperity",
+    "holding_garrison_and_militia_members",
+    "clan_active_field_parties_and_members"
+  ],
+  "nativeMarketSales": "Native horse behavior non-food and surplus-mount sales share exact current-wallet affordability with the loot route. Unsold items remain. Buying horses retains native behavior. The guarded horse_sale probe covers funded non-food, partial multi-stack, empty-wallet mounts and partial mount sales; two synthetic mounts maximum. Additive paid-sale counters do not invent prior income. Native trace8192-row budget remains bounded; large report reads can use the existing supported16MiB API cap.",
+  "nativeConsumptionCashObserver": "Funding trace2/consumption observer1 records actual native MakeConsumption market gold before/after and the already observed hook net. Only an unobserved nonnegative remainder is added to the observational net; physical gold is never written. Negative, excessive or overflowing overlap fails evidence instead of masking double counting. cashComponent rows retain actual before/after, overlap and supplemental amounts separately. Hook counts alone are not coverage; older trace1 evidence remains readable but cannot certify this observer. Natural native proof requires no residual/drops/errors/expiry plus exercised observer rows.",
+  "navalRecruitment": {
+    "version": 1,
+    "source": "native_naval_garrison",
+    "nativeTarget": "NavalDLC.CampaignBehaviors.ShipTradeCampaignBehavior.OnSettlementEntered",
+    "maxNativeIncrement": 20,
+    "arrivalReceiptLimit": 8192,
+    "arrivalReceiptRetentionDays": 3,
+    "fullCurrentRestoreAfterProbe": true,
+    "fixture": "Existing NPC governor and garrison, two actual naval caravans; thread-local ShipwrightsHand override only during two synthetic arrivals and duplicate callback. Temporarily empty actual payer for second arrival, restoring that wallet in finally. No persisted perks, cash grants, party creation, providers or time advancement. Full Current restore before natural measurement or saving.",
+    "transferScope": "Kings Pardon pirates remain transfers. Civilian fishing/caravan crews consume zero hearths by user request2026-11-05. New standing garrison soldiers created by ShipwrightsHand remain a separate military enlistment route.",
+    "initialCampaign": "explicit_native_exception_no_charge"
+  },
+  "fiscalObservation": {
+    "version": 2,
+    "readOnly": true,
+    "fields": [
+      "settlementTaxModel",
+      "nativeTownTaxRatio",
+      "nativeVillageTaxRatio",
+      "tradeTaxAccumulated",
+      "settlementEconomyModel"
+    ],
+    "interpretation": "Effective native model coefficients and accumulated tariff are game observations, not literal historical tax rates. Applied clan components overlap wallet changes."
+  },
+  "tariffCollection": {
+    "version": 3,
+    "rule": "same_realm_native_food_and_horse_provisioning",
+    "nativeTargets": [
+      "PartiesBuyFoodCampaignBehavior.BuyFoodInternal",
+      "PartiesBuyHorseCampaignBehavior.BuyHorses",
+      "SellItemsAction.ApplyInternal",
+      "Town.set_TradeTaxAccumulated"
+    ],
+    "scope": "Actual military-leader payer and current town owner share the same nonempty current kingdom, or are the same independent clan, inside exact native food/horse buying scope with matching party/locality/item. Foreign/allied kingdoms, caravans, manual and unscoped commercial purchases keep the loaded native rate. Current membership governs after conquest, defection or civil war. Public aid already purchasing directly keeps its existing accounting. Initial campaign retains native treatment.",
+    "collection": "Actual native per-unit quotes and native commission rounding retained. Post-start NPC purchases from towns and villages receive only units affordable by the exact native caravan or leader payer; both stock writes and cost accumulation are gated together. Main-party and initial-campaign behavior remains native. Qualifying internal military town commission ratio stays zero. Version3 receipts separate attempted quotes from fulfilled native price, paid cash and blocked units; legacy receipts remain readable and are not reclassified.",
+    "historyLimits": {
+      "sources": 8192,
+      "pools": 8192,
+      "recent": 128
+    },
+    "observations": [
+      "actual_payer_and_party_clans",
+      "town_owner_at_purchase",
+      "buyer_class_and_native_purpose",
+      "item_quantities_and_wallet_changes",
+      "native_model_and_ratio",
+      "commission_debit_and_pool_credit",
+      "all_pool_changes_and_outside_sale_credits",
+      "current_process_counts_and_unsupported_evidence"
+    ],
+    "countersOverlap": true,
+    "nativeAcceptance": "Pending real owned/non-owned military provisioning, commercial controls, accrued-pool withdrawals, bonus composition, save/reload, peace/war/recovery and stability. Structural hooks are not gameplay proof."
+  },
+  "raidSetup": {
+    "version": 1,
+    "maximumVillages": 1,
+    "candidateLimit": 32,
+    "nativeAction": "ChangeVillageStateAction.ApplyBySettingToLooted",
+    "setsSettlementHitPoints": 0,
+    "simulatesCombat": false,
+    "createsLootOrCasualties": false,
+    "syntheticHearthDestruction": false,
+    "existingEnemyNpcPartyRequired": true,
+    "scenarioLeftActive": true,
+    "fullCurrentRestoreAfterBranchRequired": true,
+    "acceptance": "pending native raid callbacks and recovery days"
+  },
+  "financeSnapshot": {
+    "version": 1,
+    "heartbeatField": "financeObservationClans",
+    "values": "actual clan cash, liabilities, wage/income/net quotes and last observed cash change; quotes are not payments",
+    "resourceWrites": 0,
+    "realmWealthSpendableByRuler": false
+  },
+  "militaryReadiness": {
+    "version": 1,
+    "guide": "docs/agent/REIGN_MILITARY_READINESS.md",
+    "peaceBase": 0.45,
+    "hostilePressureStoredSign": "positive",
+    "pressureRampFrom": 10,
+    "pressureRampTo": 100,
+    "frontierMaximum": 0.75,
+    "interiorMaximum": 0.6,
+    "frontierDistance": 90,
+    "snapshotTtlDays": 1,
+    "snapshotMaxPairs": 1024,
+    "snapshotSource": "current directed campaign/timeline political_pressure_state including consumed zeros; existing notices response",
+    "atWarTarget": 1,
+    "garrisonTarget": 1,
+    "garrisonWageFactor": 0.75,
+    "garrisonMenPerFood": 25,
+    "visitingFieldPartyDiscount": false,
+    "heroOrGuestSalaryDiscount": false,
+    "automaticRecruitmentOnly": true,
+    "manualPlayerAndExplicitPlayerForceOrder": "ordinary resource gates, no peace ceiling",
+    "legacyOversizedParties": "daily healthy regular drawdown proportional to available troop counts by tier, with generation-scoped fractional carry; 5 percent native capacity, 1 to 10 per day, stop at the peace target; existing safety and player order gates",
+    "nativeAcceptance": "pending",
+    "drawdown": {
+      "allocationVersion": 2,
+      "tierAllocation": "proportional_healthy_regulars_with_fractional_carry",
+      "tierEvidence": "healthy counts before and after per tier, plus native field wage quotes in readiness_probe",
+      "dailyNativeCapacityFraction": 0.05,
+      "dailyMinimum": 1,
+      "dailyMaximum": 10,
+      "sort": [
+        "greatest_fractional_tier_credit_with_deterministic_ties",
+        "mean_xp_ascending",
+        "troop_id"
+      ],
+      "hearthReturnPerActualDischarge": 0.25,
+      "hearthBudgetScope": "one fixed realm budget split among current functioning kingdom villages; no town prosperity, cash, strain or recovery reset",
+      "receiptRecentLimit": 128,
+      "partyGenerationDayLimit": 8192,
+      "pendingLimit": 128,
+      "noReplayOfUncertainOperations": true,
+      "fixture": "readiness_probe; exact existing safe NPC peace field party; same paused armed Current/recovery gates; full Current reload after branch",
+      "nativeAcceptance": "pending proportional drawdown, wound protection, realm changes and save/reload"
+    }
+  },
+  "npcCaravanInvestment": {
+    "schemaVersion": 2,
+    "fixture": "npc_caravan_probe: exact NPC clan, friendly inland town or War Sails port, matching trade mode enabled, configured cash-share rejection, rollback, single fee, native purse, generic crew and direct native destruction",
+    "receiptRecentLimit": 128,
+    "fullCurrentRestoreRequired": true,
+    "nativeCombatAcceptance": false
+  },
+  "householdStipends": {
+    "schemaVersion": 1,
+    "evidence": "accounting.householdStipends plus household_stipend_probe with exact clan and home; full Current restore",
+    "receiptRecentLimit": 128,
+    "nativeAcceptance": "pending controlled affordability, ownership, conservation and save/reload"
+  },
+  "purchaseAffordability": {
+    "version": 1,
+    "nativeTarget": "SellItemsAction.ApplyInternal",
+    "quoteCalls": "one per attempted unit",
+    "commissionCalls": "one per original sale",
+    "stockSites": 2,
+    "mainPartyUnchanged": true,
+    "initialCampaignUnchanged": true,
+    "exactPayer": "native IsCaravan party wallet, otherwise LeaderHero.Gold; no fictional payer",
+    "villageReceiptCoverage": "guarded with process-local counts; detailed tariff receipts remain town-only",
+    "probe": "funding_probe source market_purchase; two actual existing NPC buyers (lord and caravan), five fixed cases each, zero market cash, at most10 synthetic market units and100000 payer cash per case, exact stock/cash/pool/RNG restoration; full Current reload required"
+  },
+  "balanceTargets": {
+    "reignDaysPerYear": 126,
+    "wellSuppliedWarResilienceDays": 63,
+    "requiresForcedStarvation": false,
+    "peaceStanding": "Supplied peaceful holdings must sustain food without starvation; severe raids and sieges are separately attributed exceptions.",
+    "status": "Requested target; not yet native acceptance."
+  },
+  "nativeFoodCensus": {
+    "version": 2,
+    "maximumSettlements": 256,
+    "processLocal": true,
+    "excludesCivilianFixtures": true,
+    "fields": [
+      "first_last_day",
+      "maximum_gap",
+      "time_regression",
+      "minimum_food",
+      "zero_observations",
+      "first_zero_day",
+      "raid_siege_exposure",
+      "owner_and_realm_changes",
+      "distinct_day_zero_streak",
+      "maximum_consecutive_zero_days",
+      "duplicate_day_samples",
+      "subsistence_eligibility_redirects_observed_transitions"
+    ],
+    "samplePhase": "native consumption; stock update and starvation casualties remain native",
+    "coverage": "Not a balance certificate or casualty count. First native sample owns each distinct day; duplicate calls cannot advance a zero streak and missing days break it. Require all expected town IDs, full first/last window, acceptable internal/trailing gaps, no drops/errors/regression, plus native raid/siege/ownership/clan-membership history. Castles without native consumption callbacks require separate observation. Reload resets observations; version1 cannot satisfy version2 streak checks.",
+    "subsistencePolicyVersion": 3
+  },
+  "reliefAllocation": {
+    "version": 2,
+    "donorCapacityFraction": 0.075,
+    "donorMinimumShippedPerDay": 10,
+    "donorMaximumShippedPerDay": 30,
+    "recipientMinimumDeliveredPerDay": 15,
+    "recipientMaximumCapacityFraction": 0.25,
+    "refillDays": 7,
+    "refillUses": "current_stock_not_projected_stock",
+    "nativeNetExcludesIncomingRelief": true,
+    "routeDistanceLimit": 180,
+    "deliveryEfficiencyRange": [
+      0.7,
+      0.9
+    ],
+    "existingStockOnly": true,
+    "samePassReexport": false,
+    "diagnosticMaximumNetworks": 64,
+    "diagnosticMaximumHoldingsPerView": 256,
+    "diagnosticMaximumShipmentsPerView": 2048,
+    "diagnosticMaximumRecipientDecisionsPerView": 256,
+    "actualEvidence": "process-local last daily passes with exact inputs, native coordinates, planned shipments, actual after-stocks and native-float conservation residuals; cumulative capture errors/drops",
+    "counterfactualEvidence": "current-input active and legacy10/15 plans are read-only forecasts, never actual dispatch receipts",
+    "fixtureEvidence": "one declining-donor native pass plus a chronic-recipient pass when actual deficit and routes support it; require chronicRecipientCoverageComplete, exact stock restoration and unchanged actual-pass diagnostics; unavailable is not chronic coverage",
+    "coverage": "Check source version, day/window, cumulative errors/drops, stale/truncated rows, ownership and current realm membership. Last-pass evidence does not certify every historical route."
+  },
+  "subsistencePriority": {
+    "version": 3,
+    "forecastDays": 7,
+    "reserveRatio": 0.2,
+    "forecastBasis": "original_native_budget_and_available_inventory",
+    "usesPreviousSellLog": false,
+    "createsPurchasingPower": false,
+    "inventoryCapped": true,
+    "hysteresisState": false,
+    "minimumTarget": "max(base_deficit_plus_current_reserve_rebuilding,native_planned_food)",
+    "trigger": "current_reserves_below20percent_or_original_native_plan_projected_reserves_below20percent",
+    "diagnostics": "Counterfactual native-plan net/projection are distinct from actual native food change and actual relief. Additive census eligibility/redirect/unsupported days and observed transitions require policy3 evidence; duplicate native calls do not add days.",
+    "acceptance": "Pending native projected-shortage/healthy/empty/poor-budget pairs, exact Current reload, multi-day transition observations, fresh63-daypeace/war and stability. No grace or automatic food replenishment."
+  },
+  "acceptanceNotes": "Pending source-specific native/UI/persistence proof, fresh matched63-daypeace/war plus64-dayrecovery, declining-donor conservation, provider-free126-daystability andhumanacceptance. Earlier32-daystartingprotocol remains historical; it does not satisfy the newer63-dayrequest.",
+  "civilianCrewPopulation": {
+    "version": 1,
+    "policy": "zero_hearth_cost_for_fishing_and_caravan_crews",
+    "nativeFishingType": "NavalDLC.CampaignBehaviors.FishingPartyCampaignBehavior",
+    "nativeFishingCallbacks": [
+      "OnDailySettlementTick",
+      "TryReinforceParty"
+    ],
+    "scope": "Replace only each fishing callback's one direct Village.Hearth write. Keep native crew creation/reinforcement, fishing output, cadence, ships and all other resources. Caravan factory/crew initialization already has no native hearth write; validate actual callbacks. Actual regular military enlistment into garrisons remains accounted separately.",
+    "fixtureProfile": "civilian_crew_probe",
+    "fixtureBounds": {
+      "maximumCreatedParties": 2,
+      "maximumTroopsPerParty": 100,
+      "maximumWarehouseUnits": 2000,
+      "minimumVillageHearths": 80
+    },
+    "fixture": "One safe native coastal NPC village and bound NPC merchant town. Temporarily empty/restore bounded warehouse and override fishing chance/capacity only for one native callback. Create one fishing party, leave1 crew and invoke real reinforcement. Create one native land caravan, then invoke its crew initializer with its real template. Measure every village's hearths unchanged after each source. Destroy only exact returned fixture parties. No player assets or hearth/cash grants. Native caravan initial trade wallet is a temporary factory effect, not a funding acceptance test. Partial callbacks require retained Current recovery.",
+    "acceptance": "Pending canonical validation, native forced4-case probe and full Current restore."
+  },
+  "populationObservation": {
+    "version": 1,
+    "fundingTraceVersion": 6,
+    "nativeTarget": "Village.set_Hearth",
+    "scope": "fixed realm village IDs captured with the existing funding trace",
+    "fields": [
+      "opening_closing_hearths",
+      "actual_setter_before_after_delta",
+      "native_call_route",
+      "unexplained_balance"
+    ],
+    "cashAccounting": "Separate hearthBalances and populationVillage rows never enter currency balances. Fractional native hearths retained; absolute residual must not exceed0.0001. No hearth, strain, troop, inventory, wallet or production writes.",
+    "bounds": "Existing process-local8192 shared rows,3 native days and1 real hour; overflow/error fails trace. Old trace2 contains no population coverage.",
+    "acceptance": "Native binding/oracle plus deterministic contracts and real trace/reconciliation pending. A hook count does not establish causal source totals."
+  },
+  "fundingOriginObservation": {
+    "version": 2,
+    "fundingTraceVersion": 6,
+    "walletScope": "All native hero wallets, non-aliased party cash storage, settlement markets, kingdom budgets, clan/kingdom tribute wallets, town/village accumulated tax pools and workshop capital. Reference identity retains unregistered/reused native identities. Lord PartyTradeGold aliases Hero.Gold and is counted once. Primary clan cohort remains explicitly fixed; other accounts are counterparties.",
+    "boundaries": [
+      "actual ClanVariablesCampaignBehavior.DailyTickClan flow",
+      "ordinary plunder allocation",
+      "naval prize cash allocation",
+      "actual MapEventParty.CommitGoldChanges before resets"
+    ],
+    "rule": "Allocation/finance quotes and actual currency mutations are separate and correlated by flow IDs. Compare actual battle payout/loss against assigned amounts; do not call a null-giver payout new currency without following loser debits. Record source model types. Opening wealth is observed, never assigned invented historical provenance.",
+    "limits": "32768 distinct wallets;8192 shared mutation/component/origin/population rows and8192 transfer rows; three native days or one real hour. Use eighth-day segments and export each. Every registered wallet remains in closing reconciliation; no zero/poor/dead wallet exclusion. Missing/dropped/error/unexplained evidence fails.",
+    "acceptance": "Pending exact loaded binding tests, closed native source fixtures and a whole-day segmented trace/reconciliation/source classification.",
+    "walletLimit": 32768,
+    "historyRowLimit": 8192,
+    "transferLimit": 8192,
+    "leaderlessWageStoreObserverVersion": 1,
+    "leaderlessWageStores": "Replace only the single native Hero.Gold write in DefaultClanFinanceModel.AddPartyExpense and the loaded NavalDLC copy. Invoke the same setter exactly once; compare actual before/after against already-recorded changes for that same payer. Count setter callbacks and record any unobserved debit without double-counting. Unexpected positive corrections/errors/drops/residuals fail. This observer does not alter money, prices, troops or wages."
+  },
+  "navalFunding": {
+    "version": 1,
+    "fixtureProfile": "ship_funding_probe",
+    "rule": "native_player_prices_discounted_npc_purchases_acquisition_resale_real_market_funding",
+    "hookCount": 15,
+    "nativeCostType": "NavalDLC.GameComponents.NavalDLCShipCostModel",
+    "nativePriceMethods": [
+      "GetShipBaseValue",
+      "GetShipUpgradePieceValueInternal"
+    ],
+    "sourceGuards": "Exactly one0.01factor per private base and upgrade price method; one unclaimed-ship valuation;4hero,2party-debit,2party-credit and1quote call sites in ChangeShipOwnerAction.ApplyInternal. Exact15 owned bindings, native save container and preserved IL boundaries are required.",
+    "costs": "Player purchase, repair and upgrade prices remain native. NPC purchases, repairs and upgrades retain native1% economics. Resale first uses normal hull/upgrade/repair values, then applies1% for NPC-purchased hulls. Captured ships retain native30% resale less damage deductions. Native perks, policies and rounding remain.",
+    "losses": "Native sibling-ship transfers and captured hulls remain real transfers. Remaining hulls destroyed by party removal and unclaimed prize hulls destroyed by native battle cleanup yield zero cash. No retrocharge or wealth reset.",
+    "trades": "Fund actual mobile/clan wallet and settlement market transfers. Require full quoted funds and destination capacity before mutation. Duplicate same-owner callbacks charge zero. Governor trade/repair perks require outside-clan paid business, capped by authored bonus, actual transaction value and real port funds; no deferred commission claims.",
+    "persistence": "Additive navalVersion1,32 pending and128 recent receipts,8192 live acquisition records, plus two versioned native ship-reference save keys. Mismatched references/IDs/receipts fail closed. Interrupted payments never replay. Dead references are pruned before saving.",
+    "fixtureBounds": {
+      "syntheticHulls": 5,
+      "auxiliaryParties": 2,
+      "seededWallets": 4,
+      "maximumGoldPerWallet": 1000000,
+      "cases": 17,
+      "maximumSeededWallets": 4,
+      "temporaryExistingGovernor": 1,
+      "temporaryExactHeroPerkOverrides": 2
+    },
+    "fixture": "Exact paused armed disposable Current and retained checkpoint, existing free NPC lord party/friendly port with ordinary hull, one free same-realm existing hero and safe friendly/hostile NPC parties. Fixed5 synthetic hulls,2 auxiliary parties and4 seeded wallets<=1M each. Temporary governor assignment and2 exact-hero perk overrides manufacture paid/poor/self/free cases. Native capture action is tested separately from full combat. Restore prior governor, hero/market/party cash, remove only fixture hulls/parties and exact fixture hooks; mandatory full Current reload before save or natural advancement. Fixtures never establish historical funding.",
+    "acceptance": "Pending canonical source/binding contracts,17 forced native trade/loss/transfer/capture/perk cases, native save-reference proof and full Current restore; direct capture-action/helper checks alone do not establish native battle capture acceptance.",
+    "acquisitions": "Persist native List<Ship> references and parallel receipt IDs, linked to JSON acquisition records. Friendly transfers preserve acquisition; native ApplyByLooting including deferred player battle loot promotes captured status; actual purchases replace basis. Existing unknown NPC ships use an explicit discounted owner-class fallback; historical captures and prices are not invented. Player legacy ships retain native valuation. Maximum8192 live records; no silent eviction.",
+    "npcPurchaseFactor": 0.01,
+    "purchasedNpcResaleFactor": 0.01,
+    "capturedResale": "native_30_percent_less_repairs",
+    "playerPurchase": "native",
+    "admissionVersion": 1,
+    "serverAdmission": "LiveInteractionTest.NormalizeLiveTestCommand admits ship_funding_probe only for passive_world with enrolled run/save, exact party and settlement, and empty selectable source. Its isolated contract rejects each missing identity, another mode and a money source. Initial native rejection created no run or resource mutation."
+  },
+  "criminalPressureAcceptance": {
+    "version": 1,
+    "scope": [
+      "bandits",
+      "looters",
+      "deserters",
+      "pirates"
+    ],
+    "required": "Measure party counts, troop strength/tier mix, attacks and losses to villagers/caravans/patrols, suppression by kingdom forces, fleet availability and recovery. Compare war and peace; inability to police is failed balance. No blanket outlaw nerf or guaranteed navy-size claim.",
+    "status": "Native baseline/corrected observation pending."
+  },
+  "cohortControl": {
+    "schema": "reign-war-economy-cohort-control-v2",
+    "profile": "cohort_control",
+    "sources": [
+      "cohort_preview",
+      "cohort_enable",
+      "cohort_disable"
+    ],
+    "gates": "Existing verification-control, exact paused armed task-owned Current and retained recovery checkpoint. Preview changes nothing. Suppressed-rebellion scenarios reject already active rebellions. Player kingdoms cannot be selected.",
+    "scope": "Session-only exact campaign/native instance/Current/run/player-kingdom identity. Select peace kingdoms and locked war pairs explicitly or use auto/none. Four exact war/peace action and FactionManager hooks; optionally three native/Reign rebellion hooks. Does not manufacture political relations or resources. Arrange requested relations through existing bounded native structured actions before enable.",
+    "parameters": {
+      "cohortDurationDays": {
+        "default": 126,
+        "minimum": 1,
+        "maximum": 6300
+      },
+      "cohortWallHours": {
+        "default": 6,
+        "minimum": 0.25,
+        "maximum": 12
+      },
+      "cohortSampleIntervalDays": {
+        "default": 1,
+        "minimum": 0.25,
+        "maximum": 7
+      },
+      "cohortBlockOtherWars": true,
+      "cohortSuppressRebellions": true,
+      "peaceKingdomIds": "auto | none | comma-separated exact NPC kingdom IDs",
+      "warPairs": "auto | none | comma-separated first:second NPC pairs"
+    },
+    "bounds": {
+      "nativeDays": 126,
+      "maximumNativeDays": 6300,
+      "wallHours": 6,
+      "maximumWallHours": 12,
+      "sampleCount": 256,
+      "sampleIntervalDays": 1,
+      "matrixCheckIntervalDays": 0.25,
+      "requiredHooks": 7,
+      "hooksWithoutRebellionSuppression": 4,
+      "kingdoms": 64,
+      "probeHeroes": 32768,
+      "probeClans": 4096,
+      "probeSettlements": 4096,
+      "activationAttempts": 7,
+      "sessionsPerProcess": 128,
+      "selectionCharacters": 16384
+    },
+    "evidence": "Actual NPC war matrix checked each quarter day independently of hook counters. Configured sample interval retains latest256 samples with total/retained/evicted/full-history fields; eviction never claims a complete history. Explicitly report locked-war loss, unexpected war, missing peace controls, player-war contamination and unexercised hooks. Activation probes cover applicable hooks only; binding is not native proof for unexercised cases.",
+    "continuity": "Same activation replay cannot reset counters or extend expiry; another operation cannot masquerade as active. While paused, export, disable, arrange a new scenario, preview and enable a new operation on the same enrolled Current without saving/reloading. Expired operation keys cannot replay;128 sessions max. Reload, save identity or player-kingdom changes end continuity. Provider arm, advancement wall deadlines and baseline-copy gates remain independent.",
+    "cleanup": "Same-run disable does not depend on plan fields. Expiry, violations or scope/hook loss pause and unpatch only owned callbacks. No save, restart, provider, resource grant or political repair occurs.",
+    "guardProof": "Each applicable action/direct native boundary must hit its exact guard once while actual relations, hero cash, treasury, clan influence/membership, ownership, food, hearths, operation counter and time remain unchanged. War-free or fully natural selections disclose unexercised hooks. Failed activation requires retained Current recovery before another trial; no automatic restore or restart.",
+    "nativeAcceptance": "Pending new loaded-client proof; offline policy and compilation do not certify Harmony/native balance behavior."
+  },
+  "balanceRevision": {
+    "version": 3,
+    "productionCurveVersion": 3,
+    "recruitmentPriceVersion": 3,
+    "healthyOutput": {
+      "low": "2 * (H / 10) ^ (ln(5.5) / ln(30)) for 10 < H <= 300",
+      "middle": "11 + (5.5 / 300) * (H - 300) for 300 < H <= 600",
+      "high": "16.5 + (5.5 / 600) * (H - 600) for H > 600",
+      "anchors": {
+        "0": 0,
+        "10": 2,
+        "300": 11,
+        "600": 16.5,
+        "1200": 22,
+        "2000": 29.333333333333332
+      },
+      "commodityDivisor": 12,
+      "supplementaryFoodDivisor": 6,
+      "nativeHearthThresholds": [
+        200,
+        600
+      ],
+      "nativeBoundFood": [
+        6,
+        12,
+        18
+      ],
+      "nativeCommodityMultipliers": [
+        0.5,
+        1,
+        1.5
+      ],
+      "nativeSupplementaryFood": [
+        1,
+        2,
+        3
+      ],
+      "recoveryApplications": 1,
+      "nonFunctioningOutput": 0,
+      "subsistence": "12 * (H / 300) ^ (ln(6) / ln(30)) for 0 <= H <= 10"
+    },
+    "hireMultipliers": [
+      3,
+      3.6,
+      4.5,
+      6,
+      8.25,
+      10.5
+    ],
+    "tierBands": [
+      "0-1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6+"
+    ],
+    "dailyWageMultipliers": [
+      1,
+      1.15,
+      1.5,
+      2,
+      3,
+      4
+    ],
+    "hireIncreaseRelativeToPrevious": 1.5,
+    "upgrade": "native_repriced_recruit_difference_no_extra_multiplier",
+    "ransom": "existing_native_quote_exclusion",
+    "savePayloadMigration": "none_no_resource_reset_or_retrocharge",
+    "requiredEvidence": [
+      "productionCurveVersion=3",
+      "recruitmentPriceVersion=3",
+      "native controlled production and paid recruitment/upgrade observations",
+      "unchanged wages and native ransom prices",
+      "versions require healthy installed hooks and loaded model owners; version labels alone are not coverage"
+    ],
+    "nativeAcceptance": false,
+    "priceComparisonBaseline": "previous_Reign_revision2_not_native"
+  },
+  "walletOwnershipObservation": {
+    "version": 1,
+    "fundingTraceVersion": 6,
+    "scope": "all_alive_dead_disabled_and_clan_heroes_plus_distinct_native_accounts",
+    "perMutationOwner": true,
+    "openingAndClosingOwners": true,
+    "nativeGenerationIdentity": true,
+    "unknownEntryBlocksOriginAcceptance": true,
+    "observationClosureIsNotOriginClosure": true,
+    "physicalResourceWrites": 0
+  },
+  "replacementSetup": {
+    "version": 1,
+    "profile": "replacement_setup",
+    "minimumHealthyRegulars": 20,
+    "maximumHealthyRegulars": 32768,
+    "maximumRegularLoss": 100,
+    "healthyLossFraction": 0.5,
+    "allocation": "proportional_largest_remainder_stable_troop_id",
+    "simulatesFullNativeBattle": false,
+    "preserveHeroesWoundedPrisonersGarrisonsMilitiaCashInventoryFoodHearthsStrainLiabilities": true,
+    "standardForce": "100_culture_basic_recruits_hire_quote_only",
+    "restoreAfterBranch": true,
+    "resourceGrants": 0,
+    "timeAdvancement": false,
+    "providerCalls": 0
+  },
+  "economyOptions": {
+    "version": 1,
+    "evidenceField": "economyOptions",
+    "fieldWageDefaults": [
+      3,
+      6,
+      12,
+      18,
+      24,
+      40,
+      68,
+      92
+    ],
+    "mutableThrough": "existing bounded /api/settings preferences only; no native arbitrary mutation profile",
+    "nativeAcceptance": false,
+    "productionProbeRequiresContinuousCurve": true,
+    "offlineSuite": "war_economy_options",
+    "nativeUiQuoteHooks": [
+      "FieldWageSelectionPostfix",
+      "RecruitFieldWagePostfix",
+      "FieldWageTooltipTranspiler"
+    ],
+    "troopWageScope": "military_including_garrisons",
+    "uiQuoteVersion": 2
+  },
+  "raidFood": {
+    "version": 1,
+    "consumerInventory": "docs/agent/RAID_FOOD_CONSUMERS.json",
+    "profiles": [
+      "raid_food_probe",
+      "raid_partial_setup"
+    ],
+    "damagePercent": [
+      0,
+      4,
+      6,
+      10,
+      24,
+      25,
+      40
+    ],
+    "maximumVillageHearths": 2000,
+    "maximumRaiderTroops": 1000,
+    "maximumWarehouseSlots": 2048,
+    "maximumWarehouseUnits": 10000,
+    "temporaryFishingParties": 1,
+    "restoreCurrentAfterBranch": true,
+    "nativeCombatAcceptance": false,
+    "liveFishingAcceptance": false,
+    "providerCalls": 0,
+    "partialSetupNativeResourceEffectsPersist": true,
+    "rngRestored": true,
+    "evidence": "raidFoodEvidenceVersion1 plus source-specific native receipts; hooks alone incomplete"
+  }
+}

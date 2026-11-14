@@ -391,19 +391,23 @@ AND state IN ('queued','scheduled') ORDER BY is_critical DESC,CASE WHEN due_day<
                 Dictionary<string,object> matter=ReadCourtMatter(connection,ctx,matterId);if(matter==null)return CourtError("Matter was not found in this timeline.");
                 if(!CourtMatterAllowedInActiveScope(connection,ctx,matter))return CourtError("This matter is outside the host-settlement docket available in local Rule Mode.");
                 long revision=ReadLong(matter,"revision",0L);if(revision!=ctx.ExpectedRevision)return CourtRevisionError(revision);
-                if(status=="completed"||status=="failed")
+                if(status=="completed"||status=="failed"||status=="wedding_cancelled")
                 {
                     if(ReadString(matter,"state","")!="resolving")return CourtError("Only a resolving matter may receive a native execution report.");
-                    string next=status=="completed"?"resolved":"awaiting_decision";string receiptJson=Json.Serialize(ReadDictionary(payload,"nativeReceipt")??new Dictionary<string,object>());
+                    if(status=="completed"&&ReadString(matter,"source_key","").StartsWith("marriage_evaluation:",StringComparison.Ordinal)
+                        &&!ReadDictionaryList(ReadDictionary(payload,"nativeReceipt"),"actions").Any(x=>ReadBool(x,"marriageVerified",false)&&ReadBool(x,"paymentVerified",false)))
+                        return CourtError("Marriage completion requires reciprocal spouse and payment evidence.");
+                    string next=status=="completed"?"resolved":status=="wedding_cancelled"?"invalidated":"awaiting_decision";string receiptJson=Json.Serialize(ReadDictionary(payload,"nativeReceipt")??new Dictionary<string,object>());
                     ExecuteSql(connection,"UPDATE court_matters SET state=$state,resolved_day=$day,resolution_json=$receipt,revision=revision+1,updated_ts=$ts WHERE matter_id=$id;",
                         new Dictionary<string, object>{{"state",next},{"day",status=="completed"?ctx.WorldDay:-1d},{"receipt",receiptJson},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",matterId}});
-                    UpdateMarriageEvaluationForMatter(connection,matter,status=="completed"?"executed":"player_court_pending",ctx.WorldDay,status=="completed");
+                    UpdateMarriageEvaluationForMatter(connection,matter,status=="completed"?"executed":status=="wedding_cancelled"?"obsolete":"player_court_pending",ctx.WorldDay,status=="completed");
                     if(status=="completed")UpdateObligationForMatter(connection,matter,"resolved",ctx.WorldDay,new Dictionary<string,object>{{"nativeReceipt",ReadDictionary(payload,"nativeReceipt")??new Dictionary<string,object>()}});
                     Dictionary<string,object> report=CourtMutationResult(ctx,matterId,revision+1,status=="completed"?"court_matter_resolved":"court_native_execution_failed",new ArrayList());
                     StoreCourtCommand(connection,ctx,"matter_report",report);AddCourtAudit(connection,ctx,"matter",matterId,"execution_report",status,report);return report;
                 }
 
                 if(CourtMatterTerminal(ReadString(matter,"state","")))return CourtError("The matter is already closed.");
+                if(ReadString(matter,"state","")=="resolving")return CourtError("The signed matter is awaiting its native outcome.");
                 string optionId=ReadString(payload,"optionId","");Dictionary<string,object> option=CourtJsonList(ReadString(matter,"options_json","[]")).FirstOrDefault(x=>SameCourtText(ReadString(x,"optionId",""),optionId));
                 if(option==null)return CourtError("The selected option is not part of the coded matter definition.");
                 Dictionary<string,object> consequences=ReadDictionary(option,"consequences")??new Dictionary<string,object>();string canonical=CourtCanonicalJson(consequences);string expectedHash=FirstNonEmpty(ReadString(option,"termsHash",""),CourtHash(canonical));
@@ -683,7 +687,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
                 string source="marriage_evaluation:"+evaluationId;
                 if(QuerySql(connection,"SELECT matter_id FROM court_matters WHERE campaign_id=$campaign AND timeline_id=$timeline AND source_key=$source AND state NOT IN ('resolved','refused','expired','invalidated') LIMIT 1;",new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"source",source}}).Any())continue;
                 string heroA=ReadString(row,"hero_a_id",""),heroB=ReadString(row,"hero_b_id","");
-                Dictionary<string,object> accept=new Dictionary<string,object>{{"nativeActions",new ArrayList{new Dictionary<string,object>{{"type","marriage_response"},{"evaluationId",evaluationId},{"heroAId",heroA},{"heroBId",heroB}}}}};
+                Dictionary<string,object> accept=new Dictionary<string,object>{{"nativeActions",new ArrayList{new Dictionary<string,object>{{"type","marriage_response"},{"evaluationId",evaluationId},{"heroAId",heroA},{"heroBId",heroB},{"timelineId",ctx.TimelineId},{"marriageTerms",ReadDictionary(TryParseJsonObject(ReadString(row,"payload_json","{}")),"marriageTerms")}}}}};
                 Dictionary<string,object> counter=new Dictionary<string,object>{{"counterTerms",new Dictionary<string,object>{{"delayDays",14},{"requiresRenewedConsent",true}}}};
                 Dictionary<string,object> candidate=new Dictionary<string,object>
                 {
@@ -708,8 +712,16 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
         {
             string source=ReadString(matter,"source_key","");if(!source.StartsWith("marriage_evaluation:",StringComparison.OrdinalIgnoreCase))return;
             string id=source.Substring("marriage_evaluation:".Length);if(string.IsNullOrWhiteSpace(id))return;
+            using var marriageTransaction=connection.BeginTransaction();
             ExecuteSql(connection,"UPDATE marriage_evaluations SET status=$status,updated_ts=$ts WHERE evaluation_id=$id AND timeline_id=$timeline;",new Dictionary<string,object>{{"status",status},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"id",id},{"timeline",ReadString(matter,"timeline_id","main")}});
-            if(finalize)FinalizeMarriage(connection,ReadString(matter,"campaign_id","default"),id,day);
+            if(status=="rejected_by_player")
+            {
+                var evaluation=QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",id}}).FirstOrDefault();
+                if(evaluation!=null)ApplyMarriageLeaderEffect(connection,ReadString(matter,"campaign_id","default"),ReadString(matter,"timeline_id","main"),id,ReadString(evaluation,"leader_a_id",""),ReadString(evaluation,"leader_b_id",""),-10,day);
+            }
+            if(finalize)FinalizeMarriage(connection,ReadString(matter,"campaign_id","default"),id,day,false);
+            marriageTransaction.Commit();
+            if(finalize)StoreMarriageMemory(connection,ReadString(matter,"campaign_id","default"),id,day);
         }
 
         private static Dictionary<string, object> CourtWorldActionValidateApi(Dictionary<string, object> payload)

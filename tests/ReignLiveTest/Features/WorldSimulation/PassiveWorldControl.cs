@@ -32,13 +32,57 @@ namespace ReignLiveTest
                 native.ContainsKey("lastError") ? String(native, "lastError") : null);
         }
         private static bool _observeGovernmentNewsForPassiveWorldControl;
+        private static string _checkpointPeriodicPollToken;
+        private static Dictionary<string, object> _checkpointPeriodicPollRuntime;
+
+        private static Dictionary<string, object> CheckpointPeriodicPollHold(string campaignId, int seconds, bool pulse = false)
+        {
+            return RunPassiveWorldStep(_checkpointPeriodicPollRuntime, campaignId, "world_time_control",
+                new Dictionary<string, object> { ["timeMode"] = "stop",
+                    ["periodicCommunicationHoldSeconds"] = seconds,
+                    ["periodicCommunicationHoldToken"] = _checkpointPeriodicPollToken,
+                    ["communicationPulse"] = pulse,
+                    ["periodicCommunicationExpectedSaveName"] = String(ReadObject(_checkpointPeriodicPollRuntime, "runtime"), "activeSaveName"),
+                    ["periodicCommunicationExpectedTimeline"] = String(ReadObject(ReadObject(_checkpointPeriodicPollRuntime, "runtime"), "saveSync"), "timelineId") }, 120);
+        }
+
 
         private static Dictionary<string, object> PassiveWorldControl(string[] args)
         {
             bool previous = _observeGovernmentNewsForPassiveWorldControl;
             _observeGovernmentNewsForPassiveWorldControl = Has(args, "--observe-government-news");
-            try { return PassiveWorldControlCore(args); }
-            finally { _observeGovernmentNewsForPassiveWorldControl = previous; }
+            Dictionary<string, object> coreResult = null;
+            try { coreResult = PassiveWorldControlCore(args); return coreResult; }
+            finally
+            {
+                try
+                {
+                    if (_checkpointPeriodicPollToken != null)
+                    {
+                        string campaignId = String(ReadObject(_checkpointPeriodicPollRuntime, "runtime"), "campaignId");
+                        try
+                        {
+                            var released = CheckpointPeriodicPollHold(campaignId, 0);
+                            if (!IsOk(released))
+                            {
+                                if (coreResult != null) { coreResult["ok"] = false; coreResult["checkpointPollHoldReleaseFailure"] = released; }
+                                else Console.Error.WriteLine("Checkpoint periodic hold release failed after the primary failure; native expiry remains bounded to sixty seconds.");
+                            }
+                        }
+                        catch (Exception releaseError)
+                        {
+                            // Keep the primary failure, including an exception already unwinding.
+                            if (coreResult != null) { coreResult["ok"] = false; coreResult["checkpointPollHoldReleaseError"] = releaseError.Message; }
+                            else Console.Error.WriteLine("Checkpoint periodic hold release also failed: " + releaseError.Message);
+                        }
+                    }
+                }
+                finally
+                {
+                    _checkpointPeriodicPollToken = null; _checkpointPeriodicPollRuntime = null;
+                    _observeGovernmentNewsForPassiveWorldControl = previous;
+                }
+            }
         }
 
         private static Dictionary<string, object> PassiveWorldControlCore(string[] args)
@@ -133,6 +177,8 @@ namespace ReignLiveTest
             Dictionary<string, object> drained = DrainPassiveWorld(
                 args, runtime, campaignId, timelineId);
             if (!IsOk(drained)) return drained;
+            var saveHold = CheckpointPeriodicPollHold(campaignId, 60);
+            if (!IsOk(saveHold)) return saveHold;
             Dictionary<string, object> saved = SaveGame(new[]
             {
                 "game-save", "--campaign", campaignId,
@@ -249,6 +295,8 @@ namespace ReignLiveTest
                 saveName = Value(args, "--save",
                     "Reign_World_Day_" + Math.Floor(targetDay + 0.000001d)
                         .ToString("0", CultureInfo.InvariantCulture));
+                var saveHold = CheckpointPeriodicPollHold(campaignId, 60);
+                if (!IsOk(saveHold)) return saveHold;
                 save = SaveGame(new[]
                 {
                     "game-save", "--campaign", campaignId,
@@ -325,6 +373,15 @@ namespace ReignLiveTest
             int timeoutSeconds,
             bool allowMissingInitialBaselineRollup = false)
         {
+            _checkpointPeriodicPollRuntime = Runtime(new[] { "status", "--campaign", campaignId });
+            var initialNative = ReadObject(_checkpointPeriodicPollRuntime, "runtime");
+            if (ReadLong(ReadObject(initialNative, "personalGossip"), "periodicCommunicationHoldVersion", -1) != 1)
+                return new Dictionary<string, object> { ["ok"] = false, ["status"] = "checkpoint_poll_hold_unsupported",
+                    ["error"] = "The loaded client does not expose the current bounded checkpoint poll hold." };
+            if (_checkpointPeriodicPollToken == null) _checkpointPeriodicPollToken = Guid.NewGuid().ToString("N");
+            var acquired = CheckpointPeriodicPollHold(campaignId, 60);
+            if (!IsOk(acquired)) return acquired;
+            DateTime nextHoldRenewal = DateTime.UtcNow.AddSeconds(20);
             DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
             Dictionary<string, object> latest = new Dictionary<string, object>();
             Dictionary<string, object> latestRuntime = new Dictionary<string, object>();
@@ -336,6 +393,12 @@ namespace ReignLiveTest
             string previousObservationId = "", previousGeneration = "";
             while (DateTime.UtcNow < deadline)
             {
+                if (DateTime.UtcNow >= nextHoldRenewal)
+                {
+                    var renewed = CheckpointPeriodicPollHold(campaignId, 60);
+                    if (!IsOk(renewed)) return renewed;
+                    nextHoldRenewal = DateTime.UtcNow.AddSeconds(20);
+                }
                 latest = Get("/world-test/overview?campaignId="
                     + Uri.EscapeDataString(campaignId)
                     + "&timelineId=" + Uri.EscapeDataString(timelineId)
@@ -375,6 +438,14 @@ namespace ReignLiveTest
                     + "&timelineId=" + Uri.EscapeDataString(timelineId) + "&worldDay="
                     + ReadDoubleValue(nativeRuntime, "worldDay", targetDay).ToString("R", CultureInfo.InvariantCulture));
                 latestGossip = gossip;
+                var communications = ReadObject(gossip, "communications");
+                if (ReadLong(gossip, "pendingComposition", 0) > 0 || ReadLong(gossip, "awaitingNativeClock", 0) > 0
+                    || ReadLong(gossip, "dueInTransit", 0) > 0 || ReadLong(communications, "due", 0) > 0)
+                {
+                    var pulse = CheckpointPeriodicPollHold(campaignId, 60, true);
+                    if (!IsOk(pulse)) return pulse;
+                    nextHoldRenewal = DateTime.UtcNow.AddSeconds(20);
+                }
                 bool gossipQuiescent = PersonalGossipCheckpointQuiescent(gossip, nativeRuntime, campaignId, timelineId);
                 string actionFailure = PassiveWorldCheckpointPolicy.ActionFailureError(
                     ReadLong(ReadObject(latest, "pipeline"), "failedActions", -1));

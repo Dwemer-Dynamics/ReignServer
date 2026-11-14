@@ -177,6 +177,11 @@ if (-not $hasMutex) { throw 'Another Reign startup is still running. Wait for it
 $keepAlive = @('-d','ReignServer','-u','reign','--','/usr/bin/flock','-n',
     '/var/www/html/ReignServer/data/launcher-keepalive.lock','/bin/sleep','infinity')
 Start-Process -FilePath "$env:SystemRoot\System32\wsl.exe" -ArgumentList $keepAlive -WindowStyle Hidden
+# Connected Global API Keys live in the DwemerDistro distro; hold (flock-guarded) keeps it and its key socket running.
+if ($record.PSObject.Properties['globalKeysDistro'] -and $record.globalKeysDistro -ceq 'DwemerAI4Skyrim3') {
+    Start-Process -FilePath "$env:SystemRoot\System32\wsl.exe" -WindowStyle Hidden `
+        -ArgumentList @('-d','DwemerAI4Skyrim3','-u','root','--exec','/usr/local/bin/ddistro_keys_api','hold')
+}
 
 & wsl.exe -d ReignServer -u root -- systemctl start postgresql apache2
 if ($LASTEXITCODE -ne 0) { throw 'ReignServer PostgreSQL or web proxy could not start.' }

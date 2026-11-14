@@ -471,7 +471,6 @@ updated_ts INTEGER NOT NULL);");
             {
                 EnsureConversationSceneStateSchema(connection);
                 EnsureConversationContinuitySchema(connection);
-                PrepareNarrativeClock(connection, payload, speakerId);
                 ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
                     new Dictionary<string, object> { ["hour"] = hour });
                 foreach (Dictionary<string, object> participant in participants)
@@ -483,11 +482,6 @@ updated_ts INTEGER NOT NULL);");
                     // Narrative location survives an hourly legacy cache expiry or
                     // session reload until native movement/room/timeline changes.
                     row = LoadSceneContinuityHandoff(connection, payload, participant) ?? row;
-                    if (ReadBool(CurrentNarrativeClock(payload), "advanced", false))
-                    {
-                        row = CloneDictionary(row ?? new Dictionary<string, object>());
-                        row.Remove("location_override"); row.Remove("location_class"); row.Remove("acceptedPrivateScene");
-                    }
                     current[id] = ResolveSceneParticipantState(campaignId, participant, row, detailedParticipantIds.Contains(id), UsesCastleRoomAttireContext(payload));
                 }
             }
@@ -528,15 +522,21 @@ updated_ts INTEGER NOT NULL);");
             };
             payload["conversationSceneState"] = result;
             payload["conversationScenePrompt"] = prompt;
-            result["narrativeClock"] = CurrentNarrativeClock(payload);
-            if (ReadString(CurrentNarrativeClock(payload), "label", "").Length > 0)
-            {
-                prompt += "\nNARRATIVE TIME — " + ReadString(CurrentNarrativeClock(payload), "label", "")
-                    + ". This is acknowledged roleplay time, distinct from the native campaign clock. Historical yesterday/tomorrow and old plans belong to their source scene. No native day, travel, cooldown, pregnancy or action advances from this label.";
-                result["prompt"] = prompt; payload["conversationScenePrompt"] = prompt;
-            }
             return result;
         }
+
+        // A location is a concise display label, never a prompt or a truncated
+        // instruction block. Reject legacy polluted values before display/state use.
+        private static string ConversationLocationLabel(string value)
+        {
+            value = (value ?? "").Trim();
+            return value.Length <= 180 && value.IndexOfAny(new[] { '\r', '\n' }) < 0 ? value : "";
+        }
+
+        private static string NativeConversationLocation(Dictionary<string, object> payload)
+            => new[] { "nativeLocationDescription", "currentSettlementName", "settlementName" }
+                .Select(key => ConversationLocationLabel(ReadString(payload, key, "")))
+                .FirstOrDefault(value => value.Length > 0) ?? "";
 
         private static string ResolveSharedConversationVenue(
             Dictionary<string, object> payload,
@@ -566,12 +566,12 @@ updated_ts INTEGER NOT NULL);");
             if (!string.IsNullOrWhiteSpace(resolvedPlayerId)
                 && current != null)
                 current.TryGetValue(resolvedPlayerId, out playerState);
-            string venue = ReadString(playerState, "location", "");
-            if (string.IsNullOrWhiteSpace(venue))
-                venue = ReadString(player, "nativeLocationDescription", "");
-            if (string.IsNullOrWhiteSpace(venue))
-                venue = ReadString(payload, "sceneContext", "");
-            return LimitText(venue, 500);
+            string venue = ConversationLocationLabel(ReadString(playerState, "location", ""));
+            if (venue.Length == 0)
+                venue = ConversationLocationLabel(ReadString(player, "nativeLocationDescription", ""));
+            if (venue.Length == 0)
+                venue = NativeConversationLocation(payload);
+            return venue;
         }
 
         private static List<Dictionary<string, object>> NormalizeSceneParticipants(Dictionary<string, object> payload, string speakerId)
@@ -593,8 +593,8 @@ updated_ts INTEGER NOT NULL);");
                         ["heroStringId"] = playerId,
                         ["name"] = ReadString(payload, "playerName", "Player"),
                         ["role"] = "player",
-                        ["nativeLocationDescription"] = ReadString(payload, "sceneContext", ""),
-                        ["nativeLocationClass"] = InferLocationClass(ReadString(payload, "sceneContext", ""))
+                        ["nativeLocationDescription"] = NativeConversationLocation(payload),
+                        ["nativeLocationClass"] = InferLocationClass(NativeConversationLocation(payload))
                     });
                 }
             }
@@ -630,7 +630,7 @@ updated_ts INTEGER NOT NULL);");
                 ["role"] = ReadString(participant, "role", "npc"),
                 ["isFemale"] = ReadBool(participant, "isFemale", false),
                 ["isRuler"] = ReadBool(participant, "isRuler", false),
-                ["nativeLocationDescription"] = ReadString(participant, "nativeLocationDescription", ""),
+                ["nativeLocationDescription"] = ConversationLocationLabel(ReadString(participant, "nativeLocationDescription", "")),
                 ["nativeLocationClass"] = ReadString(participant, "nativeLocationClass", ""),
                 ["travelClothingDescription"] = ReadString(participant, "travelClothingDescription", ""),
                 ["civilianEquipmentFingerprint"] = ReadString(participant, "civilianEquipmentFingerprint", ""),
@@ -673,12 +673,13 @@ updated_ts INTEGER NOT NULL);");
             bool roomAttireContext = false)
         {
             string id = ReadString(participant, "heroStringId", "");
-            string location = ReadString(stored, "location_override", "");
+            string narrativeLocation = ConversationLocationLabel(ReadString(stored, "location_override", ""));
+            string location = narrativeLocation;
             string locationClass = ReadString(stored, "location_class", "");
             if (string.IsNullOrWhiteSpace(location))
             {
-                location = FirstNonEmpty(ReadString(participant, "nativeLocationDescription", ""),
-                    ReadString(participant, "currentSettlementName", ""), "on the campaign map");
+                location = FirstNonEmpty(ConversationLocationLabel(ReadString(participant, "nativeLocationDescription", "")),
+                    ConversationLocationLabel(ReadString(participant, "currentSettlementName", "")), "on the campaign map");
             }
             if (string.IsNullOrWhiteSpace(locationClass))
                 locationClass = FirstNonEmpty(ReadString(participant, "nativeLocationClass", ""), InferLocationClass(location), "travel");
@@ -724,7 +725,7 @@ updated_ts INTEGER NOT NULL);");
                 ["role"] = ReadString(participant, "role", "npc"),
                 ["location"] = LimitText(location, 500),
                 ["locationClass"] = locationClass,
-                ["hasNarrativeLocation"] = !string.IsNullOrWhiteSpace(ReadString(stored, "location_override", "")),
+                ["hasNarrativeLocation"] = narrativeLocation.Length > 0,
                 ["acceptedPrivateScene"] = ReadBool(stored, "acceptedPrivateScene", false),
                 ["clothing"] = LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
                 ["clothingSource"] = clothingSource,

@@ -6,6 +6,84 @@ using System.Text;
 
 namespace ReignBeta.Shared.Characters
 {
+    public readonly struct PopulationFaceSchemaKey : IEquatable<PopulationFaceSchemaKey>
+    {
+        public readonly int Race, Age, WeightCount;
+        public readonly bool Female;
+        public PopulationFaceSchemaKey(int race, bool female, int age, int weightCount)
+        { Race = race; Female = female; Age = age; WeightCount = weightCount; }
+        public bool Equals(PopulationFaceSchemaKey other) => Race == other.Race && Female == other.Female
+            && Age == other.Age && WeightCount == other.WeightCount;
+        public override bool Equals(object? obj) => obj is PopulationFaceSchemaKey other && Equals(other);
+        public override int GetHashCode()
+        { unchecked { return ((Race * 397 ^ (Female ? 1 : 0)) * 397 ^ Age) * 397 ^ WeightCount; } }
+    }
+
+    // Native-thread, session-scoped catalog memoization. Values are positions,
+    // never body weights or Hero references. A verified catalog change disables
+    // memoization for the session; callers then use freshly read indices.
+    public sealed class PopulationFaceSchemaCache
+    {
+        private sealed class Entry
+        {
+            public readonly IReadOnlyList<int> Indices;
+            public int Hits;
+            public bool Verified;
+            public Entry(IReadOnlyList<int> indices) { Indices = indices; }
+        }
+        private readonly Dictionary<PopulationFaceSchemaKey, Entry> entries = new Dictionary<PopulationFaceSchemaKey, Entry>();
+        private readonly int maximumEntries;
+        private readonly long maximumPayloadBytes;
+        public int Count => entries.Count;
+        public long PayloadBytes { get; private set; }
+        public long Hits { get; private set; }
+        public long Misses { get; private set; }
+        public long VerificationReads { get; private set; }
+        public long Mismatches { get; private set; }
+        public bool Disabled { get; private set; }
+        public PopulationFaceSchemaCache(int maximumEntries = 512, long maximumPayloadBytes = 1024 * 1024)
+        {
+            if (maximumEntries < 1 || maximumPayloadBytes < 1) throw new ArgumentOutOfRangeException();
+            this.maximumEntries = maximumEntries; this.maximumPayloadBytes = maximumPayloadBytes;
+        }
+        private static IReadOnlyList<int> Own(int[] indices) => Array.AsReadOnly((int[])indices.Clone());
+        private static long Bytes(int count) => 64L + count * 4L;
+        public IReadOnlyList<int> Get(PopulationFaceSchemaKey key, Func<PopulationFaceSchemaKey, int[]> readIndices)
+        {
+            if (!Disabled && entries.TryGetValue(key, out Entry? entry))
+            {
+                Hits++;
+                // No random draws: check first reuse, then each 256th reuse.
+                entry.Hits++;
+                if (!entry.Verified || (entry.Hits & 255) == 0)
+                {
+                    entry.Verified = false;
+                    VerificationReads++;
+                    int[] fresh = readIndices(key);
+                    if (!entry.Indices.SequenceEqual(fresh))
+                    {
+                        Mismatches++; Disabled = true; entries.Clear(); PayloadBytes = 0;
+                        return Own(fresh);
+                    }
+                    entry.Verified = true;
+                }
+                return entry.Indices;
+            }
+            Misses++;
+            IReadOnlyList<int> indices = Own(readIndices(key)); // Failed reads publish nothing.
+            long bytes = Bytes(indices.Count);
+            if (!Disabled && bytes <= maximumPayloadBytes)
+            {
+                if (entries.Count >= maximumEntries || PayloadBytes + bytes > maximumPayloadBytes)
+                { entries.Clear(); PayloadBytes = 0; }
+                entries.Add(key, new Entry(indices)); PayloadBytes += bytes;
+            }
+            return indices;
+        }
+        public void Clear()
+        { entries.Clear(); PayloadBytes = Hits = Misses = VerificationReads = Mismatches = 0; Disabled = false; }
+    }
+
     public sealed class WandererIdentity
     {
         public string Id = "", HeroId = "", TemplateId = "", CultureId = "", Name = "", Body = "", Biography = "", BirthplaceId = "";

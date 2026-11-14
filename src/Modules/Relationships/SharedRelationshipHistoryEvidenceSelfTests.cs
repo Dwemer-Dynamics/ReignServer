@@ -33,6 +33,18 @@ VALUES('history_sources',$campaign,'a','player','closed',1,2,'[""a"",""b"",""pla
                 var aView = RelationshipHistorySourceEvidence(connection, "a", "b", context, false);
                 var bView = RelationshipHistorySourceEvidence(connection, "b", "a", context, false);
                 var shared = RelationshipHistorySourceEvidence(connection, "a", "b", context, true);
+                var promptBudget = new RelationshipPromptEvidenceBudget();
+                string firstBlock = BuildSharedRelationshipHistoryPromptBlock(connection, "a", "b", out var firstIds, context, promptBudget);
+                string repeatBlock = BuildSharedRelationshipHistoryPromptBlock(connection, "a", "b", out var repeatIds, context, promptBudget);
+                Check("one_prompt_emits_each_original_projection_once", firstIds.Count > 0 && firstBlock.Length > 0
+                    && repeatIds.Count == 0 && repeatBlock.Length == 0);
+                var projectionBudget = new RelationshipPromptEvidenceBudget();
+                var projected = projectionBudget.Select(new[] {
+                    TestDict("sourceId", "same", "text", "An exact public projection."),
+                    TestDict("sourceId", "same", "text", "An exact public projection."),
+                    TestDict("sourceId", "same", "text", "A different observer projection.") });
+                Check("deduplication_preserves_distinct_projection_hashes", projected.Count == 2);
+                Check("shared_budget_never_clips_an_original", projectionBudget.Select(new[] { TestDict("sourceId", "too_large", "text", new string('x', 14000)) }).Count == 0);
                 string Text(List<Dictionary<string, object>> records) => string.Join("\n", records.Select(r => ReadString(r, "text", "")));
                 Check("owner_retains_prior_disclosure", Text(aView).Contains("PLAYER-SECRET-901"));
                 Check("other_observer_and_joint_writer_exclude_private_history", !Text(bView).Contains("PLAYER-SECRET-901")

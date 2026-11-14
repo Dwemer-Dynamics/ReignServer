@@ -380,6 +380,23 @@ participants_json,payload_json) VALUES('rarity-scene',$campaign,'npc','player','
                     var link = TestDict("relatedTurnId", "question", "relationKind", "answer", "relatedQuote", "What quiet place would you choose?");
                     Check("link_keeps_original_asker", ConversationContinuityLinkError(connection, link, "npc", "fixture", 5d) == ""
                         && ReadString(link, "relatedSpeakerId", "") == "npc");
+                    var eventLink = TestDict("relatedTurnId", "event-a", "relationKind", "activity_completion", "relatedQuote", "I would choose the old orchard.");
+                    Check("unique_visible_related_event_alias_binds_canonical_source", ConversationContinuityLinkError(connection, eventLink, "npc", "fixture", 5d) == ""
+                        && ReadString(eventLink, "relatedTurnId", "") == "answer" && ReadString(eventLink, "relatedSourceAlias", "") == "event-a");
+                    var inaccessibleAlias = TestDict("relatedTurnId", "event-a", "relationKind", "activity_completion", "relatedQuote", "I would choose the old orchard.");
+                    Check("related_event_alias_respects_observer_branch_and_day",
+                        ConversationContinuityLinkError(connection, CloneDictionary(inaccessibleAlias), "outsider", "fixture", 5d) == "related_source_unavailable"
+                        && ConversationContinuityLinkError(connection, CloneDictionary(inaccessibleAlias), "npc", "other_branch", 5d) == "related_source_unavailable"
+                        && ConversationContinuityLinkError(connection, CloneDictionary(inaccessibleAlias), "npc", "fixture", 4d) == "related_source_unavailable");
+                    var notQuestion = CloneDictionary(inaccessibleAlias); notQuestion["relationKind"] = "answer";
+                    Check("event_alias_does_not_weaken_question_form_guard", ConversationContinuityLinkError(connection, notQuestion, "npc", "fixture", 5d) == "related_source_not_question");
+                    using (var aliasFixture = connection.BeginTransaction())
+                    {
+                        InsertConversationTurn(connection, "duplicate-alias", "session-a", "event-a", 999, "duplicate-alias", "player", "player", "Player",
+                            "I would choose the old orchard.", "in_person", 5d, 3L, "", new List<string> { "npc", "player" }, context);
+                        Check("ambiguous_related_event_alias_is_rejected", ConversationContinuityLinkError(connection, CloneDictionary(inaccessibleAlias), "npc", "fixture", 5d) == "related_source_unavailable");
+                        aliasFixture.Rollback();
+                    }
                     link["relatedQuote"] = "An invented question about another topic?";
                     Check("invented_related_quote_rejected", ConversationContinuityLinkError(connection, link, "npc", "fixture", 5d) == "related_source_quote_mismatch");
                     var oldLink = TestDict("relatedTurnId", "question", "relatedQuote", "What quiet place would you choose?", "relationKind", "answer",

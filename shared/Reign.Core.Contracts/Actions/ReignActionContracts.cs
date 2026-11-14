@@ -242,6 +242,7 @@ namespace Reign.Core.Contracts.Actions
                 foreach (var key in c.Arguments.Keys)
                     if (!definition.Parameters.Any(p => p.Key == key)) errors.Add("Unknown parameter: " + key);
             }
+            errors.AddRange(TavernHouseVisitAction.Validate(a));
             foreach (var group in a.Clauses.Where(c => c.ActionId == "government.support_vote")
                 .GroupBy(c => c.ActorId + "\n" + (c.Arguments.TryGetValue("businessId", out var id) ? id : "")))
                 if (group.Select(c => c.Arguments.TryGetValue("optionId", out var option) ? option : "").Distinct(StringComparer.Ordinal).Count() > 1)

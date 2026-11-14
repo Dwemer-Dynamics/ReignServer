@@ -19,6 +19,11 @@ namespace ReignBetaServer
                     && ValidateRulerOptions(TestDict(key, 0)).Length > 0 && RulerOptionsHtml().Contains("id='" + key + "'"));
             }
             Check("unknown_switch_rejected", ValidateRulerOptions(TestDict("rulerInventedOption", true)).Length > 0);
+            Check("retired_governor_switch_is_inert", ValidateRulerOptions(TestDict(RulerOptions.GovernorCulture, true)).Length == 0
+                && ValidateRulerOptions(TestDict(RulerOptions.GovernorCulture, "true")).Length > 0
+                && !RulerOptionsForClient(TestDict(RulerOptions.GovernorCulture, true)).ContainsKey(RulerOptions.GovernorCulture)
+                && !RulerOptionsHtml().Contains(RulerOptions.GovernorCulture)
+                && !RulerOptionsScript().Contains(RulerOptions.GovernorCulture));
             var settings = DefaultSettings(); settings["private_fixture"] = "preserve";
             Check("settings_api_defaults_are_explicit_booleans", RulerOptions.Switches.Keys.All(k => settings.TryGetValue(k, out var value) && value is bool on && on)
                 && RulerOptions.Switches.Keys.All(k => ReadBool(SettingsForUi(settings), k, false)));

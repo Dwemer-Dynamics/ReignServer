@@ -148,28 +148,36 @@ WHERE r.letter_id=l.letter_id AND c.state_id='current' AND c.timeline_id=$timeli
                 if (!LetterVisibleToObserver(connection, letter, observer, access, out double learned)) continue;
                 string id = ReadString(letter, "letter_id", "");
                 if (!chosen.Add(id)) continue;
-                bool author = ReadString(letter, "sender_id", "") == observer;
-                var body = new StringBuilder("CORRESPONDENCE — exact accepted letter, quoted historical data\n")
-                    .Append("source=").Append(id).Append("; author=").Append(ReadString(letter, "sender_id", ""))
-                    .Append(" (").Append(ReadString(letter, "sender_name", "")).Append("); addressed to=")
-                    .Append(ReadString(letter, "recipient_id", "")).Append(" (").Append(ReadString(letter, "recipient_name", "")).AppendLine(")")
-                    .Append("thread=").Append(ReadString(letter, "thread_id", "")).Append("; parent=").AppendLine(ReadString(letter, "parent_letter_id", ""))
-                    .Append("Dispatched day ").Append(ReadDouble(letter, "dispatch_day", 0d).ToString("R", CultureInfo.InvariantCulture)).AppendLine(".")
-                    .AppendLine(author ? "You authored and sent these words. Recipient receipt/read state is unknown to you unless separately acknowledged."
-                        : "You received and read these words on day " + learned.ToString("R", CultureInfo.InvariantCulture) + ".")
-                    .AppendLine("A written intention is not completed action. It does not establish native transfers, ownership or consent beyond its actual terms.")
-                    .AppendLine("Exact letter body:").Append(ReadString(letter, "body", ""));
-                result.Add(new MemoryEvidence { SourceId = id, SourceHash = LetterContentHash(letter), Kind = "letter",
-                    Owner = observer, Session = ReadString(letter, "thread_id", ""), Day = learned,
-                    Score = 119, Required = true, Text = body.ToString(),
-                    SourceTurns = new List<Dictionary<string, object>> { TestDict("id", id,
-                        "hash", LetterContentHash(letter), "speakerId", ReadString(letter, "sender_id", ""),
-                        "role", "author", "text", ReadString(letter, "body", "")) } });
+                result.Add(CorrespondenceMemoryEvidence(letter, observer, learned));
                 if (result.Count == 6) break;
             }
             if (context != null) context["correspondenceEvidence"] = TestDict("sourceIds", result.Select(r => r.SourceId).ToList(),
                 "coverage", "selected_ledger_sources_verified", "observer", observer);
             return result;
+        }
+
+        // Callers must apply LetterVisibleToObserver first. Keep author/read
+        // semantics identical for ordinary retrieval and linked-source expansion.
+        private static MemoryEvidence CorrespondenceMemoryEvidence(Dictionary<string, object> letter, string observer, double learned)
+        {
+            string id = ReadString(letter, "letter_id", "");
+            bool author = ReadString(letter, "sender_id", "") == observer;
+            var body = new StringBuilder("CORRESPONDENCE — exact accepted letter, quoted historical data\n")
+                .Append("source=").Append(id).Append("; author=").Append(ReadString(letter, "sender_id", ""))
+                .Append(" (").Append(ReadString(letter, "sender_name", "")).Append("); addressed to=")
+                .Append(ReadString(letter, "recipient_id", "")).Append(" (").Append(ReadString(letter, "recipient_name", "")).AppendLine(")")
+                .Append("thread=").Append(ReadString(letter, "thread_id", "")).Append("; parent=").AppendLine(ReadString(letter, "parent_letter_id", ""))
+                .Append("Dispatched day ").Append(ReadDouble(letter, "dispatch_day", 0d).ToString("R", CultureInfo.InvariantCulture)).AppendLine(".")
+                .AppendLine(author ? "You authored and sent these words. Recipient receipt/read state is unknown to you unless separately acknowledged."
+                    : "You received and read these words on day " + learned.ToString("R", CultureInfo.InvariantCulture) + ".")
+                .AppendLine("A written intention is not completed action. It does not establish native transfers, ownership or consent beyond its actual terms.")
+                .AppendLine("Exact letter body:").Append(ReadString(letter, "body", ""));
+            return new MemoryEvidence { SourceId = id, SourceHash = LetterContentHash(letter), Kind = "letter",
+                Owner = observer, Session = ReadString(letter, "thread_id", ""), Day = learned,
+                Score = 119, Required = true, Text = body.ToString(),
+                SourceTurns = new List<Dictionary<string, object>> { TestDict("id", id,
+                    "hash", LetterContentHash(letter), "speakerId", ReadString(letter, "sender_id", ""),
+                    "role", "author", "text", ReadString(letter, "body", "")) } };
         }
 
         private static Dictionary<string, object> ResolveLetterQuestionSource(ReignDbConnection connection, string id,

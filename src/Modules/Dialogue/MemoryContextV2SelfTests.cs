@@ -14,6 +14,31 @@ namespace ReignBetaServer
             Action<string, bool, object> add = (id, pass, evidence) => results.Add(TestDict("caseId", "memory_precision_" + id,
                 "passed", pass, "summary", id, "data", evidence));
             string campaign = "memory_precision_test_" + Guid.NewGuid().ToString("N");
+            var defaultPolicy = DefaultSettings();
+            add("new_memory_is_default", !ReadBool(defaultPolicy, "legacyMemoryMode", true)
+                && !defaultPolicy.ContainsKey("memoryPrecisionMode") && !defaultPolicy.ContainsKey("memoryReferenceGraphMode")
+                && ResolveMemoryMode(defaultPolicy) == "precision" && ResolveConversationReferenceMode(defaultPolicy) == "enabled"
+                && ReadInt(defaultPolicy, "conversationInputTokenLimit", 0) == 120000
+                && ReadInt(defaultPolicy, "memoryReferenceGraphMaxNodes", 0) == 32
+                && ReadInt(defaultPolicy, "memoryReferenceGraphHops", 0) == 32, null);
+            foreach (string oldMode in new[] { "shadow", "legacy", "precision" })
+            {
+                var migrated = TestDict("memoryPrecisionMode", oldMode, "memoryReferenceGraphMode", "off");
+                add("old_" + oldMode + "_flags_cannot_disable_new_default", ResolveMemoryMode(migrated) == "precision"
+                    && ResolveConversationReferenceMode(migrated) == "enabled", null);
+                migrated["legacyMemoryMode"] = true;
+                add("legacy_toggle_selects_old_path_from_" + oldMode, ResolveMemoryMode(migrated) == "legacy"
+                    && ResolveConversationReferenceMode(migrated) == "off", null);
+                migrated["legacyMemoryMode"] = false;
+                add("legacy_toggle_can_return_to_new_from_" + oldMode, ResolveMemoryMode(migrated) == "precision"
+                    && ResolveConversationReferenceMode(migrated) == "enabled", null);
+            }
+            var malformedPolicy = TestDict("legacyMemoryMode", "invalid", "temperature", .7d, "dialogueModel", "fixture/model", "apiKey", "fixture-key");
+            NormalizeMemorySettings(malformedPolicy);
+            add("missing_or_malformed_toggle_defaults_new_without_changing_provider", malformedPolicy["legacyMemoryMode"] is false
+                && ResolveMemoryMode(null) == "precision" && ReadDouble(malformedPolicy, "temperature", 0) == .7d
+                && ReadString(malformedPolicy, "dialogueModel", "") == "fixture/model"
+                && ReadString(malformedPolicy, "apiKey", "") == "fixture-key", null);
             var observer = new KnowledgeAccessContext { NpcId = "npc_b", PlayerId = "player", TimelineId = "timeline_a", WorldDay = 30 };
             var settings = TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false,
                 "memoryPrecisionMode", "precision", "enableSemanticMemory", false);
@@ -53,6 +78,36 @@ namespace ReignBetaServer
             add("topic_query_retains_late_entities_and_subject_after_long_narration",
                 lateQuestionTopics.Contains("narea") && lateQuestionTopics.Contains("tournament"), lateQuestionTopics);
             add("empty_sources_do_not_invent_topics", BuildMemorySummaryTopics(Array.Empty<Dictionary<string, object>>(), 5).Count == 0, null);
+            var stagedOriginals = new List<Dictionary<string, object>> {
+                TestDict("turn_id", "old_player_source", "speaker_id", "player", "role", "player", "world_day", 20d,
+                    "text", "The caravan promise requires arrival."),
+                TestDict("turn_id", "old_npc_source", "speaker_id", "npc_b", "role", "npc", "world_day", 20d,
+                    "text", "*I imagine walking beside her* I agree. The caravan promise requires arrival; nothing is paid yet.") };
+            string stagedOriginalHash = MemorySourceHash(stagedOriginals);
+            var stagedLegacy = PrepareStagedSceneMemory(TestDict("npc_id", "npc_b"), stagedOriginals, "timeline_a");
+            string stagedText = ReadString(stagedLegacy, "summary", "");
+            add("legacy_staging_links_tags_and_public_source_views", stagedText.Contains("source=old_player_source; speaker=player; role=player")
+                && stagedText.Contains("source=old_npc_source; speaker=npc_b; role=npc")
+                && stagedText.Contains("nothing is paid yet") && !stagedText.Contains("imagine walking")
+                && ReadStringList(stagedLegacy, "tags").Contains("caravan")
+                && ReadDictionaryList(stagedLegacy, "sourceReferences").All(r => ReadString(r, "sourceHash", "").Length == 64
+                    && ReadString(r, "viewHash", "").Length == 64)
+                && MemorySourceHash(stagedOriginals) == stagedOriginalHash
+                && CanonicalJson(stagedLegacy) == CanonicalJson(PrepareStagedSceneMemory(TestDict("npc_id", "npc_b"), stagedOriginals, "timeline_a")), stagedLegacy);
+            foreach (double sourceDay in new[] { 20d, 20.25d, 91089.14008449652d })
+            {
+                var numericSources = stagedOriginals.Select(t => new Dictionary<string, object>(t) { ["world_day"] = sourceDay }).ToList();
+                var numericPrepared = PrepareStagedSceneMemory(TestDict("npc_id", "npc_b"), numericSources, "timeline_a");
+                add("legacy_staging_manifest_numeric_roundtrip_" + sourceDay.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                    CanonicalJson(numericPrepared) == CanonicalJson(TryParseJsonObject(Json.Serialize(numericPrepared))), null);
+            }
+            var oversizedSource = new List<Dictionary<string, object>> {
+                TestDict("turn_id", "large_old_source", "speaker_id", "npc_b", "role", "npc", "text", new string('z', 390000)) };
+            var oversizedStaged = PrepareStagedSceneMemory(TestDict("npc_id", "npc_b"), oversizedSource, "timeline_a");
+            string oversizedView = CompactRecentSummaryView(ReadString(oversizedStaged, "summary", ""), oversizedStaged,
+                new[] { "caravan" }, 1800, out var oversizedAudit);
+            add("legacy_staging_large_original_gets_bounded_view", oversizedView.Length <= 1800
+                && !oversizedView.Contains(new string('z', 20)) && ReadString(oversizedStaged, "summary", "").Contains(new string('z', 390000)), oversizedAudit);
             var context = TestDict("timelineId", "timeline_a", "worldDay", 30d, "playerHeroStringId", "player",
                 "sceneTurnId", "current_beat", "conversationSessionId", "current_session");
             var raw = new List<string> { "Player proposed 900 denars, payable immediately.",
@@ -145,6 +200,41 @@ SELECT 'unrelated_' || n,'npc_other',100+n,'caravan unrelated private detail','[
 INSERT INTO memories(memory_id,owner_id,ts,summary,known_by_json,visibility,status)
 VALUES('eligible_old','npc_b',1,'300 denars only after arrival','[""npc_b""]','private','active');");
                 add("unrelated_rows_cannot_exhaust_candidate_limit", QueryKnownRows(connection, "memories", observer, "status='active'", 4).Any(r => ReadString(r, "memory_id", "") == "eligible_old"), null);
+                using (var obligationFixture = connection.BeginTransaction())
+                {
+                    void SaveObligation(string id, long timestamp, string text, string validation = "", string spanStatus = "", string evidenceType = "", bool hidden = false)
+                    {
+                        var obligation = TestDict("obligation_id", id, "description", text, "owed_by", "npc_b", "owed_to", "player",
+                            "ownerId", "npc_b", "status", "unresolved", "campaignId", campaign, "timelineId", "timeline_a",
+                            "worldDay", 20d, "created_day", 20d, "visibility", "private", "known_by", new[] { "npc_b", "player" },
+                            "participants", new[] { "npc_b", "player" });
+                        if (validation.Length > 0) obligation["sourceValidation"] = validation;
+                        if (spanStatus.Length > 0) obligation["sourceEvidence"] = TestDict("status", spanStatus, "quote", text, "speakerId", "npc_b");
+                        if (evidenceType.Length > 0) obligation["evidenceType"] = evidenceType;
+                        if (hidden) obligation["hidden_from"] = new[] { "npc_b" };
+                        InsertObligation(connection, "obligation_event_" + id, obligation, timestamp, "dialogue");
+                    }
+                    const string supported = "I promise to inspect the markerproof only if the caravan arrives.";
+                    const string court = "Native ledger payment for the markerproof.";
+                    SaveObligation("supported_obligation", 21, supported, "supported_span", "supported_span", "spoken_statement");
+                    SaveObligation("native_obligation", 22, court);
+                    SaveObligation("incomplete_obligation", 31, "Markerproof unclear summary.", "incomplete", "incomplete", "unverified_summary");
+                    SaveObligation("conditional_hypothesis", 32, "Maybe the markerproof is owed.", "incomplete", "supported_span", "hypothesis");
+                    SaveObligation("marked_hypothesis", 33, "The markerproof might be owed.", "supported_span", "supported_span", "hypothesis");
+                    SaveObligation("unverified_type_only", 34, "A supposed markerproof without evidence.", evidenceType: "unverified_summary");
+                    SaveObligation("incomplete_span_only", 35, "Another markerproof missing its source.", spanStatus: "incomplete");
+                    SaveObligation("hidden_obligation", 36, "Hidden markerproof obligation.", "supported_span", "supported_span", "spoken_statement", hidden: true);
+                    var promptObligations = QueryKnownRows(connection, "obligations", observer, PromptActiveObligationSql, 2);
+                    add("prompt_obligation_budget_excludes_incomplete_and_hypothetical_rows",
+                        promptObligations.Select(r => ReadString(r, "description", "")).SequenceEqual(new[] { court, supported }), null);
+                    var editorObligations = QueryKnownRows(connection, "obligations", observer, "", 20);
+                    add("prompt_obligation_guard_preserves_stored_rows_for_review",
+                        editorObligations.Count == 7 && editorObligations.Any(r => ReadString(r, "obligation_id", "") == "incomplete_obligation"), null);
+                    var temporalObligations = LoadTemporalKnowledgeForPrompt(connection, campaign, observer, new() { "markerproof" }, 2);
+                    add("temporal_obligation_prompt_keeps_own_revision_evidence",
+                        temporalObligations.Select(r => ReadString(r, "claim", "")).ToHashSet().SetEquals(new[] { court, supported }), null);
+                    obligationFixture.Rollback();
+                }
                 InsertMemoryFts(connection, "eligible_old", "300 denars caravan caravan agreement arrival", new List<string>(), new List<string>());
                 add("eligible_ranked_lexical_source_found", SearchMemoryFts(connection, new List<string> { "caravan" }, 1, observer).Contains("eligible_old"), null);
                 using(var fixture=connection.BeginTransaction())
@@ -237,9 +327,35 @@ SELECT 'regional_'||n,$campaign,'regional_'||n,'caravan caravan caravan caravan'
                 {
                     var receipt = RepairConversationContinuity(connection, stage);
                     add("staged_apply_derivatives_only", ReadBool(receipt, "ok", false) && QuerySql(connection, "SELECT * FROM conversation_turns;").Count == 3, receipt);
+                    var published = QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging';").Single();
+                    string originalTurns = MemorySourceHash(QuerySql(connection, "SELECT * FROM conversation_turns ORDER BY turn_id;"));
+                    var duplicate = RepairConversationContinuity(connection, stage);
+                    var freshStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
+                    RepairConversationContinuity(connection, freshStage);
+                    add("legacy_staging_repeat_preserves_ids_tags_and_originals", ReadBool(duplicate, "idempotent", false)
+                        && QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging';").Count == 1
+                        && TextListFromJson(ReadString(published, "tags_json", "[]")).Contains("denars")
+                        && QuerySql(connection, "SELECT * FROM memory_sources WHERE document_type='summary' AND document_id=$id AND source_type='turn';",
+                            TestDict("id", ReadString(published, "summary_id", ""))).Count == 3
+                        && MemorySourceHash(QuerySql(connection, "SELECT * FROM conversation_turns ORDER BY turn_id;")) == originalTurns, null);
                     preview.Rollback();
                 }
                 add("preview_rolls_back_publication", QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging';").Count == 0, null);
+                using (var upgrade = connection.BeginTransaction())
+                {
+                    ExecuteSql(connection, @"INSERT INTO summaries(summary_id,owner_id,summary_type,summary,status,source,updated_ts)
+VALUES('old_staged_scene','npc_a','scene','Earlier derived scene text.','active','precision_staging',1);
+UPDATE conversation_sessions SET scene_summary_id='old_staged_scene' WHERE session_id='group_source';");
+                    InsertSummaryFts(connection, "old_staged_scene", "Earlier derived scene text.", new() { "scene" }, new() { "npc_a", "npc_b", "player" });
+                    var upgradeStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
+                    RepairConversationContinuity(connection, upgradeStage);
+                    var repeatedUpgrade = RepairConversationContinuity(connection, upgradeStage);
+                    add("legacy_staging_version_upgrade_supersedes_previous", ReadBool(repeatedUpgrade, "idempotent", false)
+                        && QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging' AND status='active';").Count == 1
+                        && ReadString(QuerySql(connection, "SELECT * FROM summaries WHERE summary_id='old_staged_scene';").Single(), "status", "") == "superseded"
+                        && QuerySql(connection, "SELECT f.* FROM summary_fts f JOIN summaries s ON s.summary_id=f.summary_id WHERE s.source='precision_staging' AND s.status='active';").Count == 1, null);
+                    upgrade.Rollback();
+                }
                 var bad = ReadDictionary(ReadDictionaryList(stage, "operations")[0], "prepared");
                 bad["summary"] = "900 has been paid.";
                 bool tampered = false;
@@ -294,6 +410,15 @@ VALUES('foundation_cache_turn','foundation_cache_source','foundation_cache_event
                 add("projection_catches_late_source_revision",ReadString(cacheAudit,"foundationCache","")=="caught_up",cacheAudit);
                 ExecuteSql(connection,@"INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,text,world_day,ts,participants_json,payload_json)
 VALUES('whisper','group_source','private_event',4,'agreement_exchange','player','player','SECRET_UNHEARD_PRICE',20,4,'[""npc_a"",""player""]','{""timelineId"":""timeline_a""}');");
+                using (var privateStage = connection.BeginTransaction())
+                {
+                    var whisperedStage = BuildMemoryStagingManifest(connection, TestDict("campaignId", campaign, "timelineId", "timeline_a"));
+                    RepairConversationContinuity(connection, whisperedStage);
+                    var whisperedSummary = QuerySql(connection, "SELECT * FROM summaries WHERE source='precision_staging' AND status='active';").Single();
+                    add("legacy_staging_whisper_excludes_nonwitness", !TextListFromJson(ReadString(whisperedSummary, "known_by_json", "[]")).Contains("npc_b")
+                        && !KnowledgeRowVisibleToNpc("summaries", whisperedSummary, observer, connection), null);
+                    privateStage.Rollback();
+                }
                 var privateSafe = PrecisionExchangeEvidence(connection,QuerySql(connection,"SELECT * FROM conversation_turns WHERE turn_id='source_1';").Single(),observer,true,100);
                 add("exchange_expansion_filters_whispers",!privateSafe.Text.Contains("SECRET_UNHEARD_PRICE"),null);
                 var recentSafe=LoadMostRecentClosedConversation(connection,"npc_b","",24000,30,observer);
@@ -384,6 +509,73 @@ VALUES('whisper','group_source','private_event',4,'agreement_exchange','player',
             results.AddRange(RunMemorySnapshotSourceAssertions());
             results.AddRange(RunMemoryCompactionOutcomeSelfTests());
             results.AddRange(RunDerivedMemoryTimeSelfTests());
+            results.AddRange(RunConversationArchiveStorageSelfTests());
+            return results;
+        }
+
+        private static List<Dictionary<string, object>> RunConversationArchiveStorageSelfTests()
+        {
+            var results = new List<Dictionary<string, object>>();
+            void Check(string id, bool pass, object evidence = null) => results.Add(TestDict(
+                "caseId", "memory_precision_archive_" + id, "passed", pass, "summary", id, "data", evidence));
+            string campaign = "memory_archive_test_" + Guid.NewGuid().ToString("N");
+            string original = "ORIGINAL_BEGIN " + new string('x', 6200) + char.ConvertFromUtf32(0x1F33F) + " ORIGINAL_END";
+            const string lastSource = "The final source says that the proposed visit has not happened. FINAL_ARCHIVE_SOURCE";
+            string historical = original + " Lucon departed and declared his withdrawal permanent. He did not re-engage on the same terms.";
+            string archive = NormalizeHistoricalRoleplayContinuityText(historical, 1800, true, HistoricalTextPurpose.StoredArchive);
+            Check("historical_archive_preserves_whole_quoted_source_and_idempotent_scope", archive.Contains(historical, StringComparison.Ordinal)
+                && archive.Contains("historical scene", StringComparison.Ordinal)
+                && NormalizeHistoricalRoleplayContinuityText(archive, 1800, true, HistoricalTextPurpose.StoredArchive) == archive
+                && NormalizeHistoricalRoleplayContinuityText(archive, 1800, false, HistoricalTextPurpose.StoredArchive) == archive
+                && NormalizeHistoricalRoleplayContinuityText(NormalizeHistoricalRoleplayContinuityText(archive, 1800, false,
+                    HistoricalTextPurpose.StoredArchive), 1800, true, HistoricalTextPurpose.StoredArchive) == archive);
+            Check("prompt_projection_remains_bounded", NormalizeHistoricalRoleplayContinuityText(historical, 1800, true).Length <= 1800);
+            string legacyFramedArchive = "A speaker ended an earlier historical conversation. " + HistoricalConversationScopeNote(true);
+            Check("legacy_scope_framing_is_retained_without_rewriting", NormalizeHistoricalRoleplayContinuityText(
+                legacyFramedArchive, 1800, false, HistoricalTextPurpose.StoredArchive) == legacyFramedArchive);
+            var response = TestDict("ok", true, "finishReason", "stop", "content", "{\"sourceIndices\":[1,2]}");
+            var rejected = EvaluateMemoryCompactionResponse(response, new(), new() { new string('a', 1100), new string('b', 1100) }, new(), 1800, true);
+            var selection = ReadDictionary(ReadDictionary(rejected, "compactionDiagnostic"), "selectionValidation");
+            Check("oversized_valid_selection_reports_exact_budget_failure", ReadString(selection, "reason", "") == "selection_exceeds_character_budget"
+                && ReadInt(selection, "selectedCount", 0) == 2 && ReadInt(selection, "selectedCharactersWithFraming", 0) > 1800
+                && ReadString(rejected, "sourceCoverage", "") == "all_records"
+                && ReadString(rejected, "compactionStatus", "") == "incomplete");
+            try
+            {
+                var context = TestDict("campaignId", campaign, "timelineId", "archive_branch", "worldDay", 1d,
+                    "playerHeroStringId", "archive_player", "conversationSessionId", "archive_session");
+                ConversationStartApi(TestDict("campaignId", campaign, "timelineId", "archive_branch", "sessionId", "archive_session",
+                    "npcId", "archive_npc", "playerId", "archive_player", "worldDay", 1d, "ts", 1L,
+                    "participants", new[] { "archive_npc", "archive_player" }));
+                using var c = OpenCampaignConnection(campaign);
+                EnsureIdentitySchema(c);
+                ExecuteSql(c, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,updated_ts)
+VALUES('archive_npc','archive_player','verified','Player','fixture',1,1);");
+                var audience = new List<string> { "archive_npc", "archive_player" };
+                InsertConversationTurn(c, "archive_first", "archive_session", "archive_event", 0, "archive_exchange", "player",
+                    "archive_player", "Player", original, "in_person", 1d, 1L, "", audience, context);
+                InsertConversationTurn(c, "archive_last", "archive_session", "archive_event", 1, "archive_exchange", "npc",
+                    "archive_npc", "NPC", lastSource, "in_person", 1d, 2L, "", audience, context);
+                var session = QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id='archive_session';").Single();
+                var turns = QuerySql(c, "SELECT * FROM conversation_turns WHERE session_id='archive_session' AND status='active' ORDER BY turn_order;");
+                var sources = new List<string>();
+                var result = CreateConversationSceneSummary(campaign, session, turns, 3L,
+                    TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false, "memoryConsolidationMaxSummaryChars", 500),
+                    captureSourceRecords: records => sources.AddRange(records));
+                var row = QuerySql(c, "SELECT * FROM summaries WHERE summary_id=$id;", TestDict("id", ReadString(result, "summaryId", ""))).Single();
+                string stored = ReadString(row, "summary", "");
+                Check("scene_fallback_roundtrips_beyond_old_storage_ceiling", stored.Length > 6200
+                    && sources.All(source => stored.Contains(source, StringComparison.Ordinal))
+                    && stored.Contains(original, StringComparison.Ordinal) && stored.Contains(lastSource, StringComparison.Ordinal),
+                    TestDict("storedCharacters", stored.Length, "sourceCount", sources.Count));
+                Check("canonical_turns_are_unchanged", ReadString(QuerySql(c, "SELECT text FROM conversation_turns WHERE turn_id='archive_first';").Single(), "text", "") == original);
+                var metadata = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
+                string view = CompactRecentSummaryView(stored, metadata, new[] { "FINAL_ARCHIVE_SOURCE" }, 1800, out _);
+                Check("bounded_view_selects_complete_sources_without_clipping_archive", view.Length <= 1800
+                    && view.Contains(lastSource, StringComparison.Ordinal) && !view.Contains("ORIGINAL_BEGIN", StringComparison.Ordinal));
+            }
+            catch (Exception ex) { Check("suite_exception", false, ex.ToString()); }
+            finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }
 
@@ -468,13 +660,14 @@ VALUES('summary','linked_summary','memory','intermediate_memory'),('memory','int
             Dictionary<string, object> response = TestDict("ok", true, "finishReason", "length", "content", "{}", "model", "fixture",
                 "raw", TestDict("usage", TestDict("completion_tokens", 1200, "completion_tokens_details", TestDict("reasoning_tokens", 1199))));
             Dictionary<string, object> Respond(Dictionary<string, object> input) { calls++; request = input; return response; }
-            var length = BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond);
+            var length = BuildMiddleTermSummary(settings, "npc", "conversation:compaction_fixture", rows, responder: Respond, campaignId: "isolated_compaction_campaign");
             var diagnostic = ReadDictionary(length, "compactionDiagnostic");
             Check("length_failure_is_explicit_and_not_retried", calls == 1 && !ReadBool(length, "retryable", true)
                 && ReadString(length, "compactionStatus", "") == "incomplete"
                 && ReadString(diagnostic, "reason", "") == "provider_output_limit"
                 && ReadInt(diagnostic, "reasoningTokens", 0) == 1199);
             string prompt = string.Join("\n", ReadDictionaryList(request, "messages").Select(m => ReadString(m, "content", "")));
+            Check("request_is_attributed_to_exact_campaign", ReadString(request, "campaignId", "") == "isolated_compaction_campaign");
             Check("request_has_single_attempt_and_complete_final_source", ReadBool(request, "singleProviderAttempt", false)
                 && rows.All(r => prompt.Contains(ReadString(r, "summary", ""), StringComparison.Ordinal)));
             string retained = ReadString(length, "summary", "");

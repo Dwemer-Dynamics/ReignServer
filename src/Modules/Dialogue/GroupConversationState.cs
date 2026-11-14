@@ -168,6 +168,58 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
             return builder.ToString().TrimEnd();
         }
 
+        private static string GroupPlayerInputEventId(Dictionary<string, object> payload)
+        {
+            string session = GroupConversationSessionId(payload), beat = ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId");
+            return session.Length == 0 || beat.Length == 0 ? "" : "group_input_"
+                + PromptHash(ContinuityTimeline(payload) + "|" + session + "|" + beat).Substring(0, 24);
+        }
+
+        private static Dictionary<string, object> ObservedGroupPlayerInput(ReignDbConnection connection,
+            Dictionary<string, object> payload, string observer, string player, string text)
+        {
+            string id = GroupPlayerInputEventId(payload);
+            if (id.Length == 0 || !IsSharedGroupConversation(payload) || !TableExists(connection, "conversation_turns")) return null;
+            var row = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND session_id=$session
+AND exchange_id=$beat AND speaker_id=$player AND role='player' AND text=$text AND status='active' ORDER BY turn_order LIMIT 1;",
+                TestDict("event", id, "session", GroupConversationSessionId(payload),
+                    "beat", ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId"), "player", player, "text", text)).FirstOrDefault();
+            return row != null && PrecisionTurnVisible(row, observer, BuildKnowledgeAccessContext(observer, player, "", payload), connection) ? row : null;
+        }
+
+        // This frame is derived from stored input and delivered, observer-visible
+        // contributions. Client queue plans and matching prose cannot attest it.
+        private static Dictionary<string, object> BuildConfiguredObservedGroupTurnStage(string campaign,
+            Dictionary<string, object> payload, string observer, string playerText, Dictionary<string, object> settings = null)
+        {
+            // Default-off until current-profile budget, native-header parity and
+            // independent accuracy evidence qualify this optional prompt change.
+            return ReadBool(settings ?? LoadSettings(), "enableObservedGroupTurnStageFrame", false)
+                ? BuildObservedGroupTurnStage(campaign, payload, observer, playerText) : null;
+        }
+
+        private static Dictionary<string, object> BuildObservedGroupTurnStage(string campaign, Dictionary<string, object> payload, string observer, string playerText)
+        {
+            if (string.IsNullOrWhiteSpace(campaign) || !IsSharedGroupConversation(payload)) return null;
+            string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
+            using var connection = OpenCampaignConnection(campaign);
+            var input = ObservedGroupPlayerInput(connection, payload, observer, player, playerText);
+            if (input == null || !TableExists(connection, "group_conversation_contributions")) return null;
+            var delivered = QuerySql(connection, @"SELECT contribution_id,speaker_id,delivery_order FROM group_conversation_contributions
+WHERE session_id=$session AND scene_turn_id=$beat AND role='npc' AND text<>''
+AND validation_status IN ('accepted_speech','visible_failed_repair')
+AND timeline_id=$timeline AND world_day<=$day AND " + MemoryJsonContainsSql("audience_json", "$observer")
+                + " ORDER BY delivery_order,ts,contribution_id LIMIT 65;",
+                TestDict("session", GroupConversationSessionId(payload), "beat", ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId"),
+                    "observer", observer, "timeline", ContinuityTimeline(payload), "day", ReadDouble(payload, "worldDay", 0d)));
+            if (delivered.Count == 0) return null;
+            return TestDict("schema", "reign-observed-group-turn-stage-v1", "inputTurnId", ReadString(input, "turn_id", ""),
+                "deliveredAfterInput", delivered.Take(64).Select(d => TestDict("contributionId", d["contribution_id"],
+                    "actor", ReadString(d, "speaker_id", "") == observer ? "responding_npc" : "witness_" + PromptHash(ReadString(d, "speaker_id", "")).Substring(0, 16), "order", d["delivery_order"])).ToList(),
+                "truncated", delivered.Count > 64,
+                "inputIsNotANewAnswerToListedContributions", true);
+        }
+
         private static void UpdateSharedGroupConversationState(string campaignId, Dictionary<string, object> payload,
             string npcId, string npcName, string reply, string sessionId, long ts, string acceptedEventId = "")
         {

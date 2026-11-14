@@ -169,12 +169,13 @@ namespace ReignBetaServer
 
             lock (SettingsSecretVaultLock)
             {
+                var vaultSettings = new Dictionary<string, object>(
+                    settings ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
+                SanitizeBoundKeySlots(vaultSettings);
                 Dictionary<string, object> protectedState = new Dictionary<string, object>
                 {
                     ["formatVersion"] = 2,
-                    ["settings"] = new Dictionary<string, object>(
-                        settings ?? new Dictionary<string, object>(),
-                        StringComparer.OrdinalIgnoreCase)
+                    ["settings"] = vaultSettings
                 };
 
                 string directory = Path.GetDirectoryName(vaultPath);
@@ -235,6 +236,8 @@ namespace ReignBetaServer
                 {
                     foreach (KeyValuePair<string, object> pair in savedSettings)
                     {
+                        // A slot bound to a global key never takes a value back from an older vault.
+                        if (GlobalKeyBinding(settings, pair.Key) != null) continue;
                         settings[pair.Key] = pair.Value;
                         restoredSettingCount++;
                         if (SensitiveSettingsKeys().Contains(pair.Key)
@@ -248,7 +251,7 @@ namespace ReignBetaServer
 
                 foreach (string key in SensitiveSettingsKeys())
                 {
-                    if (!string.IsNullOrWhiteSpace(ReadString(settings, key, "")))
+                    if (!string.IsNullOrWhiteSpace(ReadString(settings, key, "")) || GlobalKeyBinding(settings, key) != null)
                     {
                         continue;
                     }

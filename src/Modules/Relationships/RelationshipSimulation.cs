@@ -1069,8 +1069,16 @@ namespace ReignBetaServer
                     if (!RelationshipSimulationMarriageEligible(member, candidate)) continue;
                     Dictionary<string, object> candidateClan;
                     if (!run.Clans.TryGetValue(ReadString(candidate.Data, "clanId", ""), out candidateClan)) continue;
-                    double score = DynasticMarriageScore(clan, candidateClan, leader.Data, member.Data, candidate.Data)
-                        *RelationshipSimulationArrangedCourtshipMultiplier(run,member.Id,candidate.Id,day);
+                    double ownApproval=DynasticMarriageScore(clan,candidateClan,leader.Data,member.Data,candidate.Data)*RelationshipSimulationArrangedCourtshipMultiplier(run,member.Id,candidate.Id,day);
+                    if(ownApproval<25)continue;
+                    var counterpart=run.Heroes.TryGetValue(ReadString(candidateClan,"leaderId",""),out var cl)?cl.Data:new Dictionary<string,object>();
+                    double otherApproval=DynasticMarriageScore(candidateClan,clan,counterpart,candidate.Data,member.Data)*RelationshipSimulationArrangedCourtshipMultiplier(run,member.Id,candidate.Id,day);
+                    int nativeYear=ReadInt(member.Data,"nativeYear",-1);
+                    bool royalA=ReadBool(member.Data,"isRulingClanMember",false),royalB=ReadBool(candidate.Data,"isRulingClanMember",false);
+                    if(nativeYear<0&&((royalA&&ReadInt(candidateClan,"fiefCount",0)==0)||(royalB&&ReadInt(clan,"fiefCount",0)==0)))continue;
+                    if(!Reign.Relationships.ArrangedMarriagePolicy.RoyalAllowed(run.CampaignId,member.Id,royalA,ReadInt(candidateClan,"fiefCount",0),nativeYear)
+                        ||!Reign.Relationships.ArrangedMarriagePolicy.RoyalAllowed(run.CampaignId,candidate.Id,royalB,ReadInt(clan,"fiefCount",0),nativeYear))continue;
+                    double score=Reign.Relationships.ArrangedMarriagePolicy.Rank(ownApproval,otherApproval,ReadInt(clan,"tier",0),ReadInt(candidateClan,"tier",0),ReadInt(clan,"fiefCount",0),ReadInt(candidateClan,"fiefCount",0));
                     if (score > bestScore) { bestScore = score; best = member; other = candidate; bestOtherClan = candidateClan; }
                 }
                 if (best != null && other != null && bestOtherClan != null && bestScore >= 25d)
@@ -1079,7 +1087,14 @@ namespace ReignBetaServer
                     double otherApproval = run.Heroes.TryGetValue(ReadString(bestOtherClan, "leaderId", ""), out otherLeader)
                         ? DynasticMarriageScore(bestOtherClan, clan, otherLeader.Data, other.Data, best.Data)
                             *RelationshipSimulationArrangedCourtshipMultiplier(run,best.Id,other.Id,day) : 0d;
-                    if (otherApproval >= 25d) MarryRelationshipSimulationHeroes(run, best, other, "arranged",day);
+                    int fee=Reign.Relationships.ArrangedMarriagePolicy.Fee(ReadInt(clan,"tier",0),ReadInt(bestOtherClan,"tier",0));
+                    var payer=ReadInt(clan,"tier",0)<ReadInt(bestOtherClan,"tier",0)?clan:bestOtherClan;
+                    var payee=ReferenceEquals(payer,clan)?bestOtherClan:clan;
+                    if(otherApproval>=25 && ReadDouble(payer,"gold",0)>=fee)
+                    {
+                        payer["gold"]=ReadDouble(payer,"gold",0)-fee;payee["gold"]=ReadDouble(payee,"gold",0)+fee;
+                        MarryRelationshipSimulationHeroes(run,best,other,"arranged",day);
+                    }
                 }
             }
         }

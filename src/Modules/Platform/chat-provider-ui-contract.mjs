@@ -15,22 +15,24 @@ const reasoningCatalog = process.env.REIGN_CODEX_MODEL_CATALOG
 await fs.mkdir(output, { recursive: true });
 const keys = ['dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel','memoryModel',
   'relationshipModel','correspondenceModel','strategyModel','actionPlannerModel','actionRouterModel'];
-const providers = ['nanogpt','openrouter','openai_compatible','codex_subscription'];
+const providers = ['nanogpt','openrouter','ollama_cloud','openai_compatible','codex_subscription'];
 let settings = { llmProvider:'nanogpt', nanoGptApiKeyPresent:true, nanoGptApiKeyLength:20,
-  openRouterApiKeyPresent:true, openRouterApiKeyLength:24, apiUrl:'https://fixture.invalid/chat',
+  openRouterApiKeyPresent:true, openRouterApiKeyLength:24, ollamaCloudApiKeyPresent:true, ollamaCloudApiKeyLength:24, apiUrl:'https://fixture.invalid/chat',
   llmModelProfiles: Object.fromEntries(providers.map(p => [p,Object.fromEntries(keys.map(k => [k,p + '/' + k]))])),
   reasoningMode:'selective', reasoningEffort:'medium',
   codexOptions: {schema:'reign-codex-options-v1',version:1,reasoningMode:'selective',reasoningEffort:'medium',fastMode:false,
     structuredOutputs:false,compactMetadata:false,stablePromptMapping:false,parallelContextPreparation:false,reuseThreads:false,asyncThreadCleanup:false},
   codex: {runtimeVersion:'fixture-runtime',catalogFreshness:'fresh',discoveryErrors:[],models:[{id:'gpt-5.5',displayName:'GPT-5.5',supportedReasoningEfforts:['minimal','low','medium','high','xhigh']}],modelVerification:'unverified'} };
 Object.assign(settings, settings.llmModelProfiles.nanogpt);
+let globalKeys = null, globalSaves = [], globalClears = [], settingsGets = 0, globalSaveReply = null;
+const dialogs = [];
 let saved, codexCheckCalls = 0, lastCodexCheck, modelRefreshCalls = 0, failModelRefresh = false;
 const results = [], errors = [];
 const browser = await chromium.launch({channel:process.env.REIGN_BROWSER_CHANNEL || 'msedge',headless:true});
 try {
   const page = await browser.newPage();
   page.on('pageerror', e => errors.push(e.message));
-  page.on('dialog', dialog => dialog.accept());
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); dialog.accept(); });
   await page.addInitScript(() => { window.setInterval = () => 0; });
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
@@ -41,7 +43,17 @@ try {
         saved = route.request().postDataJSON();
         settings = {...settings,...saved};
       }
+      else settingsGets++;
       body = {...settings,ok:true};
+    }
+    if (url.pathname === '/api/global-keys') body = globalKeys || {ok:true,localKeyWorkflow:true,enrolled:false,available:false,outcome:'not_enrolled',slots:[]};
+    if (url.pathname === '/api/settings/clear-key') {
+      globalClears.push({body:route.request().postDataJSON(),header:route.request().headers()['x-reign-keys']});
+      body = {ok:true,outcome:'unbound'};
+    }
+    if (url.pathname === '/api/global-keys/save') {
+      globalSaves.push({body:route.request().postDataJSON(),header:route.request().headers()['x-reign-keys']});
+      body = globalSaveReply || {ok:true,outcome:'created',keyId:'99999999-2222-4333-8444-555555555555'};
     }
     if (url.pathname === '/api/codex/status') body = {...settings.codex,ok:true,models:settings.codex.models || []};
     if (url.pathname === '/api/codex/models/refresh') {
@@ -76,7 +88,7 @@ try {
         experiments:['structuredOutputs','compactMetadata','stablePromptMapping','parallelContextPreparation','reuseThreads','asyncThreadCleanup']
           .map(key => document.getElementById('codex' + key.charAt(0).toUpperCase() + key.slice(1))?.checked),
         fastAfterEffort:document.getElementById('reasoningEffort').compareDocumentPosition(document.getElementById('codexFastMode')),
-        keyTypes:['nanoGptApiKey','openRouterApiKey'].map(k => document.getElementById(k).type),
+        keyTypes:['nanoGptApiKey','openRouterApiKey','ollamaCloudApiKey'].map(k => document.getElementById(k).type),
         overflow:document.documentElement.scrollWidth > innerWidth+1,
         hint:document.getElementById('chatProviderHint').textContent,
         background:getComputedStyle(document.getElementById('openRouterApiKey')).backgroundColor
@@ -84,6 +96,13 @@ try {
       assert.deepEqual(state.models,keys.map(k => provider + '/' + k));
       assert.equal(state.custom,provider === 'openai_compatible');
       assert.equal(state.codex,provider === 'codex_subscription');
+      assert.equal(await page.locator('#ollamaCloudLinks').isVisible(),provider === 'ollama_cloud');
+      if (provider === 'ollama_cloud') {
+        assert.ok(state.hint.includes('No local installation'));
+        assert.equal(await page.locator('#ollamaCloudLinks a').first().getAttribute('href'),'https://ollama.com/settings/keys');
+        assert.equal(await page.locator('#llmModelOptions option').first().getAttribute('value'),'gemma4:31b');
+        assert.equal(await page.textContent('#modelProviderLabel'),'Model selections for Ollama Cloud');
+      }
       assert.equal(await page.locator('#codexLookupSettings').isVisible(),provider === 'codex_subscription');
       assert.equal(state.performance,provider === 'codex_subscription');
       if (provider === 'codex_subscription') {
@@ -95,7 +114,7 @@ try {
         assert.ok((state.fastAfterEffort & 0x04) !== 0,'Fast mode must follow reasoning effort');
       }
       assert.equal(await page.locator('#promptCacheProbeButton').isDisabled(),provider !== 'nanogpt');
-      assert.deepEqual(state.keyTypes,['password','password']);
+      assert.deepEqual(state.keyTypes,['password','password','password']);
       assert.equal(state.overflow,false);
       assert.equal(state.background,'rgb(11, 11, 11)');
       await page.locator('#openRouterApiKey').focus();
@@ -182,6 +201,7 @@ try {
   await page.evaluate(() => saveSettings());
   assert.equal(saved.nanoGptApiKey,'');
   assert.equal(saved.openRouterApiKey,'');
+  assert.equal(saved.ollamaCloudApiKey,'');
   assert.equal(saved.llmModelProfiles.nanogpt.dialogueModel,'nano-draft');
   assert.equal(saved.llmModelProfiles.nanogpt.actionRouterModel,'nano-router-draft');
   assert.equal(saved.dialogueModel,'openai/router-draft');
@@ -189,13 +209,39 @@ try {
   assert.equal(await page.inputValue('#dialogueModel'),'nano-draft');
   await page.selectOption('#llmProvider','openrouter');
   assert.equal(await page.inputValue('#dialogueModel'),'openai/router-draft');
+  // The unenrolled installation retains its local key Save/mask workflow.
+  const savedBeforeTypedKey = saved;
   await page.fill('#openRouterApiKey','fixture-replacement');
   await page.evaluate(() => saveSettings());
-  assert.equal(saved.openRouterApiKey,'fixture-replacement');
+  assert.notEqual(saved,savedBeforeTypedKey);
+  assert.equal(saved.openRouterApiKey,'fixture-replacement','Unenrolled Main Save retains local key edits');
+  assert.match(await page.inputValue('#openRouterApiKey'),/^\*{12,32}$/,'Saved local keys remain masked');
+  await page.evaluate(() => { const el = document.getElementById('openRouterApiKey'); el.value = el.dataset.savedMask; });
+  await page.evaluate(() => saveSettings());
+  assert.notEqual(saved,savedBeforeTypedKey);
   assert.equal(saved.nanoGptApiKey,'');
   assert.equal(saved.codexOptions.fastMode,true,'Non-Codex save must preserve the Codex bank');
   assert.equal(saved.codexOptions.stablePromptMapping,true,'Non-Codex save must preserve independent Codex experiments');
   assert.equal(saved.codexOptions.lookupMode,'direct','Provider switching and non-Codex saves preserve the lookup selection');
+  await page.selectOption('#llmProvider','ollama_cloud');
+  await page.evaluate(() => { document.getElementById('dialogueModel').value='custom-ollama:tag'; });
+  await page.fill('#ollamaCloudApiKey','fixture-ollama-replacement');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.llmProvider,'ollama_cloud');
+  assert.equal(saved.ollamaCloudApiKey,'fixture-ollama-replacement');
+  assert.equal(saved.llmModelProfiles.ollama_cloud.dialogueModel,'custom-ollama:tag');
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('llmProvider').value === 'ollama_cloud');
+  assert.equal(await page.inputValue('#dialogueModel'),'custom-ollama:tag');
+  assert.match(await page.inputValue('#ollamaCloudApiKey'),/^\*{12,32}$/,'Saved keys display only a masked placeholder');
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','nanogpt');
+  await page.selectOption('#llmProvider','ollama_cloud');
+  assert.equal(await page.inputValue('#dialogueModel'),'custom-ollama:tag');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.ollamaCloudApiKey,'','An unchanged saved Ollama key is not resubmitted');
+  await page.selectOption('#llmProvider','openrouter');
+  assert.equal(await page.inputValue('#dialogueModel'),'openai/router-draft');
   await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('models').classList.add('active'); });
   const retired = ['highMemoryMode','memoryCheckerModel','memoryCheckerTimeoutMs','memoryEvidenceModel',
     'memoryEvidenceTimeoutMs','memoryEvidenceReasoningEffort','memoryEvidencePlanningReasoningEffort',
@@ -257,6 +303,140 @@ try {
     await page.locator('#llm').screenshot({path:screenshot});
     results.push({width,lookupMode:'direct',reload:true,screenshot,passed:true});
   }
+  // The global memory choice uses the real settings load/save path, independent
+  // of provider/model banks. Older settings lack the key and default unchecked.
+  await page.evaluate(() => selectControlCenterTab('memory'));
+  assert.equal(await page.locator('#legacyMemoryMode').isChecked(),false);
+  for (const width of [1672,1024,600]) {
+    await page.setViewportSize({width,height:941});
+    for (const legacy of [true,false]) {
+      const modelsBefore=JSON.stringify(settings.llmModelProfiles);
+      const checksBefore=codexCheckCalls;
+      await page.locator('#legacyMemoryMode').setChecked(legacy);
+      await page.evaluate(() => saveSettings());
+      assert.equal(saved.legacyMemoryMode,legacy);
+      assert.equal(JSON.stringify(settings.llmModelProfiles),modelsBefore,'Memory mode must preserve provider model banks');
+      await page.reload();
+      await page.waitForFunction(() => document.getElementById('llmProvider').value === 'codex_subscription');
+      await page.evaluate(() => selectControlCenterTab('memory'));
+      assert.equal(await page.locator('#legacyMemoryMode').isChecked(),legacy);
+      assert.equal(codexCheckCalls,checksBefore,'Memory toggle must not invoke a model');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth>innerWidth+1),false);
+      const screenshot=path.join(output,`${width}-memory-${legacy ? 'legacy' : 'new'}.png`);
+      await page.locator('#memory').screenshot({path:screenshot});
+      results.push({width,legacyMemoryMode:legacy,saveReload:true,screenshot,passed:true});
+    }
+  }
+
+  // Global API Keys rows: no automatic selection, main Save cannot drop a typed key, per-row save sends the guarded create.
+  const sharedKey = {keyId:'11111111-2222-4333-8444-555555555555',label:'Shared',preview:'...abcd',revision:2,configured:true};
+  globalKeys = {ok:true,available:true,outcome:'listed',slots:[{slot:'openRouterApiKey',name:'OpenRouter',provider:'openrouter',
+    origin:'https://openrouter.ai:443',legacy:true,binding:null,keys:[sharedKey]}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyGlobalRow'));
+  globalKeys.slots.push({slot:'ollamaCloudApiKey',name:'Ollama Cloud',provider:'custom_openai',origin:'https://ollama.com:443',legacy:true,binding:null,keys:[]});
+  await page.evaluate(() => loadGlobalKeys());
+  await page.evaluate(() => selectControlCenterTab('llm'));
+  await page.selectOption('#llmProvider','ollama_cloud');
+  await page.fill('#ollamaCloudApiKey','fixture-managed-ollama');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.ollamaCloudApiKey,'','Enrolled Ollama keys use the guarded per-row workflow');
+  assert.equal(await page.inputValue('#ollamaCloudApiKey'),'fixture-managed-ollama');
+  await page.evaluate(() => { const el=document.getElementById('ollamaCloudApiKey'); el.value=el.dataset.savedMask; });
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openrouter');
+  assert.equal(await page.inputValue('#openRouterApiKeyGlobalRow select'),'','A single matching global key is never selected automatically');
+  const savedBefore = saved;
+  await page.fill('#openRouterApiKey','fixture-global');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.openRouterApiKey,'','Main Save must not send a typed provider key');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-global','Main Save must not drop a typed provider key');
+  assert.match(await page.textContent('#status'),/Save key/);
+  await page.selectOption('#openRouterApiKeyGlobalRow select','new');
+  await page.click('#openRouterApiKeyGlobalRow button');
+  for (let i = 0; i < 100 && !globalSaves.length; i++) await page.waitForTimeout(20);
+  assert.deepEqual(globalSaves[0],{body:{slot:'openRouterApiKey',mode:'create',label:'',secret:'fixture-global',expectedKeyId:''},header:'1'});
+  await page.waitForFunction(() => document.getElementById('openRouterApiKey').value === '');
+  // Saving one key refreshes only its row: other unsaved settings and key inputs survive, and settings are not reloaded.
+  globalKeys.slots.push({slot:'nanoGptApiKey',name:'NanoGPT text',provider:'nano_gpt',origin:'https://nano-gpt.com:443',legacy:false,binding:null,keys:[]});
+  globalKeys.slots[0] = {...globalKeys.slots[0],legacy:false,binding:{keyId:sharedKey.keyId,provider:'openrouter',origin:'https://openrouter.ai:443',originMatches:true}};
+  await page.evaluate(() => loadGlobalKeys());
+  await page.fill('#nanoGptApiKey','other-pending-key');
+  await page.evaluate(() => { document.getElementById('dialogueModel').value = 'pending-model'; });
+  const getsBefore = settingsGets;
+  await page.fill('#openRouterApiKeyGlobalRow input','Renamed');
+  await page.click('#openRouterApiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length < 2; i++) await page.waitForTimeout(20);
+  assert.equal(globalSaves[1].body.mode,'rotate');
+  assert.equal(globalSaves[1].body.secret,'');
+  assert.equal(globalSaves[1].body.expectedKeyId,sharedKey.keyId);
+  assert.match(dialogs.at(-1),/Rename/,'A label-only change is a rename, not a value replacement');
+  await page.waitForFunction(() => /Saved|updated|unknown|No change/.test(document.querySelector('#openRouterApiKeyGlobalRow [role=status]').textContent));
+  assert.equal(settingsGets,getsBefore,'A key save must not reload all settings');
+  assert.equal(await page.inputValue('#nanoGptApiKey'),'other-pending-key');
+  assert.equal(await page.inputValue('#dialogueModel'),'pending-model');
+  // Clearing a bound slot unbinds it through the guarded route; the global key itself is untouched.
+  await page.evaluate(() => clearKey('openRouterApiKey'));
+  assert.deepEqual(globalClears.at(-1),{body:{key:'openRouterApiKey'},header:'1'});
+  assert.match(dialogs.at(-1),/stays in Global API Keys/);
+  assert.equal(await page.inputValue('#nanoGptApiKey'),'other-pending-key');
+  globalKeys.slots[0] = {...globalKeys.slots[0],legacy:false,binding:{keyId:sharedKey.keyId,provider:'openrouter',origin:'https://openrouter.ai:443',originMatches:true}};
+  globalKeys.available = false;
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyGlobalRow'));
+  assert.equal(await page.locator('#openRouterApiKeyGlobalRow button').isDisabled(),true,'Stopped DwemerDistro disables key saves');
+  assert.match(await page.textContent('#openRouterApiKeyGlobalRow [role=status]'),/unavailable/);
+  // Not set up: rows are still shown (disabled, with the one-time setup step) and a typed key is kept, never saved locally.
+  globalKeys = {ok:true,available:false,enrolled:false,outcome:'not_enrolled',slots:[{...globalKeys.slots[0],binding:null,legacy:false}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyGlobalRow'));
+  assert.equal(await page.locator('#openRouterApiKeyGlobalRow select').isDisabled(),true);
+  assert.match(await page.textContent('#openRouterApiKeyGlobalRow [role=status]'),/Connect-GlobalKeys/);
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openrouter');
+  const savedBeforeUnenrolled = saved;
+  await page.fill('#openRouterApiKey','fixture-unenrolled');
+  await page.evaluate(() => saveSettings());
+  assert.notEqual(saved,savedBeforeUnenrolled);
+  assert.equal(saved.openRouterApiKey,'');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-unenrolled');
+  assert.match(await page.textContent('#status'),/Connect-GlobalKeys/);
+  // Custom endpoint: a key typed for an unsaved URL is never sent; main Save stores the URL and keeps the key, then Save key
+  // sends the shown URL for the server's check, and a server-side endpoint mismatch keeps the typed key.
+  globalKeys = {ok:true,available:true,outcome:'listed',slots:[{slot:'apiKey',name:'Custom endpoint',provider:'custom_openai',
+    origin:'https://fixture.invalid:443',legacy:false,binding:null,keys:[]}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('apiKeyGlobalRow'));
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openai_compatible');
+  const savesBeforeEndpoint = globalSaves.length, oldApiUrl = await page.inputValue('#apiUrl');
+  await page.fill('#apiUrl','https://new-endpoint.invalid/v1/chat/completions');
+  await page.fill('#apiKey','fixture-custom-new');
+  await page.selectOption('#apiKeyGlobalRow select','new');
+  await page.click('#apiKeyGlobalRow button');
+  assert.equal(globalSaves.length,savesBeforeEndpoint,'A key typed beside an unsaved API URL is never sent');
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new');
+  assert.match(await page.textContent('#apiKeyGlobalRow [role=status]'),/Save Changes/);
+  assert.notEqual(oldApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.apiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  assert.equal(saved.apiKey,'');
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new','Saving the URL keeps the typed endpoint key');
+  globalSaveReply = {ok:false,outcome:'endpoint_changed'};
+  await page.selectOption('#apiKeyGlobalRow select','new');
+  await page.click('#apiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length === savesBeforeEndpoint; i++) await page.waitForTimeout(20);
+  assert.deepEqual(globalSaves.at(-1).body,{slot:'apiKey',mode:'create',label:'',secret:'fixture-custom-new',expectedKeyId:'',
+    expectedApiUrl:'https://new-endpoint.invalid/v1/chat/completions'});
+  await page.waitForFunction(() => /Save Changes/.test(document.querySelector('#apiKeyGlobalRow [role=status]').textContent));
+  assert.equal(await page.inputValue('#apiKey'),'fixture-custom-new','A server endpoint refusal keeps the typed key');
+  globalSaveReply = null;
+  await page.click('#apiKeyGlobalRow button');
+  for (let i = 0; i < 100 && globalSaves.length < savesBeforeEndpoint + 2; i++) await page.waitForTimeout(20);
+  await page.waitForFunction(() => document.getElementById('apiKey').value === '');
+  assert.equal(globalSaves.at(-1).body.expectedApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
+  results.push({globalKeys:true,noAutoSelect:true,endpointGuard:true,mainSaveGuard:true,rowOnlyRefresh:true,unbind:true,rename:true,unavailable:true,notEnrolled:true,passed:true});
+  globalKeys = null;
   assert.deepEqual(errors,[]);
   const report=path.join(output,'ui-report.json');
   await fs.writeFile(report,JSON.stringify({ok:true,isolated:true,htmlPath,results,errors,saveReload:true,maskedKeysPreserved:true},null,2));

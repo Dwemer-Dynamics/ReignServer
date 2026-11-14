@@ -61,6 +61,27 @@ namespace ReignBetaServer
                 Check("retry_freezes_order", ReadBool(replay, "replayed", false)
                     && ReadStringList(first, "responseOrder").SequenceEqual(ReadStringList(replay, "responseOrder")));
                 UpdateSharedGroupConversationState(campaign, payload, "arven", "Arven", "I would begin at the river.", "floor-session", 10, "floor-accepted");
+                var stage = BuildObservedGroupTurnStage(campaign, payload, "taren", ReadString(payload, "playerText", ""));
+                Check("stage_lists_only_observed_delivered_contributions", stage != null
+                    && ReadDictionaryList(stage, "deliveredAfterInput").Count == 1
+                    && ReadBool(stage, "inputIsNotANewAnswerToListedContributions", false), stage);
+                Check("unqualified_stage_prompt_default_off", BuildConfiguredObservedGroupTurnStage(campaign, payload, "taren", ReadString(payload, "playerText", ""), TestDict()) == null);
+                Check("stage_requires_server_settings_opt_in", BuildConfiguredObservedGroupTurnStage(campaign, payload, "taren", ReadString(payload, "playerText", ""),
+                    TestDict("enableObservedGroupTurnStageFrame", true)) != null);
+                Check("stage_not_attested_by_queue_plan_or_different_input", BuildObservedGroupTurnStage(campaign, payload, "taren", "A later player interjection.") == null);
+                Check("stage_not_disclosed_to_absent_observer", BuildObservedGroupTurnStage(campaign, payload, "outsider", ReadString(payload, "playerText", "")) == null);
+                using (var orderConnection = OpenCampaignConnection(campaign))
+                {
+                    ExecuteSql(orderConnection, "UPDATE group_conversation_contributions SET audience_json=$audience WHERE source_event_id='floor-accepted';",
+                        TestDict("audience", Json.Serialize(new[] { "taren_2" })));
+                    Check("stage_audience_does_not_match_id_prefix", BuildObservedGroupTurnStage(campaign, payload, "taren", ReadString(payload, "playerText", "")) == null);
+                    ExecuteSql(orderConnection, "UPDATE group_conversation_contributions SET audience_json=$audience WHERE source_event_id='floor-accepted';",
+                        TestDict("audience", Json.Serialize(new[] { "taren", "arven", "lysa", "player" })));
+                    var current = ResolveQuestionSource(orderConnection, TestDict("turnId", "current_player", "speakerId", "player", "quote", "what is your view?"),
+                        payload, "taren", "player", "different_npc_event", "I am listening.");
+                    Check("current_alias_binds_original_group_floor_event", current != null && ReadBool(current, "groupInputStage", false)
+                        && ReadString(current, "eventId", "") == GroupPlayerInputEventId(payload) && ReadLong(current, "sequence", 0) > 0, current);
+                }
                 Check("accepted_contribution_keeps_floor_cache", ReadBool(GroupConversationFloorApi(payload), "replayed", false));
                 var changed = CloneDictionary(payload); changed["playerText"] = "A different request with the same turn id.";
                 Check("changed_retry_input_rejected", !ReadBool(GroupConversationFloorApi(changed), "ok", true));

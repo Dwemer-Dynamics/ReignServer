@@ -12,6 +12,7 @@ namespace ReignBetaServer
         private sealed class AcceptedPlayerInputSource
         {
             internal string Original;
+            internal string PrivateFocusId = "";
             internal string SourceId = "", InputId = "", Generation = "";
             internal Dictionary<string, object> Receipt, Interpretation;
         }
@@ -26,9 +27,27 @@ namespace ReignBetaServer
             if (attendees.Count == 0) attendees = MergedInteractionParticipantProfiles(payload ?? TestDict());
             // Interpretation annotates scene changes; it never decides which
             // parts of the player's story the writer is allowed to receive.
-            string original = payload != null && PlayerInputSources.TryGetValue(payload, out var captured)
+            AcceptedPlayerInputSource captured = null;
+            string original = payload != null && PlayerInputSources.TryGetValue(payload, out captured)
                 ? captured.Original : input;
-            return ProjectPlayerInputForAudience(original, listenerId, attendees, out _, out _);
+            return ProjectPlayerInputForAudience(original, listenerId, attendees, out _, out _,
+                privateFocusId: captured?.PrivateFocusId ?? ResolvePlayerPrivateFocus(payload));
+        }
+
+        private static string ResolvePlayerPrivateFocus(Dictionary<string, object> payload)
+        {
+            payload ??= TestDict();
+            string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
+            var active = new[] { "activeHeroIds", "activeHeroStringIds", "activeParticipantIds" }
+                .SelectMany(key => ReadStringList(payload, key)).Where(id => id.Length > 0 && !id.Equals(player, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (active.Count > 0) return active.Count == 1 ? active[0] : "__private_unknown__";
+            var people = MergedInteractionParticipantProfiles(payload ?? TestDict()).Where(p =>
+                !CharacterIdFrom(p).Equals(player, StringComparison.OrdinalIgnoreCase) && ReadString(p, "role", "") != "player").Select(CharacterIdFrom)
+                .Where(id => id.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (people.Count > 0) return people.Count == 1 ? people[0] : "__private_unknown__";
+            string solo = ReadFirstString(payload, "heroStringId", "speakerHeroStringId");
+            return solo.Length > 0 && !solo.Equals(player, StringComparison.OrdinalIgnoreCase) ? solo : "__private_unknown__";
         }
 
         private static void CopyPlayerInputSource(Dictionary<string, object> source, Dictionary<string, object> target)
@@ -98,7 +117,8 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
             string publicText; bool privateForListener;
             string projected = interpreted
                 ? ProjectInterpretedInput(payload, listenerId, attendees, out publicText, out privateForListener)
-                : ProjectPlayerInputForAudience(input, listenerId, attendees, out publicText, out privateForListener);
+                : ProjectPlayerInputForAudience(input, listenerId, attendees, out publicText, out privateForListener,
+                    privateFocusId: captured.PrivateFocusId);
             payload["playerText"] = projected;
             payload["narrativeInputIntegrity"] = TestDict("schema", "reign-narrative-input-v1",
                 "originalHash", ConversationExactTextHash(input), "writerHash", ConversationExactTextHash(projected),
@@ -151,13 +171,16 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
 
         private static string ProjectPlayerInputForAudience(string input, string listenerId,
             List<Dictionary<string, object>> attendees, out string publicText, out bool privateForListener,
-            bool validatedNarration = false)
+            bool validatedNarration = false, string privateFocusId = "")
         {
             string source = input ?? string.Empty;
             StringBuilder visible = new StringBuilder();
             StringBuilder shared = new StringBuilder();
             privateForListener = false;
             string pendingWhisperTarget = string.Empty;
+            string namedRecipients = string.Join("|", (attendees ?? new()).Select(a => ReadString(a, "name", ""))
+                .Where(name => name.Length > 0).Select(Regex.Escape));
+            string recipientPattern = @"(?:her|him|them|you" + (namedRecipients.Length > 0 ? "|" + namedRecipients : "") + ")";
             int cursor = 0;
             foreach (var action in InputNarrationBlocks(source))
             {
@@ -167,15 +190,21 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
                     pendingWhisperTarget, listenerId, visible, shared, ref privateForListener);
                 pendingWhisperTarget = string.Empty;
                 string actionText = ReadString(action, "text", "");
-                if (Regex.IsMatch(actionText, @"\bwhisper(?:s|ed|ing)?\b", RegexOptions.IgnoreCase))
+                bool whisper = Regex.IsMatch(actionText, @"\bwhisper(?:s|ed|ing)?\b", RegexOptions.IgnoreCase);
+                bool privateVoice = Regex.IsMatch(actionText, @"\b(?:speak(?:s|ing)?|spoke|say(?:s|ing)?|said|tell(?:s|ing)?|told|murmur(?:s|ed|ing)?|voice)\b", RegexOptions.IgnoreCase)
+                    && Regex.IsMatch(actionText, @"\b(?:quietly|softly|low|lower(?:s|ing)?|hushed|pitched)\b", RegexOptions.IgnoreCase)
+                    && Regex.IsMatch(actionText, @"\b(?:(?:just|only)\s+(?:for|to)\s+" + recipientPattern
+                        + @"|for\s+" + recipientPattern + @"\s+alone|only\s+" + recipientPattern
+                        + @"\s+can\s+hear|for\s+" + recipientPattern + @"(?:['’]s)?\s+ears\s+only)\b", RegexOptions.IgnoreCase);
+                if (whisper || privateVoice)
                 {
                     pendingWhisperTarget = ResolveWhisperRecipient(actionText, attendees);
                     if (string.IsNullOrWhiteSpace(pendingWhisperTarget))
                     {
                         var recipients = (attendees ?? new()).Where(a => ReadString(a, "role", "") != "player"
                             && CharacterIdFrom(a) != "main_hero").Select(CharacterIdFrom).Where(id => id.Length > 0).Distinct().ToList();
-                        pendingWhisperTarget = recipients.Count == 1 ? recipients[0] : "__private_unknown__";
-                        if (attendees == null || attendees.Count == 0) pendingWhisperTarget = listenerId.Length > 0 ? listenerId : "__private_unknown__";
+                        pendingWhisperTarget = privateFocusId.Length > 0 ? privateFocusId
+                            : recipients.Count == 1 ? recipients[0] : "__private_unknown__";
                     }
                     // Keep the surrounding action even when its following
                     // speech is private. Only explicit quoted whisper words

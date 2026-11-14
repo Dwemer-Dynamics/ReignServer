@@ -113,6 +113,7 @@ namespace ReignBetaServer
             }
             if (normalized == NanoGptProvider || normalized == "nano_gpt") return NanoGptProvider;
             if (normalized == OpenRouterProvider || normalized == "open_router") return OpenRouterProvider;
+            if (normalized == OllamaCloudProvider || normalized == "ollama") return OllamaCloudProvider;
             return OpenAiCompatibleProvider;
         }
 
@@ -145,7 +146,7 @@ namespace ReignBetaServer
             }
             string url = LlmApiUrl(settings);
             bool local = url.IndexOf("127.0.0.1", StringComparison.OrdinalIgnoreCase) >= 0 || url.IndexOf("localhost", StringComparison.OrdinalIgnoreCase) >= 0;
-            return !string.IsNullOrWhiteSpace(url) && (!string.IsNullOrWhiteSpace(LlmApiKey(settings)) || local);
+            return !string.IsNullOrWhiteSpace(url) && (ProviderKeyConfigured(settings, LlmApiKeySlot(settings)) || local);
         }
 
         private static Dictionary<string, object> CodexStatusApi()
@@ -329,6 +330,7 @@ namespace ReignBetaServer
             Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
             if (canceled?.Invoke() == true) throw new OperationCanceledException("Banter was canceled before provider startup.");
+            ProviderTestGuard.BeforeDispatch("codex_text");
             EnsureCodexAppServer(settings);
             CodexRuntimeRequestContext context = CaptureCodexRequestContext(settings, requestBody, ReadString(codexContext, "requestType", "dialogue"), model,
                 ReadString(codexContext, "correlationId", ""), codexContext);
@@ -1157,6 +1159,8 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
             tests.AddRange(RunCodexRuntimeSelfTests());
             tests.AddRange(RunOpenRouterProviderContractTests());
+            tests.AddRange(RunOllamaCloudProviderContractTests());
+            tests.AddRange(RunGlobalKeyBridgeContractTests());
             Action<string, bool, string> add = (id, passed, summary) => tests.Add(new Dictionary<string, object>
             {
                 ["id"] = id, ["passed"] = passed, ["summary"] = summary
@@ -1215,6 +1219,7 @@ namespace ReignBetaServer
             add("control_center_selection",
                 controlCenter.Contains("value='nanogpt'>NanoGPT")
                 && controlCenter.Contains("value='openrouter'>OpenRouter")
+                && controlCenter.Contains("value='ollama_cloud'>Ollama Cloud")
                 && controlCenter.Contains("value='openai_compatible'>Custom OpenAI-compatible API")
                 && controlCenter.Contains("value='codex_subscription'>ChatGPT Codex subscription")
                 && controlCenter.Contains("/api/codex/models/refresh")

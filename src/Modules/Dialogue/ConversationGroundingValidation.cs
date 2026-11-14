@@ -90,6 +90,40 @@ namespace ReignBetaServer
                 }
         }
 
+        private const string PlayerVoiceEcho = "critical_continuity_player_voice_echo";
+
+        private static bool CopiesCurrentPlayerNarratedBeat(string player, string reply)
+        {
+            if (!player.Contains('*')) return false;
+
+            static IEnumerable<(string Direction, string Speech)> NarratedBeats(string text)
+            {
+                foreach (var block in InputNarrationBlocks(text))
+                {
+                    if (!ReadBool(block, "closed", false)) continue;
+                    int start = ReadInt(block, "outerStart", 0);
+                    int lineStart = start == 0 ? 0 : text.LastIndexOf('\n', start - 1) + 1;
+                    if (!string.IsNullOrWhiteSpace(text[lineStart..start])) continue;
+
+                    string direction = ReadString(block, "text", "").Trim();
+                    if (!direction.StartsWith("I ", StringComparison.OrdinalIgnoreCase)
+                        || Regex.Matches(direction, @"[\p{L}\p{N}]+").Count < 4) continue;
+
+                    int end = start + ReadInt(block, "outerLength", 0);
+                    string speech = Regex.Match(text[end..], @"\A\s*([\p{L}\p{N}][^*""“”\r\n.!?]{0,319})(?=[.!?\r\n]|\z)")
+                        .Groups[1].Value.TrimEnd();
+                    if (Regex.Matches(speech, @"[\p{L}\p{N}]+").Count >= 8
+                        && Regex.IsMatch(speech, @"\b(?:I|me|my|mine|myself)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                        yield return (Regex.Replace(direction, @"\s+", " ").ToUpperInvariant(),
+                            Regex.Replace(speech, @"[ \t]+", " ").ToUpperInvariant());
+                }
+            }
+
+            // Require both adjacent cues with the same wording. A shared gesture or
+            // an attributed quotation alone can be a legitimate response.
+            return NarratedBeats(player).Intersect(NarratedBeats(reply)).Any();
+        }
+
         private static List<Dictionary<string, object>> FindConversationGroundingViolations(Dictionary<string, object> parsed,
             Dictionary<string, object> payload, string observer)
         {
@@ -97,6 +131,10 @@ namespace ReignBetaServer
             issues.AddRange(FindDeliveredMemoryRecallViolations(parsed, payload, observer));
             void Issue(string category, string detail) => issues.Add(TestDict("type", "critical_continuity_" + category, "detail", detail));
             string reply = ReadFirstString(parsed, "reply", "body", "response", "text");
+            if (reply.Contains('*') && CopiesCurrentPlayerNarratedBeat(
+                ProjectCurrentPlayerPromptText(ReadString(payload, "playerText", ""), observer, payload), reply))
+                issues.Add(TestDict("type", PlayerVoiceEcho,
+                    "detail", "The response takes a first-person player action and its adjoining speech as the NPC's own. Respond from the NPC's perspective while preserving the player's action and current scene."));
             foreach (var proposal in ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "proposals")
                 .Where(p => ReadString(p, "subject_id", "") == observer && ReadString(p, "kind", "") == "move"))
             {
@@ -189,13 +227,11 @@ namespace ReignBetaServer
         private static string RenderGroundedSceneHeading(Dictionary<string, object> payload, string observer, Dictionary<string, object> parsed, string reply)
         {
             if (ReadString(payload, "channel", "").Contains("correspond", StringComparison.OrdinalIgnoreCase)) return reply;
-            string venue = ResolvedNarrativeVenue(payload, observer, parsed, reply);
+            string venue = ConversationLocationLabel(ResolvedNarrativeVenue(payload, observer, parsed, reply));
             if (venue.Length == 0 || string.IsNullOrWhiteSpace(reply) || IsTechnicalConversationNotice(reply)) return reply;
             int modelHeadingLength = ConversationVenueHeadingLength(reply);
             string body = modelHeadingLength > 0 ? reply.Substring(modelHeadingLength) : reply;
             string date = ReadString(payload, "conversationDateLabel", "");
-            string narrativeDate = ReadString(CurrentNarrativeClock(payload), "label", "");
-            if (narrativeDate.Length > 0) date = narrativeDate;
             string owner = ReadString(MergedInteractionParticipantProfiles(payload).FirstOrDefault(p => CharacterIdFrom(p) == observer), "name", "");
             string label = owner.Length > 0 ? Regex.Replace(venue, @"^(?:her|his|their)\s+", owner + "'s ", RegexOptions.IgnoreCase) : venue;
             string settlement = ReadFirstString(payload, "currentSettlementName", "settlementName");
@@ -263,6 +299,15 @@ namespace ReignBetaServer
         private static bool FinalizeConversationGrounding(Dictionary<string, object> payload, string observer,
             Dictionary<string, object> parsed, ref string reply)
         {
+            if (IsSinglePassConversation(payload))
+            {
+                // Delivery never judges or rewrites authored prose. Consent is
+                // checked independently by CaptureStructuredActionDecision.
+                payload["conversationGrounding"] = TestDict("schema", "reign-conversation-grounding-v1",
+                    "status", "single_pass", "replyHash", ConversationExactTextHash(reply),
+                    "semanticCoverage", "not_run", "additionalProviderCalls", 0);
+                return true;
+            }
             ConstrainNpcLeaveReply(payload, observer, parsed, ref reply);
             var candidate = CloneDictionary(parsed ?? TestDict()); candidate["reply"] = reply;
             var issues = FindCriticalConversationContinuityViolations(candidate, payload, observer);
@@ -277,6 +322,9 @@ namespace ReignBetaServer
                 "semanticCoverage", "deterministic_checks_with_measured_model_acceptance");
             if (!ok)
             {
+                if (issues.Any(issue => ReadString(issue, "type", "") == PlayerVoiceEcho))
+                    foreach (string field in new[] { "reply", "body", "response", "text", "content" })
+                        if (candidate.ContainsKey(field)) candidate[field] = "";
                 var safe = VisibleFailedRepairWithoutEffects(candidate, "conversation_grounding");
                 parsed.Clear(); foreach (var pair in safe) parsed[pair.Key] = pair.Value;
                 var noDecision = TestDict("version", 1, "kind", "none", "valid", false,

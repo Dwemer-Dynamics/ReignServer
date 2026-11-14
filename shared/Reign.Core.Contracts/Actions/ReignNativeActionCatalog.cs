@@ -21,7 +21,7 @@ namespace Reign.Core.Contracts.Actions
     }
     public static class ReignNativeActionCatalog
     {
-        public const string InventoryAssemblySha256 = "1F8E33E2ED73E6EC653D7629180AFB70649DDC6E5BD1657A802A264EFDA1C3AE";
+        public const string InventoryAssemblySha256 = "D7E5C67A04EF83964C882FDA2A1F20F0E2AFAF2BFE31345ED31D1061C495D462";
         // Public API metadata only. Native implementation remains in the licensed game.
         // Runtime matching is exact; a new or changed signature is never invoked implicitly.
         private static readonly string[] Signatures =
@@ -220,6 +220,24 @@ namespace Reign.Core.Contracts.Actions
             "native.TeleportHero.ApplyDelayedTeleportToPartyAsPartyLeader|TaleWorlds.CampaignSystem.Actions.TeleportHeroAction|ApplyDelayedTeleportToPartyAsPartyLeader|void|Hero heroToBeMoved|MobileParty party",
             "native.TransferPrisoner.Apply|TaleWorlds.CampaignSystem.Actions.TransferPrisonerAction|Apply|void|CharacterObject prisonerTroop|PartyBase prisonerOwnerParty|PartyBase newParty",
         };
+        // Bannerlord 1.5.7 additions are inventoried without expanding operator execution.
+        // Blood feuds are disabled by Reign; the remaining new routes require separate
+        // feature approval and campaign coverage before entering the callable registry.
+        private static readonly string[] ExcludedSignatures =
+        {
+            "native.ChangeBloodFeudState.StartBloodFeudWithClanByPlayerExecutingAHero|TaleWorlds.CampaignSystem.Actions.ChangeBloodFeudStateAction|StartBloodFeudWithClanByPlayerExecutingAHero|void|Clan clan|Hero executedHero",
+            "native.ChangeBloodFeudState.StartBloodFeudWithClanByAIExecutingPlayerRelative|TaleWorlds.CampaignSystem.Actions.ChangeBloodFeudStateAction|StartBloodFeudWithClanByAIExecutingPlayerRelative|void|Clan clan|Hero executedHero",
+            "native.ChangeBloodFeudState.SettleBloodFeudByRelationIncrease|TaleWorlds.CampaignSystem.Actions.ChangeBloodFeudStateAction|SettleBloodFeudByRelationIncrease|void|Clan clan",
+            "native.ChangeBloodFeudState.SettleBloodFeudByRansomPayment|TaleWorlds.CampaignSystem.Actions.ChangeBloodFeudStateAction|SettleBloodFeudByRansomPayment|void|Clan clan",
+            "native.ChangeOwnerOfWorkshop.ApplyByFree|TaleWorlds.CampaignSystem.Actions.ChangeOwnerOfWorkshopAction|ApplyByFree|void|Workshop workshop|Hero newOwner",
+            "native.ChangeRelation.SetRelationBetweenHeroes|TaleWorlds.CampaignSystem.Actions.ChangeRelationAction|SetRelationBetweenHeroes|void|Hero hero|Hero gainedRelationWith|int newRelation|bool showQuickNotification=true",
+            "native.ChangeShipOwner.ApplyByStashingShipIntoSettlement|TaleWorlds.CampaignSystem.Actions.ChangeShipOwnerAction|ApplyByStashingShipIntoSettlement|void|Settlement stashSettlement|Ship ship",
+            "native.ChangeShipOwner.ApplyByUnstashingShipFromSettlement|TaleWorlds.CampaignSystem.Actions.ChangeShipOwnerAction|ApplyByUnstashingShipFromSettlement|void|PartyBase newOwner|Settlement stashSettlement|Ship ship",
+            "native.ChangeShipOwner.ApplyByTemporarilyRemovingShipsFromPlayer|TaleWorlds.CampaignSystem.Actions.ChangeShipOwnerAction|ApplyByTemporarilyRemovingShipsFromPlayer|void|Ship ship",
+            "native.ChangeShipOwner.ApplyByGivingBackShipsToPlayer|TaleWorlds.CampaignSystem.Actions.ChangeShipOwnerAction|ApplyByGivingBackShipsToPlayer|void|Ship ship",
+            "native.DeclareWar.ApplyByQuest|TaleWorlds.CampaignSystem.Actions.DeclareWarAction|ApplyByQuest|void|IFaction faction1|IFaction faction2",
+        };
+        public static readonly IReadOnlyList<NativeActionDefinition> ExcludedFromExecution = Array.AsReadOnly(ExcludedSignatures.Select(Parse).ToArray());
         public static readonly IReadOnlyList<NativeActionDefinition> All = Array.AsReadOnly(Signatures.Select(Parse).ToArray());
         public static NativeActionDefinition? Find(string id) => All.FirstOrDefault(d => d.Id == id);
         private static NativeActionDefinition Parse(string row)

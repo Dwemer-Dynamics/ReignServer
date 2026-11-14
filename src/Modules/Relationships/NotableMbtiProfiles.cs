@@ -99,6 +99,11 @@ namespace ReignBetaServer
 
         private static void EnsureNotableMbtiSchema(ReignDbConnection connection)
         {
+            if (IsRelationshipMaintenanceTableReady(connection, "notable_mbti_profiles")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_heads")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_revisions")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_native_commands")
+                && IsRelationshipMaintenanceTableReady(connection, "character_editor_reconciliation")) return;
             EnsureCharacterEditorSchema(connection);
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS notable_mbti_profiles (
 hero_id TEXT PRIMARY KEY,mbti_type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,
@@ -800,6 +805,16 @@ updated_ts=$ts WHERE hero_id=$hero;",
             Dictionary<string, object> profileEmbedded = ReadDictionary(profile, "mbtiProfile")
                 ?? new Dictionary<string, object>();
             string type = ReadString(profileEmbedded, "type", ReadString(embedded, "type", "XXXX"));
+            if (!MbtiDefinitions.ContainsKey(type) && MbtiDefinitions.ContainsKey(ReadString(embedded, "type", "")))
+                profileEmbedded = embedded;
+            type = ReadString(profileEmbedded, "type", ReadString(embedded, "type", "XXXX"));
+            if (!MbtiDefinitions.ContainsKey(type)
+                && (CoreTraitKeys.All(foundation.ContainsKey) || CoreTraitKeys.All(percentages.ContainsKey)))
+            {
+                profileEmbedded = DeriveMbtiAxes(traitDocument);
+                profileEmbedded["source"] = "derived_from_personality_traits";
+                type = ReadString(profileEmbedded, "type", "XXXX");
+            }
             if (!MbtiDefinitions.TryGetValue(type, out MbtiDefinition definition))
                 return new Dictionary<string, object> { ["type"] = "XXXX", ["title"] = "Unavailable", ["description"] = "This character does not yet have enough personality data for an MBTI profile.", ["source"] = "insufficient_data", ["templateVersion"] = 0, ["assignedDay"] = -1d, ["nativeSyncStatus"] = "not_applicable" };
             return new Dictionary<string, object>
@@ -835,6 +850,20 @@ updated_ts=$ts WHERE hero_id=$hero;",
             bool catalog = MbtiDefinitions.Count == 16 && MbtiTypes.All(MbtiDefinitions.ContainsKey)
                 && MbtiDefinitions.Values.All(x => !string.IsNullOrWhiteSpace(x.Title) && x.Description.Length >= 100);
             add("catalog", catalog, "All 16 MBTI types have one shared UI and prompt description.");
+            var dynamicTraits = BuildTraitDocument(new Dictionary<string, object> { ["heroStringId"] = "dynamic_nord", ["name"] = "Aenessa", ["isLord"] = true, ["cultureId"] = "nord" });
+            var dynamicMbti = ResolveCharacterMbtiProfile("mbti_selftest", "dynamic_nord", new Dictionary<string, object>(), dynamicTraits);
+            add("dynamic_traits_derive_mbti", ReadString(dynamicMbti, "type", "") == ReadString(DeriveMbtiAxes(dynamicTraits), "type", "")
+                && ReadString(dynamicMbti, "source", "") == "derived_from_personality_traits",
+                "A generated noble's complete trait foundation supplies MBTI before first-contact narrative construction, without a provider or database write.");
+            add("missing_traits_stay_unavailable", ReadString(ResolveCharacterMbtiProfile("mbti_selftest", "empty", new Dictionary<string, object>(), new Dictionary<string, object>()), "type", "") == "XXXX",
+                "Missing personality data is still unavailable rather than an invented MBTI type.");
+            var explicitMbti = ResolveCharacterMbtiProfile("mbti_selftest", "dynamic_nord", new Dictionary<string, object> {
+                ["mbtiProfile"] = new Dictionary<string, object> { ["type"] = "ENFP", ["source"] = "pregenerated_noble_catalog" }
+            }, dynamicTraits);
+            add("explicit_noble_mbti_preserved", ReadString(explicitMbti, "type", "") == "ENFP"
+                && ReadString(explicitMbti, "source", "") == "pregenerated_noble_catalog"
+                && !dynamicTraits.ContainsKey("mbtiProfile"),
+                "Trait derivation is a read-only fallback and never replaces an explicit valid noble MBTI.");
             bool complete = true, derives = true;
             foreach (string type in MbtiTypes)
             {

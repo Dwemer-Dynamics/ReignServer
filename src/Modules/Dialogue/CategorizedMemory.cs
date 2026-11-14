@@ -1062,13 +1062,17 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
                     ReadString(stored, "participants_json", "[]"), ReadString(stored, "channel", "in_person"));
         }
 
+        private static readonly string[] TechnicalConversationNoticePrefixes = {
+            "[The NPC's decision could not be verified.",
+            "[Dialogue continuity evidence could not be verified.",
+            "[Dialogue memory correction could not be verified.",
+            "[Dialogue validation could not be completed."
+        };
+
         private static bool IsTechnicalConversationNotice(string text)
         {
             string reply = text ?? "";
-            foreach (string notice in new[] { "[The NPC's decision could not be verified.",
-                "[Dialogue continuity evidence could not be verified.",
-                "[Dialogue memory correction could not be verified.",
-                "[Dialogue validation could not be completed." })
+            foreach (string notice in TechnicalConversationNoticePrefixes)
                 if (reply.StartsWith(notice, StringComparison.Ordinal)
                     || reply.Contains("\n\n" + notice, StringComparison.Ordinal)) return true;
             return false;
@@ -1113,7 +1117,7 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
 
         private static Dictionary<string, object> CreateConversationSceneSummary(string campaignId, Dictionary<string, object> session,
             List<Dictionary<string, object>> turns, long now, Dictionary<string, object> settingsOverride = null,
-            bool retrievalEligible = true)
+            bool retrievalEligible = true, Action<IReadOnlyList<string>> captureSourceRecords = null)
         {
             turns = turns ?? new List<Dictionary<string, object>>();
             turns = turns.Where(t => ReadString(t, "status", "active") == "active").ToList();
@@ -1188,12 +1192,13 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
                 + "A session participant list proves only who heard or spoke in this conversation, not who witnessed an older event described inside it. If one NPC denies witnessing an older event while another speaker says 'we', 'everyone', or 'all three', preserve that contradiction explicitly and never silently promote the collective wording into firsthand evidence. "
                 + "An INDEPENDENT SYSTEM EVIDENCE record is authoritative for the component it adjudicates. A first-hand caught-lie receipt makes that contradicted component false rather than unresolved; preserve its lie-check lineage and do not flatten it back into two equally unsupported claims. "
                 + "Phrase unverified world claims as reports or beliefs, not objective campaign facts, and do not call a recollection wholly correct when it adds unsupported detail. "
+                + "Keep each consequential promise, permission, refusal, question, or correction with its actual reporter, underlying actor, bound person, object, conditions, reason, scope, and status wherever the source supplies them. Preserve stated cause and effect without joining unrelated clauses into a new explanation. Keep distinct undertakings separate; withdrawing a dated permission does not cancel a separate standing condition. Preserve unanswered questions and explicit uncertainty rather than supplying a plausible answer. A source date or time of day dates the utterance, not automatically an older event recalled inside it. "
                 + "Treat any claim that the current speaker is absent, permanently withdrawn, or will never re-engage as performative refusal limited to this historical scene; do not turn it into continuing physical state. "
                 + (identityKnowledge.PlayerIdentityUnknown
                     ? "The player remains unidentified to this memory owner. Use only 'the unidentified interlocutor' or 'the stranger'; do not restore a canonical player name, clan, realm, title, tier, fiefs, wealth, inventory, or political status from speaker metadata or an NPC reconstruction. "
                     : "")
                 + "Narrated gifts, payments, item handoffs, orders, or other gameplay actions prove only what was proposed or said unless a supplied production action receipt confirms completion; never convert narrated acceptance into a completed native transfer.",
-                summaryCorrelationId);
+                summaryCorrelationId, captureSourceRecords: captureSourceRecords, campaignId: campaignId);
             string summaryText = ReadString(compact, "summary", "");
             if (string.IsNullOrWhiteSpace(summaryText))
                 summaryText = string.Join("\n---\n", pseudoRows.Select(row => ReadString(row, "summary", "")));
@@ -1203,7 +1208,7 @@ VALUES($id,$campaign,$npc,$player,'correspondence','closed',$ts,$ts,$day,$day,''
             string originalSummaryText = summaryText;
             summaryText = NormalizeHistoricalRoleplayContinuityText(summaryText,
                 Math.Max(summaryText.Length + 4096, 5000),
-                false);
+                false, purpose: HistoricalTextPurpose.StoredArchive);
             bool continuityNormalized = !string.Equals(
                 originalSummaryText, summaryText, StringComparison.Ordinal);
             string routingText = RemoveNegatedSceneCommitmentTerms(summaryText);
@@ -1267,6 +1272,8 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
                             ["candidateHash"] = ReadString(compact, "candidateHash", ""),
                             ["uncoveredSourceHashes"] = ReadStringList(compact, "uncoveredSourceHashes"),
                             ["sourceHash"] = MemorySourceHash(turns), ["processingVersion"] = MemoryPrecisionVersion,
+                            ["sourceReferences"] = ReadDictionaryList(PrepareStagedSceneMemory(session, turns,
+                                ReadString(TryParseJsonObject(ReadString(session,"payload_json","{}")),"timelineId","")), "sourceReferences"),
                             ["retrievalRoute"] = sceneRoute, ["retrievalEligible"] = retrievalEligible,
                             ["recallReconstruction"] = !retrievalEligible,
                             ["evidenceClass"] = "dialogue_reported_speech",
@@ -1459,7 +1466,7 @@ AND memory_lane=$lane AND ($player='' OR participants_json LIKE $player_like) OR
             Dictionary<string, object> compact = BuildMiddleTermSummary(arcSettings, npcId,
                 "arc:" + npcId + ":" + playerId + ":" + memoryLane, scenes, 60000,
                 "These records are chronological closed conversation scenes. A departure, silence, refusal, or closure in an older scene applies only to that scene. If a later scene exists, it proves the participants subsequently re-engaged; never preserve an older scene ending as current physical absence or permanent non-engagement.",
-                arcCorrelationId);
+                arcCorrelationId, campaignId: campaignId);
             string text = ReadString(compact, "summary", "");
             if (identityUnknown)
             {
@@ -1468,7 +1475,7 @@ AND memory_lane=$lane AND ($player='' OR participants_json LIKE $player_like) OR
             string originalArcText = text;
             text = NormalizeHistoricalRoleplayContinuityText(text,
                 Math.Max(text.Length + 4096, 5000),
-                true);
+                true, purpose: HistoricalTextPurpose.StoredArchive);
             bool continuityNormalized = !string.Equals(
                 originalArcText, text, StringComparison.Ordinal);
             if (string.IsNullOrWhiteSpace(text))
@@ -1564,7 +1571,7 @@ AND ($player='' OR participants_json LIKE $player_like);",
                 {
                     string original = ReadString(row, "summary", "");
                     string normalized = NormalizeHistoricalRoleplayContinuityText(
-                        original, maxChars, true);
+                        original, maxChars, true, purpose: HistoricalTextPurpose.StoredArchive);
                     if (string.Equals(original, normalized, StringComparison.Ordinal)) continue;
                     string summaryId = ReadString(row, "summary_id", "");
                     if (string.IsNullOrWhiteSpace(summaryId)) continue;
@@ -1730,6 +1737,11 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
             {
                 ["enableMinimeMemoryWorker"] = false, ["enableMinimeMemoryReranking"] = false
             };
+            var legacySettings = new Dictionary<string, object>(disabledSettings)
+                { ["enableSemanticMemory"] = false, ["legacyMemoryMode"] = true };
+            var precisionSettings = new Dictionary<string, object>(disabledSettings)
+                { ["enableSemanticMemory"] = false, ["legacyMemoryMode"] = false };
+            var datedContext = TestDict("worldDay", 23d, "mainHeroStringId", "player", "timelineId", "main");
             Dictionary<string, object> personalRoute = BuildMemoryRetrievalRoute(disabledSettings, "How have you been feeling today?", new Dictionary<string, object>());
             Dictionary<string, object> worldRoute = BuildMemoryRetrievalRoute(disabledSettings, "Who won the tournament?", new Dictionary<string, object>());
             Dictionary<string, object> namedWorldRoute = BuildMemoryRetrievalRoute(disabledSettings, "What happened to Rhotae?", new Dictionary<string, object>());
@@ -1824,8 +1836,8 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
                     ["about_entities"] = new List<string> { "npc_a" }, ["visibility"] = "private",
                     ["worldDay"] = 13d, ["ts"] = 1300L, ["importance"] = 0.9d
                 }, "categorized_memory_test");
-                Dictionary<string, object> authorizedPromisePacket = BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500);
-                Dictionary<string, object> unauthorizedPromisePacket = BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500);
+                Dictionary<string, object> authorizedPromisePacket = BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
+                Dictionary<string, object> unauthorizedPromisePacket = BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, legacySettings);
                 string authorizedPromiseText = ReadString(authorizedPromisePacket, "memoryPacket", "");
                 string unauthorizedPromiseText = ReadString(unauthorizedPromisePacket, "memoryPacket", "");
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
@@ -1835,6 +1847,13 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
                         commitmentRows == 1 && authorizedPromiseText.Contains(privatePromiseMarker) && !unauthorizedPromiseText.Contains(privatePromiseMarker),
                         "Private promises route through commitments, remain retrievable by their owner, and do not leak to uninvolved NPCs.");
                 }
+                string precisePromise = ReadString(BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                string preciseStranger = ReadString(BuildNpcMemoryPacket(campaignId, "npc_c", "player", "", "SABLE memory promise", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                add("precision_private_promise_retrieval", precisePromise.Contains(privatePromiseMarker) && !preciseStranger.Contains(privatePromiseMarker),
+                    "Dated precision retrieval preserves an owner's private promise without disclosing it to an uninvolved NPC; owner=" + precisePromise.Contains(privatePromiseMarker) + ", stranger=" + preciseStranger.Contains(privatePromiseMarker) + ".");
+                string undatedPromise = ReadString(BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", "SABLE memory promise", 2500, null, precisionSettings), "memoryPacket", "");
+                add("precision_missing_date_withholds_later_memory", !undatedPromise.Contains(privatePromiseMarker),
+                    "An undated caller cannot disclose a memory later than the conservative day-zero boundary.");
 
                 const string oldArchiveMarker = "OBSIDIAN_ARCHIVE_OATH_9173";
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
@@ -1858,9 +1877,9 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
                         "Full-archive FTS hits are materialized by id instead of being discarded outside the newest-memory window.");
                 }
                 Dictionary<string, object> oldArchivePacket = BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
-                    "What exactly do you remember about " + oldArchiveMarker + "?", 2500);
+                    "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, legacySettings);
                 Dictionary<string, object> oldArchiveStrangerPacket = BuildNpcMemoryPacket(campaignId, "npc_c", "player", "",
-                    "What exactly do you remember about " + oldArchiveMarker + "?", 2500);
+                    "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, legacySettings);
                 string oldArchiveText = ReadString(oldArchivePacket, "memoryPacket", "");
                 bool oldArchiveRecall = oldArchiveText.Contains(oldArchiveMarker)
                     && oldArchiveText.Contains("firsthand witness")
@@ -1877,6 +1896,14 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
                     ["selectedMemoryCount"] = selectedMemoryCount,
                     ["precisionAtPacket"] = selectedMemoryCount <= 0 ? 0d : (oldArchiveText.Contains(oldArchiveMarker) ? 1d : 0d) / selectedMemoryCount
                 };
+                string preciseArchive = ReadString(BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
+                    "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                string preciseArchiveStranger = ReadString(BuildNpcMemoryPacket(campaignId, "npc_c", "player", "",
+                    "What exactly do you remember about " + oldArchiveMarker + "?", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                add("precision_long_archive_recall", preciseArchive.Contains(oldArchiveMarker)
+                    && preciseArchive.Contains("Legacy recollection; original evidence unavailable")
+                    && !preciseArchiveStranger.Contains(oldArchiveMarker),
+                    "Precision retrieves the older lexical hit beyond 90 decoys, preserves source uncertainty and observer privacy; recalled=" + preciseArchive.Contains(oldArchiveMarker) + ".");
 
                 const string contradictionMarker = "SUNDERED_CROWN_REPORT_4421";
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
@@ -1889,13 +1916,20 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
                         "beliefs_and_rumors", new List<string> { "player" }, new List<string>(), new List<string> { "npc_a" });
                 }
                 Dictionary<string, object> contradictionPacket = BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
-                    "What rumor or claim have you heard about " + contradictionMarker + "?", 2500);
+                    "What rumor or claim have you heard about " + contradictionMarker + "?", 2500, datedContext, legacySettings);
                 string contradictionText = ReadString(contradictionPacket, "memoryPacket", "");
                 add("contradictory_recollections",
                     contradictionText.Contains("survived the ambush") && contradictionText.Contains("died in the ambush")
                     && contradictionText.Contains("firsthand witness") && contradictionText.Contains("secondhand rumor")
                     && contradictionText.Contains("confidence 0.85") && contradictionText.Contains("confidence 0.40"),
                     "Conflicting recollections remain distinct and carry enough provenance for the dialogue model to preserve uncertainty.");
+                string preciseContradictions = ReadString(BuildNpcMemoryPacket(campaignId, "npc_a", "player", "",
+                    "What rumor or claim have you heard about " + contradictionMarker + "?", 2500, datedContext, precisionSettings), "memoryPacket", "");
+                add("precision_contradictory_recollections", preciseContradictions.Contains("survived the ambush")
+                    && preciseContradictions.Contains("died in the ambush")
+                    && ContinuityPromptRecords(preciseContradictions, false).Count(record => record.Kind == "unverified"
+                        && record.Text.Contains(contradictionMarker)) == 2,
+                    "Both source-less contradictory recollections remain separate unverified records; survived=" + preciseContradictions.Contains("survived the ambush") + ", died=" + preciseContradictions.Contains("died in the ambush") + ".");
 
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
@@ -2111,27 +2145,38 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
                         && ReadString(recentRaw, "text", "").Contains("Beatrice")
                         && ReadString(recentRaw, "text", "").Contains("ribbon and pin"),
                         "The recent 30-turn raw window is NPC-specific and preserves every attributed line from included group sessions.");
-                    string livePromptContext = BuildPromptContext(campaignId, "npc_a",
-                        new Dictionary<string, object> { ["mainHeroStringId"] = "player", ["worldDay"] = 23d },
-                        "For a simple memory check, what did I say about the obsidian compass in our first conversation?",
+                    string FixturePromptContext(string query, string preparedMemory = null) => BuildPromptContext(campaignId, "npc_a",
+                        new Dictionary<string, object>(datedContext), query,
                         "", new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
                         new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
-                        false, new Dictionary<string, object> { ["mainHeroStringId"] = "player", ["worldDay"] = 23d }, "dialogue");
+                        false, new Dictionary<string, object>(datedContext), "dialogue", precomputedMemoryPacket: preparedMemory);
+                    string exactQuery = "For a simple memory check, what did I say about the obsidian compass in our first conversation?";
+                    string legacyExactMemory = ReadString(BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", exactQuery,
+                        2500, datedContext, legacySettings), "memoryPacket", "");
+                    string livePromptContext = FixturePromptContext(exactQuery, legacyExactMemory);
                     add("exact_live_prompt_context",
                         livePromptContext.Contains("Exact conversation source") && livePromptContext.Contains("obsidian compass"),
                         "The production dialogue prompt context includes the exact-history section and its matched evidence.");
-                    string ordinaryContinuityContext = BuildPromptContext(campaignId, "npc_a",
-                        new Dictionary<string, object> { ["mainHeroStringId"] = "player", ["worldDay"] = 23d },
-                        "Paraphrase the obsidian-compass fact without losing its exact description.",
-                        "", new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>(),
-                        new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
-                        false, new Dictionary<string, object> { ["mainHeroStringId"] = "player", ["worldDay"] = 23d }, "dialogue");
+                    string ordinaryQuery = "Paraphrase the obsidian-compass fact without losing its exact description.";
+                    string legacyOrdinaryMemory = ReadString(BuildNpcMemoryPacket(campaignId, "npc_a", "player", "", ordinaryQuery,
+                        2500, datedContext, legacySettings), "memoryPacket", "");
+                    string ordinaryContinuityContext = FixturePromptContext(ordinaryQuery, legacyOrdinaryMemory);
                     add("recent_raw_window_without_recall_keywords",
                         ordinaryContinuityContext.Contains("Recent source-bearing closed conversations")
                         && ordinaryContinuityContext.Contains("obsidian compass")
                         && ordinaryContinuityContext.Contains("Beatrice")
                         && ordinaryContinuityContext.Contains("ribbon and pin"),
                         "The configured recent raw NPC window is present even when ordinary player wording does not trigger the exact-recall router, and complete attributed group context is retained.");
+                    string preciseLiveContext = FixturePromptContext(exactQuery);
+                    add("precision_exact_live_prompt_context", preciseLiveContext.Contains("MEMORY EVIDENCE")
+                        && preciseLiveContext.Contains("obsidian compass"),
+                        "The default production prompt path includes typed precision evidence and the matched original; recalled=" + preciseLiveContext.Contains("obsidian compass") + ".");
+                    string preciseOrdinaryContext = FixturePromptContext(ordinaryQuery);
+                    add("precision_recent_raw_window_without_recall_keywords", preciseOrdinaryContext.Contains("MEMORY EVIDENCE")
+                        && preciseOrdinaryContext.Contains("obsidian compass") && preciseOrdinaryContext.Contains("Beatrice")
+                        && preciseOrdinaryContext.Contains("ribbon and pin"),
+                        "The default production prompt preserves the original compass fact and complete attributed group context; compass=" + preciseOrdinaryContext.Contains("obsidian compass")
+                        + ", groupSpeaker=" + preciseOrdinaryContext.Contains("Beatrice") + ", groupFact=" + preciseOrdinaryContext.Contains("ribbon and pin") + ".");
                 }
                 Dictionary<string, object> secondFinish = ConversationFinishApi(new Dictionary<string, object>
                 {

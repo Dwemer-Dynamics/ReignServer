@@ -107,7 +107,7 @@ namespace ReignBetaServer
         }
     }
 
-    internal static class ReignPostgreSqlStorage
+    internal static partial class ReignPostgreSqlStorage
     {
         private const string MetadataSchema = "reign_meta";
         private const string CampaignSchemaPrefix = "reign_campaign_";
@@ -989,9 +989,9 @@ WHERE datname=current_database();", connection))
             }
         }
 
-        private static void RunPostgreSqlTool(
+        private static string RunPostgreSqlTool(
             IList<string> arguments,
-            int timeoutMilliseconds)
+            int timeoutMilliseconds, bool requireProcessTermination = false)
         {
             string distro = Environment.GetEnvironmentVariable(
                 "REIGN_POSTGRES_WSL_DISTRO");
@@ -1008,7 +1008,13 @@ WHERE datname=current_database();", connection))
                 var errorTask = process.StandardError.ReadToEndAsync();
                 if (!process.WaitForExit(timeoutMilliseconds))
                 {
-                    try { process.Kill(); } catch { }
+                    if (requireProcessTermination)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        if (!process.WaitForExit(10000))
+                            throw new TimeoutException("Native PostgreSQL archive tool could not be stopped; owned state must be retained.");
+                    }
+                    else { try { process.Kill(); } catch { } }
                     throw new TimeoutException(
                         "PostgreSQL archive command timed out.");
                 }
@@ -1027,6 +1033,7 @@ WHERE datname=current_database();", connection))
                         + (string.IsNullOrWhiteSpace(standardOutput)
                             ? "" : " " + standardOutput.Trim()));
                 }
+                return standardOutput;
             }
         }
 

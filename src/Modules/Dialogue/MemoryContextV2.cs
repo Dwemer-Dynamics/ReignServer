@@ -108,11 +108,23 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
         private static Dictionary<string, object> ReadMemoryPrecisionState(ReignDbConnection connection) =>
             QuerySql(connection, "SELECT * FROM memory_precision_state WHERE state_id='current';").Single();
 
-        private static string MemoryPrecisionMode(ReignDbConnection connection, Dictionary<string, object> settings = null)
+        private static bool IsIsolatedMemoryValidation => ReignPostgreSqlStorage.Options.IsValidation
+            && !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value);
+
+        private static string ResolveMemoryMode(Dictionary<string, object> settings, bool allowFixtureMode = false)
         {
-            string mode = ReadString(settings, "memoryPrecisionMode", ReadString(ReadMemoryPrecisionState(connection), "mode", "shadow"));
-            return mode == "precision" || mode == "legacy" ? mode : "shadow";
+            // The install-wide choice survives loading an older campaign snapshot.
+            // Old per-campaign shadow/legacy flags are not production authority.
+            if (allowFixtureMode && settings?.ContainsKey("memoryPrecisionMode") == true)
+            {
+                string mode = ReadString(settings, "memoryPrecisionMode", "shadow");
+                return mode is "precision" or "legacy" ? mode : "shadow";
+            }
+            return ReadBool(settings, "legacyMemoryMode", false) ? "legacy" : "precision";
         }
+
+        private static string MemoryPrecisionMode(ReignDbConnection connection, Dictionary<string, object> settings = null) =>
+            ResolveMemoryMode(settings ?? LoadSettings(), IsIsolatedMemoryValidation);
 
         private static void AdvanceMemoryRestoreGeneration(string campaignId, Dictionary<string, object> restoredPoint = null, string snapshotSchema = "")
         {
@@ -127,6 +139,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
                     new Dictionary<string, object> { ["generation"] = generation, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 ExecuteSql(connection, "DELETE FROM memory_projections;");
                 CaptureRestoredLetterSources(connection, restoredPoint);
+                RebindRestoredConversationReferences(connection, restoredPoint, generation);
                 ExecuteSql(connection, "UPDATE memory_background_jobs SET status='pending',lease_token='',lease_until=0 WHERE status='running';");
                 QueueAllEmbeddingJobs(connection, true);
                 transaction.Commit();
@@ -185,6 +198,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
             return new Dictionary<string, object> {
                 ["summary"] = text, ["tags"] = topics ?? new List<string>(), ["confidence"] = 1d,
                 ["method"] = "extractive_fallback", ["coverageComplete"] = true,
+                ["sourceCoverage"] = "all_records", ["archiveCharacters"] = text.Length,
                 ["compactionStatus"] = text.Length == 0 ? "empty" : "incomplete",
                 ["sourceHash"] = PromptHash(text), ["processingVersion"] = MemoryPrecisionVersion };
         }
@@ -229,23 +243,40 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
         // The worker chooses sources; it does not publish unchecked paraphrases.
         // Selection completeness and source coverage are deliberately separate.
         private static Dictionary<string, object> AcceptMemorySummarySelection(Dictionary<string, object> candidate,
-            List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars)
+            List<Dictionary<string, object>> rows, List<string> sources, List<string> topics, int maxChars,
+            Dictionary<string, object> selectionDiagnostic = null)
         {
+            Dictionary<string, object> Reject(string reason)
+            {
+                if (selectionDiagnostic != null) selectionDiagnostic["reason"] = reason;
+                return null;
+            }
+            if (selectionDiagnostic != null)
+            { selectionDiagnostic["sourceItemCount"] = sources.Count; selectionDiagnostic["maximumCharacters"] = maxChars; }
             if (candidate == null || !candidate.TryGetValue("sourceIndices", out object raw)
-                || raw is string || raw is not System.Collections.IEnumerable values) return null;
+                || raw is string || raw is not System.Collections.IEnumerable values) return Reject("invalid_selection_shape");
             var selected = new HashSet<int>();
             foreach (object value in values)
             {
-                string token = Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
-                if (!Regex.IsMatch(token, @"^[1-9][0-9]*$", RegexOptions.CultureInvariant)
-                    || !int.TryParse(token, out int index) || index > sources.Count || !selected.Add(index)
-                    || selected.Count > 16) return null;
+                string indexText = Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+                if (!Regex.IsMatch(indexText, @"^[1-9][0-9]*$", RegexOptions.CultureInvariant)
+                    || !int.TryParse(indexText, out int index)) return Reject("invalid_source_index");
+                if (index > sources.Count) return Reject("source_index_out_of_range");
+                if (!selected.Add(index)) return Reject("duplicate_source_index");
+                if (selected.Count > 16) return Reject("too_many_source_indices");
             }
-            if (selected.Count == 0) return null;
+            if (selected.Count == 0) return Reject("empty_selection");
             var indices = selected.OrderBy(i => i).ToList();
             bool complete = indices.Count == sources.Count;
             string text = MemorySummarySelectionText(sources, indices);
-            if (text.Length > maxChars) return null;
+            if (selectionDiagnostic != null)
+            {
+                selectionDiagnostic["selectedSourceIndices"] = indices;
+                selectionDiagnostic["selectedSourceCharacters"] = indices.Select(i => sources[i - 1].Length).ToList();
+                selectionDiagnostic["selectedCharactersWithFraming"] = text.Length;
+                selectionDiagnostic["selectedCount"] = indices.Count;
+            }
+            if (text.Length > maxChars) return Reject("selection_exceeds_character_budget");
             return TestDict("summary", text, "tags", topics, "confidence", 1d,
                 "method", "source_bound_selection", "coverageComplete", complete,
                 "sourceCoverage", complete ? "all_records" : "selected_records",
@@ -294,12 +325,15 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
             }
             var parsed = TryParseJsonObject(ReadString(provider, "content", ""));
             if (parsed == null) return MemoryCompactionOutcome(retained, "malformed_response", provider);
-            var selected = AcceptMemorySummarySelection(parsed, rows, sources, topics, maxChars);
+            var selectionDiagnostic = new Dictionary<string, object>();
+            var selected = AcceptMemorySummarySelection(parsed, rows, sources, topics, maxChars, selectionDiagnostic);
             if (selected != null) return MemoryCompactionOutcome(selected, "source_selection_accepted", provider);
             if (parsed.TryGetValue("sourceIndices", out var raw))
             {
                 bool empty = raw is not string && raw is System.Collections.IEnumerable list && !list.Cast<object>().Any();
-                return MemoryCompactionOutcome(retained, empty ? "no_safe_selection" : "invalid_source_selection", provider);
+                var outcome = MemoryCompactionOutcome(retained, empty ? "no_safe_selection" : "invalid_source_selection", provider);
+                ReadDictionary(outcome, "compactionDiagnostic")["selectionValidation"] = selectionDiagnostic;
+                return outcome;
             }
             string summary = ReadString(parsed, "summary", "");
             if (!string.IsNullOrWhiteSpace(summary) && summary.Trim().Length <= maxChars)
@@ -602,13 +636,23 @@ CASE WHEN summary_type='scene' THEN 0 ELSE 1 END,summary_id LIMIT $batch OFFSET 
             evidence.AddRange(LinkedConversationEvidence(connection, plan.Observer, plan.Peer, plan.Timeline, plan.Query, knowledge));
             var parameters = new Dictionary<string, object> { ["owner"] = plan.Observer, ["peer"] = plan.Peer,
                 ["timeline"] = plan.Timeline, ["campaign"] = campaign, ["day"] = plan.WorldDay };
-            foreach (var row in QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: knowledge) + @"
+            var continuity = QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: knowledge) + @"
 AND status<>'invalidated' AND kind<>'question' AND (kind<>'relationship' OR peer_id=$peer)
-AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) ORDER BY importance DESC,updated_ts DESC,record_id;", parameters))
+AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) ORDER BY importance DESC,updated_ts DESC,record_id;", parameters);
+            var episodeSources = LoadContinuityEpisodeSources(connection, continuity, plan.Observer);
+            foreach (var row in continuity)
             {
                 var value = TryParseJsonObject(ReadString(row, "payload_json", "{}")) ?? new Dictionary<string, object>();
                 if (!MemoryTimeVisible(row, knowledge, connection)) continue;
                 string kind = ReadString(row, "kind", "");
+                if (kind == "episode")
+                {
+                    episodeSources.TryGetValue(ReadString(row, "source_turn_id", ""), out var source);
+                    string episode = RenderContinuityEpisodeEvidence(connection, row, value, source, knowledge, plan.SuppliedSources);
+                    if (episode.Length > 0)
+                        evidence.Add(EvidenceFromRow(row, "record_id", episode, kind, plan.Observer, false, 90 + ReadDouble(row, "importance", 0d)));
+                    continue;
+                }
                 bool required = kind == "relationship" || kind == "agenda";
                 string opportunity = kind == "agenda" ? ContinuityAgendaOpportunity(value, context) : "";
                 string text = "id=" + ReadString(row, "record_id", "") + "; revision=" + ReadInt(row, "revision", 1)
@@ -675,7 +719,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", parameters).Where(r => MemoryTimeVisible
             // Include the knowledge and opportunity context in the cache key.
             // Source revision is conservative across the campaign; no stale pair
             // can survive a late group contribution or a changed boundary.
-            string key = PromptHash("source-linked-foundation-v9|" + CanonicalJson(plan.SuppliedSources) + "|" + plan.Timeline + "|" + plan.Observer + "|" + plan.Peer
+            string key = PromptHash("source-linked-foundation-v10|" + CanonicalJson(plan.SuppliedSources) + "|" + plan.Timeline + "|" + plan.Observer + "|" + plan.Peer
                 + "|" + plan.Query + "|" + plan.Session + "|" + CanonicalJson(context));
             using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead))
             {
@@ -823,7 +867,9 @@ ON CONFLICT(projection_id) DO UPDATE SET restore_generation=$generation,projecti
         }
 
         private static string RenderMemoryEvidence(MemoryEvidence evidence, string alias) =>
-            RenderContinuityRecord(alias, evidence.Kind, evidence.Owner, evidence.Session, evidence.Day,
+            RenderContinuityRecord(ConversationReferenceMode() == "off" || evidence.SourceId.Length == 0
+                || !ConversationReferenceSourceKind(evidence.Kind) ? alias : evidence.SourceId,
+                evidence.Kind, evidence.Owner, evidence.Session, evidence.Day,
                 (int)evidence.Score, evidence.Required, "[" + alias + " revision=" + evidence.Revision + "] " + evidence.Text, evidence.SelectionRank);
 
         private static MemoryEvidencePacket SelectPrecisionEvidence(IEnumerable<MemoryEvidence> candidates, int ordinaryBudget = 4000,
@@ -1068,15 +1114,18 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
         }
 
         private static Dictionary<string, object> BuildPrecisionMemoryPacket(string campaign, string npc, string peer,
-            string location, string query, Dictionary<string, object> context, Dictionary<string, object> settings, bool shadow)
+            string location, string query, Dictionary<string, object> context, Dictionary<string, object> settings, bool shadow,
+            PublishedPartyReplayView publishedParty = null, ReviewedDurableReplayRead durableRead = null)
         {
             var timer = System.Diagnostics.Stopwatch.StartNew();
             context ??= new Dictionary<string, object>();
             var plan = PlanMemoryQuery(npc, peer, query, context);
             var knowledge = BuildKnowledgeAccessContext(npc, peer, location, context);
             knowledge.WorldDay = plan.WorldDay;
+            publishedParty?.BindRead(campaign, knowledge, query);
             var diagnostics = new Dictionary<string, object>();
             var candidates = new List<MemoryEvidence>();
+            var nativeEventIds = new HashSet<string>(StringComparer.Ordinal);
             var recentWindow = new List<MemoryEvidence>();
             var route = BuildMemoryRetrievalRoute(settings, query, context);
             var semantic = shadow ? new Dictionary<string, object> { ["reason"] = "shadow_lexical_only" }
@@ -1113,7 +1162,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
                     candidates.AddRange(ExpandPrecisionSource(connection, "memories",
                         new Dictionary<string, object> { ["memory_id"] = assertion.Id, ["event_id"] = ReadString(row, "source_event_id", "") }, plan, knowledge, 87));
                 }
-                foreach (var row in QueryKnownRows(connection, "obligations", knowledge, "status IN ('unresolved','active','open','pending')", 64))
+                foreach (var row in QueryKnownRows(connection, "obligations", knowledge, PromptActiveObligationSql, 64))
                 {
                     bool relevant = plan.Needs.Contains("commitment") || plan.Terms.Any(t => ReadString(row, "description", "").Contains(t, StringComparison.OrdinalIgnoreCase))
                         || ReadString(row, "owed_by", "") == npc && ReadString(row, "owed_to", "") == peer
@@ -1142,7 +1191,12 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
                         return r;
                     }).OrderByDescending(r => ReadDouble(r, "precisionRank", 0d)).Take(8);
                     foreach (var row in ranked)
-                        candidates.AddRange(ExpandPrecisionSource(connection, table, row, plan, knowledge, 55 + ReadDouble(row, "precisionRank", 0d) * 600));
+                    {
+                        double score = 55 + ReadDouble(row, "precisionRank", 0d) * 600;
+                        if (table == "memories" && durableRead?.ProjectRankedMemory(connection, row, knowledge, score) is { } recollection)
+                            candidates.Add(recollection);
+                        candidates.AddRange(ExpandPrecisionSource(connection, table, row, plan, knowledge, score));
+                    }
                 }
                 var recalledExchanges = FindPrecisionExchanges(connection, plan, knowledge, MemoryRecallLexicalLimit);
                 diagnostics["recallCandidateLimit"] = MemoryRecallLexicalLimit + MemoryRecallSupplementLimit;
@@ -1161,11 +1215,16 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
                 var native = LoadKnownWorldHistoryForDialogue(connection, plan.Timeline, plan.WorldDay, knowledge, query, route, semantic,
                     ReadBool(ReadDictionary(context, "identityView"), "knowsIdentity", false));
                 foreach (var row in native.Where(r => plan.Terms.Any(t => Json.Serialize(r).Contains(t, StringComparison.OrdinalIgnoreCase))))
+                {
                     candidates.Add(EvidenceFromRow(row, "event_id", FormatKnownWorldHistoryForDialogue(new List<Dictionary<string, object>> { row }, 24000),
                         "native_confirmed", npc, false, 92));
+                    nativeEventIds.Add(ReadString(row, "event_id", ""));
+                }
 
 
             }
+            if (durableRead != null)
+                candidates.RemoveAll(e => e.Kind == "reported_exchange" || e.Kind == "recent_summary");
             candidates = candidates.Where(e => !IsUnsupportedWordingJudgment(e.Text)).ToList();
             if (knowledge.PlayerIdentityUnknown)
                 foreach (var evidence in candidates) evidence.Text = SanitizeUnknownIdentityEvidenceText(evidence.Text, knowledge);
@@ -1176,7 +1235,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             // A single bounded second pass follows the strongest eligible source
             // to the last exchange in that episode; it cannot search another
             // character's private history or recursively grow the context.
-            if (unresolved.Count > 0)
+            if (unresolved.Count > 0 && durableRead == null)
             {
                 var anchor = candidates.Where(e => e.Session.Length > 0).OrderByDescending(e => e.Score).FirstOrDefault();
                 if (anchor != null)
@@ -1191,7 +1250,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             }
             diagnostics["initialRetrievalMs"] = timer.ElapsedMilliseconds;
             // The guaranteed recent window is independent of relevance ranking and source discovery limits.
-            candidates.AddRange(recentWindow);
+            if (durableRead == null) candidates.AddRange(recentWindow);
             candidates = ApplyLocalMemorySelection(candidates, plan, context, settings, diagnostics, shadow);
             var packet = SelectPrecisionEvidence(candidates, Math.Clamp(ReadInt(settings, "memoryPrecisionOrdinaryTokens", 4000), 2000, 8000), plan.SuppliedSources);
             FinalizeMemorySelectionAudit(diagnostics, packet, shadow);
@@ -1208,6 +1267,8 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             audit["dynamicMemoryTokenEstimate"] = EstimateContinuityTokens(text);
             audit["retrievalMs"] = timer.ElapsedMilliseconds;
             return new Dictionary<string, object> { ["memoryPacket"] = text, ["precisionEvidence"] = audit,
+                ["sourceEventIds"] = packet.Selected.Where(e => e.Kind == "native_confirmed" && nativeEventIds.Contains(e.SourceId))
+                    .Select(e => e.SourceId).Where(id => id.Length > 0).Distinct(StringComparer.Ordinal).Take(40).ToList(),
                 ["retrievalRoute"] = route, ["semanticRetrieval"] = semantic, ["timingMs"] = timer.ElapsedMilliseconds,
                 ["timingPhases"] = new Dictionary<string, object> { ["precisionRetrievalMs"] = timer.ElapsedMilliseconds } };
         }
@@ -1269,7 +1330,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
 
         private static string ConversationActionOutputSchema(string source, bool structuredActions)
         {
-            string rendered = ConversationMemoryOutputSchema(source);
+            string rendered = ConversationReferenceOutputSchema(ConversationMemoryOutputSchema(source));
             if (!structuredActions) return rendered;
             Dictionary<string, object> example = null;
             try { example = Json.DeserializeObject(rendered) as Dictionary<string, object>; } catch { }

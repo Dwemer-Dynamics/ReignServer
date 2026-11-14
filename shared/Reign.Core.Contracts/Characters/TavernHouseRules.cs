@@ -4,6 +4,84 @@ using System.Linq;
 
 namespace ReignBeta.Shared.Characters
 {
+    // Indexes ledger identities, never mutable eligibility or Native Hero state.
+    // Native-thread owners supply their backing append-only list and a pure key
+    // selector. Invalidate after key/content replacement or loading; a count
+    // change alone detects appends/removals, not same-count in-place changes.
+    public sealed class PopulationIdentityIndex<T> where T : class
+    {
+        private readonly Func<T, string?> identity;
+        private readonly Dictionary<string, T> records = new Dictionary<string, T>(StringComparer.Ordinal);
+        private IReadOnlyList<T>? source;
+        private int count = -1;
+        public PopulationIdentityIndex(Func<T, string?> identity) { this.identity = identity; }
+        public T? Find(IReadOnlyList<T> people, string? id)
+        {
+            // Preserve FirstOrDefault semantics even for incomplete identities.
+            if (id == null) return people.FirstOrDefault(p => identity(p) == null);
+            if (!ReferenceEquals(source, people) || count != people.Count)
+            {
+                Invalidate();
+                foreach (T person in people)
+                {
+                    string? key = identity(person);
+                    if (key != null && !records.ContainsKey(key)) records.Add(key, person);
+                }
+                source = people;
+                count = people.Count;
+            }
+            return records.TryGetValue(id, out T? found) ? found : null;
+        }
+        public void Invalidate() { records.Clear(); source = null; count = -1; }
+    }
+
+    // Reused buffers have a single synchronous pass lifetime. Native lookups
+    // remain authoritative on misses and duplicate IDs; live Hero state is never
+    // cached. The caller clears references before leaving its pass.
+    public sealed class TavernHouseHeroLookup<T> where T : class
+    {
+        private readonly Dictionary<string, T> heroes = new Dictionary<string, T>(StringComparer.Ordinal);
+        private readonly HashSet<string> wanted = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> duplicateIds = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Func<string, T?> fallback;
+        public int FallbackHits { get; private set; }
+        public int DuplicateIds => duplicateIds.Count;
+        public int Count => heroes.Count;
+        public TavernHouseHeroLookup(Func<string, T?> fallback) => this.fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
+        public void Refresh(IEnumerable<string> ids, IEnumerable<T> first, IEnumerable<T> second, Func<T, string> identity)
+        {
+            Clear();
+            foreach (string id in ids) if (!string.IsNullOrEmpty(id)) wanted.Add(id);
+            AddSource(first, identity); AddSource(second, identity);
+            foreach (string id in duplicateIds)
+            {
+                T? authoritative = fallback(id);
+                if (authoritative == null) heroes.Remove(id); else heroes[id] = authoritative;
+            }
+        }
+        private void AddSource(IEnumerable<T> source, Func<T, string> identity)
+        {
+            foreach (T hero in source)
+            {
+                if (hero == null) continue;
+                string id = identity(hero);
+                if (!wanted.Contains(id)) continue;
+                if (!heroes.TryGetValue(id, out T? existing)) heroes.Add(id, hero);
+                else if (!ReferenceEquals(existing, hero)) duplicateIds.Add(id);
+            }
+        }
+        public T? Find(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            if (heroes.TryGetValue(id, out T? hero)) return hero;
+            hero = fallback(id);
+            if (hero != null) { heroes[id] = hero; FallbackHits++; }
+            return hero;
+        }
+        public void Created(string id, T hero) { if (!string.IsNullOrEmpty(id)) heroes[id] = hero; }
+        public void Clear() { heroes.Clear(); wanted.Clear(); duplicateIds.Clear(); FallbackHits = 0; }
+    }
+
     public static class TavernHouseRules
     {
         public const int Version = 1;

@@ -116,11 +116,25 @@ namespace Reign.Core.Contracts.Government
             return profile;
         }
 
-        public static bool Valid(GovernmentPoliticalProfile profile) => profile != null && profile.ModelVersion == ModelVersion
-            && !string.IsNullOrWhiteSpace(profile.HeroId) && !string.IsNullOrWhiteSpace(profile.CampaignId) && profile.Revision > 0
-            && profile.Values != null && profile.Values.Count == 16 && profile.Values.Select(x => x.Value).Distinct().Count() == 16
-            && profile.Values.All(x => Enum.IsDefined(typeof(ReignGovernmentPlank), x.Value) && x.Stance >= -100 && x.Stance <= 100
-                && x.Importance >= 1 && x.Importance <= 100) && profile.Changes != null && profile.SeenEvidence != null;
+        public static bool Valid(GovernmentPoliticalProfile profile)
+        {
+            if (profile == null || profile.ModelVersion != ModelVersion || string.IsNullOrWhiteSpace(profile.HeroId)
+                || string.IsNullOrWhiteSpace(profile.CampaignId) || profile.Revision <= 0 || profile.Values == null
+                || profile.Values.Count != 16 || profile.Changes == null || profile.SeenEvidence == null) return false;
+            // Model1 requires each of the sixteen contiguous planks exactly once.
+            // Avoid a Distinct set and sixteen boxed enum reflection calls per profile
+            // in every native selection/heartbeat scan.
+            uint seen = 0;
+            foreach (var value in profile.Values)
+            {
+                if (value == null || (uint)value.Value >= 16 || value.Stance < -100 || value.Stance > 100
+                    || value.Importance < 1 || value.Importance > 100) return false;
+                uint bit = 1u << (int)value.Value;
+                if ((seen & bit) != 0) return false;
+                seen |= bit;
+            }
+            return seen == 0xffff;
+        }
 
         public static IReadOnlyList<GovernmentPoliticalValue> WorldEventChanges(GovernmentPoliticalWorldEvidence evidence, string heroId)
         {
