@@ -7,6 +7,13 @@ source_root=/var/www/html/ReignServer
 pidfile=/run/reignserver/server.pid
 command=${1:-status}
 if [ "$(id -u)" != 0 ]; then exec sudo "$0" "$@"; fi
+# Public lifecycle calls must use the same service owner as Control Center.
+# systemd supplies INVOCATION_ID to ExecStart/ExecStop; those callbacks alone
+# perform the process work below. Dispatch before locking: the callback needs
+# the runtime lease too, and waiting on systemctl while holding it deadlocks.
+if [[ "$command" = start || "$command" = stop ]] && [ -z "${INVOCATION_ID:-}" ]; then
+    exec /usr/bin/systemctl "$command" reignserver.service
+fi
 case "$command" in
     prepare|configure-web|activate|start|stop|rollback|rollback-list|repair-permissions)
         exec 8>/run/lock/reignserver-runtime.lock

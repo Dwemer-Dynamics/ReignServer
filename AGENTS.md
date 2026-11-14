@@ -6,6 +6,8 @@ For paired development, clone the public Reign repository beside this checkout a
 
 Stage explicit reviewed paths only. Validate and audit both repositories before publication. Source publication is authorized when the user requests it; keep implementation PRs as drafts targeting unstable. A source PR does not establish clean-install or in-game acceptance.
 
+Every publication targeting unstable must also deliver the same qualified complete tester build as one ZIP on the user's Google Drive, including the Linux server and installation system, full Reign mod/shared portraits, required Windows helper and latest HTML instructions. Follow ../Reign/docs/agent/testing/RELEASE_PACKAGING.md and scripts/tester-package. Retain paired commit/report hashes, package inventory/SHA and verified Drive identity/link; never include player state or credentials. Source push alone is incomplete.
+
 Approved first-party shared portraits belong in the Reign client module at ReignBeta/PortraitCache/_shared, with the tracked ReignBeta/PortraitCache/shared-portrait-inventory.json. Deploy and package the verified module inventory; do not rely on a separate or machine-local first-party portrait payload.
 
 ## Dedicated ReignServer WSL operations

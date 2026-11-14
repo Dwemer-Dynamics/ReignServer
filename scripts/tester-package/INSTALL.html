@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Install Reign for beta testing</title>
+<style>body{margin:0;background:#070808;color:#c5bdaf;font:18px/1.6 Georgia,serif}main{max-width:850px;margin:auto;padding:40px 28px}h1,h2{color:#a88a54}a{color:#c5ac83}code,pre{font:15px/1.6 Consolas,monospace;background:#10100f;overflow-wrap:anywhere}pre{padding:18px;white-space:pre-wrap;border:1px solid #352c20}li{margin:12px 0}aside{border-left:3px solid #7e6a4d;padding-left:20px}small{color:#8a8883}</style>
+<main><h1>Install Reign for beta testing</h1>
+<p>This complete tester package contains the Reign game module, its shared portraits, matching Linux server, prepared server environment, installer and player manual. Keep every file in the extracted folder together.</p>
+<aside><p>This is an <strong>unstable beta</strong>. Back up your native saves and matching Reign campaign history before testing. Automated build and installation checks do not certify every in-game interaction.</p></aside>
+<h2>Before you install</h2>
+<ul><li>Windows 11 on an x64 PC, virtualization enabled, and your own Steam <strong>Bannerlord v1.5.7</strong> installation. Other game versions and storefronts are outside this package's verified scope.</li>
+<li>WSL 2 installed and working. If it is missing, open Windows Terminal as administrator under your usual Windows account, run <code>wsl --install --no-distribution</code>, and restart Windows if requested. Then return to your normal account to install Reign. Do not use another person's administrator account.</li>
+<li>Install one copy each of Harmony, ButterLib, UIExtenderEx and Mod Configuration Menu for your game version. Steam Workshop copies are supported. The installer checks their module IDs and minimum versions and preserves existing modules. Reign includes Arena Overhaul; remove its separate installation before installing this package.</li>
+<li>Allow enough space for the extracted package, the game module, and at least <strong>24 GB free</strong> on your chosen server drive. The server drive must be a fixed, uncompressed, unencrypted local NTFS drive.</li>
+<li>Your own cloud AI provider account or API key is required for AI conversations. Optional new AI pictures need a separately configured image provider. Provider charges belong to your own account.</li></ul>
+<h2>Install</h2>
+<ol><li>Download the single ZIP from the distributor's Google Drive link. Compare its SHA-256 with the distributor's separate published receipt if you want to verify the download.</li>
+<li>Extract the entire ZIP to a short local path such as <code>C:\ReignPackage</code>. Open the extracted <code>Reign</code> folder. Do not run the installer inside the ZIP viewer.</li>
+<li>Close Bannerlord and its launcher. Open <strong>Install.cmd</strong>. Enter the full path to your Steam Bannerlord folder when asked. The default server location is <code>%USERPROFILE%\ReignTester</code>. The complete hash check can take several minutes for large images and portraits.</li>
+<li>If you prefer another server drive, open Windows PowerShell in this folder and run:</li></ol>
+<pre>powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-Reign.ps1 -BannerlordRoot "D:\SteamLibrary\steamapps\common\Mount &amp; Blade II Bannerlord" -InstallRoot "D:\ReignTester"</pre>
+<p>The installer creates its own ReignServer WSL environment and a fresh local player database. It does not replace an unrelated distro, adopt a previous developer/legacy installation, move your dependency modules, or launch Bannerlord. An existing unrelated installation causes a refusal so it can be reviewed safely.</p>
+<h2>First launch</h2>
+<ol><li>Open <strong>Start Reign Tester</strong> on the Desktop. Wait for the server and memory worker to finish starting. The first model load may take time.</li>
+<li>Use the Control Center at <a href="http://127.0.0.1:8089/">http://127.0.0.1:8089/</a> to configure your own dialogue provider and optional image provider. Confirm the server is healthy. The Control Center manages server start and stop.</li>
+<li>Enable ReignBeta and its required dependencies in the Bannerlord launcher. Start Bannerlord yourself. Let campaign preparation finish before interacting.</li>
+<li>Read the included <a href="Reign%20User%20Guide.html">Reign User Guide</a> for controls and play. It is the latest available illustrated manual; its source-reviewed edition is November 9, 2026. This installation page describes the current tester installer. New beta behavior may be newer than that manual.</li></ol>
+<h2>Updates and interrupted installs</h2>
+<p>For a newer tester package, close the game and use the same game/server folders with <code>-Update</code>. Only a previously owned tester installation can be updated. Its database, settings, campaigns and previous runtime are retained. Changed or unknown module files cause a refusal.</p>
+<p>If installation stops, keep its extracted package, server folder and transaction journal under <code>ReignTester\transactions</code>. Fix the reported problem, then retry the same command with <code>-Resume</code>. Never delete a distro or player-data folder just to clear an error. Some interrupted storage/import or conflicting backup states require inspection before retrying.</p>
+<p><code>-VerifyOnly</code> checks package integrity and installation prerequisites without installing. It does not prove a complete clean-computer install or native gameplay.</p>
+<h2>What the package keeps private</h2>
+<p>No distributor API keys, personal settings, campaigns, saves, campaign portraits or player database are supplied. Each tester provides their own game, dependency mods, provider credentials and campaign. The server environment includes the fixed dependency/model versions identified in its receipt.</p>
+<p>For a beta report, include your package ID, game version, steps to reproduce and a screenshot of the error. Review logs before sharing them; they may contain your conversations. Do not share API keys or your entire player database publicly.</p>
+<p><small>Installation system authored November 14, 2026. Exact source commits, validation identities and file hashes are in package-manifest.json. Distribution component notices are in THIRD_PARTY.txt.</small></p></main></html>

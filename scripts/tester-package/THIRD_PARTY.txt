@@ -1,0 +1,31 @@
+REIGN TESTER DISTRIBUTION COMPONENTS
+
+Bannerlord and TaleWorlds-owned assemblies are not redistributed. Testers must
+install their own licensed game and the separately distributed dependency mods.
+Dependency provenance/minimums are in server-support/release/dependencies.lock.json
+and ReignBeta/SubModule.xml. Existing user dependencies are not overwritten.
+
+The server environment starts with Debian 12 (bookworm), using the official
+Debian debuerreotype image debian:bookworm-20261104. Provenance and immutable
+artifact digests are recorded in image-receipt.json. Debian component copyright
+and licensing notices are retained under /usr/share/doc in the server image.
+Corresponding Debian package sources are available from https://sources.debian.org/
+and https://snapshot.debian.org/ for the exact package versions recorded in
+/etc/reign-tester-image.json. Debian image/build sources:
+https://github.com/debuerreotype/docker-debian-artifacts
+https://github.com/debuerreotype/debuerreotype
+
+Python dependency versions are fixed in
+server-support/services/vector-worker/requirements-linux.txt. Package metadata
+and supplied license notices remain in their installed .dist-info directories
+inside the offline environment. It includes ONNX Runtime, CUDA libraries and
+other separately licensed runtimes; their retained component notices apply.
+
+Embedding/selection model sources, revisions and hashes are recorded in
+server-support/release/embedding-model.lock.json. Source model notices retained
+in the supplied model files and original model repositories continue to apply.
+
+This file is an index, not a replacement for the component licenses. First-party
+Reign source is published at https://github.com/Dwemer-Dynamics/Reign and
+https://github.com/Dwemer-Dynamics/ReignServer. No right to redistribute the game,
+other mods or unrelated third-party payloads is granted by this package.
