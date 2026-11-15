@@ -221,9 +221,9 @@ namespace ReignBetaServer
 
                     List<Dictionary<string, object>> duplicateTranscript = new List<Dictionary<string, object>>
                     {
-                        new Dictionary<string, object> { ["turnId"] = "turn_a", ["exchangeId"] = "exchange_1", ["speaker"] = "Player", ["text"] = "First line." },
-                        new Dictionary<string, object> { ["turnId"] = "turn_a", ["exchangeId"] = "exchange_1", ["speaker"] = "Player", ["text"] = "First line." },
-                        new Dictionary<string, object> { ["turnId"] = "turn_b", ["exchangeId"] = "exchange_1", ["speaker"] = "NPC A", ["text"] = "Second line." }
+                        new Dictionary<string, object> { ["sourceTurnId"] = "turn_a", ["exchangeId"] = "exchange_1", ["speaker"] = "Player", ["text"] = "First line." },
+                        new Dictionary<string, object> { ["sourceTurnId"] = "turn_a", ["exchangeId"] = "exchange_1", ["speaker"] = "Player", ["text"] = "First line." },
+                        new Dictionary<string, object> { ["sourceTurnId"] = "turn_b", ["exchangeId"] = "exchange_1", ["speaker"] = "NPC A", ["text"] = "Second line." }
                     };
                     List<Dictionary<string, object>> canonicalTranscript = CanonicalizePromptTranscript(duplicateTranscript, 30);
                     add("canonical_transcript_deduplicates_turn_ids", canonicalTranscript.Count == 2
@@ -231,21 +231,48 @@ namespace ReignBetaServer
                         "Prompt assembly renders each stable conversation turn once.", canonicalTranscript);
 
                     List<Dictionary<string, object>> eventHistoryFixture = new List<Dictionary<string, object>>();
+                    bool sourceIdsMatchAcceptedRows = true;
+                    bool retryReturnsSameSourceIds = true;
                     for (int beat = 1; beat <= 2; beat++)
                     {
-                        foreach (string speakerId in new[] { "player", "npc_a", "npc_b" })
+                        foreach (string speakerId in new[] { "npc_a", "npc_b" })
                         {
                             var eventPayload = new Dictionary<string, object>
                             {
                                 ["eventId"] = "history_roundtrip", ["turnId"] = "shared_beat_" + beat,
-                                ["playerHeroStringId"] = "player", ["speakerHeroStringId"] = speakerId
+                                ["playerHeroStringId"] = "player", ["speakerHeroStringId"] = speakerId,
+                                ["participants"] = new List<string> { "player", "npc_a", "npc_b" }
                             };
-                            var eventLine = EventTranscriptLine(speakerId == "player" ? "player" : "npc",
-                                speakerId, "HISTORY_" + beat + "_" + speakerId, eventPayload);
-                            eventLine["ts"] = 100L; // A real group beat can finish within one second.
-                            eventHistoryFixture.Add(eventLine);
+                            string playerWords = "HISTORY_" + beat + "_player";
+                            string npcWords = "HISTORY_" + beat + "_" + speakerId;
+                            var accepted = StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
+                                "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
+                                "history_roundtrip", 100);
+                            var acceptedRetry = StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
+                                "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
+                                "history_roundtrip", 100);
+                            retryReturnsSameSourceIds &= ReadStringList(accepted, "turnIds").SequenceEqual(ReadStringList(acceptedRetry, "turnIds"));
+                            var playerRow = speakerId == "npc_a" ? EventTranscriptLine("player", "player", playerWords, eventPayload) : null;
+                            var npcRow = EventTranscriptLine("npc", speakerId, npcWords, eventPayload);
+                            AttachAcceptedTranscriptSourceIds(playerRow, npcRow, accepted);
+                            foreach (var eventLine in new[] { playerRow, npcRow }.Where(row => row != null))
+                            {
+                                eventLine["ts"] = 100L; // A real group beat can finish within one second.
+                                var persisted = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
+                                    TestDict("id", ReadString(eventLine, "sourceTurnId", ""))).SingleOrDefault();
+                                sourceIdsMatchAcceptedRows &= persisted != null
+                                    && ReadString(persisted, "role", "") == ReadString(eventLine, "role", "")
+                                    && ReadString(persisted, "speaker_id", "") == ReadString(eventLine, "speakerHeroStringId", "")
+                                    && ReadString(persisted, "text", "") == ReadString(eventLine, "text", "")
+                                    && ReadString(eventLine, "id", "") != ReadString(eventLine, "sourceTurnId", "");
+                                eventHistoryFixture.Add(eventLine);
+                            }
                         }
                     }
+                    add("social_event_transcript_retains_acceptance_statement_ids", sourceIdsMatchAcceptedRows && eventHistoryFixture.Count == 6,
+                        "The production event-row helper copies the actual accepted DB keys for both NPCs and the shared player, while preserving storage IDs.", eventHistoryFixture);
+                    add("social_event_acceptance_retry_keeps_statement_ids", retryReturnsSameSourceIds,
+                        "Retrying the same accepted event contribution returns the same persisted statement IDs.", null);
                     var duplicateNpcLine = new Dictionary<string, object>(eventHistoryFixture[1]);
                     duplicateNpcLine["id"] = "a-retry-can-have-a-new-file-row-id";
                     duplicateNpcLine["turnId"] = ReadString(duplicateNpcLine, "turnId", "").ToUpperInvariant();
@@ -261,6 +288,41 @@ namespace ReignBetaServer
                     add("social_event_history_same_second_order_and_complete_boundary",
                         boundedEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory.Skip(3)),
                         "Same-second lines retain append order and the window includes the whole latest player/NPC exchange.", boundedEventHistory);
+
+                    var legacyRetry = new Dictionary<string, object>(duplicateNpcLine);
+                    legacyRetry.Remove("sourceTurnId");
+                    var legacyRows = eventHistoryFixture.Concat(new[] { legacyRetry }).ToList();
+                    add("social_event_unbound_new_storage_id_is_preserved",
+                        BuildSocialEventPromptTranscript(legacyRows, 30).Count == 7
+                        && BuildSocialEventPromptTranscript(legacyRows, 2).Select(row => ReadString(row, "text", ""))
+                            .SequenceEqual(expectedHistory.Skip(3).Concat(new[] { ReadString(legacyRetry, "text", "") })),
+                        "An unbound row with another storage ID is not erased by equal words or a shared beat; its whole boundary remains visible.", null);
+                    var repeatedUnboundWords = new[] { TestDict("turnId", "beat", "role", "npc", "speakerHeroStringId", "npc_a", "text", "Yes."),
+                        TestDict("turnId", "beat", "role", "npc", "speakerHeroStringId", "npc_a", "text", "Yes.") };
+                    var distinctAcceptedWords = repeatedUnboundWords.Select((row, index) => new Dictionary<string, object>(row) { ["sourceTurnId"] = "accepted_" + index }).ToArray();
+                    var changedAcceptedWords = new[] { new Dictionary<string, object>(distinctAcceptedWords[0]),
+                        new Dictionary<string, object>(distinctAcceptedWords[0]) { ["text"] = "No." } };
+                    add("transcript_identity_preserves_unknown_distinct_and_changed_statements",
+                        CanonicalizePromptTranscript(repeatedUnboundWords, 30).Count == 2
+                        && CanonicalizePromptTranscript(distinctAcceptedWords, 30).Count == 2
+                        && CanonicalizePromptTranscript(changedAcceptedWords, 30).Count == 2,
+                        "Unknown repeated words, distinct accepted IDs and different complete bodies remain separate statements.", null);
+                    bool invalidAcceptancePreserved = true;
+                    foreach (var invalid in new[] { TestDict("ok", false, "turnIds", new[] { "p", "n" }),
+                        TestDict("ok", true), TestDict("ok", true, "turnIds", new[] { "p" }),
+                        TestDict("ok", true, "turnIds", new[] { "same", "same" }) })
+                    {
+                        invalid["sessionId"] = "invalid_acceptance_session";
+                        invalid["exchangeId"] = "invalid_acceptance_exchange";
+                        var row = EventTranscriptLine("npc", "npc_a", "Keep this unbound.", TestDict());
+                        AttachAcceptedTranscriptSourceIds(null, row, invalid);
+                        invalidAcceptancePreserved &= !row.ContainsKey("sourceTurnId") && ReadString(row, "id", "").Length > 0;
+                    }
+                    var quietPlayerRow = EventTranscriptLine("player", "player", "A player line without an NPC reply.", TestDict());
+                    AttachAcceptedTranscriptSourceIds(quietPlayerRow, null, TestDict("ok", true, "sessionId", "quiet_session", "exchangeId", "quiet_exchange", "turnIds", new[] { "accepted_player", "unused_npc" }));
+                    add("transcript_identity_requires_successful_complete_acceptance", invalidAcceptancePreserved
+                        && ReadString(quietPlayerRow, "sourceTurnId", "") == "accepted_player",
+                        "Failed/incomplete acceptance supplies no source authority, while a missing NPC line does not discard the accepted player line.", null);
 
                     foreach (string sceneKind in new[] { "party_chat", "castle_chat", "family_chambers", "royal_council", "settlement_home" })
                     {

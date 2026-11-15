@@ -10440,6 +10440,7 @@ The previous attempt did not complete a JSON object within its output budget.
                     npcLine["exchangeId"] = storedExchangeId;
                 }
             }
+            AttachAcceptedTranscriptSourceIds(playerLine, npcLine, conversationExchange);
             if (playerLine != null)
             {
                 AppendJsonLineToPath(eventTranscriptPath, playerLine);
@@ -28068,6 +28069,32 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             string sessionId = ReadFirstString(payload, "conversationSessionId", "sessionId");
             return Path.Combine(CampaignDirectory(campaignId), "events", "party_chat",
                 SafePathSegment(sessionId, "unknown_session"), "transcript.jsonl");
+        }
+
+        private static void AttachAcceptedTranscriptSourceIds(
+            Dictionary<string, object> playerLine, Dictionary<string, object> npcLine,
+            Dictionary<string, object> acceptedExchange)
+        {
+            // StoreGroupedConversationExchange returns the actual persisted player
+            // and NPC turn keys in this order. Never derive a key from a shared
+            // event beat, speaker name or matching words. Keep the JSONL row id.
+            if (!ReadBool(acceptedExchange, "ok", false)
+                || ReadString(acceptedExchange, "sessionId", "").Length == 0
+                || ReadString(acceptedExchange, "exchangeId", "").Length == 0) return;
+            var ids = ReadStringList(acceptedExchange, "turnIds");
+            if (ids.Count != 2 || ids.Any(string.IsNullOrWhiteSpace)
+                || string.Equals(ids[0], ids[1], StringComparison.Ordinal)) return;
+            void Attach(Dictionary<string, object> line, string role, string id)
+            {
+                if (line == null || !string.Equals(ReadString(line, "role", ""), role, StringComparison.Ordinal)) return;
+                string existing = ReadString(line, "sourceTurnId", "");
+                if (existing.Length > 0 && !string.Equals(existing, id, StringComparison.Ordinal)) return;
+                line["sourceTurnId"] = id;
+                line["sessionId"] = ReadString(acceptedExchange, "sessionId", "");
+                line["exchangeId"] = ReadString(acceptedExchange, "exchangeId", "");
+            }
+            Attach(playerLine, "player", ids[0]);
+            Attach(npcLine, "npc", ids[1]);
         }
 
         private static Dictionary<string, object> EventTranscriptLine(string role, string speaker, string text, Dictionary<string, object> payload)
