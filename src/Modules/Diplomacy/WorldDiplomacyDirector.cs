@@ -1879,8 +1879,16 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             query = query ?? new Dictionary<string, string>();
             string campaignId = query.TryGetValue("campaignId", out string campaignQuery) ? campaignQuery : ReadString(payload, "campaignId", "default");
+            bool publicHistory = query.TryGetValue("publicHistory", out string historyMode) && historyMode == "true";
             int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsed) ? parsed : 10;
-            limit = Math.Max(1, Math.Min(20, limit));
+            limit = Math.Max(1, Math.Min(publicHistory ? 500 : 20, limit));
+            if (publicHistory)
+            {
+                List<Dictionary<string, object>> published;
+                lock (FileLock) published = PublicDiplomaticAnnouncements(ReadDiplomaticEventQueue(campaignId, requireValid: true), limit);
+                return TestDict("ok", true, "campaignId", campaignId, "publicHistory", true,
+                    "projection", "reign-public-diplomacy-v1", "count", published.Count, "events", published);
+            }
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             lock (FileLock)
             {
@@ -1898,6 +1906,22 @@ namespace ReignBetaServer
                 item.Remove("initiativeDiagnostics");
             }
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["count"] = selected.Count, ["events"] = selected };
+        }
+
+        private static List<Dictionary<string, object>> PublicDiplomaticAnnouncements(List<Dictionary<string, object>> queue, int limit)
+        {
+            string[] fields = { "eventId", "actionId", "title", "outcome", "summary", "termsText", "worldDay", "accepted", "acknowledged",
+                "actorHeroId", "actorName", "actorKingdomId", "actorKingdomName", "actorPublicReason",
+                "targetHeroId", "targetName", "targetKingdomId", "targetKingdomName", "targetPublicReason" };
+            // This dedicated director queue already publishes public world-memory
+            // events. Only ready announcements qualify; pending proposals do not.
+            return queue.Where(item => ReadBool(item, "announcementReady", false)
+                    && ReadString(item, "visibility", "public") == "public")
+                .Take(Math.Max(1, Math.Min(500, limit))).Select(item => {
+                    var result = fields.Where(item.ContainsKey).ToDictionary(key => key, key => item[key]);
+                    result["publicAnnouncement"] = true;
+                    return result;
+                }).ToList();
         }
 
         private static Dictionary<string, object> AcknowledgeDiplomaticEvent(Dictionary<string, object> payload)
@@ -2918,15 +2942,17 @@ namespace ReignBetaServer
             WriteJsonObject(CampaignFile(campaignId, "diplomacy", "director-state.json"), state ?? new Dictionary<string, object>());
         }
 
-        private static List<Dictionary<string, object>> ReadDiplomaticEventQueue(string campaignId)
+        private static List<Dictionary<string, object>> ReadDiplomaticEventQueue(string campaignId, bool requireValid = false)
         {
             string path = CampaignFile(campaignId, "diplomacy", "event-queue.json");
             if (!File.Exists(path)) return new List<Dictionary<string, object>>();
             try
             {
-                return Json.Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(path)) ?? new List<Dictionary<string, object>>();
+                var queue = Json.Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(path));
+                if (requireValid && queue == null) throw new InvalidDataException("The public diplomatic queue is not a valid event list.");
+                return queue ?? new List<Dictionary<string, object>>();
             }
-            catch
+            catch when (!requireValid)
             {
                 return new List<Dictionary<string, object>>();
             }

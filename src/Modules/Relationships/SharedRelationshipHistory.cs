@@ -686,6 +686,10 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             StringBuilder builder = new StringBuilder();
             var originals = context == null ? new List<Dictionary<string, object>>()
                 : RelationshipHistorySourceEvidence(connection, speakerHeroId, targetHeroId, context, false);
+            var supplied = PlannedPromptSources(context);
+            originals = originals.Where(record => ReadString(record, "kind", "") != "attributed_turn"
+                || supplied == null || !supplied.TryGetValue(ReadString(record, "sourceId", ""), out var hash)
+                || hash != ReadString(record, "sourceHash", "")).ToList();
             if (evidenceBudget != null) originals = evidenceBudget.Select(originals);
             if (rows.Count == 0 && originals.Count == 0) return "";
             builder.AppendLine("Relationship development (generated soft relational canon; original dated speech retains precedence):");
@@ -703,6 +707,9 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             {
                 builder.AppendLine("Your own original relationship evidence; this does not grant it to another participant:");
                 builder.Append(RenderRelationshipHistorySourceEvidence(originals));
+                if (supplied != null)
+                    foreach (var record in originals.Where(r => ReadString(r, "kind", "") == "attributed_turn"))
+                        supplied[ReadString(record, "sourceId", "")] = ReadString(record, "sourceHash", "");
                 historyIds.AddRange(originals.Select(r => ReadString(r, "sourceId", "")));
             }
             return builder.ToString().Trim();

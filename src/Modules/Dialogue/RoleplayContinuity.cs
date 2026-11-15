@@ -1143,40 +1143,11 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
         private static List<Dictionary<string, object>> CompactRoleplayTranscriptForPrompt(
             List<Dictionary<string, object>> lines)
         {
-            if (lines == null || lines.Count == 0) return new List<Dictionary<string, object>>();
-            List<Dictionary<string, object>> keptReverse = new List<Dictionary<string, object>>();
-            List<string> retainedNpc = new List<string>();
-            int compacted = 0;
-            foreach (Dictionary<string, object> line in lines.AsEnumerable().Reverse())
-            {
-                string text = ReadString(line, "text", "");
-                bool npc = ReadString(line, "role", "").Equals("npc", StringComparison.OrdinalIgnoreCase);
-                if (npc && IsRoleplayFeedbackLoopEvidence(line, text))
-                {
-                    compacted++;
-                    continue;
-                }
-                if (npc && text.Length >= 100 && retainedNpc.Any(existing => RoleplayTextSimilarity(text, existing) >= 0.72d))
-                {
-                    compacted++;
-                    continue;
-                }
-                keptReverse.Add(line);
-                if (npc) retainedNpc.Add(text);
-            }
-            List<Dictionary<string, object>> result = keptReverse.AsEnumerable().Reverse().ToList();
-            if (compacted > 0)
-            {
-                result.Insert(0, new Dictionary<string, object>
-                {
-                    ["role"] = "system",
-                    ["speaker"] = "Continuity guard",
-                    ["channel"] = "in_person",
-                    ["text"] = compacted.ToString(CultureInfo.InvariantCulture)
-                        + " older repetitive or impossible role-play line(s) were withheld from this prompt. Their canonical audit history remains stored. Do not reconstruct or imitate them."
-                });
-            }
-            return result;
+            // Similar wording is not proof of an identical contribution. A later
+            // correction may differ by one name, number or negation. Canonical
+            // identity deduplication owns repeated delivery; preserve the selected
+            // original turns here as attributed speech, including mistakes.
+            return (lines ?? new List<Dictionary<string, object>>()).Where(line => line != null).ToList();
         }
 
         private static Dictionary<string, object> QuarantineRoleplayFeedbackExactHistory(
@@ -1481,10 +1452,11 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 new Dictionary<string, object> { ["role"] = "player", ["speaker"] = "Raven", ["text"] = "Can we discuss another matter?" },
                 new Dictionary<string, object> { ["role"] = "npc", ["speaker"] = "Lucon", ["text"] = "I am here. Ask what you came to ask, and I will decide whether it deserves an answer." }
             });
-            add("poisoned_transcript_is_quarantined_not_deleted",
-                compacted.All(row => !ReadString(row, "text", "").Contains("withdrawal is permanent", StringComparison.OrdinalIgnoreCase))
-                && compacted.Any(row => ReadString(row, "speaker", "") == "Continuity guard"),
-                "Impossible model-derived continuity remains in canonical audit storage but is withheld from future prompts.");
+            add("attributed_mistake_and_later_correction_remain_originals",
+                compacted.Count == 3 && ReadString(compacted[0], "speaker", "") == "Lucon"
+                && ReadString(compacted[0], "text", "").Contains("withdrawal is permanent")
+                && ReadString(compacted[2], "text", "").Contains("I am here"),
+                "No deterministic semantic judge removes a historical statement; its author and later correction survive.");
             return results;
         }
     }

@@ -119,10 +119,10 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
             builder.AppendLine("Epistemic boundary: attendance in this shared scene proves only hearing this scene. It does not make a participant a firsthand witness to an older event discussed here. Treat another NPC's 'we/everyone/all three' wording as that NPC's claim, never as a witness link, and never let it override the current speaker's own earlier denial or absent source evidence.");
             builder.AppendLine("Current speaker id: " + currentSpeakerId);
             builder.AppendLine("Present participant ids: " + string.Join(", ", participants));
+            builder.AppendLine(GroupConversationParticipationGuidance);
             var floor = ReadDictionary(payload, "groupTurnPlan");
             if (floor != null && floor.Count > 0)
             {
-                builder.AppendLine(GroupConversationParticipationGuidance);
                 builder.AppendLine("Being a quiet listener is neither absence nor refusal, evasion, agreement or rejection. The player has not answered suggestions made later in this same beat.");
             }
             if (stored.Count > 0)

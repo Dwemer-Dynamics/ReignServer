@@ -368,6 +368,7 @@
       "id": "PA-NATIVE-008", "profile": "eligibility_detachment", "required": true,
       "requiresTarget": true,
       "variants": ["governor", "prisoner", "dead", "child", "companion", "quest_bound"],
+      "prisonerCustody": "foreign_clan_dungeon; player-held captives may consent to release into guest service",
       "expected": { "record": "absent", "stateEligible": false }
     },
     {

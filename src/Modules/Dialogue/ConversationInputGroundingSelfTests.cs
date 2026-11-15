@@ -32,6 +32,9 @@ namespace ReignBetaServer
                 Check(text == grass ? "grass_duel_reaches_current_writer" : "back_massage_reaches_current_writer",
                     ReadString(source.Interpretation, "status", "") == "validated" && ReadString(payload, "playerText", "").Contains(action)
                     && BuildCurrentConversationGrounding(payload, "npc").Contains(action) && source.Original == text);
+                Check(text == grass ? "structured_grass_uses_latest_reference" : "structured_massage_uses_latest_reference",
+                    !BuildCurrentConversationGrounding(payload, "npc", separateLatestPlayerMessage: true).Contains(action)
+                    && BuildCurrentConversationGrounding(payload, "npc", separateLatestPlayerMessage: true).Contains("LATEST PLAYER TURN"));
                 var ignored = TestDict("reply", "I am well. What is on your mind?", "actionResponses", new object[0]);
                 Check(text == grass ? "grass_no_mechanical_reaction_gate" : "massage_no_mechanical_reaction_gate", FindConversationGroundingViolations(ignored, payload, "npc").Count == 0);
                 string quote = text == grass ? "*She parries the grass blade and laughs.*" : "*She tenses beneath his hand.* Please stop touching my back.";
@@ -259,6 +262,26 @@ namespace ReignBetaServer
                 && !unknownMembership.Any(issue => ReadString(issue, "detail", "").Contains("outside the complete")));
             ReadDictionary(pParty, "partyContext")["worldDay"] = 19d;
             Check("stale_roster_is_unknown", CurrentConversationPartyContext(pParty) == null);
+            var exactParty = TestDict("schema", "reign-party-context-v2", "complete", true, "memberCount", 3, "heroCount", 3,
+                "regularTroopCount", 0, "woundedMemberCount", 1, "prisonerCount", 0, "prisonerHeroCount", 0, "regularPrisonerCount", 0,
+                "members", new[] { TestDict("heroStringId", "player", "name", "Michael"), TestDict("heroStringId", "npc", "name", "Rhagaea", "membership", "temporary_guest"),
+                    TestDict("heroStringId", "ira", "name", "Ira", "membership", "temporary_guest") });
+            string exactFacts = BuildCurrentPartyFacts(exactParty, "npc", "player");
+            Check("complete_three_person_party_has_explicit_zero_without_global_privacy", exactFacts.Contains("Members: 3; heroes: 3; ordinary troops: 0")
+                && exactFacts.Contains("Prisoners (not party members): 0") && exactFacts.Contains("Only the named members")
+                && exactFacts.Contains("do not prove global privacy"));
+            Check("nonmember_cannot_read_tactical_counts", !BuildCurrentPartyFacts(exactParty, "visitor", "player").Contains("Members: 3"));
+            var missingWounded = CloneDictionary(exactParty); missingWounded.Remove("woundedMemberCount");
+            Check("missing_wounded_count_is_unknown_not_zero", BuildCurrentPartyFacts(missingWounded, "npc", "player").Contains("totals: unknown"));
+            foreach (string schema in new[] { "reign-party-context-v1", "reign-party-context-v2" })
+            {
+                var incompleteParty = CloneDictionary(exactParty); incompleteParty["schema"] = schema;
+                if (schema.EndsWith("v2")) incompleteParty["memberCount"] = 4;
+                string unknown = BuildCurrentPartyFacts(incompleteParty, "npc", "player");
+                Check("missing_or_inconsistent_totals_never_infer_zero_" + schema, unknown.Contains("totals: unknown") && !unknown.Contains("Only the named members"));
+            }
+            exactParty["attachedToArmy"] = true;
+            Check("army_is_separate_from_party_roster", BuildCurrentPartyFacts(exactParty, "npc", "player").Contains("other parties are separate"));
             Check("body_scene_drift_caught_without_heading", CurrentSceneBodyContradictions("camp stables", "*She walks across the tavern toward him.*").Count == 1
                 && CurrentSceneBodyContradictions("camp stables", "I remember yesterday in the tavern.").Count == 0);
             Check("captured_tavern_body_remains_invalid_after_heading_repair",

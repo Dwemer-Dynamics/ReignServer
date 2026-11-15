@@ -9,8 +9,8 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const string CharacterCommitmentContract = @"
-PERSISTENT PROMISES AND COMMITMENTS: Treat the protected ledger as current character knowledge, separate from recalled conversation. Keep promises, conditions, refusals and fulfilled or withdrawn commitments distinct. Do not renew a closed commitment or claim an intention has happened. A promise does not execute a gameplay action or override current consent or native authority.
-When this exchange creates or changes a durable promise, use hidden obligationWrites. Write one independently supported commitment per item; this collection may contain several items when several distinct promises are made. Keep conditions in the same item as the promise they qualify and quote the entire qualified promise in sourceEvidence. For closure or revision use the supplied obligation_id and status (fulfilled, withdrawn, superseded, unresolved or active). Never close a promise merely because its subject was mentioned. Only create a promise actually expressed by its owner, not an expectation, hypothetical, request or third-party report.";
+ACTIVE PROMISES, REQUESTS AND PREFERENCES: Quotes bind wording/authorship, not proposer, acceptance or fulfillment. Interpretations remain uncertain; they never execute actions or override consent.
+In obligationWrites, set recordKind=promise/request/preference, interpreted owed_by/owed_to, and description/scope retaining all conditions. Cite exact words and speaker in sourceEvidence; cite responses separately in sourceEvidenceSpans. Use acceptanceStatus=unknown unless counterparty evidence supports accepted/refused. Requests/counteroffers are not agreements. Preserve refusals; do not infer consent from sarcasm, hypotheticals, hearsay or another NPC's agreement. Separate distinct matters without losing conditions. Preferences survive compliant replies and violations. Revise with obligation_id and newer evidence; status=unresolved/active/fulfilled/withdrawn/superseded. Mention alone never closes a record; preserve original terms and uncertainty.";
 
         // Preserve older and native rows without dialogue-validation metadata.
         // When validation exists, an exact quote alone cannot turn a hypothesis into a promise.
@@ -24,7 +24,9 @@ When this exchange creates or changes a durable promise, use hidden obligationWr
 AND COALESCE({PromptObligationPayloadSql}->>'evidenceType','') NOT IN ('hypothesis','unverified_summary','subjective_belief')
 AND COALESCE({PromptObligationPayloadSql}->'sourceEvidence'->>'evidenceType','') NOT IN ('hypothesis','unverified_summary','subjective_belief')";
 
-        private const string PromptActiveObligationSql = "status IN ('unresolved','active','open','pending') AND " + PromptObligationEvidenceSql;
+        private const string PromptActiveObligationSql = "status IN ('unresolved','active','open','pending') AND (" + PromptObligationEvidenceSql
+            + " OR (" + PromptObligationPayloadSql + "->>'interpretationStatus'='model_inferred' AND "
+            + PromptObligationPayloadSql + "->>'bindingStatus'='bound'))";
 
         private static void EnsureCharacterCommitmentTimeline(ReignDbConnection connection)
         {
@@ -92,6 +94,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
 
         private static IEnumerable<Dictionary<string, object>> AtomicCommitmentWrites(Dictionary<string, object> write)
         {
+            if (ReadString(write, "recordKind", "promise") != "promise") { yield return write; yield break; }
             string description = ReadString(write, "description", "");
             // Split only sentence boundaries. Conditions within a promise stay
             // attached; the source guard still checks every resulting item.
@@ -171,7 +174,8 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
         }
 
         private static string BuildCharacterCommitmentPrompt(ReignDbConnection connection, string observer, string peer,
-            Dictionary<string, object> payload, List<string> sources, IEnumerable<string> additionalObservers = null)
+            Dictionary<string, object> payload, List<string> sources, IEnumerable<string> additionalObservers = null,
+            string requiredTranscript = "")
         {
             if (!TableExists(connection, "obligations")) return "";
             var access = BuildKnowledgeAccessContext(observer, peer, "", payload);
@@ -179,7 +183,8 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
                 + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations", access: access)
                 + " AND COALESCE(payload_json,'{}') NOT LIKE '%\"continuityQuarantined\":true%' ORDER BY created_day,obligation_id;",
                 new Dictionary<string, object> { ["observer"] = observer, ["timeline"] = access.TimelineId });
-            var text = new StringBuilder("CURRENT KNOWN PROMISES AND COMMITMENTS — independent of conversation history\n");
+            var text = new StringBuilder("ACTIVE PROMISES, REQUESTS AND PREFERENCES — source-bound dialogue interpretations\n");
+            text.AppendLine("Authorship is verified; meaning, acceptance and lifecycle remain interpretations. Native facts and original wording take precedence. Preserve conditions, corrections and refusals; a known preference is not an obligation automatically inherited by every listener.");
             int included = 0;
             var eligible = new List<Dictionary<string, object>>();
             var audience = new[] { access }.Concat((additionalObservers ?? Enumerable.Empty<string>())
@@ -193,23 +198,107 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
                     && !new[] { "world", "global", "common", "public" }.Contains(ReadString(row, "visibility", "").ToLowerInvariant())) continue;
                 var value = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var evidence = ReadDictionary(value, "sourceEvidence");
-                if (ReadString(value, "sourceValidation", "") != "supported_span"
+                if ((ReadString(value, "sourceValidation", "") != "supported_span" && ReadString(value, "bindingStatus", "") != "bound")
                     || ReadString(evidence, "status", "") != "supported_span") continue;
                 string id = ReadString(row, "obligation_id", "");
                 sources.Add(id);
                 text.AppendLine(RenderContinuityRecord(id, "active_commitment", observer, "", ReadDouble(row, "created_day", 0d), 121, true,
-                    "obligation_id=" + id + "; status=" + ReadString(row, "status", "") + "; owed by=" + ReadString(row, "owed_by", "")
-                    + "; owed to=" + ReadString(row, "owed_to", "") + "; commitment: " + ReadString(row, "description", "")
-                    + "; accepted source quote: " + ReadString(evidence, "quote", "")
+                    "obligation_id=" + id + "; kind=" + ReadString(value, "recordKind", "promise")
+                    + "; interpreted status=" + ReadString(row, "status", "") + "; interpreted parties=" + ReadString(row, "owed_by", "")
+                    + " -> " + ReadString(row, "owed_to", "") + "; interpretation (unverified): " + ReadString(row, "description", "")
+                    + "; scope=" + ReadString(value, "scope", "unspecified") + "; interpreted acceptance=" + ReadString(value, "acceptanceStatus", "unknown")
+                    + "; exact source quote: " + ReadString(evidence, "quote", "")
                     + "; source event=" + ReadString(evidence, "sourceEventId", "") + "; source speaker=" + ReadString(evidence, "speakerId", "")
                     + "; source turn=" + ReadString(evidence, "turnId", "")));
                 included++; eligible.Add(row);
             }
             var diagnostics = new List<Dictionary<string, object>>();
-            if (included > 0) text.Append(BuildRelevantCommitmentContext(connection, eligible, payload, audience, sources, diagnostics));
+            if (included > 0) text.Append(BuildRelevantCommitmentContext(connection, eligible, payload, audience, sources, diagnostics, requiredTranscript));
             payload["characterCommitmentEvidence"] = TestDict("activeCount", included, "observerId", observer, "timelineId", ContinuityTimeline(payload), "sourceContexts", diagnostics);
             return included == 0 ? "" : text.ToString();
         }
+
+        private static void NormalizeDialogueCommitment(Dictionary<string, object> item, string observer)
+        {
+            string kind = ReadString(item, "recordKind", "unclassified").ToLowerInvariant();
+            item["recordKind"] = new[] { "promise", "request", "preference" }.Contains(kind) ? kind : "unclassified";
+            item["bindingStatus"] = ReadString(ReadDictionary(item, "sourceEvidence"), "status", "") == "supported_span" ? "bound" : "unbound";
+            item["interpretationStatus"] = "model_inferred";
+            item["claimEntailmentVerified"] = false;
+            item["quotedSpeakerId"] = ReadString(ReadDictionary(item, "sourceEvidence"), "speakerId", "");
+            item["known_by"] = new[] { observer };
+            item["knownBy"] = new[] { observer };
+            item["visibility"] = "private";
+            string acceptance = ReadString(item, "acceptanceStatus", "unknown").ToLowerInvariant();
+            if (!new[] { "unknown", "accepted", "refused" }.Contains(acceptance)) acceptance = "unknown";
+            string counterparty = ReadFirstString(item, "owed_to", "owedTo");
+            if (acceptance != "unknown" && (counterparty.Length == 0 || !ReadDictionaryList(item, "sourceEvidenceSpans").Any(span =>
+                ReadString(span, "status", "") == "supported_span" && ReadString(span, "speakerId", "") == counterparty
+                && counterparty != ReadString(item, "quotedSpeakerId", "")))) acceptance = "unknown";
+            item["acceptanceStatus"] = acceptance;
+            if (ReadString(item, "recordKind", "") == "preference" && ReadString(item, "status", "") == "fulfilled")
+                item["status"] = "active"; // One compliant reply does not expire a standing preference.
+        }
+
+        private static string DialogueCommitmentTarget(ReignDbConnection connection, string id, Dictionary<string, object> item)
+        {
+            if (ReadString(item, "interpretationStatus", "") != "model_inferred") return id;
+            ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "dialogue_commitment:" + id));
+            var previous = QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", id)).SingleOrDefault();
+            if (previous == null) return id;
+            var old = TryParseJsonObject(ReadString(previous, "payload_json", "{}"));
+            if (ReadString(old, "interpretationStatus", "") == "model_inferred"
+                && DialogueCommitmentIdentity(old) == DialogueCommitmentIdentity(item)) return null;
+            // Dialogue can revise a source-bound interpretation in the same scope.
+            // It cannot retire or overwrite a native debt or another observer's record.
+            bool compatible = DialogueCommitmentRevisionAllowed(previous, item);
+            if (!compatible)
+            {
+                item["proposedRevisionOf"] = id;
+                item["status"] = "unresolved";
+                string proposal = "interpretation_" + PromptHash(id + "|" + DialogueCommitmentIdentity(item)).Substring(0, 32);
+                var existingProposal = QuerySql(connection, "SELECT payload_json FROM obligations WHERE obligation_id=$id;", TestDict("id", proposal)).SingleOrDefault();
+                if (existingProposal != null)
+                {
+                    var proposed = TryParseJsonObject(ReadString(existingProposal, "payload_json", "{}"));
+                    if (ReadString(proposed, "interpretationStatus", "") == "model_inferred"
+                        && DialogueCommitmentIdentity(proposed) == DialogueCommitmentIdentity(item)) return null;
+                    proposal += "_" + Guid.NewGuid().ToString("N"); // Actual different-content collision only.
+                }
+                return proposal;
+            }
+            var revisions = ReadDictionaryList(old, "interpretationHistory").ToList();
+            revisions.Add(TestDict("description", ReadString(previous, "description", ""), "status", ReadString(previous, "status", ""),
+                "sourceEvidence", ReadDictionary(old, "sourceEvidence") ?? TestDict(), "ts", ReadLong(previous, "ts", 0)));
+            item["interpretationHistory"] = revisions;
+            return id;
+        }
+
+        private static bool DialogueCommitmentRevisionAllowed(Dictionary<string, object> previous, Dictionary<string, object> item)
+        {
+            var old = TryParseJsonObject(ReadString(previous, "payload_json", "{}"));
+            long sourceTime = ReadLong(ReadDictionary(item, "sourceEvidence"), "timestamp", 0);
+            long oldTime = ReadLong(ReadDictionary(old, "sourceEvidence"), "timestamp", 0);
+            return ReadString(old, "interpretationStatus", "") == "model_inferred"
+                && ReadString(item, "bindingStatus", "") == "bound"
+                && ReadString(old, "sourceValidation", "") == "supported_span"
+                && sourceTime > oldTime && oldTime > 0
+                && new[] { "active", "unresolved" }.Contains(ReadString(previous, "status", ""))
+                && ReadString(previous, "timeline_id", "main") == ContinuityTimeline(item)
+                && ReadString(previous, "owed_by", "") == ReadFirstString(item, "owed_by", "owedBy")
+                && ReadString(previous, "owed_to", "") == ReadFirstString(item, "owed_to", "owedTo")
+                && ReadString(old, "recordKind", "promise") == ReadString(item, "recordKind", "promise")
+                && ReadString(old, "scope", "") == ReadString(item, "scope", "")
+                && TextListFromJson(ReadString(previous, "known_by_json", "[]")).OrderBy(x => x)
+                    .SequenceEqual(ReadStringList(item, "known_by").OrderBy(x => x));
+        }
+
+        private static string DialogueCommitmentIdentity(Dictionary<string, object> item) => CanonicalJson(TestDict(
+            "timeline", ContinuityTimeline(item), "knownBy", ReadStringList(item, "known_by").OrderBy(x => x).ToArray(),
+            "kind", ReadString(item, "recordKind", "unclassified"), "scope", ReadString(item, "scope", ""),
+            "by", ReadFirstString(item, "owed_by", "owedBy"), "to", ReadFirstString(item, "owed_to", "owedTo"),
+            "description", ReadFirstString(item, "description", "text"), "status", ReadString(item, "status", "unresolved"),
+            "acceptance", ReadString(item, "acceptanceStatus", "unknown"), "source", ReadDictionary(item, "sourceEvidence")));
 
         // These references are server-owned. Proposed metadata cannot substitute
         // an unrelated conversation for the original terms of an existing debt.
@@ -274,7 +363,7 @@ WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$ev
 
         private static string BuildRelevantCommitmentContext(ReignDbConnection connection, List<Dictionary<string, object>> commitments,
             Dictionary<string, object> payload, List<KnowledgeAccessContext> audience, List<string> sources,
-            List<Dictionary<string, object>> diagnostics)
+            List<Dictionary<string, object>> diagnostics, string requiredTranscript = "")
         {
             if (ReadBool(payload, "officialMemoryFirewall", false)) return "";
             string query = ReadFirstString(payload, "playerText", "text", "message") + " " + ReadString(payload, "memoryActiveTopic", "");
@@ -319,7 +408,7 @@ WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$ev
                     string body = "EXACT ACCEPTED COMMITMENT CONTEXT; obligation_id=" + obligation
                         + "; session=" + session + "; exchange=" + exchange
                         + ". Historical wording explains the terms; the current ledger controls status. This is not a fresh promise or proof of fulfillment.\n"
-                        + string.Join("\n", rows.Select(row => "turn_id=" + ReadString(row, "turn_id", "") + "; " + RenderExactHistoryTurn(row, audience[0])));
+                        + string.Join("\n", rows.Select(row => CommitmentContextTurn(row, audience[0], requiredTranscript, PlannedPromptSources(payload))));
                     string sourceId = "commitment_context_" + PromptHash(key).Substring(0, 24);
                     string record = RenderContinuityRecord(sourceId, "commitment_source_context", audience[0].NpcId, session,
                         ReadDouble(anchor, "world_day", 0d), 120, true, body);
@@ -332,12 +421,31 @@ WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$ev
             }
             return text.ToString();
         }
+
+        private static string CommitmentContextTurn(Dictionary<string, object> row, KnowledgeAccessContext observer, string transcript,
+            Dictionary<string, string> supplied = null)
+        {
+            string id = ReadString(row, "turn_id", "");
+            string visible = NormalizePromptSegment(CommitmentVisibleSourceText(row, observer));
+            // Only required, whole exchanges survive both allocation passes. An
+            // optional candidate, matching quote, or mismatched source ID cannot
+            // authorize removing the original fallback from this protected block.
+            bool delivered = MemorySourceAlreadySupplied(row, supplied) || id.Length > 0 && visible.Length > 0 && ContinuityPromptRecords(transcript, true)
+                .Any(record => record.Required && record.Kind == "accepted_exchange"
+                    && record.SourceId.Split(',').Contains(id, StringComparer.Ordinal)
+                    && record.Text.Contains(visible, StringComparison.Ordinal));
+            return "turn_id=" + id + "; " + (delivered
+                ? "Full original supplied in the required chronological exchange; visible_source_hash=" + PromptHash(visible) + "."
+                : RenderExactHistoryTurn(row, observer));
+        }
         private static string StableCommitmentId(Dictionary<string, object> item)
         {
             string id = ReadFirstString(item, "obligation_id", "obligationId", "id");
             if (id.Length > 0) return id;
+            if (ReadString(item, "interpretationStatus", "") == "model_inferred")
+                return "interpretation_" + PromptHash(DialogueCommitmentIdentity(item)).Substring(0, 32);
             // Retries and repeated exact promises do not create a new debt.
-            return "obligation_" + PromptHash(Json.Serialize(new[] { ContinuityTimeline(item), ReadFirstString(item, "owed_by", "owedBy", "actorId", "subject"),
+            return "obligation_" + PromptHash(Json.Serialize(new[] { ContinuityTimeline(item), ReadString(item, "recordKind", "promise"), ReadString(item, "scope", ""), ReadFirstString(item, "owed_by", "owedBy", "actorId", "subject"),
                 ReadFirstString(item, "owed_to", "owedTo", "targetId", "target"), ReadFirstString(item, "description", "text", "promise", "threat", "summary").Trim() })).Substring(0, 32);
         }
 

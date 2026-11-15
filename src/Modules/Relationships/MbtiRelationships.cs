@@ -4820,6 +4820,18 @@ WHERE action_type='native_relation' AND status IN ('pending','claimed');",
                 ["caseId"] = id, ["name"] = id, ["summary"] = summary, ["durationMs"] = 0
             });
 
+            var scopedStatusRequest = new HttpRequest { Method = "GET",
+                Query = new Dictionary<string, string> { ["campaignId"] = "requested_campaign", ["timelineId"] = "requested_timeline" },
+                JsonBody = TestDict("campaignId", "wrong_body_campaign", "timelineId", "wrong_body_timeline") };
+            var getScope = RelationshipStatusPayload(scopedStatusRequest);
+            scopedStatusRequest.Method = "POST";
+            var postScope = RelationshipStatusPayload(scopedStatusRequest);
+            add("ambient_status_scope_follows_request_transport",
+                ReadString(getScope, "campaignId", "") == "requested_campaign"
+                && ReadString(getScope, "timelineId", "") == "requested_timeline"
+                && ReadString(postScope, "campaignId", "") == "wrong_body_campaign"
+                && ReadString(postScope, "timelineId", "") == "wrong_body_timeline",
+                "GET respects explicit campaign/timeline query scope; POST retains its existing body scope.");
             List<int> all = RelationshipCompatibilityPolicy.AllBaseScores()
                 .ToList();
             add("all_256_directional_scores_present", all.Count == 256 && all.Min() == 46 && all.Max() == 93,

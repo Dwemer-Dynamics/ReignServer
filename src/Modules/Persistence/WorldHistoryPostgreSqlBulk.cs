@@ -125,7 +125,9 @@ namespace ReignBetaServer
                     BuildWorldHistorySemanticText(eventType, phase, summary,
                         entities, locationName)),
                 Source = source,
-                IsComplete = ReadBool(item, "isComplete", true),
+                IsComplete = ReadBool(item, "isComplete", true) && (eventType != "public_announcement"
+                    || source == "reign_public_news" && ValidPublicWorldHistory(TestDict("event_type", eventType,
+                        "dissemination_class", dissemination, "world_day", worldDay, "payload_json", payloadJson))),
                 Checksum = ReadFirstString(item, "checksum", "hash"),
                 PayloadJson = payloadJson,
                 CreatedUtc = createdUtc,
@@ -156,6 +158,12 @@ namespace ReignBetaServer
                 rules.RemoveAll(rule => ReadString(rule, "audienceType", "") != "entity");
             }
             bool publicTournament = IsPublicTournamentHistory(eventType, dissemination);
+            if (eventType == "public_announcement" && dissemination == "major_world")
+            {
+                rules.Add(new Dictionary<string, object> { ["audienceType"] = "global", ["audienceId"] = "all",
+                    ["availableDay"] = day, ["acquisitionMode"] = "public_world_news", ["confidence"] = 1d });
+                return rules;
+            }
             if (rules.Count > 0)
             {
                 if (publicTournament) rules.Add(PublicTournamentKnowledgeRule(day));

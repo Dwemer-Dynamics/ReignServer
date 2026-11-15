@@ -164,7 +164,7 @@ namespace Reign.Core.Contracts.Actions
         }
 
         public static ActionAgreement CreateProposal(ActionAgreement? offered, ActionDecision decision,
-            string playerId, string npcId, string conversationId, double now)
+            string playerId, string npcId, string conversationId, double now, AgreementChannel channel = AgreementChannel.Unknown)
         {
             if (decision.Kind != "counter" && decision.Kind != "propose") throw new ArgumentException("No new proposal was supplied.");
             if (decision.Clauses == null || decision.Clauses.Count == 0 || decision.Clauses.Count > 64)
@@ -174,6 +174,7 @@ namespace Reign.Core.Contracts.Actions
                 Id = offered?.Id ?? Guid.NewGuid().ToString("N"), Revision = offered == null ? 1 : checked(offered.Revision + 1),
                 PlayerId = playerId, NpcId = npcId, ConversationId = conversationId, ProposerId = npcId,
                 Origin = ActionOrigin.Conversation, State = AgreementState.Counteroffered, CreatedDay = now,
+                Channel = offered?.Channel ?? channel,
                 // Consent is deliberately absent until native facts, identity, wording and
                 // game-derived quote bounds have been checked before player presentation.
                 PlayerAcceptedHash = "", NpcAcceptedHash = ""

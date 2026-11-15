@@ -22,21 +22,55 @@ namespace ReignBetaServer
             var party = ReadDictionary(payload, "partyContext") ?? ReadDictionary(ReadDictionary(payload, "localPresence"), "partyContext");
             double day = ReadDouble(payload, "worldDay", -1d), captured = ReadDouble(party, "worldDay", -2d);
             string id = ReadString(payload, "playerPartyId", "");
-            return ReadString(party, "schema", "") == "reign-party-context-v1"
+            return new[] { "reign-party-context-v1", "reign-party-context-v2" }.Contains(ReadString(party, "schema", ""))
                 && double.IsFinite(day) && double.IsFinite(captured) && day >= captured && day - captured <= 1d / 1440d
                 && ReadString(party, "partyId", "").Length > 0 && (id.Length == 0 || id == ReadString(party, "partyId", "")) ? party : null;
         }
 
-        private static string BuildCurrentConversationGrounding(Dictionary<string, object> payload, string observer)
+        private static string BuildCurrentPartyFacts(Dictionary<string, object> party, string observer, string player)
+        {
+            if (party == null) return "Current party composition is unknown; missing or stale counts never mean zero.";
+            var members = ReadDictionaryList(party, "members");
+            if (observer != player && !members.Any(m => ReadString(m, "heroStringId", "") == observer))
+                return "Exact party composition is not supplied to this observer. Conversation attendance, titles and nearby parties do not establish membership or an audience.";
+            string names = string.Join(", ", members.Select(m => FirstNonEmpty(ReadString(m, "name", ""), ReadString(m, "heroStringId", ""))
+                + (ReadString(m, "membership", "") == "temporary_guest" ? " (temporary guest)" : "")));
+            var text = new StringBuilder("CURRENT PARTY FACTS — native snapshot for this turn\n");
+            text.Append("Known named members: ").AppendLine(names.Length > 0 ? names : "none listed");
+            int total = ReadInt(party, "memberCount", -1), heroes = ReadInt(party, "heroCount", -1), troops = ReadInt(party, "regularTroopCount", -1);
+            int prisoners = ReadInt(party, "prisonerCount", -1), prisonerHeroes = ReadInt(party, "prisonerHeroCount", -1), regularPrisoners = ReadInt(party, "regularPrisonerCount", -1);
+            int wounded = ReadInt(party, "woundedMemberCount", -1);
+            bool countsComplete = ReadString(party, "schema", "") == "reign-party-context-v2" && ReadBool(party, "complete", false)
+                && total >= 0 && heroes >= 0 && troops >= 0 && total == heroes + troops && heroes == members.Count
+                && prisoners >= 0 && prisonerHeroes >= 0 && regularPrisoners >= 0 && prisoners == prisonerHeroes + regularPrisoners
+                && wounded >= 0 && wounded <= total;
+            if (!countsComplete) text.AppendLine("Full member, ordinary troop and prisoner totals: unknown (hero-only or incomplete snapshot).");
+            else
+            {
+                text.AppendLine("Members: " + total + "; heroes: " + heroes + "; ordinary troops: " + troops + "; wounded members (already counted): " + wounded + ".");
+                text.AppendLine("Prisoners (not party members): " + prisoners + "; heroes: " + prisonerHeroes + "; ordinary prisoners: " + regularPrisoners + ".");
+                if (troops == 0 && prisoners == 0)
+                    text.AppendLine("Only the named members belong to this party. There are no additional party soldiers, guards, servants or horse handlers. Horses, wealth and titles do not imply personnel.");
+                text.AppendLine(ReadBool(party, "attachedToArmy", false) ? "Attached to an army; its other parties are separate from these totals."
+                    : "Not attached to an army in this snapshot.");
+            }
+            text.AppendLine("Party totals do not prove global privacy or hearing distance. Only supplied current participants and presence establish a known audience; do not invent listeners. Current native facts override incompatible past dialogue claims about personnel.");
+            return text.ToString();
+        }
+
+        private static string BuildCurrentConversationGrounding(Dictionary<string, object> payload, string observer,
+            bool separateLatestPlayerMessage = false)
         {
             var text = new StringBuilder("CURRENT CONTRIBUTION AND SCENE GROUNDING\n");
             text.AppendLine("Player dialogue and narration are complete story input. Respond naturally to the whole contribution; no per-gesture actionResponses or reaction quotes are required. Narration is not a native execution receipt, consent, or a formal agreement. Historical, hypothetical and negated wording keeps its meaning; do not turn it into a new completed event. Do not infer hidden thoughts and discard the surrounding story.");
             text.AppendLine("Preserve who said and did each thing: the player owns player contributions, and each NPC owns their own replies. Before saying 'you asked', 'you said' or 'you did', check the original speaker/actor; your own earlier question remains yours. A memory paraphrase is not independent proof of ownership.");
-            text.Append("COMPLETE CURRENT PLAYER CONTRIBUTION: ").AppendLine(ProjectCurrentPlayerPromptText(ReadString(payload, "playerText", ""), observer, payload));
+            if (separateLatestPlayerMessage)
+                text.AppendLine("COMPLETE CURRENT PLAYER CONTRIBUTION: see the final LATEST PLAYER TURN message, including all narration. That message supplies the original, not a summary.");
+            else
+                text.Append("COMPLETE CURRENT PLAYER CONTRIBUTION: ").AppendLine(ProjectCurrentPlayerPromptText(ReadString(payload, "playerText", ""), observer, payload));
             var party = CurrentConversationPartyContext(payload);
             text.AppendLine("PARTY MEMBERSHIP IS INDEPENDENT OF TOWN, ROOM, CLAN, ARMY AND CONVERSATION ATTENDANCE.");
-            text.AppendLine(party == null ? "Current party membership is unknown; do not invent membership or absence."
-                : "Native party roster (" + (ReadBool(party, "complete", false) ? "complete" : "partial; omissions unknown") + "): " + Json.Serialize(party));
+            text.AppendLine(BuildCurrentPartyFacts(party, observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId")));
             text.AppendLine("A member or guest is not automatically a scout, guard or a witness of earlier travel. Present roster membership never proves historical travel. Require separately dated source evidence for those claims. An older NPC assertion is an attributed statement, not independent corroboration. When corrected, reassess against the supplied facts.");
             var scene = ReadDictionary(payload, "conversationSceneState");
             if (scene != null)

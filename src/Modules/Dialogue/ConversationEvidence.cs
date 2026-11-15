@@ -98,11 +98,12 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             // Do not reclassify every recalled/quoted occurrence of "will".
             else if (Regex.IsMatch(quote.TrimStart(), @"^(?:I|we)\s+(?:will|shall|plan to|intend to|would like to)\b", RegexOptions.IgnoreCase))
                 type = "future_intention";
-            var bound = new Dictionary<string, object> { ["status"] = "supported_span", ["sourceEventId"] = eventId,
+            var bound = new Dictionary<string, object> { ["status"] = "supported_span", ["sourceEventId"] = ReadString(source, "eventId", eventId),
                 ["turnId"] = ReadString(source, "turnId", ""), ["speakerId"] = speaker,
+                ["timestamp"] = ReadLong(source, "timestamp", 0), ["acceptedSequence"] = ReadLong(source, "acceptedSequence", 0),
                 // Actor assertions remain claims; presence is not proof of acting.
                 ["claimedActorIds"] = ReadStringList(claimed, "actorIds"), ["evidenceType"] = type,
-                ["quote"] = quote, ["start"] = start, ["length"] = quote.Length, ["sourceHash"] = PromptHash(original) };
+                ["quote"] = quote, ["start"] = start, ["length"] = quote.Length, ["sourceHash"] = ReadString(source, "originalSourceHash", PromptHash(original)) };
             if (speakerAlias.Length > 0) bound["resolvedSpeakerAlias"] = speakerAlias;
             return bound;
         }

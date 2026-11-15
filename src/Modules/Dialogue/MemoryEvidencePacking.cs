@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -8,6 +9,130 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        // Process-owned delivery plan. A payload field or model-provided source ID
+        // cannot authorize deleting evidence from a prompt. Registered copies are
+        // complete required transcript/reference records, before receipt capture.
+        private static readonly ConditionalWeakTable<Dictionary<string, object>, Dictionary<string, string>> PromptDeliveredSources = new();
+        private static readonly ConditionalWeakTable<Dictionary<string, object>, List<Dictionary<string, object>>> PromptStatementSources = new();
+        private const int RequiredConversationTailCount = 30;
+
+        private static Dictionary<string, string> PlannedPromptSources(Dictionary<string, object> context) =>
+            context != null && PromptDeliveredSources.TryGetValue(context, out var sources) ? sources : null;
+
+        private static bool TryProjectBoundTranscript(List<Dictionary<string, object>> lines,
+            Func<List<Dictionary<string, object>>> project)
+        {
+            try
+            {
+                var visible = project().ToList();
+                lines.Clear(); lines.AddRange(visible);
+                return true;
+            }
+            catch { lines.Clear(); return false; } // Visibility cannot fail open.
+        }
+
+        private static Dictionary<string, object> MatchPromptSource(Dictionary<string, object> line,
+            IEnumerable<Dictionary<string, object>> candidates)
+        {
+            // JSONL `id` identifies a storage row, not a conversation_turns key.
+            // Only an explicitly bound durable ID can override the exchange match.
+            string id = ReadFirstString(line, "sourceTurnId", "turn_id");
+            string exchange = ReadFirstString(line, "exchangeId", "exchange_id", "sceneTurnId", "turnId");
+            string session = ReadFirstString(line, "sessionId", "session_id");
+            string speaker = ReadFirstString(line, "speakerHeroStringId", "speaker_id", "speakerId");
+            var matches = candidates.Where(row => (id.Length > 0 ? id == ReadString(row, "turn_id", "")
+                    : exchange.Length > 0 && exchange == ReadString(row, "exchange_id", ""))
+                && (session.Length == 0 || session == ReadString(row, "session_id", ""))
+                && speaker.Length > 0 && speaker == ReadString(row, "speaker_id", "")
+                && ReadString(line, "role", "") == ReadString(row, "role", "")
+                && ReadString(line, "text", "") == ReadString(row, "text", "")).Take(2).ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        private static void BindPromptTranscriptSources(string campaign, string observer, Dictionary<string, object> context,
+            List<Dictionary<string, object>> lines)
+        {
+            var supplied = PromptDeliveredSources.GetValue(context, _ => new(StringComparer.Ordinal));
+            supplied.Clear();
+            var statements = PromptStatementSources.GetValue(context, _ => new());
+            statements.Clear();
+            context["promptSourceBinding"] = TestDict("schema", "reign-prompt-source-binding-v1", "sourceCount", 0,
+                "status", "withheld_or_not_bound", "semanticValidation", "not_claimed");
+            if (!TryProjectBoundTranscript(lines, () => ProjectConversationLinesForObserver(lines, observer, context)))
+            {
+                context["promptSourceBinding"] = TestDict("status", "projection_unavailable_history_withheld", "sourceCount", 0);
+                SetMemoryTranscriptContext(context, lines);
+                return;
+            }
+            try
+            {
+            var ids = lines.Select(l => ReadFirstString(l, "sourceTurnId", "turn_id", "id")).Where(id => id.Length > 0).Distinct().ToList();
+            var exchanges = lines.Select(l => ReadFirstString(l, "exchangeId", "exchange_id", "sceneTurnId", "turnId"))
+                .Append(ReadFirstString(context, "sceneTurnId", "turnId", "exchangeId", "contributionId"))
+                .Where(id => id.Length > 0).Distinct().ToList();
+            if (PlayerInputSources.TryGetValue(context, out var input) && input.SourceId.Length > 0) ids.Add(input.SourceId);
+            using var connection = OpenCampaignConnection(campaign);
+            var access = BuildKnowledgeAccessContext(observer, ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId"), "", context);
+            if (access.PlayerIdentityUnknown || ReadBool(context, "officialMemoryFirewall", false)) return;
+            var candidates = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active' AND
+(turn_id IN (SELECT jsonb_array_elements_text(CAST($ids AS jsonb)))
+OR exchange_id IN (SELECT jsonb_array_elements_text(CAST($exchanges AS jsonb)))) ORDER BY ts DESC,turn_order DESC LIMIT 512;",
+                TestDict("ids", Json.Serialize(ids), "exchanges", Json.Serialize(exchanges)))
+                .Where(row => PrecisionTurnVisible(row, observer, access, connection)).ToList();
+            int bound = 0;
+            foreach (var line in lines)
+            {
+                var source = MatchPromptSource(line, candidates);
+                if (source == null) continue;
+                line["sourceTurnId"] = ReadString(source, "turn_id", "");
+                line["sessionId"] = ReadString(source, "session_id", "");
+                line["exchangeId"] = ReadString(source, "exchange_id", "");
+                line["acceptedSequence"] = ReadLong(source, "accepted_sequence", 0);
+                bound++;
+            }
+            // The current input is sent separately, after history. Bind existing
+            // floor/accepted views to that exact admitted original, never by a
+            // guessed suffix or an unrelated equal-text player turn.
+            if (input != null)
+            {
+                var latestIds = new HashSet<string>(StringComparer.Ordinal);
+                string player = ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId");
+                string projected = ProjectCurrentPlayerPromptText(input.Original, observer, context);
+                foreach (var row in candidates.Where(r => ReadString(r, "role", "") == "player" && ReadString(r, "speaker_id", "") == player
+                    && input.SourceId.Length > 0 && ReadString(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "inputSourceId", "") == input.SourceId))
+                    if (ObserverConversationSourceText(row, observer) == projected)
+                    {
+                        string id = ReadString(row, "turn_id", "");
+                        supplied[id] = MemoryTranscriptSourceHash(row);
+                        latestIds.Add(id);
+                    }
+                lines.RemoveAll(line => latestIds.Contains(ReadString(line, "sourceTurnId", "")));
+            }
+            // Compute coverage from the final tail, after current-input removal.
+            foreach (var line in lines.TakeLast(RequiredConversationTailCount))
+            {
+                var source = MatchPromptSource(line, candidates);
+                if (source != null) supplied[ReadString(source, "turn_id", "")] = MemoryTranscriptSourceHash(source);
+            }
+            bound = lines.Count(line => MatchPromptSource(line, candidates) != null);
+            context["promptSourceBinding"] = TestDict("schema", "reign-prompt-source-binding-v1", "boundTranscriptTurns", bound,
+                "unboundTranscriptTurns", Math.Max(0, lines.Count - bound), "sourceCount", supplied.Count, "semanticValidation", "not_claimed");
+            foreach (var row in candidates.Where(row => supplied.ContainsKey(ReadString(row, "turn_id", ""))))
+                statements.Add(TestDict("turnId", ReadString(row, "turn_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
+                    "eventId", ReadString(row, "event_id", ""), "originalSourceHash", PromptHash(ConversationTurnTextForRecall(row)),
+                    "timestamp", ReadLong(row, "ts", 0), "acceptedSequence", ReadLong(row, "accepted_sequence", 0),
+                    "text", SanitizeUnknownIdentityEvidenceText(CommitmentVisibleSourceText(row, access), access)));
+            }
+            catch (Exception error)
+            {
+                // Binding is an optimization, not permission to prevent dialogue.
+                supplied.Clear(); statements.Clear();
+                context["promptSourceBinding"] = TestDict("schema", "reign-prompt-source-binding-v1",
+                    "sourceCount", 0, "status", "unavailable_originals_retained", "errorType", error.GetType().Name);
+            }
+            finally { SetMemoryTranscriptContext(context, lines); }
+        }
+
         private static string MemoryProjectedTranscriptHash(Dictionary<string, object> row, KnowledgeAccessContext knowledge)
         {
             string rendered = RenderExactHistoryTurn(row, knowledge);
@@ -31,7 +156,7 @@ namespace ReignBetaServer
 
         private static MemoryEvidence RemoveSuppliedMemoryTurns(MemoryEvidence original, Dictionary<string, string> supplied)
         {
-            if (original.Kind != "reported_exchange" || original.SourceTurns.Count == 0) return original;
+            if (original.Kind != "reported_exchange" && original.Kind != "active_conversation" || original.SourceTurns.Count == 0) return original;
             var remaining = original.SourceTurns.Where(t => !MemoryTurnAlreadySupplied(t, supplied)).ToList();
             if (remaining.Count == 0) return null;
             if (remaining.Count == original.SourceTurns.Count) return original;

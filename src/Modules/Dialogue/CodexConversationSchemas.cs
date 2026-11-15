@@ -34,7 +34,7 @@ namespace ReignBetaServer
 
         private static readonly string[] CommonFields =
         {
-            "reply", "participation", "reactionTargetHeroStringId", "addressedHeroStringIds", "decisionBrief",
+            "decisionBrief", "reply", "participation", "reactionTargetHeroStringId", "addressedHeroStringIds",
             "politicalConduct", "emotion", "intent", "relationshipSignal",
             "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals",
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
@@ -217,7 +217,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             var properties = CommonConversationProperties(kind, payload);
-            var required = new List<string> { "reply", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions" };
+            var required = new List<string> { "decisionBrief", "reply", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions" };
             if (HasStructuredActions(payload)) required.Add("structuredActionDecision");
             if (kind != CodexConversationContractKind.Individual)
             {
@@ -233,9 +233,9 @@ namespace ReignBetaServer
         {
             var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
+                ["decisionBrief"] = DecisionBrief(),
                 ["reply"] = String(),
                 ["addressedHeroStringIds"] = Array(String()),
-                ["decisionBrief"] = DecisionBrief(),
                 ["politicalConduct"] = PoliticalConduct(),
                 ["emotion"] = String(),
                 ["intent"] = String(),
@@ -596,6 +596,8 @@ namespace ReignBetaServer
                 ["sourceEvidence"] = SourceEvidence(),
                 ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["description"] = String(), ["owed_by"] = String(), ["owed_to"] = String(),
+                ["obligation_id"] = String(), ["recordKind"] = String(new[] { "promise", "request", "preference" }),
+                ["scope"] = String(), ["acceptanceStatus"] = String(new[] { "unknown", "accepted", "refused" }),
                 ["status"] = String(), ["importance"] = Number(0, 1), ["evidenceSourceIds"] = Array(String()), ["uncertainty"] = Number(0, 1)
             }, new[] { "description", "owed_by", "owed_to", "status", "importance" }, true);
         }

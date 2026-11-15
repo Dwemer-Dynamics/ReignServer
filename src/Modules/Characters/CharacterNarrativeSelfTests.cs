@@ -384,6 +384,19 @@ namespace ReignBetaServer
                 "Accepted development replaces the old concern in legacy motivation projections and the shared effective snapshot.");
             string prompt = BuildCoreSkillAwarenessPrompt(hero, stack);
             string directFoundation = BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, stack);
+            var currentWounds = ReadDictionaryList(ResolveEffectiveNarrative(stack), "items").Where(item => ReadString(item, "category", "") == "wound").ToList();
+            check("all_current_wounds_and_reputation_always_present", currentWounds.All(item => directFoundation.Contains(ReadString(item, "description", "")))
+                && directFoundation.Contains("PUBLIC REPUTATION") && directFoundation.Contains("CENTRAL WOUNDS")
+                && directFoundation.Contains(ReadString(ReadDictionary(written, "life"), "reputation", "")),
+                "The owner's complete current wound and reputation foundation does not depend on selected context or retrieval mode.");
+            var legacyFoundation = TestDict("background", TestDict("centralWound", "LEGACY_WOUND", "publicReputation", "LEGACY_REPUTATION", "reputation", "LEGACY_REPUTATION"));
+            string legacyCharacter = BuildStableCharacterPrompt("legacy", "Legacy", hero, legacyFoundation);
+            check("legacy_wound_and_reputation_preserved_without_alias_duplicate", legacyCharacter.Contains("LEGACY_WOUND")
+                && legacyCharacter.Split("LEGACY_REPUTATION").Length == 2, "Legacy foundation fields remain always available, with exact reputation aliases deduplicated.");
+            var staleFoundation = CloneDictionary(stack); staleFoundation["background"] = ReadDictionary(legacyFoundation, "background");
+            string currentCharacter = BuildStableCharacterPrompt("current", "Current", hero, staleFoundation);
+            check("current_narrative_overrides_legacy_wound_alias", !currentCharacter.Contains("LEGACY_WOUND") && !currentCharacter.Contains("LEGACY_REPUTATION"),
+                "A current narrative does not resurrect obsolete legacy wounds or reputation.");
             check("projected_list_prose_reaches_prompt", !directFoundation.Contains("System.Collections")
                 && directFoundation.Contains(ReadString(ReadDictionaryList(written, "items").First(x => ReadString(x, "category", "") == "formative"), "description", "")),
                 "Fresh in-memory projections render real formative prose without relying on a save/reload to normalize list types.");

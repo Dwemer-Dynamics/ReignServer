@@ -448,7 +448,8 @@ WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
 
         private static string BuildProtectedConversationContinuity(string campaignId, string heroId,
             Dictionary<string, object> payload, Dictionary<string, object> state, string suppliedContext = "",
-            List<Dictionary<string, object>> priorLines = null, Func<string> projectTranscript = null)
+            List<Dictionary<string, object>> priorLines = null, Func<string> projectTranscript = null,
+            bool structuredMessages = false)
         {
             state = WithoutRecallAbsenceState(state, campaignId, heroId, payload);
             var text = new StringBuilder(ConversationContinuityContract).AppendLine(ConversationSourceContract).AppendLine(ConversationQuestionContract).AppendLine(CharacterCommitmentContract);
@@ -464,7 +465,8 @@ WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
             using (var persistentConnection = OpenCampaignConnection(campaignId))
             {
                 CaptureContinuityReadSnapshot(persistentConnection, payload, heroId);
-                text.AppendLine(BuildCharacterCommitmentPrompt(persistentConnection, heroId, peer, payload, sourceIds));
+                text.AppendLine(BuildCharacterCommitmentPrompt(persistentConnection, heroId, peer, payload, sourceIds,
+                    requiredTranscript: structuredMessages && projectTranscript != null ? projectTranscript() : ""));
                 text.AppendLine(BuildPlayerPerformancePrompt(persistentConnection, heroId, payload, sourceIds));
             }
             if (agency != null)
@@ -493,7 +495,7 @@ WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
                     text.AppendLine().Append(BuildQuestionContinuityPrompt(activityConnection, payload, heroId, peer, sourceIds));
                     text.AppendLine().Append(BuildSharedActivityContinuity(activityConnection, timeline, peer, heroId, payload, state, sourceIds));
                 }
-                text.AppendLine().Append(BuildPersonalGossipPrompt(campaignId, heroId, payload, sourceIds));
+                text.AppendLine().Append(BuildPersonalGossipPrompt(campaignId, heroId, payload, sourceIds, structuredMessages));
                 bool precision = ReadString(ReadDictionary(payload, "memoryPrecisionEvidence"), "mode", "") == "precision";
                 if (!precision)
                 using (var connection = OpenCampaignConnection(campaignId))
@@ -583,7 +585,7 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
                 .Append("; world day=").Append(ReadDouble(payload, "worldDay", 0d).ToString("0.#####", CultureInfo.InvariantCulture))
                 .Append("; location=").AppendLine(ReadFirstString(payload, "locationId", "settlementId"));
             text.Append(BuildLocalPresenceContinuityPrompt(payload));
-            text.AppendLine().Append(BuildCurrentConversationGrounding(payload, heroId));
+            text.AppendLine().Append(BuildCurrentConversationGrounding(payload, heroId, structuredMessages));
             string protectedText = OmitExactSuppliedContinuityRecords(text.ToString(), suppliedContext);
             var requiredContent = CapturedRequiredPromptEvidence(payload);
             requiredContent.Add(TestDict("id", "protected_continuity_content", "text", NormalizePromptSegment(protectedText),
@@ -931,7 +933,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             // Keep the most recent 30 individual messages, including the complete
             // exchange that crosses the boundary. Memory deduplication relies on
             // this content remaining in the actual provider request.
-            int protectedStart = Math.Max(0, groups.Sum(group => group.Count) - 30);
+            int protectedStart = Math.Max(0, groups.Sum(group => group.Count) - RequiredConversationTailCount);
             int groupEnd = 0;
             return string.Join("\n\n", groups.Select((group, index) =>
             {
@@ -939,7 +941,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 string body = render(group);
                 if (string.IsNullOrWhiteSpace(body) || body == "none") return "";
                 var first = group.First();
-                string ids = string.Join(",", group.Select(l => FirstNonEmpty(ReadFirstString(l, "id", "turnId", "turn_id"), PromptHash(ReadString(l, "text", "")).Substring(0, 20))));
+                string ids = string.Join(",", group.Select(ConversationTranscriptSourceId));
                 return RenderContinuityRecord(ids, "accepted_exchange", "current_observer", ReadFirstString(first, "sessionId", "session_id"),
                     ReadDouble(first, "worldDay", ReadDouble(first, "world_day", 0d)), Math.Max(65, 85 - (groups.Count - 1 - index)), groupEnd > protectedStart, body);
             }).Where(s => s.Length > 0));

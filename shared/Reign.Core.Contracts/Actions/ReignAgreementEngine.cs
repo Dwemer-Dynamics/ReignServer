@@ -264,14 +264,54 @@ namespace Reign.Core.Contracts.Actions
         private static void Complete(AgreementStep s) { s.Completed = true; s.FulfilledInstallments = Math.Max(s.FulfilledInstallments, s.Installment + 1); }
 
         private static ActionClause Clause(AgreementJournal journal, AgreementStep step) => journal.Agreement.Clauses.Single(x => x.Id == step.ClauseId);
-        private static ActionReceipt Receipt(AgreementJournal journal, string message, double now)
+        public static ActionReceipt Describe(AgreementJournal journal, string message, double now)
         {
+            if (journal?.Agreement == null)
+                return new ActionReceipt { State = AgreementState.RecoveryRequired, Message = "The saved agreement is unavailable; inspection is required.", Day = now };
+            var steps = (journal.Steps ?? new List<AgreementStep>()).Where(s => s != null).ToList();
             var receipt = new ActionReceipt { OperationId = journal.Agreement.Id, TermsHash = journal.CommittedHash,
                 State = journal.Agreement.State, Day = now, Message = message,
-                ObservedEffects = journal.Steps.Where(x => x.Completed).Select(x => x.ClauseId).ToList() };
-            if (journal.Receipts.Count == 0 || journal.Receipts.Last().State != receipt.State || journal.Receipts.Last().Message != message)
-                journal.Receipts.Add(receipt);
+                ArrivalDay = journal.ArrivalDay,
+                Clauses = steps.Select(step => {
+                    var matches = (journal.Agreement.Clauses ?? new List<ActionClause>()).Where(c => c != null && c.Id == step.ClauseId).ToList();
+                    if (matches.Count != 1) return new ActionClauseReceipt { ClauseId = step.ClauseId, Status = "recovery_required",
+                        Reserved = step.Reserved && !step.Returned && !step.Completed, Started = step.Started, FulfilledInstallments = step.FulfilledInstallments };
+                    var clause = matches[0];
+                    bool terminal = journal.Agreement.State != AgreementState.Waiting && journal.Agreement.State != AgreementState.InTransit
+                        && journal.Agreement.State != AgreementState.Reserved;
+                    return new ActionClauseReceipt { ClauseId = step.ClauseId, ActionId = clause.ActionId,
+                        Status = step.Completed ? "completed" : step.Returned ? "returned" : step.Started ? "executing"
+                            : terminal ? journal.Agreement.State.ToString() : now < journal.ArrivalDay ? "in_transit" : "waiting",
+                        DueDay = !string.IsNullOrEmpty(clause.ConditionKind) && clause.ConditionKind != "day" ? (double?)null
+                            : Math.Max(journal.ArrivalDay, clause.DueDay + step.Installment * clause.IntervalDays), ConditionKind = clause.ConditionKind,
+                        Reserved = step.Reserved && !step.Returned && !step.Completed, Started = step.Started,
+                        FulfilledInstallments = step.FulfilledInstallments };
+                }).ToList(),
+                ObservedEffects = steps.Where(x => x.Completed).Select(x => x.ClauseId).ToList() };
+            if (receipt.Clauses.Any(c => c.Status == "recovery_required"))
+            {
+                receipt.State = AgreementState.RecoveryRequired;
+                receipt.ObservedEffects.RemoveAll(id => receipt.Clauses.Any(c => c.ClauseId == id && c.Status == "recovery_required"));
+                receipt.Message = "The saved journal contains an unmatched clause; inspection is required. Stored agreement state: " + journal.Agreement.State + ".";
+            }
+            else if (receipt.State == AgreementState.InTransit && journal.ArrivalDay > now)
+                receipt.Message = "Agreement accepted; delivery is in transit. "
+                    + (journal.ArrivalDay - now).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    + " campaign days remain. Completed effects: " + steps.Count(s => s.Completed) + "/" + steps.Count + ".";
             return receipt;
+        }
+        private static ActionReceipt Receipt(AgreementJournal journal, string message, double now)
+        {
+            var receipt = Describe(journal, message, now);
+            // Journal history records transitions, not a changing countdown on
+            // every hourly observation. The display view is computed separately.
+            receipt.Message = message;
+            string Progress(ActionReceipt r) => string.Join("|", (r.Clauses ?? new List<ActionClauseReceipt>())
+                .Select(c => c.ClauseId + ":" + c.Status + ":" + c.FulfilledInstallments));
+            if (journal.Receipts.Count == 0 || journal.Receipts.Last().State != receipt.State || journal.Receipts.Last().Message != message
+                || Progress(journal.Receipts.Last()) != Progress(receipt))
+                journal.Receipts.Add(receipt);
+            return Describe(journal, message, now);
         }
     }
 }

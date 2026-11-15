@@ -188,7 +188,10 @@ namespace ReignBetaServer
                 var traits = ReadJsonObject(CharacterFile(campaign, id, "traits.json"));
                 var beliefs = EnsurePoliticalProfile(campaign, id, profile, traits);
                 string block = RequiredPoliticalPrompt(id, profile, TestDict("politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(beliefs))));
-                if (messages.Any(x => ReadString(x, "content", "").Contains(block, StringComparison.Ordinal))) continue;
+                // Use the same framing normalization as foundation assembly. Match
+                // the complete current author/revision block, never a partial quote.
+                string canonical = NormalizePromptSegment(block);
+                if (messages.Any(x => NormalizePromptSegment(ReadString(x, "content", "")).Contains(canonical, StringComparison.Ordinal))) continue;
                 // Append complete required context. Never truncate history/personality to
                 // make room or treat another author's private values as observer knowledge.
                 messages.Add(TestDict("role", "user", "content", block));

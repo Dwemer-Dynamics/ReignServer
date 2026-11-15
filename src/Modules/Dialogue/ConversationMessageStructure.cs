@@ -89,7 +89,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
         }
 
         private static string ConversationTranscriptSourceId(Dictionary<string, object> line) => Regex.Replace(
-            FirstNonEmpty(ReadFirstString(line, "id", "turnId", "turn_id"), PromptHash(ReadString(line, "text", "")).Substring(0, 20)),
+            FirstNonEmpty(ReadFirstString(line, "sourceTurnId", "turn_id", "id", "turnId", "promptLocalSourceId"), PromptHash(ReadString(line, "text", "")).Substring(0, 20)),
             @"[^\p{L}\p{Nd}_:.,-]", "_");
 
         private static void StructureConversationMessages(PromptEnvelope envelope, ConversationTemplateSlots slots,

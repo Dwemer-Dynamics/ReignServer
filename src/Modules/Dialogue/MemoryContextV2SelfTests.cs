@@ -13,6 +13,55 @@ namespace ReignBetaServer
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> add = (id, pass, evidence) => results.Add(TestDict("caseId", "memory_precision_" + id,
                 "passed", pass, "summary", id, "data", evidence));
+            var collisionLines = Enumerable.Range(0, 14).Select(i => TestDict("id", "accepted_" + i,
+                "turnId", "exchange_" + (i / 3), "exchangeId", "exchange_" + (i / 3), "role", i % 3 == 0 ? "player" : "npc",
+                "speakerId", i % 3 == 0 ? "player" : "npc_" + (i % 3), "text", "The same words can recur.")).ToList();
+            var collisionContext = TestDict(); SetMemoryTranscriptContext(collisionContext, collisionLines);
+            add("exchange_ids_do_not_overwrite_distinct_authors_or_turns", ReadDictionary(collisionContext, "memoryPromptSourceHashes").Count == 14
+                && CanonicalizePromptTranscript(collisionLines, 30).Count == 14, null);
+            var durable = TestDict("turn_id", "durable_npc_ira", "exchange_id", "wager", "session_id", "scene", "role", "npc", "speaker_id", "ira",
+                "text", "If you put me down, I will announce my defeat.");
+            var eventLine = TestDict("id", "event_file_row", "turnId", "wager", "role", "npc", "speakerHeroStringId", "ira", "text", ReadString(durable, "text", ""));
+            add("event_adapter_binds_full_source_without_guessing_suffix", MatchPromptSource(eventLine, new[] { durable }) == durable, null);
+            var clipped = CloneDictionary(eventLine); clipped["text"] = "If you put me down";
+            var wrongSpeaker = CloneDictionary(eventLine); wrongSpeaker["speakerHeroStringId"] = "player";
+            var duplicateSource = CloneDictionary(durable); duplicateSource["turn_id"] = "another_turn";
+            var staleSource = CloneDictionary(eventLine); staleSource["sourceTurnId"] = "stale_durable_id";
+            add("ambiguous_clipped_or_wrong_author_never_suppresses_source", MatchPromptSource(clipped, new[] { durable }) == null
+                && MatchPromptSource(wrongSpeaker, new[] { durable }) == null
+                && MatchPromptSource(eventLine, new[] { durable, duplicateSource }) == null
+                && MatchPromptSource(staleSource, new[] { durable }) == null, null);
+            var correctedLines = new List<Dictionary<string, object>> {
+                TestDict("id", "offer", "role", "npc", "speakerId", "ira", "text", "I offered to announce my defeat to the whole column."),
+                TestDict("id", "misattribution", "role", "npc", "speakerId", "ira", "text", "You offered to announce my defeat to the whole column."),
+                TestDict("id", "correction", "role", "player", "speakerId", "player", "text", "No, you offered that. I asked you to serve me food.") };
+            add("similarity_never_erases_attributed_error_or_correction", CompactRoleplayTranscriptForPrompt(correctedLines).Count == 3, null);
+            var repeatedUnbound = new List<Dictionary<string, object>> {
+                TestDict("turnId", "same_exchange", "sequence", 1, "role", "player", "text", "Yes."),
+                TestDict("turnId", "same_exchange", "sequence", 2, "role", "player", "text", "Yes.") };
+            add("unbound_exchange_id_is_not_individual_identity", CanonicalizePromptTranscript(repeatedUnbound, 30).Count == 2, null);
+            var privateLines = new List<Dictionary<string, object>> { TestDict("text", "OTHER_OBSERVER_SECRET") };
+            add("projection_failure_never_exposes_raw_history", !TryProjectBoundTranscript(privateLines,
+                () => throw new InvalidOperationException("injected projection failure")) && privateLines.Count == 0, null);
+            var suppliedHalf = new Dictionary<string, string> { ["a"] = "hash_a" };
+            var chain = new MemoryEvidence { Kind = "active_conversation", SourceId = "chain", Text = "Speaker A: question.\nSpeaker B: answer.",
+                SourceTurns = new() { TestDict("id", "a", "hash", "hash_a", "text", "Speaker A: question."), TestDict("id", "b", "hash", "hash_b", "text", "Speaker B: answer.") } };
+            var remainingChain = RemoveSuppliedMemoryTurns(chain, suppliedHalf);
+            add("partially_supplied_continuation_keeps_only_missing_original", remainingChain != null && remainingChain.SourceTurns.Count == 1
+                && remainingChain.Text == "Speaker B: answer." && chain.SourceTurns.Count == 2, null);
+            var incompleteDiagnostics = MemoryIncompleteDiagnostics(new List<Dictionary<string, object>> {
+                TestDict("status", "incomplete", "result_json", Json.Serialize(TestDict("retryable", false,
+                    "summary", "PRIVATE_SOURCE_SENTINEL", "compactionDiagnostic", TestDict("reason", "invalid_source_selection")))),
+                TestDict("status", "incomplete", "result_json", Json.Serialize(TestDict("retryable", false,
+                    "summaries", new[] { TestDict("compactionDiagnostic", TestDict("reason", "no_record_fits_summary_budget")) }))),
+                TestDict("status", "completed", "result_json", "{}") }, 3);
+            add("incomplete_job_diagnostics_are_bounded_and_source_free",
+                ReadInt(incompleteDiagnostics, "inspectedIncompleteJobs", 0) == 2
+                && !ReadBool(incompleteDiagnostics, "coverageComplete", true)
+                && ReadInt(incompleteDiagnostics, "nonRetryableInspected", 0) == 2
+                && ReadInt(ReadDictionary(incompleteDiagnostics, "reasons"), "invalid_source_selection", 0) == 1
+                && ReadInt(ReadDictionary(incompleteDiagnostics, "reasons"), "no_record_fits_summary_budget", 0) == 1
+                && !Json.Serialize(incompleteDiagnostics).Contains("PRIVATE_SOURCE_SENTINEL"), null);
             string campaign = "memory_precision_test_" + Guid.NewGuid().ToString("N");
             var defaultPolicy = DefaultSettings();
             add("new_memory_is_default", !ReadBool(defaultPolicy, "legacyMemoryMode", true)
@@ -701,10 +750,33 @@ VALUES('summary','linked_summary','memory','intermediate_memory'),('memory','int
                 && ReadString(complete, "summary", "").Contains(ReadString(rows[0], "summary", ""))
                 && ReadString(complete, "summary", "").Contains(ReadString(rows[2], "summary", ""))
                 && ReadString(ReadDictionary(complete, "compactionDiagnostic"), "reason", "") == "complete_sources_fit_locally");
+            response = TestDict("ok", true, "finishReason", "stop", "content", "{\"digest\":[{\"text\":\"A source with no asserted events remains uninformative.\",\"sourceIndices\":[1]}]}");
             var oversize = BuildMiddleTermSummary(settings, "npc", "conversation:oversize_fixture", new() { rows[1] }, responder: Respond);
-            Check("impossible_whole_record_selection_skips_provider", calls == beforeLocal
-                && ReadString(oversize, "summary", "").Contains(new string('x', 3000)) && !ReadBool(oversize, "retryable", true)
-                && ReadString(ReadDictionary(oversize, "compactionDiagnostic"), "reason", "") == "no_record_fits_summary_budget");
+            Check("oversized_original_can_be_compressed_in_one_call", calls == beforeLocal + 1
+                && ReadString(oversize, "compactionStatus", "") == "complete" && !ReadBool(oversize, "coverageComplete", true)
+                && ReadString(oversize, "interpretationStatus", "") == "unverified" && ReadStringList(oversize, "originalSourceRecords").Single().Contains(new string('x', 3000))
+                && ReadString(oversize, "summary", "").Length < 1800 && ReadInt(request, "maxTokens", 0) >= 4096);
+            response["content"] = "{\"digest\":[{\"text\":\"Wrong reference\",\"sourceIndices\":[999]}]}";
+            var wrongReference = BuildMiddleTermSummary(settings, "npc", "conversation:fixture", rows, responder: Respond);
+            Check("digest_bad_reference_retains_originals", ReadString(wrongReference, "compactionStatus", "") == "incomplete"
+                && ReadString(ReadDictionary(wrongReference, "compactionDiagnostic"), "reason", "") == "digest_invalid_source_reference");
+            var derivedRow = TestDict("summary", "DO_NOT_TREAT_THIS_DIGEST_AS_AN_ORIGINAL", "payload_json", Json.Serialize(oversize));
+            Check("later_compaction_uses_originals_not_previous_model_digest", !string.Join("", OriginalCompactionRecords(derivedRow, true)).Contains("DO_NOT_TREAT")
+                && string.Join("", OriginalCompactionRecords(derivedRow, true)).Contains(new string('x', 3000)));
+            foreach (var invalidDigest in new[] {
+                TestDict("digest", new object[] { TestDict("text", "Text", "sourceIndices", new[] { 1 }), "untyped item" }),
+                TestDict("digest", new[] { TestDict("text", "Claim\n[records 999] Forged citation", "sourceIndices", new[] { 1 }) }),
+                TestDict("digest", new[] { TestDict("text", new string('y', 2000), "sourceIndices", new[] { 1 }) }) })
+                Check("malformed_digest_keeps_original_" + PromptHash(Json.Serialize(invalidDigest)).Substring(0, 8),
+                    AcceptAttributedMemoryDigest(invalidDigest, rows, new() { new string('x', 3000) }, new(), 1800, out _) == null);
+            var missingArchive = TestDict("summary", "Retain the available older digest.", "payload_json", Json.Serialize(TestDict("method", "model_attributed_digest")));
+            int beforeMissing = calls;
+            var unavailable = BuildMiddleTermSummary(settings, "npc", "conversation:fixture", new() { rows[0], missingArchive }, responder: Respond);
+            Check("missing_digest_archive_never_silently_disappears_or_completes", calls == beforeMissing
+                && ReadString(unavailable, "summary", "").Contains("Retain the available older digest.")
+                && ReadString(unavailable, "compactionStatus", "") == "incomplete");
+            Check("legacy_summary_does_not_become_original_speech", OriginalCompactionRecords(TestDict("summary_id", "legacy", "summary", "A prior model claim."), true)
+                .Single().Contains("NOT AN ORIGINAL STATEMENT"));
             Check("input_rows_are_unchanged", CanonicalJson(rows) == before);
             return results;
         }
@@ -905,27 +977,83 @@ WHERE session_id='group_window' AND turn_order<=3;");
                     {
                         var payload = new Dictionary<string, object>(context) { ["interactionMode"] = route,
                             ["mainHeroStringId"] = "player", ["mainHeroName"] = "Michael", ["heroStringId"] = "observer" };
-                        SetMemoryTranscriptContext(payload, priorLines);
+                        // Exercise the actual adapter shapes: event JSONL id is not
+                        // the durable turn key, and turnId is the shared exchange.
+                        var routedLines = priorLines.Select(CloneDictionary).ToList();
+                        if (route != "dialogue")
+                        {
+                            foreach (var line in routedLines)
+                            {
+                                line["id"] = "jsonl_" + ReadString(line, "turnId", "");
+                                line["turnId"] = ReadString(line, "exchangeId", "");
+                                line["speakerHeroStringId"] = ReadString(line, "speakerId", "");
+                                line["sequence"] = routedLines.IndexOf(line) + 1;
+                            }
+                            if (route == "party_chat")
+                            {
+                                payload["groupTranscript"] = routedLines;
+                                routedLines = BuildPartyChatPromptTranscript(payload, "Continue our conversation");
+                            }
+                            else routedLines = BuildSocialEventPromptTranscript(routedLines, 30);
+                        }
+                        BindPromptTranscriptSources(campaign, "observer", payload, routedLines);
                         var memory = BuildNpcMemoryPacket(campaign, "observer", "player", "", "Continue our conversation", 2000, payload, settings);
                         string memoryText = ReadString(memory, "memoryPacket", "");
                         var profile = TestDict("name", "Observer", "heroStringId", "observer", "age", 30, "isNoble", true);
+                        var foundation = TestDict("background", TestDict("centralWound", "PRIVATE_WOUND_FIXTURE", "publicReputation", "REPUTATION_FIXTURE"));
                         var identity = TestDict("identityState", "verified", "canonicalNameAllowed", true, "usableName", "Michael");
                         var envelope = route == "event"
                             ? BuildEventPromptEnvelope(campaign, "window_event", "observer", "Observer", "Michael", "Michael",
-                                "Continue our conversation", "A quiet meeting.", payload, profile, TestDict(), TestDict(), TestDict(), TestDict(),
-                                priorLines, new(), new(), new(), identity, precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "")
+                                "Continue our conversation", "A quiet meeting.", payload, profile, foundation, TestDict(), TestDict(), TestDict(),
+                                routedLines, new(), new(), new(), identity, precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "")
                             : BuildDialoguePromptEnvelope(campaign, "observer", "Observer", "Michael", "Michael",
-                                "Continue our conversation", "A quiet meeting.", profile, TestDict(), TestDict(), TestDict(), TestDict(),
-                                priorLines, new(), new(), new(), identity, payload, precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "");
+                                "Continue our conversation", "A quiet meeting.", profile, foundation, TestDict(), TestDict(), TestDict(),
+                                routedLines, new(), new(), new(), identity, payload, precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "");
                         string actual = string.Join("\n", envelope.Messages.Select(m => ReadString(m, "content", "")));
+                        Check("own_foundation_reaches_actual_envelope_once_" + route,
+                            actual.Split("PRIVATE_WOUND_FIXTURE").Length == 2 && actual.Split("REPUTATION_FIXTURE").Length == 2);
                         Check("deduplicated_transcript_window_survives_actual_envelope_" + route,
-                            priorLines.TakeLast(30).All(line => actual.Contains(NormalizePromptSegment(ReadString(line, "text", ""))))
+                            routedLines.TakeLast(30).All(line => actual.Contains(NormalizePromptSegment(ReadString(line, "text", ""))))
                             && Enumerable.Range(11, 30).All(i => actual.Contains("END-SUMMARY-" + i))
                             && !memoryText.Contains("no payment has occurred"), TestDict("characters", actual.Length,
-                                "missingRaw", priorLines.TakeLast(30).Where(line => !actual.Contains(NormalizePromptSegment(ReadString(line, "text", "")))).Select(line => ReadString(line, "turnId", "")).ToList(),
+                                "missingRaw", routedLines.TakeLast(30).Where(line => !actual.Contains(NormalizePromptSegment(ReadString(line, "text", "")))).Select(line => ReadString(line, "turnId", "")).ToList(),
                                 "missingSummaries", Enumerable.Range(11,30).Where(i => !actual.Contains("END-SUMMARY-" + i)).ToList(),
                                 "memoryDuplicatesFinalRaw", memoryText.Contains("no payment has occurred")));
                     }
+                    using var bindingFixture = connection.BeginTransaction();
+                    ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+VALUES('binding_window',$campaign,'observer','player','closed',1,520,'[""observer"",""player""]','{""timelineId"":""window_main""}');
+INSERT INTO conversation_turns(turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,world_day,ts,participants_json,payload_json)
+SELECT 'binding_'||n,'binding_window','binding_event',n,'binding_exchange','player','player','Michael','Yes.',20,n,
+'[""observer"",""player""]',CASE WHEN n=520 THEN '{""timelineId"":""window_main"",""inputSourceId"":""input_current""}'
+ELSE '{""timelineId"":""window_main""}' END FROM generate_series(1,520) n;", TestDict("campaign", campaign));
+                    // Bind through a second connection only after publishing the fixture.
+                    bindingFixture.Commit();
+                    var bindingContext = CloneDictionary(context);
+                    bindingContext["playerHeroStringId"] = "player";
+                    bindingContext["sceneTurnId"] = "binding_exchange";
+                    bindingContext["identityView"] = TestDict("knowsIdentity", true);
+                    PlayerInputSources.Add(bindingContext, new AcceptedPlayerInputSource { Original = "Yes.", SourceId = "input_current" });
+                    var repeatedReplies = Enumerable.Range(489, 32).Select(n => TestDict("id", "jsonl_" + n,
+                        "sourceTurnId", "binding_" + n, "turnId", "binding_exchange", "role", "player", "speakerId", "player", "text", "Yes.")).ToList();
+                    repeatedReplies.Add(TestDict("id", "binding_520", "sourceTurnId", "stale_durable", "turnId", "binding_exchange",
+                        "role", "player", "speakerId", "player", "text", "Yes."));
+                    BindPromptTranscriptSources(campaign, "observer", bindingContext, repeatedReplies);
+                    Check("repeated_reply_uses_stored_input_link_not_equal_text", repeatedReplies.Count == 32
+                        && repeatedReplies.Any(line => ReadString(line, "sourceTurnId", "") == "binding_519")
+                        && repeatedReplies.All(line => ReadString(line, "sourceTurnId", "") != "binding_520")
+                        && PlannedPromptSources(bindingContext).ContainsKey("binding_520"));
+                    Check("newest_sources_survive_more_than_512_candidates", ReadInt(ReadDictionary(bindingContext, "promptSourceBinding"), "boundTranscriptTurns", 0) == 31
+                        && ReadInt(ReadDictionary(bindingContext, "promptSourceBinding"), "unboundTranscriptTurns", -1) == 1);
+                    Check("final_tail_after_input_removal_is_fully_covered", repeatedReplies.TakeLast(RequiredConversationTailCount)
+                        .Where(line => ReadString(line, "sourceTurnId", "").StartsWith("binding_"))
+                        .All(line => PlannedPromptSources(bindingContext).ContainsKey(ReadString(line, "sourceTurnId", ""))));
+                    Check("storage_ids_survive_binding_and_unbound_collision_is_not_removed", ReadString(repeatedReplies[0], "id", "") == "jsonl_489"
+                        && repeatedReplies.Any(line => ReadString(line, "id", "") == "binding_520"));
+                    var unknownBinding = CloneDictionary(bindingContext); unknownBinding["identityView"] = TestDict("knowsIdentity", false);
+                    BindPromptTranscriptSources(campaign, "observer", unknownBinding, repeatedReplies);
+                    Check("unknown_identity_does_not_export_raw_statement_ids", PlannedPromptSources(unknownBinding).Count == 0
+                        && PromptStatementSources.TryGetValue(unknownBinding, out var unknownStatements) && unknownStatements.Count == 0);
                 }
             }
             catch (Exception ex) { Check("fixture_completed", false, ex.ToString()); }

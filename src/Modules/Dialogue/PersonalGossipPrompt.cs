@@ -58,7 +58,8 @@ Do not narrate an offscreen conversation or incoming answer as having happened b
 If you actually bring up a nominated received gossip topic in this reply, optionally include raisedGossip:[{receiptId,evidenceQuote}]
 with the exact words of this reply. Do not mark something raised merely because it was available in memory.";
 
-        private static string BuildPersonalGossipPrompt(string campaign, string hero, Dictionary<string, object> payload, List<string> sourceIds)
+        private static string BuildPersonalGossipPrompt(string campaign, string hero, Dictionary<string, object> payload, List<string> sourceIds,
+            bool separateIdentitySystemMessage = false)
         {
             if (ReadBool(payload, "officialMemoryFirewall", false) || !ReadBool(PersonalGossipSettings(), "enabled", true)) return "";
             try
@@ -165,7 +166,13 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
                     string id = "known_npc_identity_" + PromptHash(identitySection + "|" + body).Substring(0, 24).ToLowerInvariant();
                     string record = RenderContinuityRecord(id, "native_gossip_identity", hero, session, day, 140, true, body);
                     CaptureRequiredPromptEvidence(payload, identitySection, record);
-                    sourceIds.Add(id); text.AppendLine(record);
+                    sourceIds.Add(id);
+                    // Plan placement before protecting the enclosing context. The
+                    // native record is still required and is attached as a system
+                    // message by the structured conversation adapter.
+                    text.AppendLine(separateIdentitySystemMessage
+                        ? "Known native identity facts are supplied once in the authoritative system record " + id + "."
+                        : record);
                 }
                 SchedulePersonalGossip(campaign);
                 return text.ToString();

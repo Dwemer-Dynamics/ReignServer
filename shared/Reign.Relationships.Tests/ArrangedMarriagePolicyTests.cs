@@ -6,6 +6,28 @@ namespace Reign.Relationships.Tests;
 
 public sealed class ArrangedMarriagePolicyTests
 {
+    [Fact]
+    public void WeddingReceiptAcknowledgesOnlyTheSameTerminalStateAndBooking()
+    {
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(false, 1, "a", true, 2, "a"));
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "a", true, 2, "b"));
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "a", false, 1, "a"));
+        Assert.True(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "a", true, 2, "a"));
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "", true, 2, ""));
+    }
+
+    [Fact]
+    public void ReceiptFeeMetadataHandlesMalformedAndOverflowingQuotesWithoutThrowing()
+    {
+        Assert.True(ArrangedMarriagePolicy.TryReceiptFee(new[] { "20000", "1000" }, out int fee));
+        Assert.Equal(21000, fee);
+        foreach (var input in new[] { new[] { "" }, new[] { "invalid" }, new[] { "-1" }, new[] { "2,000" },
+            new[] { int.MaxValue.ToString(), "1" } })
+        {
+            Assert.False(ArrangedMarriagePolicy.TryReceiptFee(input, out fee));
+            Assert.Equal(0, fee);
+        }
+    }
     [Theory]
     [InlineData(6, 1, 100000)] [InlineData(1, 6, 100000)]
     [InlineData(3, 3, 0)] [InlineData(1, 2, 20000)]

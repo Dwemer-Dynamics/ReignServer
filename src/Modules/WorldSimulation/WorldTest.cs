@@ -2115,11 +2115,9 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
             List<Dictionary<string, object>> actions = ReadWorldTestActions(campaignId);
             int failed = actions.Count(x => IsTerminalFailureStatus(ReadString(x, "status", "")));
             int pending = actions.Count(x => IsPendingStatus(ReadString(x, "status", "")));
-            int overdue = actions.Count(x =>
-            {
-                Dictionary<string, object> record = ReadDictionary(x, "record") ?? x;
-                return IsPendingStatus(ReadString(x, "status", "")) && latestDay - ReadDouble(record, "createdDay", latestDay) > 1d;
-            });
+            int overdue = actions.Count(x => WorldTestActionOverdue(x, latestDay));
+            int unknownWeddingSchedules = actions.Count(x => ReadString(x, "status", "") == "wedding_pending"
+                && WorldTestWeddingEndDay(x) < 0);
             Dictionary<string, object> saveSync = ReadDictionary(nativePayload, "saveSync") ?? new Dictionary<string, object>();
             bool alignmentPending = ReadBool(saveSync, "alignmentPending", false);
             double relationshipDay = RelationshipLastProcessedDay(connection, timelineId);
@@ -2183,13 +2181,14 @@ ORDER BY day_key DESC LIMIT 1;",
             int compactionBacklog = ReadInt(storage, "compactionBacklog", 0);
             string status = failed > 0 || !string.IsNullOrWhiteSpace(relationshipMbtiError)
                 || ReadBool(nativePayload, "timelineRegression", false) ? "error"
-                : overdue > 0 || alignmentPending || relationshipLag > 1d
+                : overdue > 0 || unknownWeddingSchedules > 0 || alignmentPending || relationshipLag > 1d
                     || nativeProjectionLag > 1d || relationshipInputBacklog > 1
                     || compactionBacklog > WorldHistoryCompactionBatchSize ? "warning"
                 : nativePayload.Count == 0 ? "insufficient_data" : "healthy";
             List<string> anomalies = new List<string>();
             if (failed > 0) anomalies.Add(failed + " world actions have terminal failures.");
-            if (overdue > 0) anomalies.Add(overdue + " world actions have been pending for more than one campaign day.");
+            if (overdue > 0) anomalies.Add(overdue + " world actions are past their processing or scheduled completion window.");
+            if (unknownWeddingSchedules > 0) anomalies.Add(unknownWeddingSchedules + " pending weddings have no reported ceremony window; timing cannot be evaluated.");
             if (alignmentPending) anomalies.Add("Save Sync alignment is pending.");
             if (relationshipLag > 1d) anomalies.Add("Relationship processing is "
                 + relationshipLag.ToString("0.##", CultureInfo.InvariantCulture) + " campaign days behind.");
@@ -2205,7 +2204,7 @@ ORDER BY day_key DESC LIMIT 1;",
             {
                 ["name"] = "Supporting Pipeline Health", ["status"] = status, ["latestSuccessfulDay"] = latestDay,
                 ["actionStatuses"] = CountBy(actions, "status"), ["pendingActions"] = pending, ["failedActions"] = failed,
-                ["overdueActions"] = overdue, ["saveSync"] = saveSync,
+                ["overdueActions"] = overdue, ["weddingsWithoutSchedule"] = unknownWeddingSchedules, ["saveSync"] = saveSync,
                 ["relationshipProcessingLagDays"] = relationshipLag,
                 ["latestRelationshipIngestedDay"] = latestRelationshipIngestedDay,
                 ["latestRelationshipCompletedDay"] = relationshipDay,
@@ -2490,6 +2489,7 @@ WHERE e.timeline_id=$timeline AND e.event_type='social_outcome' AND r.completed=
                             ["type"] = ReadString(row, "action_type", ""),
                             ["status"] = ReadString(row, "status", ""),
                             ["createdDay"] = ReadDouble(row, "world_day", 0d),
+                            ["result"] = TryParseJsonObject(ReadString(row, "result_json", "{}")) ?? new Dictionary<string, object>(),
                             ["attemptCount"] = ReadString(row, "status", "") == "claimed" ? 1 : 0,
                             ["record"] = new Dictionary<string, object>
                             {
@@ -2732,6 +2732,27 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
             return ContainsAny(value, "failed", "blocked", "expired", "validation_failed");
         }
 
+        private static double WorldTestWeddingEndDay(Dictionary<string, object> action)
+        {
+            var result = ReadDictionary(action, "result") ?? ReadDictionary(ReadDictionary(action, "record"), "result");
+            double end = ReadDouble(result, "scheduledEndDay", -1);
+            return ReignBeta.Shared.Rulers.ReignRulerPolicy.Finite(end) && end > 0 ? end : -1;
+        }
+
+        private static bool WorldTestActionOverdue(Dictionary<string, object> action, double day)
+        {
+            string status = ReadString(action, "status", "");
+            if (!IsPendingStatus(status)) return false;
+            if (status == "wedding_pending")
+            {
+                double end = WorldTestWeddingEndDay(action);
+                // Allow one day for the terminal native receipt. An absent schedule
+                // is a coverage gap, not proof a legitimately booked wedding stalled.
+                return end >= 0 && day > end + 1d;
+            }
+            return day - ReadDouble(ReadDictionary(action, "record") ?? action, "createdDay", day) > 1d;
+        }
+
         private static bool IsPendingStatus(string status)
         {
             string value = NormalizeLookup(status);
@@ -2863,6 +2884,18 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                 ["ok"] = true, ["passed"] = passed, ["suite"] = "world_test", ["caseId"] = id,
                 ["name"] = id, ["summary"] = summary, ["durationMs"] = 0
             });
+            var scheduledWedding = TestDict("status", "wedding_pending", "createdDay", 1d,
+                "result", TestDict("scheduledStartDay", 20d, "scheduledEndDay", 21d));
+            add("scheduled_wedding_overdue_uses_ceremony_window",
+                !WorldTestActionOverdue(scheduledWedding, 19d) && !WorldTestActionOverdue(scheduledWedding, 22d)
+                && WorldTestActionOverdue(scheduledWedding, 22.01d),
+                "Weddings wait through their booked window and one day of receipt grace, independently of creation age.");
+            add("missing_wedding_schedule_is_unknown_not_overdue",
+                WorldTestWeddingEndDay(TestDict("status", "wedding_pending")) < 0
+                && !WorldTestActionOverdue(TestDict("status", "wedding_pending", "createdDay", 1d), 100d)
+                && WorldTestActionOverdue(TestDict("status", "pending", "createdDay", 1d), 3d)
+                && !WorldTestActionOverdue(TestDict("status", "completed", "createdDay", 1d), 100d),
+                "Missing ceremony dates remain a visible coverage gap while ordinary actions retain the one-day rule.");
             add("relationship_band_boundaries",
                 RelationshipBand(-70) == "nemesis" && RelationshipBand(-69) == "enemy"
                 && RelationshipBand(9) == "neutral" && RelationshipBand(10) == "acquaintance"
@@ -3006,6 +3039,24 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
                             && ReadInt(announcementOverview, "unacknowledgedAnnouncements", -1) == 3
                             && ReadInt(nextAnnouncements, "count", -1) == 3,
                             "Once government execution completes and marks the announcement ready, the unchanged delivery and acknowledgement gates require it to drain.");
+                        var publicFixture = Enumerable.Range(0, 35).Select(index => TestDict("eventId", "published_" + index,
+                            "announcementReady", true, "acknowledged", true, "summary", "A published public decision.",
+                            "privateDecisionFactors", "PRIVATE_DECISION_SENTINEL", "initiativeDiagnostics", "PRIVATE_INITIATIVE_SENTINEL")).ToList();
+                        publicFixture.Add(TestDict("eventId", "pending_private_proposal", "announcementReady", false));
+                        publicFixture.Add(TestDict("eventId", "private_ready", "announcementReady", true, "visibility", "private"));
+                        WriteDiplomaticEventQueue(campaign, publicFixture);
+                        string publicationQueuePath = CampaignFile(campaign, "diplomacy", "event-queue.json");
+                        string beforeRead = File.ReadAllText(publicationQueuePath);
+                        var publicAnnouncements = NextDiplomaticEvents(TestDict("campaignId", campaign),
+                            new Dictionary<string, string> { ["publicHistory"] = "true", ["limit"] = "500" });
+                        var publicRows = ReadDictionaryList(publicAnnouncements, "events");
+                        add("public_diplomacy_ignores_popup_and_ack_limits", ReadInt(publicAnnouncements, "count", 0) == 35
+                            && publicRows.All(row => ReadBool(row, "publicAnnouncement", false) && ReadBool(row, "acknowledged", false)),
+                            "All retained ready public decisions are readable beyond the ten-popup window and acknowledgment.");
+                        add("public_diplomacy_projection_is_read_only_and_allowlisted", beforeRead == File.ReadAllText(publicationQueuePath)
+                            && !Json.Serialize(publicRows).Contains("PRIVATE_DECISION_SENTINEL") && !Json.Serialize(publicRows).Contains("PRIVATE_INITIATIVE_SENTINEL")
+                            && !publicRows.Any(row => ReadString(row, "eventId", "").Contains("private")),
+                            "Public projection excludes pending/private rows and unselected fields without changing fetch/ack metadata.");
                     }
                     finally
                     {

@@ -723,6 +723,13 @@ FROM personal_gossip_messages WHERE message_id=$original;", GossipFields("copy",
                     payload["worldDay"] = 20 + 2d / 24;
                     check("native_gossip_identity_cannot_cross_payload_time_scope", !staleIdentity.Diagnostics.ContainsKey("personalGossipIdentity"), null);
                     var eventIdentityPayload = presence(20 + 2d / 24);
+                    var placedIdentityPayload = presence(20 + 2d / 24);
+                    placedIdentityPayload["playerHeroStringId"] = "player";
+                    string placedIdentityContext = BuildPersonalGossipPrompt(campaign, "target", placedIdentityPayload, new List<string>(), separateIdentitySystemMessage: true);
+                    var placedIdentityEnvelope = IdentityEnvelope(placedIdentityPayload, "target", placedIdentityContext, true);
+                    check("identity_placement_precedes_whole_block_protection", !placedIdentityContext.Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")
+                        && placedIdentityEnvelope.Messages.Count(m => ReadString(m, "content", "").Contains("AUTHORITATIVE KNOWN NPC IDENTITIES")) == 1
+                        && ConversationStructureMatches(placedIdentityEnvelope.Diagnostics, placedIdentityEnvelope.Messages), null);
                     eventIdentityPayload["playerHeroStringId"] = "player";
                     string eventIdentityContext = BuildPersonalGossipPrompt(campaign, "target", eventIdentityPayload, new List<string>());
                     var eventIdentityEnvelope = IdentityEnvelope(eventIdentityPayload, "target", eventIdentityContext, true);

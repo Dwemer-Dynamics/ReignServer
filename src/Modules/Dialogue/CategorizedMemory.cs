@@ -1262,6 +1262,8 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
                             ["timelineId"] = ReadString(TryParseJsonObject(ReadString(session,"payload_json","{}")),"timelineId",""),
                             ["worldDay"] = turns.Max(t => ReadDouble(t,"world_day",0d)),
                             ["sessionId"] = sessionId, ["method"] = ReadString(compact, "method", "deterministic"),
+                            ["interpretationStatus"] = ReadString(compact, "interpretationStatus", "source_extract"),
+                            ["originalSourceRecords"] = ReadStringList(compact, "originalSourceRecords"),
                             ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
                             ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
                             ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),
@@ -1505,6 +1507,9 @@ VALUES($id,$scope,$owner,'arc',$summary,'[]',$start,$end,$count,'',$participants
                         ["payload"] = Json.Serialize(new Dictionary<string, object>
                         {
                             ["sourceSummaryIds"] = scenes.Select(row => ReadString(row, "summary_id", "")).ToList(),
+                            ["method"] = ReadString(compact, "method", ""),
+                            ["interpretationStatus"] = ReadString(compact, "interpretationStatus", ""),
+                            ["originalSourceRecords"] = ReadStringList(compact, "originalSourceRecords"),
                             ["coverageComplete"] = ReadBool(compact, "coverageComplete", false),
                             ["compactionStatus"] = ReadString(compact, "compactionStatus", "incomplete"),
                             ["sourceCoverage"] = ReadString(compact, "sourceCoverage", "unverified"),

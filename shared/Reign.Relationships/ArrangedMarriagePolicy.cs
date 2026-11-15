@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -28,6 +30,22 @@ namespace Reign.Relationships
 
         public static bool CanConcludeUnattended(double now, double ends, bool playerSpouse, bool appealPending)
             => now >= ends && !playerSpouse && !appealPending;
+        public static bool CanAcknowledgeWeddingReceipt(bool sentTerminal, int sentState, string sentSchedule,
+            bool currentTerminal, int currentState, string currentSchedule) => sentTerminal && currentTerminal
+                && sentState == currentState && !string.IsNullOrEmpty(sentSchedule)
+                && string.Equals(sentSchedule, currentSchedule, StringComparison.Ordinal);
+
+        public static bool TryReceiptFee(IEnumerable<string> quantities, out int fee)
+        {
+            fee = 0;
+            foreach (string quantity in quantities ?? Array.Empty<string>())
+            {
+                if (!int.TryParse(quantity, NumberStyles.Integer, CultureInfo.InvariantCulture, out int amount)
+                    || amount < 0 || amount > int.MaxValue - fee) { fee = 0; return false; }
+                fee += amount;
+            }
+            return true;
+        }
         public const double RoyalAnnualChance = .05d;
         public static long Period(double day) => (long)Math.Floor(day / 7d);
         public static bool CanAcknowledge(long expected,long observed,bool ok,bool skipped)

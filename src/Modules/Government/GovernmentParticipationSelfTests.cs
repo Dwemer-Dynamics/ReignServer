@@ -205,6 +205,16 @@ namespace ReignBetaServer
                 var other = TestDict("heroStringId", "companion", "campaignId", campaign, "politicalTimelineId", "original",
                     "name", "A companion", "age", 25, "isAlive", true);
                 var combined = RequiredPoliticalMessages(TestDict("campaignId", campaign, "politicalAuthors", new[] { native, other }), messages);
+                var singlePoliticalRequest = TestDict("campaignId", campaign, "politicalAuthors", new[] { native });
+                string currentPolitical = ReadString(RequiredPoliticalMessages(singlePoliticalRequest, messages).Last(), "content", "");
+                foreach (var frame in new[] { currentPolitical.TrimEnd(), currentPolitical.Replace("\r\n", "\n").TrimEnd(), currentPolitical.TrimEnd() + "\r\n" }
+                    .Select((content, index) => new { content, index }))
+                    add("government.participation_complete_block_framing_" + frame.index,
+                        RequiredPoliticalMessages(singlePoliticalRequest, new() { TestDict("role", "user", "content", frame.content) }).Count == 1,
+                        "The complete current political block survives foundation framing without another copy.", null);
+                add("government.participation_partial_block_does_not_suppress_current", RequiredPoliticalMessages(singlePoliticalRequest,
+                    new() { TestDict("role", "user", "content", currentPolitical.Substring(0, currentPolitical.Length / 2)) }).Count == 2,
+                    "A partial block cannot suppress the current private political foundation.", null);
                 add("government.participation_multispeaker_private_ownership", combined.Count == 4
                     && ReadString(combined[2], "content", "").Contains("— local_notable —")
                     && ReadString(combined[3], "content", "").Contains("— companion —")
