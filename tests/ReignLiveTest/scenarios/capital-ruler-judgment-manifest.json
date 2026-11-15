@@ -1,7 +1,7 @@
 {
   "schema": "reign-ruler-certification-manifest-v1",
-  "version": 1,
-  "caseCount": 73,
+  "version": 2,
+  "caseCount": 76,
   "saveAuthority": "guarded-campaign-test-enrollment",
   "fixtureTool": "reign_test_structured_actions",
   "fixtureAction": "fixture.ruler_setup",
@@ -33,6 +33,8 @@
   ],
   "schedule": "Advance only to the next required assertion boundary; combine compatible cases; restore incompatible branches. No fixed soak.",
   "clockBoundaries": [
+    7,
+    8,
     15,
     20,
     30,
@@ -85,7 +87,11 @@
     "recordOpportunityCosts": true
   },
   "readiness": "All mandatory native assertions and required human acceptance; no uncertain side effects, failed queue or missing cleanup. Offline and fixture-only receipts do not count as native passes.",
+  "timingContract": {"decisionDelayDays": 7, "executionDelayAfterSentenceDays": 8, "clock": "fractional native campaign days", "captureAnchor": "original capture, not handover", "legacy": "retain existing absolute execution deadlines; missing capture timestamps start a full seven-day window"},
   "cases": [
+    {"id": "RUL-TIME-001", "description": "No AI or player verdict before capture plus seven days; exact fractional boundary opens decisions", "required": true, "status": "pending", "proof": "native", "combineCompatible": true},
+    {"id": "RUL-TIME-002", "description": "Save/load, direct handover and pending callbacks preserve capture anchor; escape cancels immediately", "required": true, "status": "pending", "proof": "native", "combineCompatible": true},
+    {"id": "RUL-TIME-003", "description": "New execution waits eight days after sentence; old saved deadlines remain; defeated-lord queued verdict cannot bypass the seven-day gate", "required": true, "status": "pending", "proof": "native", "combineCompatible": true},
     {
       "id": "RUL-CAP-001",
       "description": "strongest ruling-clan city",
@@ -262,7 +268,7 @@
     },
     {
       "id": "RUL-JUDGMENT-004",
-      "description": "torture fifteen-day execution and -20/-19 split",
+      "description": "torture seven-day decision plus eight-day execution and -20/-19 split",
       "assertions": ["Only clans still in the defeated realm at execution may defect; prior membership cannot pull a clan from a third realm.", "Transferred clans retain all fiefs they hold at execution, including acquisitions since sentencing; those holdings receive the conquest effect."],
       "required": true,
       "status": "pending",
@@ -271,7 +277,7 @@
     },
     {
       "id": "RUL-JUDGMENT-005",
-      "description": "clean fifteen-day execution and -10/-9 split",
+      "description": "clean seven-day decision plus eight-day execution and -10/-9 split",
       "required": true,
       "status": "pending",
       "proof": "native",

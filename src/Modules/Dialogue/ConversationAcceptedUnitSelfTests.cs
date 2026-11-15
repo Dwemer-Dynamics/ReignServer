@@ -148,6 +148,46 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 ReadDictionary(aliasUnit.Memories[0], "sourceEvidence")["turnId"] = ReadString(aliasUnit.Payload, "sceneTurnId", "");
                 Check("exact_group_beat_source_is_complete", ReadBool(ReadDictionary(Publish(aliasUnit), "acceptedUnit"), "memoryUpdateComplete", false));
 
+                Check("standalone_terms_question_cannot_hide_an_additional_request",
+                    IsPureConversationRecallRequest("Before we go, what were your terms for the north gate?")
+                    && !IsPureConversationRecallRequest("What were your terms for the north gate and can I bring six guards?")
+                    && !IsPureConversationRecallRequest("What were your terms for the north gate, and can I bring six guards?"));
+                var recall = Unit("standalone_terms_recall");
+                recall.PlayerText = "Before we go, what exactly were my conditions for giving the crates to Irena?";
+                recall.Payload["playerText"] = recall.PlayerText;
+                recall.RetrievalEligible = !IsPureConversationRecallRequest(recall.PlayerText);
+                recall.Continuity.Add(TestDict("id", "recall_only_agenda", "kind", "agenda", "status", "active",
+                    "subject", "Earlier terms", "meaning", recall.Reply, "expectedRevision", 0, "evidenceQuote", recall.Reply));
+                var recallReceipt = ReadDictionary(Publish(recall), "acceptedUnit");
+                Check("standalone_terms_recall_keeps_speech_without_new_memory_or_continuity",
+                    IsPureConversationRecallRequest(recall.PlayerText)
+                    && ReadBool(recallReceipt, "memoryUpdateComplete", false)
+                    && ReadBool(ReadDictionary(recallReceipt, "memory"), "auditOnly", false)
+                    && Count("conversation_turns", "event_id", recall.EventId) == 2
+                    && Count("events", "event_id", recall.EventId) == 0
+                    && Count("memories", "event_id", recall.EventId) == 0
+                    && Count("conversation_continuity", "record_id", "recall_only_agenda") == 0);
+
+                var mixedRecall = Unit("terms_recall_with_current_report");
+                mixedRecall.PlayerText = "I just counted eight sealed crates by the inner door. What were my terms from our previous conversation?";
+                mixedRecall.Payload["playerText"] = mixedRecall.PlayerText;
+                mixedRecall.RetrievalEligible = !IsPureConversationRecallRequest(mixedRecall.PlayerText);
+                mixedRecall.Memories = NormalizeMemoryWrites(new[] { TestDict("text", mixedRecall.PlayerText, "ownerId", "npc", "sourceEvidence",
+                    TestDict("turnId", "current_player", "speakerId", "player", "quote", mixedRecall.PlayerText)) }, campaign, "npc", mixedRecall.Timestamp);
+                var mixedRecallReceipt = ReadDictionary(Publish(mixedRecall), "acceptedUnit");
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    var report = QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event AND source='dialogue_llm' AND status='active';",
+                        TestDict("event", mixedRecall.EventId)).SingleOrDefault();
+                    var reportPayload = TryParseJsonObject(ReadString(report, "payload_json", "{}"));
+                    Check("mixed_terms_recall_keeps_exact_current_player_report",
+                        !IsPureConversationRecallRequest(mixedRecall.PlayerText)
+                        && ReadBool(mixedRecallReceipt, "memoryUpdateComplete", false)
+                        && ReadString(report, "summary", "") == mixedRecall.PlayerText
+                        && ReadString(ReadDictionary(reportPayload, "sourceEvidence"), "speakerId", "") == "player"
+                        && ReadString(ReadDictionary(reportPayload, "semanticAdmission"), "status", "") == "exact_reported_source");
+                }
+
                 var privateUnit = Unit("whisper", group: true, whisper: true);
                 bool privateFailure = false;
                 try { Publish(privateUnit, phase => { if (phase == "after_memory") throw new InvalidOperationException("Private source fault."); }); }
@@ -425,7 +465,27 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 Check("spoken_turn_after_silence_still_accepts", ReadBool(afterSilenceReceipt, "ok", false) && AcceptedSourcesMatch(afterSilence)
                     && ReadString(ReadDictionary(afterSilenceReceipt, "playerAttention"), "status", "") == "committed"
                     && ReadString(ReadDictionary(afterSilenceReceipt, "playerAttention"), "sourceId", "").Length > 0, afterSilenceReceipt);
+                var single = Unit("single_pass_missing_metadata");
+                CapturePlayerInput(single.Payload);
+                var oneAnswer = GenerateSinglePassConversation(TestDict(), single.Payload, "dialogue", responder: _ =>
+                    TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "I'll put it to each of them. Would you go?"))));
+                single.Parsed = TryParseJsonObject(ReadString(oneAnswer, "content", ""));
+                single.Reply = ReadString(single.Parsed, "reply", "");
+                single.Memories.Clear();
+                var singleReceipt = ReadDictionary(Publish(single), "acceptedUnit");
+                Check("single_pass_missing_metadata_publishes_original_speech", ReadBool(singleReceipt, "ok", false)
+                    && AcceptedSourcesMatch(single) && !single.Parsed.ContainsKey("structuredActionDecision"), singleReceipt);
+                Check("single_pass_exact_replay_does_not_republish", ReadBool(ReadDictionary(Publish(single), "acceptedUnit"), "idempotentReplay", false)
+                    && Count("conversation_accepted_units", "unit_id", single.EventId) == 1);
+                string originalSingleReply = single.Reply;
+                single.Reply += " Replaced.";
+                bool singleConflict = false;
+                try { Publish(single); } catch (InvalidOperationException) { singleConflict = true; }
+                Check("single_pass_cannot_replace_accepted_speech", singleConflict);
+                single.Reply = originalSingleReply;
                 var stale = Unit("pre_restore");
+                GenerateSinglePassConversation(TestDict(), stale.Payload, "dialogue", responder: _ =>
+                    TestDict("ok", true, "content", Json.Serialize(stale.Parsed)));
                 AdvanceMemoryRestoreGeneration(campaign);
                 bool restoreRejected = false;
                 try { Publish(stale); } catch (InvalidOperationException) { restoreRejected = true; }

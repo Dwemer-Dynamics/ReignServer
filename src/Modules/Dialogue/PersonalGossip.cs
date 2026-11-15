@@ -126,7 +126,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             var row = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 GossipFields("pair", AmbientPairKey(observer, subject))).FirstOrDefault();
             return row == null ? InitialReignAffinity(observerProfile, subjectProfile)
-                : ReadDouble(row, GossipSameId(ReadString(row, "hero_a_id", ""), observer) ? "affinity_a_to_b" : "affinity_b_to_a", 0);
+                : EffectiveDirectionalAffinity(row, GossipSameId(ReadString(row, "hero_a_id", ""), observer));
         }
 
         private static bool GossipKnown(ReignDbConnection c, string observer, string target,
@@ -270,15 +270,77 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                             "rootId", id, "hop", 1, "holders", new List<string> { speaker },
                             "presenceComplete", ReadBool(ReadDictionary(payload, "gossipPresence"), "rosterComplete", false));
                         topic["playerName"] = ReadString(ReadDictionary(topic, "playerReference"), "label", "the stranger");
+                        topic = PreservePersonalGossipSource(c, prior == null ? null : GossipJson(prior), topic);
                         CapturePersonalGossipTestControls(c, campaign, topic, prior);
                         EvaluatePersonalGossip(c, campaign, topic, people);
                     }
+                    AcceptPublicWitnessGossip(c, campaign, payload, parsed, episode, speaker, player, people);
                     MarkPersonalGossipRaised(c, timeline, speaker, session, parsed, reply, payload);
                     DeliverPersonalGossip(c, campaign, timeline, day);
                 }
                 SchedulePersonalGossip(campaign);
             }
             catch (Exception ex) { LogOperational("gossip.accept_failed", GossipFields("campaignId", campaign, "error", LimitText(ex.Message, 500))); }
+        }
+
+        private static int PersonalGossipSourceStrength(Dictionary<string, object> topic)
+        {
+            if (IsOriginalPublicWitnessGossip(topic)) return GossipFeeling(topic, "witnessInterest");
+            if (ReadString(topic, "category", "") == "impression") return 0;
+            var signal = ReadDictionary(topic, "signal");
+            return new[] { GossipFeeling(signal, "excitement"), GossipFeeling(signal, "curiosity"), GossipFeeling(signal, "hurt") }
+                .Concat(ReadDictionaryList(signal, "targets").Select(target => GossipQuoteSupported(
+                    ReadString(target, "evidenceQuote", ""), ReadString(topic, "sourceText", "")) ? GossipFeeling(target, "hurt") : 0))
+                .DefaultIfEmpty(0).Max();
+        }
+
+        private static Dictionary<string, object> PreservePersonalGossipSource(ReignDbConnection c,
+            Dictionary<string, object> prior, Dictionary<string, object> incoming)
+        {
+            // Called under the campaign gossip gate. Preserve an entire accepted
+            // evidence bundle: quote, feelings, source/session IDs and transcript.
+            // A later bland line cannot borrow the earlier line's supported feeling.
+            if (prior == null || !GossipSourcesActive(c, prior)) return incoming;
+            var priorIds = ReadStringList(prior, "sourceTurnIds");
+            bool sameSource = priorIds.Count > 0 && priorIds.SequenceEqual(ReadStringList(incoming, "sourceTurnIds"), StringComparer.Ordinal)
+                && ReadString(prior, "sessionId", "") == ReadString(incoming, "sessionId", "")
+                && ReadString(prior, "sourceQuote", "") == ReadString(incoming, "sourceQuote", "");
+            int previousStrength = PersonalGossipSourceStrength(prior), incomingStrength = PersonalGossipSourceStrength(incoming);
+            bool retain = previousStrength > 0 && (previousStrength > incomingStrength
+                || previousStrength == incomingStrength && !sameSource);
+            var result = new Dictionary<string, object>(retain ? prior : incoming, StringComparer.OrdinalIgnoreCase);
+            result["worldDay"] = ReadDouble(incoming, "worldDay", 0);
+            result["speaker"] = ReadDictionary(incoming, "speaker");
+            result["presenceComplete"] = ReadBool(incoming, "presenceComplete", true);
+            result["sourceRetainedFromEarlierExchange"] = retain
+                && ReadString(prior, "sourceEvidenceExchangeId", "") != ReadString(incoming, "sourceEvidenceExchangeId", "");
+            result["relationshipReassessmentExchangeIds"] = (ReadString(result, "sessionId", "") == ReadString(prior, "sessionId", "")
+                    ? ReadStringList(prior, "relationshipReassessmentExchangeIds").Concat(new[] { ReadString(prior, "sourceExchangeId", "") })
+                    : Enumerable.Empty<string>())
+                .Concat(ReadString(result, "sessionId", "") == ReadString(incoming, "sessionId", "")
+                    ? new[] { ReadString(incoming, "sourceExchangeId", "") } : Array.Empty<string>())
+                .Where(id => id.Length > 0).Distinct(StringComparer.Ordinal).TakeLast(64).ToList();
+            foreach (string key in new[] { "policy", "savedRolls", "operatorTestControls" })
+                if (prior.TryGetValue(key, out object value)) result[key] = value;
+            // Repeated discussion in one episode cannot downgrade an already
+            // classified confidence. This does not rewrite a queued story.
+            var oldSignal = ReadDictionary(prior, "signal");
+            var newSignal = ReadDictionary(incoming, "signal");
+            if (ReadString(prior, "sessionId", "") == ReadString(incoming, "sessionId", "")
+                && GossipSourcePrivacyClassified(oldSignal) && GossipSourcePrivacyClassified(newSignal))
+            {
+                var merged = new Dictionary<string, object>(ReadDictionary(result, "signal"), StringComparer.OrdinalIgnoreCase);
+                var ranks = new[] { "public", "personal", "intimate", "secret" };
+                foreach (string key in new[] { "privacy", "existencePrivacy" })
+                    merged[key] = ranks[Math.Max(Array.IndexOf(ranks, ReadString(oldSignal, key, "public")),
+                        Array.IndexOf(ranks, ReadString(newSignal, key, "public")))];
+                foreach (string key in new[] { "promisedSecrecy", "ownCompromising" })
+                    merged[key] = ReadBool(oldSignal, key, false) || ReadBool(newSignal, key, false);
+                merged["confidenceOwnerIds"] = ReadStringList(oldSignal, "confidenceOwnerIds")
+                    .Concat(ReadStringList(newSignal, "confidenceOwnerIds")).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                result["signal"] = merged;
+            }
+            return result;
         }
 
         private static bool GossipSourcePrivacyClassified(Dictionary<string, object> signal) =>
@@ -301,7 +363,8 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
                         GossipFields("day", ReadDouble(payload, "worldDay", 0) - 1)))
                     {
                         var topic = GossipJson(row);
-                        if (ReadString(topic, "sourceExchangeId", "") != exchange) continue;
+                        if (ReadString(topic, "sourceExchangeId", "") != exchange
+                            && !ReadStringList(topic, "relationshipReassessmentExchangeIds").Contains(exchange, StringComparer.Ordinal)) continue;
                         var snapshot = GossipSnapshot(c, ReadString(topic, "timelineId", "main"));
                         if (Math.Abs(ReadDouble(snapshot, "worldDay", -1) - ReadDouble(topic, "worldDay", 0)) > 1d / 1440) continue;
                         EvaluatePersonalGossip(c, campaign, topic, ReadDictionaryList(snapshot, "people"));
@@ -373,20 +436,29 @@ VALUES($id,$timeline,$speaker,$player,$session,$day,$status,$json) ON CONFLICT(t
                 "disclosure", GossipDecisionRoll(topic, id, "disclosure"), "distortion", GossipDecisionRoll(topic, id, "distortion"), "severity", GossipDecisionRoll(topic, id, "severity"),
                 "negativeRecipient", GossipDecisionDraw(topic, id, "negative_recipient"), "friendlyRecipient", GossipDecisionDraw(topic, id, "friendly_recipient"));
             if (ReadBool(signal, "privacyUnclassified", false)) { SavePersonalGossipTopic(c, topic, "privacy_unclassified"); return; }
-            double delta = GossipConversationDelta(c, timeline, session, speaker, player);
-            int positiveFeeling = Math.Max(GossipFeeling(signal, "excitement"), GossipFeeling(signal, "curiosity"));
+            bool publicWitness = IsOriginalPublicWitnessGossip(topic);
+            double delta = publicWitness ? 0 : GossipConversationDelta(c, timeline, session, speaker, player);
+            // Public salience describes the witnessed words, not an invented private
+            // feeling or a relationship receipt for a nonparticipant.
+            int witnessInterest = publicWitness ? GossipFeeling(topic, "witnessInterest") : 0;
+            int positiveFeeling = Math.Max(witnessInterest, Math.Max(GossipFeeling(signal, "excitement"), GossipFeeling(signal, "curiosity")));
             double supportedHurt = ReadDictionaryList(signal, "targets")
                 .Where(t => GossipQuoteSupported(ReadString(t, "evidenceQuote", ""), ReadString(topic, "sourceText", "")))
                 .Select(t => GossipFeeling(t, "hurt")).DefaultIfEmpty(0).Max();
             double emotion = Math.Max(positiveFeeling, Math.Max(Math.Max(supportedHurt, GossipFeeling(signal, "hurt")), Math.Min(100, 20 * Math.Abs(delta))));
-            topic["delta"] = delta; topic["emotion"] = emotion; topic["traits"] = traits;
+            topic["delta"] = delta; topic["deltaSourceSessionId"] = publicWitness ? "" : session;
+            topic["emotion"] = emotion; topic["traits"] = traits;
+            topic["signalDiagnostic"] = ReadString(topic, "category", "") == "impression"
+                && new[] { "excitement", "curiosity", "hurt" }.Any(key => GossipFeeling(signal, key) != 0)
+                ? "impression_feelings_ignored_requires_detailed_classification" : "";
             if (ReadString(topic, "category", "") == "impression") emotion = Math.Min(100, 20 * Math.Abs(delta));
             topic["emotion"] = emotion;
             if (!GossipEmotionEligible(emotion, traits)) { SavePersonalGossipTopic(c, topic, "insufficient_feeling"); return; }
             var friendlyAudit = BuildPersonalGossipCandidates(c, topic, people, "positive");
             var negativeAudit = BuildPersonalGossipCandidates(c, topic, people, "negative");
             var friendly = GossipRecipients(friendlyAudit, "positive", GossipTrait(traits, "familyMotivation"), policy);
-            var negative = GossipRecipients(negativeAudit, "negative", GossipTrait(traits, "familyMotivation"), policy);
+            var negative = publicWitness ? new List<GossipCandidate>()
+                : GossipRecipients(negativeAudit, "negative", GossipTrait(traits, "familyMotivation"), policy);
             topic["candidateAudit"] = GossipFields("friendly", friendlyAudit.Where(x => x.Local || x.Mentioned).Select(x => x.Audit()).ToList(),
                 "negative", negativeAudit.Where(x => x.Local || x.Mentioned).Select(x => x.Audit()).ToList(),
                 "exclusionCounts", friendlyAudit.Where(x => x.Exclusion.Length > 0).GroupBy(x => x.Exclusion)
@@ -442,6 +514,8 @@ AND (m.created_day>$day OR t.session_id=$session);", GossipFields("timeline", ti
             if (capRows.Count(r => ReadDouble(r, "created_day", 0) > day - 1) >= ReadInt(policy, "maximumOutgoingPerDay", 3)
                 || !retell && capRows.Count(r => ReadString(r, "session_id", "") == session && ReadInt(r, "hop", 1) == 1) >= ReadInt(policy, "maximumOriginalsPerConversation", 2))
             { SavePersonalGossipTopic(c, topic, "capacity_reached"); return; }
+            if (publicWitness && PublicWitnessGossipCapacityReached(c, topic))
+            { SavePersonalGossipTopic(c, topic, "witness_capacity_reached"); return; }
             string distortion = "none";
             int distortionChance = GossipTrait(traits, "honesty") >= 100 ? 0
                 : GossipAdjustedChance(GossipDistortionChance(traits, selected.Hurt), "distortion", policy);

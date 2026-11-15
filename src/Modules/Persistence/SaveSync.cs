@@ -394,13 +394,37 @@ namespace ReignBetaServer
                 ["storageWarning"] = uniqueStateCount >= SaveSyncUniqueStateWarning,
                 ["lastRegisteredPointId"] = lastRegisteredPointId,
                 ["lastRegisteredPointAvailable"] = lastRegisteredPointAvailable,
-                ["lastLoadedSavePoint"] = PublicSaveSyncPoint(campaignId,
-                    ReadDictionary(ledger, "lastLoadedSavePoint")),
+                ["lastLoadedSavePoint"] = PublicLoadedSaveSyncPoint(campaignId, ledger, allPoints),
                 ["lastSyncResult"] = ReadDictionary(ledger, "lastSyncResult") ?? new Dictionary<string, object>(),
                 ["lastBackupId"] = ReadString(ledger, "lastBackupId", ""),
                 ["pendingFinalSaveDeletion"] = IsCampaignRetirementPending(campaignId),
                 ["updatedUtc"] = ReadString(ledger, "updatedUtc", "")
             };
+        }
+
+        private static Dictionary<string, object> PublicLoadedSaveSyncPoint(string campaignId,
+            Dictionary<string, object> ledger, List<Dictionary<string, object>> points)
+        {
+            var loaded = ReadDictionary(ledger, "lastLoadedSavePoint");
+            string id = ReadString(loaded, "savePointId", "");
+            if (id.Length == 0) return new Dictionary<string, object>();
+            // The cached public receipt omits private storage identifiers. Resolve
+            // the registered point before checking its actual snapshot location.
+            var current = ResolveLoadedSaveSyncPoint(ledger, points);
+            if (current != null) return PublicSaveSyncPoint(campaignId, current);
+            var missing = PublicSaveSyncPoint(loaded);
+            missing["status"] = "unregistered_loaded_point";
+            missing["snapshotAvailable"] = false;
+            missing["availabilityReason"] = "The last-loaded point is no longer registered in this campaign ledger.";
+            return missing;
+        }
+
+        private static Dictionary<string, object> ResolveLoadedSaveSyncPoint(Dictionary<string, object> ledger,
+            List<Dictionary<string, object>> points)
+        {
+            string id = ReadString(ReadDictionary(ledger, "lastLoadedSavePoint"), "savePointId", "");
+            return id.Length == 0 ? null : points.FirstOrDefault(point => ReadString(point, "savePointId", "")
+                .Equals(id, StringComparison.OrdinalIgnoreCase));
         }
 
         private static Dictionary<string, object> SaveSyncDeleteNativeSaveApi(Dictionary<string, object> payload)
@@ -2139,6 +2163,17 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 ["name"] = id, ["summary"] = summary, ["durationMs"] = 0
             });
             string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var loadedReceiptLedger = TestDict("lastLoadedSavePoint", TestDict("savePointId", "cached_point", "status", "ready"));
+            var registeredLoadedPoint = TestDict("savePointId", "cached_point", "snapshotStorageId", "actual_retained_storage");
+            add("loaded_receipt_uses_registered_storage_metadata",
+                ReadString(ResolveLoadedSaveSyncPoint(loadedReceiptLedger,
+                    new List<Dictionary<string, object>> { registeredLoadedPoint }), "snapshotStorageId", "") == "actual_retained_storage",
+                "Cached public receipts resolve the current full point before snapshot availability checks.");
+            var missingLoaded = PublicLoadedSaveSyncPoint("isolated_missing_point", loadedReceiptLedger, new List<Dictionary<string, object>>());
+            add("unregistered_loaded_receipt_has_explicit_coverage_gap",
+                ReadString(missingLoaded, "status", "") == "unregistered_loaded_point" && !ReadBool(missingLoaded, "snapshotAvailable", true)
+                && PublicLoadedSaveSyncPoint("isolated_missing_point", TestDict(), new List<Dictionary<string, object>>()).Count == 0,
+                "Absent loaded points do not invent legacy-snapshot failures or access another campaign.");
             string campaignId = "stx_" + token;
             string siblingId = "sss_" + token;
             string preexistingId = "ssp_" + token;

@@ -377,10 +377,19 @@ namespace ReignBetaServer
                         TestDict("calls", calls - largeBefore, "error", ReadString(largeResult, "error", "")));
                 }
                 int oversizedBefore = calls;
-                var oversized = ChatWithLlm(TestDict("campaignId", campaign, "requestType", "memory", "correlationId", "capacity_oversized",
-                    "messages", new[] { TestDict("role", "user", "content", new string('x', 1500000)) }));
-                add("production_oversized_codex_input_blocks_before_dispatch", !ReadBool(oversized, "ok", true) && calls == oversizedBefore
-                    && ReadString(oversized, "errorCode", "") == "prompt_hard_limit_exceeded", null);
+                var oversizedRequest = TestDict("campaignId", campaign, "requestType", "dialogue", "correlationId", "capacity_oversized",
+                    "messages", new[] { TestDict("role", "user", "content", new string('x', 1500000)) });
+                var oversized = ChatWithLlm(oversizedRequest);
+                add("production_oversized_codex_estimate_is_advisory", ReadBool(oversized, "ok", false) && calls == oversizedBefore + 1
+                    && turnTexts.Last().Contains(new string('x', 1500000), StringComparison.Ordinal)
+                    && !ReadBool(ReadDictionary(oversizedRequest, "continuityProviderPreflight"), "fits", true)
+                    && ReadBool(ReadDictionary(oversizedRequest, "promptPreflight"), "dispatchAllowed", false), null);
+                int missingSourceBefore = calls;
+                var missingSource = ChatWithLlm(TestDict("campaignId", campaign, "requestType", "dialogue", "correlationId", "required_source_missing",
+                    "messages", new[] { TestDict("role", "user", "content", "A short request with missing evidence.") },
+                    "promptEnvelope", TestDict("continuityPreflight", TestDict("requiredSourceIds", new[] { "required_original_absent" }))));
+                add("production_required_source_loss_still_blocks_dispatch", !ReadBool(missingSource, "ok", true) && calls == missingSourceBefore
+                    && ReadString(missingSource, "errorCode", "") == "prompt_required_source_missing", null);
                 var request = new Dictionary<string, object> { ["campaignId"] = campaign, ["requestType"] = "dialogue", ["prompt"] = "Good evening.", ["correlationId"] = "primary" };
                 int before = calls;
                 var primary = ChatWithLlm(request);

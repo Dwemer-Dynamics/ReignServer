@@ -9,9 +9,9 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const string ConversationQuestionContract = @"
-QUESTION AND ANSWER STATE: Answer receipt and agreement are separate. An answer may be understood but unconvincing. Do not say it was never supplied. A narrower follow-up is a NEW question; do not move the original demand. Other NPCs speaking in the same player beat do not give the player an opportunity to answer. Emit up to four source-linked changes when needed to retain an answer and a distinct new follow-up together.
-Use continuityWrites kind=question to link an important question or explicit request for information and its answers. Requests such as tell me how or please explain need not end in a question mark. A declarative recollection, private thought, reported request or rhetorical observation is not a new demand. Supply questionState {question:{turnId,speakerId,quote}, addresseeIds:[], answerState:unanswered/answered/partial/deferred/refused/uncertain, answers:[{turnId,speakerId,quote}], evaluation:unassessed/convincing/unconvincing, followUpTo:""""}. Source quotes are exact, including punctuation. current_player/current_npc refer to this exchange; otherwise use supplied canonical turn IDs. Use status=resolved for answered/refused, active for partial/unanswered/uncertain, deferred for deferred. The outer evidenceQuote must cite your current reply acknowledging this update. Never infer evasion merely from uncertainty or disagreement. Give a new narrower question a different record; followUpTo may link its predecessor. Never assign another person's answer or invent an acknowledgment. Empty/omitted writes preserve prior answers. For other continuity kinds, omit questionState or return null.
-For an EXISTING question, update its supplied id and OMIT questionState.question: the server binds its immutable original. A repeated asking does not replace that original. Cite only the exact answer in answers; do not reconstruct or re-quote the old question. For a NEW question, questionState.question remains required. Record an answer even when you dislike its scope or find it unconvincing, before adding a distinct follow-up. An admission of not knowing, a refusal, or a stated lack of limits is an answer to evaluate, not proof that no answer was given.
+QUESTION AND ANSWER STATE: Answer receipt and agreement are separate. An answer may be understood but unconvincing. Do not say it was never supplied. A narrower follow-up is a NEW question; do not move the original demand. Other NPCs speaking in the same player beat do not give the player an opportunity to answer. Use up to four source-linked changes to retain answers and distinct follow-ups.
+Use continuityWrites kind=question for important information requests and their answers. Requests like tell me how or please explain need no question mark. A declarative recollection, private thought, reported request or rhetorical observation is not a new demand. Supply questionState {question:{turnId,speakerId,quote}, addresseeIds:[], answerState:unanswered/answered/partial/deferred/refused/uncertain, answers:[{turnId,speakerId,quote}], evaluation:unassessed/convincing/unconvincing, followUpTo:""""}. Quotes are exact contiguous spans, including punctuation; use separate answers for separated spans. Quote whole request units. For compound questions, answered needs answer spans for every part; otherwise use partial. Use current_player/current_npc for this exchange; otherwise supplied canonical turn IDs. Use status=resolved for answered/refused, active for partial/unanswered/uncertain, deferred for deferred. evidenceQuote must cite your reply acknowledging this update. Never infer evasion merely from uncertainty or disagreement. Narrower questions need distinct records; followUpTo can link the predecessor. Never assign another person's answer or invent an acknowledgment. Empty/omitted writes preserve prior answers. Omit questionState or use null for other kinds.
+For an EXISTING question, update its supplied question-ledger id and OMIT questionState.question: the server binds its immutable original. Omitted addresseeIds inherit that original; do not change its addressees. Other context identifiers (including group question references) are not question-ledger ids. A repeated asking does not replace that original. Cite only the exact answer in answers; do not reconstruct or re-quote the old question. The optional relatedTurnId/relationKind fields are redundant for a questionState update; omit them. New questions require questionState.question. Record even an unconvincing answer before a distinct follow-up. An admission of not knowing, a refusal, or a stated lack of limits is an answer to evaluate, not proof that no answer was given.
 An open ledger is a record of accepted links, not proof of silence. Later addressee turns marked for review have not been assessed by that record. Read their quoted originals and the latest contribution before repeating a demand. Unrelated later speech does not automatically answer a question. Link a relevant answer to the existing id, or reaffirm the state with an exact current acknowledgment. Omitted writes leave that review outstanding; do not describe dissatisfaction or a new question as an unpaid original answer.
 ";
 
@@ -66,10 +66,25 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
                     row = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND speaker_id=$speaker
 AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                         TestDict("event", eventId, "speaker", speaker, "text", text)).FirstOrDefault();
+                // The floor admits the shared input before any NPC response,
+                // under its own event ID. A per-NPC event is not that input's ID.
+                if (row == null && id == "current_player")
+                    row = ObservedGroupPlayerInput(connection, payload, owner, speaker, text);
             }
             else if (id.Length > 0 && TableExists(connection, "conversation_turns"))
             {
                 row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", id)).FirstOrDefault();
+                // Some writers cite the exchange event ID displayed beside a turn.
+                // Resolve it only when exactly one visible, attributed original
+                // contains the exact quote; never guess across observer projections.
+                if (row == null)
+                {
+                    var candidates = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND speaker_id=$speaker AND status='active';",
+                        TestDict("id", id, "speaker", requestedSpeaker)).Where(candidate =>
+                            PrecisionTurnVisible(candidate, owner, BuildKnowledgeAccessContext(owner, peer, "", payload), connection)
+                            && ReadString(candidate, "text", "").Contains(quote, StringComparison.Ordinal)).Take(2).ToList();
+                    if (candidates.Count == 1) row = candidates[0];
+                }
                 if (row == null || !PrecisionTurnVisible(row, owner, BuildKnowledgeAccessContext(owner, peer, "", payload), connection)) return null;
                 text = ReadString(row, "text", ""); speaker = ReadString(row, "speaker_id", "");
                 if (!string.Equals(requestedSpeaker, speaker, StringComparison.OrdinalIgnoreCase)) return null;
@@ -85,7 +100,10 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                 "speakerId", speaker, "quote", quote, "start", start, "length", quote.Length,
                 "sourceHash", PromptHash(text), "requestForm", ConversationInformationRequestForm(text, quote, start),
                 "worldDay", row == null ? ReadDouble(payload, "worldDay", 0d) : ReadDouble(row, "world_day", 0d),
-                "sequence", row == null ? long.MaxValue : ReadLong(row, "accepted_sequence", 0),
+                "sequence", row == null ? 0L : ReadLong(row, "accepted_sequence", 0),
+                "role", id == "current_player" ? "player" : id == "current_npc" ? "npc" : ReadString(row, "role", ""),
+                "groupInputStage", row != null && ReadString(row, "event_id", "") == GroupPlayerInputEventId(payload)
+                    && ReadString(row, "role", "") == "player",
                 "sessionId", row == null ? GroupConversationSessionId(payload) : ReadString(row, "session_id", ""),
                 "beatId", row == null ? ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId")
                     : ReadFirstString(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "sceneTurnId", "exchangeId", "turnId"),
@@ -93,18 +111,31 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                     : TextListFromJson(ReadString(row, "participants_json", "[]")));
         }
 
-        private static bool QuestionSourceAfter(Dictionary<string, object> answer, Dictionary<string, object> question)
+        private static string QuestionSourceOrder(Dictionary<string, object> answer, Dictionary<string, object> question)
         {
-            if (ReadString(answer, "eventId", "") == ReadString(question, "eventId", ""))
+            string session = ReadString(answer, "sessionId", ""), beat = ReadString(answer, "beatId", "");
+            if (session.Length > 0 && beat.Length > 0 && session == ReadString(question, "sessionId", "")
+                && beat == ReadString(question, "beatId", ""))
+            {
+                if (ReadBool(answer, "groupInputStage", false) && ReadString(question, "role", "") == "npc") return "before";
+                if (ReadBool(question, "groupInputStage", false) && ReadString(answer, "role", "") == "npc") return "after";
+            }
+            if (ReadString(answer, "eventId", "").Length > 0 && ReadString(answer, "eventId", "") == ReadString(question, "eventId", ""))
             {
                 string a = ReadString(answer, "sourceAlias", ""), q = ReadString(question, "sourceAlias", "");
-                if (q == "current_npc" && a == "current_player") return false;
-                if (q == "current_player" && a == "current_npc") return true;
-                if (ReadString(answer, "turnId", "") == ReadString(question, "turnId", ""))
-                    return ReadInt(answer, "start", 0) >= ReadInt(question, "start", 0) + ReadInt(question, "length", 0);
+                if (q == "current_npc" && a == "current_player") return "before";
+                if (q == "current_player" && a == "current_npc") return "after";
+                if (ReadString(answer, "turnId", "").Length > 0 && ReadString(answer, "turnId", "") == ReadString(question, "turnId", ""))
+                    return ReadInt(answer, "start", 0) >= ReadInt(question, "start", 0) + ReadInt(question, "length", 0) ? "after" : "before";
             }
-            return ReadDouble(answer, "worldDay", 0d) >= ReadDouble(question, "worldDay", 0d)
-                && ReadLong(answer, "sequence", 0) > ReadLong(question, "sequence", 0);
+            long aSequence = ReadLong(answer, "sequence", 0), qSequence = ReadLong(question, "sequence", 0);
+            // An unstored alias is not infinitely later than a stored question.
+            if (aSequence <= 0 || qSequence <= 0 || aSequence == long.MaxValue || qSequence == long.MaxValue) return "unknown";
+            if (aSequence == qSequence) return "unknown";
+            double aDay = ReadDouble(answer, "worldDay", double.NaN), qDay = ReadDouble(question, "worldDay", double.NaN);
+            if (double.IsFinite(aDay) && double.IsFinite(qDay) && ((aDay < qDay && aSequence > qSequence)
+                || (aDay > qDay && aSequence < qSequence))) return "unknown";
+            return aSequence > qSequence ? "after" : "before";
         }
 
         private static string PrepareQuestionContinuityWrite(ReignDbConnection connection, Dictionary<string, object> write,
@@ -120,6 +151,10 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                 TestDict("id", id, "owner", owner, "timeline", ContinuityTimeline(payload))).FirstOrDefault();
             if (old != null && !MemoryTimeVisible(old, access, connection)) old = null;
             var requestedQuestion = ReadDictionary(state, "question");
+            // An all-empty schema placeholder carries no replacement assertion.
+            // A partially supplied source still has to pass the normal exact checks.
+            if (requestedQuestion != null && new[] { "turnId", "speakerId", "quote" }.All(key => ReadString(requestedQuestion, key, "").Length == 0))
+                requestedQuestion = null;
             if (requestedQuestion == null)
             {
                 // Updating a known record need not reproduce a historical quote.
@@ -132,6 +167,8 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
             var question = ResolveQuestionSource(connection, requestedQuestion, payload, owner, peer, eventId, reply);
             if (question == null || ReadString(question, "requestForm", "").Length == 0) return "question_source_unverified";
             var addressees = ReadStringList(state, "addresseeIds").Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (!state.ContainsKey("addresseeIds") && old != null)
+                addressees = ReadStringList(ReadDictionary(TryParseJsonObject(ReadString(old, "payload_json", "{}")), "questionState"), "addresseeIds");
             var audience = ReadStringList(question, "audienceIds");
             string asker = ReadString(question, "speakerId", "");
             if (addressees.Count == 0 || addressees.Any(a => a == asker || !audience.Contains(a, StringComparer.OrdinalIgnoreCase)))
@@ -147,7 +184,8 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                 var source = ResolveQuestionSource(connection, supplied, payload, owner, peer, eventId, reply);
                 if (source == null || !addressees.Contains(ReadString(source, "speakerId", ""), StringComparer.OrdinalIgnoreCase))
                     return "question_answer_source_unverified";
-                if (!QuestionSourceAfter(source, question)) return "question_answer_precedes_question";
+                string order = QuestionSourceOrder(source, question);
+                if (order != "after") return order == "before" ? "question_answer_precedes_question" : "question_answer_order_unverified";
                 answers.Add(source);
             }
             if ((answerState == "answered" || answerState == "partial" || answerState == "deferred" || answerState == "refused") && answers.Count == 0)
@@ -187,6 +225,20 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
             write["questionState"] = TestDict("schema", "reign-question-state-v1", "question", question, "askerId", asker,
                 "addresseeIds", addressees, "answerState", answerState, "answers", answers, "evaluation", evaluation,
                 "followUpTo", followUp, "interpretation", "speaker_proposed_source_link");
+            // A redundant answer link sometimes points at the validated answer,
+            // whereas the generic relation contract points at its question.
+            // Remove that redundant optional link only after this exact Q&A pair passed all identity,
+            // visibility and chronology checks. Other generic links are untouched.
+            string relatedId = ReadString(write, "relatedTurnId", ""), relatedQuote = ReadString(write, "relatedQuote", "");
+            if (ReadString(write, "relationKind", "") == "answer" && answers.Any(answer =>
+                relatedId.Length > 0 && (relatedId == ReadString(answer, "turnId", "") || relatedId == ReadString(answer, "sourceAlias", ""))
+                && relatedQuote.Length >= 12 && ReadString(answer, "quote", "").Contains(relatedQuote, StringComparison.Ordinal)))
+            {
+                write["questionAnswerLinkNormalization"] = TestDict("fromTurnId", relatedId, "fromQuote", relatedQuote, "questionId", id,
+                    "questionTurnId", ReadString(question, "turnId", ""),
+                    "policy", "exact_validated_question_answer_pair");
+                foreach (string field in new[] { "relatedTurnId", "relationKind", "relatedQuote", "relatedSpeakerId", "relatedSourceHash" }) write.Remove(field);
+            }
             return "";
         }
 

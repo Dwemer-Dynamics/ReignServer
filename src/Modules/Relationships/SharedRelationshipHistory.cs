@@ -676,7 +676,8 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             ReignDbConnection connection,
             string speakerHeroId,
             string targetHeroId,
-            out List<string> historyIds, Dictionary<string, object> context = null)
+            out List<string> historyIds, Dictionary<string, object> context = null,
+            RelationshipPromptEvidenceBudget evidenceBudget = null)
         {
             historyIds = new List<string>();
             string pairKey = AmbientPairKey(speakerHeroId, targetHeroId);
@@ -685,6 +686,11 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             StringBuilder builder = new StringBuilder();
             var originals = context == null ? new List<Dictionary<string, object>>()
                 : RelationshipHistorySourceEvidence(connection, speakerHeroId, targetHeroId, context, false);
+            var supplied = PlannedPromptSources(context);
+            originals = originals.Where(record => ReadString(record, "kind", "") != "attributed_turn"
+                || supplied == null || !supplied.TryGetValue(ReadString(record, "sourceId", ""), out var hash)
+                || hash != ReadString(record, "sourceHash", "")).ToList();
+            if (evidenceBudget != null) originals = evidenceBudget.Select(originals);
             if (rows.Count == 0 && originals.Count == 0) return "";
             builder.AppendLine("Relationship development (generated soft relational canon; original dated speech retains precedence):");
             foreach (Dictionary<string, object> row in rows)
@@ -701,6 +707,9 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             {
                 builder.AppendLine("Your own original relationship evidence; this does not grant it to another participant:");
                 builder.Append(RenderRelationshipHistorySourceEvidence(originals));
+                if (supplied != null)
+                    foreach (var record in originals.Where(r => ReadString(r, "kind", "") == "attributed_turn"))
+                        supplied[ReadString(record, "sourceId", "")] = ReadString(record, "sourceHash", "");
                 historyIds.AddRange(originals.Select(r => ReadString(r, "sourceId", "")));
             }
             return builder.ToString().Trim();
@@ -722,10 +731,22 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             string text = ReadFirstString(eventPayload, "playerText", "text", "message");
             Dictionary<string, object> index = ReadDictionary(eventPayload, "actionResolutionIndex")
                 ?? new Dictionary<string, object>();
-            foreach (Dictionary<string, object> row in MentionedResolverEntries(index, "heroes", "name", text, 10))
+            var active = new HashSet<string>(new[] { "activeHeroIds", "activeHeroStringIds", "activeParticipantIds" }
+                .SelectMany(key => ReadStringList(eventPayload, key)), StringComparer.OrdinalIgnoreCase);
+            var candidates = MentionedResolverEntries(index, "heroes", "name", text, int.MaxValue)
+                .Where(row => ReadFirstString(row, "heroStringId", "heroId", "id").Length > 0)
+                .GroupBy(row => NormalizeLookup(ReadString(row, "name", "")), StringComparer.OrdinalIgnoreCase);
+            foreach (var namesakes in candidates)
             {
-                string id = ReadFirstString(row, "heroStringId", "heroId", "id");
-                if (!string.IsNullOrWhiteSpace(id)) result.Add(id);
+                var ids = namesakes.Select(row => ReadFirstString(row, "heroStringId", "heroId", "id"))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                if (ids.Count == 1) result.Add(ids[0]);
+                else
+                {
+                    // A present person or an explicit ID disambiguates a shared
+                    // name. Text alone never selects every absent namesake.
+                    foreach (string id in ids.Where(id => active.Contains(id) || result.Contains(id))) result.Add(id);
+                }
             }
             result.Remove(speakerHeroId);
             result.Remove(playerId);

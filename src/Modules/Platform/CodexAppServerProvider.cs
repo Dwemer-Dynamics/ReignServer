@@ -113,6 +113,7 @@ namespace ReignBetaServer
             }
             if (normalized == NanoGptProvider || normalized == "nano_gpt") return NanoGptProvider;
             if (normalized == OpenRouterProvider || normalized == "open_router") return OpenRouterProvider;
+            if (normalized == OllamaCloudProvider || normalized == "ollama") return OllamaCloudProvider;
             return OpenAiCompatibleProvider;
         }
 
@@ -1158,6 +1159,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
             tests.AddRange(RunCodexRuntimeSelfTests());
             tests.AddRange(RunOpenRouterProviderContractTests());
+            tests.AddRange(RunOllamaCloudProviderContractTests());
             tests.AddRange(RunGlobalKeyBridgeContractTests());
             Action<string, bool, string> add = (id, passed, summary) => tests.Add(new Dictionary<string, object>
             {
@@ -1217,6 +1219,7 @@ namespace ReignBetaServer
             add("control_center_selection",
                 controlCenter.Contains("value='nanogpt'>NanoGPT")
                 && controlCenter.Contains("value='openrouter'>OpenRouter")
+                && controlCenter.Contains("value='ollama_cloud'>Ollama Cloud")
                 && controlCenter.Contains("value='openai_compatible'>Custom OpenAI-compatible API")
                 && controlCenter.Contains("value='codex_subscription'>ChatGPT Codex subscription")
                 && controlCenter.Contains("/api/codex/models/refresh")

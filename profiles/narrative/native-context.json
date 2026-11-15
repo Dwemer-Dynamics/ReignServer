@@ -6,7 +6,11 @@
       "spclans.xml": "318afe49eb3a7e4b7b92877da58c69af5571925b31e13c0a3851ba995e47b070",
       "spkingdoms.xml": "1d0664283c916dbbd11a02bcd55bbba75e1de10354b54bd35508f59720dde41a",
       "lords.xml": "dd2747bccadc0ed0c2fee1debf38e8a36825b053e497f14d301de030f153abd5",
-      "reign_court_clans.xml": "8e01d68563520ccbd48b823d4e8bbbe4b0035ef28187be4cfe0ca7be105aaee7"
+      "reign_court_clans.xml": "8e01d68563520ccbd48b823d4e8bbbe4b0035ef28187be4cfe0ca7be105aaee7",
+      "NavalDLC/clans.xml": "688ecc6046d0cdf3e092ae9669857ddbe26f2ac5695ea03251099c54172feb34",
+      "NavalDLC/kingdoms.xml": "a9823a45cda869981e6755e5126eaf11463561dbdb5b51ea30edcd3f462cb0e8",
+      "NavalDLC/naval_lords.xml": "d5ab7e048c87b282bfb7f1987e18854d43fe4fdf1c9aeca0da91b7580f661868",
+      "NavalDLC/heroes.xml": "efd2a1bcfc14e0e2885479511c95ae8f9de21b4bd080ac32d54b4bc0becfb189"
     }
   },
   "clans": {
@@ -869,6 +873,42 @@
     "reign_house_town_K6": {
       "name": "Dorbetqan",
       "leaderId": "reign_court_town_K6_father"
+    },
+    "clan_nord_1": {
+      "name": "Throsniring",
+      "leaderId": "lord_7_1"
+    },
+    "clan_nord_2": {
+      "name": "Kjolding",
+      "leaderId": "lord_7_3"
+    },
+    "clan_nord_3": {
+      "name": "Orthling",
+      "leaderId": "lord_7_5"
+    },
+    "clan_nord_4": {
+      "name": "Skylfing",
+      "leaderId": "lord_7_14"
+    },
+    "clan_nord_5": {
+      "name": "Gauting",
+      "leaderId": "lord_7_17"
+    },
+    "clan_nord_6": {
+      "name": "Rungniring",
+      "leaderId": "lord_7_18"
+    },
+    "clan_nord_7": {
+      "name": "Huldring",
+      "leaderId": "lord_7_19"
+    },
+    "clan_nord_8": {
+      "name": "Dvarroving",
+      "leaderId": "lord_7_20"
+    },
+    "clan_nord_9": {
+      "name": "Visduring",
+      "leaderId": "lord_7_25"
     }
   },
   "kingdoms": {
@@ -903,6 +943,10 @@
     "khuzait": {
       "name": "Khuzait",
       "rulerId": "lord_6_1"
+    },
+    "nord": {
+      "name": "Kingdom of the Nordvyg",
+      "rulerId": "lord_7_1"
     }
   },
   "unspecifiedAgeHeroIds": [

@@ -32,7 +32,7 @@ namespace ReignBetaServer
                 "prepare_authority_fixture",
                 "prepare_manipulation_fixture", "restore_manipulation_fixture", "confirm", "deny",
                 "gauntlet_snapshot", "gauntlet_apply_fixture", "gauntlet_restore_fixture",
-                "action_probe_wait", "structured_action_test", "npc_lives_test", "personal_gossip_test",
+                "action_probe_wait", "structured_action_test", "npc_lives_test", "personal_gossip_test", "conversation_clock_probe",
                 "gauntlet_advance_time", "gauntlet_arrive", "gauntlet_depart",
                 "gauntlet_save", "gauntlet_reload", "gauntlet_fault",
                 "ui_open", "ui_status", "ui_snapshot", "ui_action", "ui_back", "ui_close",
@@ -3422,6 +3422,22 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             if (!LiveTestOperations.Contains(operation)) return null;
             string mode = NormalizeLiveTestMode(ReadString(input, "mode", ReadString(run, "mode", "individual_chat")));
             if (!LiveTestModes.Contains(mode)) return null;
+            if (operation == "conversation_clock_probe")
+            {
+                var enrollment = ReadDictionary(run, "enrollment");
+                if (mode != "individual_chat" || ReadString(run, "mode", "") != "individual_chat"
+                    || enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_conversation_clock"
+                    || !ReadBool(enrollment, "recoveryCheckpointVerified", false)
+                    || !new[] { "observe", "pulse" }.Contains(ReadString(input, "profile", ""))
+                    || ReadString(input, "confirmation", "") != "probe Reign conversation clock on disposable save"
+                    || string.IsNullOrWhiteSpace(ReadString(input, "probeId", ""))
+                    || ReadString(input, "probeId", "").Length > 128
+                    || ReadString(input, "expectedSaveName", "") != ReadString(enrollment, "disposableSaveName", "")) return null;
+                var scope = CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
+                if (!StructuredActionEnrollmentValid(scope, ReadString(run, "campaignId", ""))) return null;
+                // No caller-selected duration, raw clock value or action is admitted.
+                if (input.ContainsKey("minutes") || input.ContainsKey("days") || input.ContainsKey("ticks")) return null;
+            }
             if (operation == "world_economy_test")
             {
                 string profile = ReadString(input, "profile", "");
@@ -3526,6 +3542,11 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             }
             if (operation == "send" && string.IsNullOrWhiteSpace(ReadString(command, "text", ""))) return null;
             if (operation == "structured_action_test") command["enrollment"] = ReadDictionary(run, "enrollment");
+            if (operation == "conversation_clock_probe")
+            {
+                command["enrollment"] = ReadDictionary(run, "enrollment");
+                command["timeoutSeconds"] = 30;
+            }
             if (operation == "npc_lives_test" || operation == "personal_gossip_test") command["enrollment"] = ReadDictionary(run, "enrollment");
             if (operation == "clan_accords_test")
             {
@@ -4045,6 +4066,46 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && ReadString(proseOnlyFollowUp, "status", "") == "queued",
                 "Action-like reply prose cannot suppress a natural follow-up without an exact structured queued dialogue action.");
             add("safe_defaults", NormalizeLiveTestEffects("") == "guarded" && NormalizeLiveTestPresentation("") == "headless", "Headless presentation and guarded native actions are the defaults.");
+            var clockEnrollment = new Dictionary<string, object>
+            {
+                ["source"] = "reign_mcp_conversation_clock", ["campaignId"] = "clock-campaign",
+                ["timelineId"] = "clock-timeline", ["campaignTestRunId"] = "clock-test",
+                ["disposableSaveName"] = "ReignTest_Clock_Current", ["protectedBaselineSaveName"] = "Baseline",
+                ["recoveryCheckpointVerified"] = true
+            };
+            var clockRun = new Dictionary<string, object>
+            {
+                ["mode"] = "individual_chat", ["campaignId"] = "clock-campaign", ["enrollment"] = clockEnrollment
+            };
+            var clockStep = new Dictionary<string, object>
+            {
+                ["operation"] = "conversation_clock_probe", ["profile"] = "pulse", ["probeId"] = "clock-one",
+                ["expectedSaveName"] = "ReignTest_Clock_Current", ["confirmation"] = "probe Reign conversation clock on disposable save"
+            };
+            var clockAccepted = NormalizeLiveTestCommand(clockRun, clockStep);
+            add("clock_probe_enrolled", clockAccepted != null && ReferenceEquals(clockAccepted["enrollment"], clockEnrollment), "Clock diagnostic keeps the verified run enrollment.");
+            foreach (string key in new[] { "source", "campaignId", "timelineId", "campaignTestRunId", "disposableSaveName", "protectedBaselineSaveName", "recoveryCheckpointVerified" })
+            {
+                var invalidEnrollment = CloneDictionary(clockEnrollment); invalidEnrollment.Remove(key);
+                var invalidRun = CloneDictionary(clockRun); invalidRun["enrollment"] = invalidEnrollment;
+                add("clock_probe_missing_" + key, NormalizeLiveTestCommand(invalidRun, clockStep) == null, "Missing clock enrollment evidence is rejected.");
+            }
+            foreach (string key in new[] { "minutes", "days", "ticks" })
+            {
+                var invalidStep = CloneDictionary(clockStep); invalidStep[key] = 1;
+                add("clock_probe_duration_" + key, NormalizeLiveTestCommand(clockRun, invalidStep) == null, "The bounded clock probe cannot select an arbitrary time jump.");
+            }
+            foreach (string key in new[] { "confirmation", "probeId", "expectedSaveName", "profile" })
+            {
+                var invalidStep = CloneDictionary(clockStep); invalidStep[key] = "";
+                add("clock_probe_invalid_" + key, NormalizeLiveTestCommand(clockRun, invalidStep) == null, "Missing clock operation identity is rejected.");
+            }
+            var baselineEnrollment = CloneDictionary(clockEnrollment); baselineEnrollment["disposableSaveName"] = "Baseline";
+            var baselineRun = CloneDictionary(clockRun); baselineRun["enrollment"] = baselineEnrollment;
+            var baselineStep = CloneDictionary(clockStep); baselineStep["expectedSaveName"] = "Baseline";
+            add("clock_probe_protected_baseline", NormalizeLiveTestCommand(baselineRun, baselineStep) == null, "The immutable baseline cannot become a clock fixture.");
+            var wrongClockMode = CloneDictionary(clockRun); wrongClockMode["mode"] = "correspondence";
+            add("clock_probe_letters_rejected", NormalizeLiveTestCommand(wrongClockMode, clockStep) == null, "The diagnostic never runs in correspondence.");
             add("checkpoint_contract", LiveTestOperations.Contains("checkpoint"), "Versioned scenarios can pause at an explicit reload-safe checkpoint.");
             Dictionary<string, object> legacy = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object>
             {

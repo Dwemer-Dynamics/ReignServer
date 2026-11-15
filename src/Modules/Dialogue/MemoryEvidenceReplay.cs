@@ -3,11 +3,50 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private static string ReplayReferenceGraphModeError(Dictionary<string, object> fixture) =>
+            fixture?.TryGetValue("referenceGraphMode", out var value) == true
+                && (value is not string mode || mode is not ("off" or "capture" or "enabled"))
+                ? "invalid_replay_reference_graph_mode" : "";
+
+        // A fixture option, never a production setting. Scope the entire case,
+        // including retrieval, publication and continuations, and restore on throw.
+        private sealed class EvidenceReplayReferenceModeScope : IDisposable
+        {
+            private readonly string previous = ConversationReferenceValidationMode.Value;
+            public Dictionary<string, object> Audit { get; }
+
+            public EvidenceReplayReferenceModeScope(Dictionary<string, object> fixture)
+            {
+                string error = ReplayReferenceGraphModeError(fixture);
+                if (error.Length > 0) throw new InvalidOperationException(error);
+                bool supplied = fixture?.ContainsKey("referenceGraphMode") == true;
+                if (supplied)
+                {
+                    if (!ReignPostgreSqlStorage.Options.IsValidation || ActiveServerPort > 0
+                        || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+                        throw new InvalidOperationException("Reference graph replay requires non-listening isolated validation.");
+                    ConversationReferenceValidationMode.Value = ReadString(fixture, "referenceGraphMode", "");
+                }
+                try
+                {
+                    var settings = LoadSettings();
+                    Audit = TestDict("mode", ConversationReferenceMode(settings), "source", supplied ? "fixture"
+                        : previous != null ? "inherited_fixture" : settings.ContainsKey("memoryReferenceGraphMode") ? "settings" : "default",
+                        "historyBackfilled", false, "scope", "isolated_fixture_not_native_campaign");
+                    Audit["auditSha256"] = PromptHash(CanonicalJson(Audit));
+                }
+                catch { ConversationReferenceValidationMode.Value = previous; throw; }
+            }
+
+            public void Dispose() => ConversationReferenceValidationMode.Value = previous;
+        }
+
         private static string ReplayGenerationSettingsError(Dictionary<string, object> owner)
         {
             if (!owner.ContainsKey("generationSettings")) return "";
@@ -30,6 +69,133 @@ namespace ReignBetaServer
             string error = ReplayGenerationSettingsError(owner);
             if (error.Length > 0) throw new InvalidOperationException(error);
             foreach (var setting in ReadDictionary(owner, "generationSettings") ?? TestDict()) settings[setting.Key] = setting.Value;
+        }
+
+        private static bool BoundedReplayNativeValue(object value, int depth, ref int entries)
+        {
+            if (depth > 16 || ++entries > 10000) return false;
+            if (value is string text) return text.Length <= 24000;
+            if (value is Dictionary<string, object> dictionary)
+            {
+                foreach (var pair in dictionary)
+                    if (pair.Key.Length > 160 || !BoundedReplayNativeValue(pair.Value, depth + 1, ref entries)) return false;
+                return true;
+            }
+            if (value is IEnumerable<object> list)
+            {
+                foreach (object child in list) if (!BoundedReplayNativeValue(child, depth + 1, ref entries)) return false;
+                return true;
+            }
+            return value == null || value is bool or byte or short or int or long or decimal
+                || value is double number && double.IsFinite(number);
+        }
+
+        private static string ReplayInitialNativeContextError(Dictionary<string, object> item, Dictionary<string, object> writer)
+        {
+            if (writer == null || !writer.ContainsKey("initialNativeContext")) return "";
+            var native = ReadDictionary(writer, "initialNativeContext");
+            int entries = 0;
+            if (native == null || native.Count is < 1 or > 2
+                || native.Keys.Any(k => k is not ("actionResolutionIndex" or "identityView"))
+                || native.Keys.Any(k => ReadDictionary(native, k) == null)
+                || !BoundedReplayNativeValue(native, 0, ref entries) || Json.Serialize(native).Length > 128000)
+                return "invalid_initial_native_context";
+            // Characterization only: no captured reply can be published and no
+            // stale native snapshot can enter a repair or subsequent turn.
+            if (ReadString(item, "route", "dialogue") != "dialogue"
+                || new[] { "response", "repairResponses", "continuation", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse" }.Any(writer.ContainsKey)
+                || new[] { "publishedPartyViewSha256", "durableReadReplay", "reviewedFactReplay", "reviewedRecoveryReplay" }.Any(item.ContainsKey))
+                return "initial_native_context_capture_only";
+            return ReplayInitialPoliticalProfileError(item, writer);
+        }
+
+        private static string ReplayInitialPoliticalProfileError(Dictionary<string, object> item, Dictionary<string, object> writer)
+        {
+            var profile = ReadDictionary(writer, "profile");
+            if (profile == null || !profile.ContainsKey("appliedPoliticalProfile")) return "";
+            var applied = ReadDictionary(profile, "appliedPoliticalProfile");
+            try
+            {
+                var value = applied == null ? null : System.Text.Json.JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(applied));
+                if (!GovernmentPoliticalBeliefs.Valid(value) || value.Revision != 1 || value.Changes.Count != 0
+                    || value.SeenEvidence.Count != 0 || value.IntervalBudgets == null || value.IntervalBudgets.Count != 0
+                    || value.CampaignId != ReadString(profile, "campaignId", "")
+                    || value.HeroId != ReadString(profile, "heroStringId", "") || value.HeroId != ReadString(item, "observerId", "")
+                    || string.IsNullOrEmpty(value.TimelineId)
+                    || value.TimelineId != ReadString(profile, "politicalTimelineId", "")
+                    || CanonicalJson(applied) != CanonicalJson(TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(value))))
+                    return "invalid_initial_native_political_profile";
+                var characteristics = ReadDictionary(writer, "characteristics");
+                if (characteristics?.ContainsKey("politicalProfile") == true
+                    && CanonicalJson(ReadDictionary(characteristics, "politicalProfile")) != CanonicalJson(applied))
+                    return "initial_native_political_snapshots_disagree";
+                var content = CloneDictionary(applied);
+                foreach (string key in new[] { "CampaignId", "HeroId", "TimelineId" }) content.Remove(key);
+                // Mature or nested cross-world history needs its own receipt; this
+                // initial characterization supports only an unchanged genesis.
+                string serialized = CanonicalJson(content);
+                if (new[] { value.CampaignId, value.HeroId, value.TimelineId }.Any(id => serialized.Contains(id, StringComparison.Ordinal)))
+                    return "initial_native_political_nested_identity";
+                return "";
+            }
+            catch (System.Text.Json.JsonException) { return "invalid_initial_native_political_profile"; }
+        }
+
+        private static Dictionary<string, object> BindInitialReplayPoliticalProfile(Dictionary<string, object> item,
+            Dictionary<string, object> fixture, Dictionary<string, object> profile, Dictionary<string, object> characteristics,
+            string campaign, string observer, string timeline)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation || ActiveServerPort > 0
+                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+                || !HasArg(Environment.GetCommandLineArgs(), "--run-verification")
+                || campaign.Length != "evidence_replay_".Length + 32
+                || !campaign.StartsWith("evidence_replay_", StringComparison.Ordinal)
+                || !campaign.Skip("evidence_replay_".Length).All(Uri.IsHexDigit)
+                || !timeline.StartsWith("replay_", StringComparison.Ordinal)
+                || !int.TryParse(timeline.AsSpan("replay_".Length), out int scope) || scope < 0 || timeline != "replay_" + scope)
+                throw new InvalidOperationException("Initial political binding requires isolated evidence replay.");
+            string error = ReplayInitialNativeContextError(item, fixture);
+            if (!fixture.ContainsKey("initialNativeContext") || error.Length > 0)
+                throw new InvalidOperationException("Initial political binding is capture-only: " + error);
+            var source = ReadDictionary(ReadDictionary(fixture, "profile"), "appliedPoliticalProfile");
+            if (source == null) return null;
+            if (campaign == ReadString(source, "CampaignId", "") || observer == ReadString(source, "HeroId", "")
+                || timeline == ReadString(source, "TimelineId", ""))
+                throw new InvalidOperationException("The replay political namespace must differ from the source.");
+            var bound = CloneDictionary(source);
+            bound["CampaignId"] = campaign; bound["HeroId"] = observer; bound["TimelineId"] = timeline;
+            var value = System.Text.Json.JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(bound));
+            string path = CharacterFile(campaign, observer, "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json");
+            lock (PoliticalProfileLock)
+            {
+                var existing = ReadJsonObject(path);
+                if (existing.Count > 0 && CanonicalJson(existing) != CanonicalJson(bound))
+                    throw new InvalidOperationException("The isolated political revision already has different content.");
+                WritePoliticalRevision(campaign, observer, value);
+                if (value.Revision != 1 || CanonicalJson(ReadJsonObject(path)) != CanonicalJson(bound))
+                    throw new InvalidOperationException("The isolated political revision did not preserve its captured content.");
+            }
+            profile["appliedPoliticalProfile"] = CloneDictionary(bound);
+            characteristics["politicalProfile"] = CloneDictionary(bound);
+            return TestDict("status", "fixture_rebound_not_native_issued", "sourceSha256", PromptHash(CanonicalJson(source)),
+                "boundSha256", PromptHash(CanonicalJson(bound)), "writtenSha256", PromptHash(CanonicalJson(ReadJsonObject(path))),
+                "changedPaths", new[] { "CampaignId", "HeroId", "TimelineId" }, "revisionPreserved", true,
+                "limits", "Only revision1 with empty change/evidence/interval history is supported. Values are preserved; this is an isolated namespace clone, not native issuance or restore acceptance.");
+        }
+
+        private static Dictionary<string, object> MapReplayInitialNativeContext(Dictionary<string, object> fixture,
+            string originalObserver, string originalPeer, string observer, string peer)
+        {
+            var native = ReadDictionary(fixture, "initialNativeContext");
+            if (native == null) return null;
+            object MapValue(object value)
+            {
+                if (value is string text) return text == originalObserver ? observer : text == originalPeer ? peer : text;
+                if (value is Dictionary<string, object> dictionary) return dictionary.ToDictionary(p => p.Key, p => MapValue(p.Value));
+                if (value is IEnumerable<object> list) return list.Select(MapValue).ToList();
+                return value;
+            }
+            return (Dictionary<string, object>)MapValue(native);
         }
 
         // Offline initial-body capture only. The provider, credentials, headers,
@@ -73,8 +239,11 @@ namespace ReignBetaServer
             int hardCharacterLimit = ConversationPromptHardCharacterLimit(settings, continuityPreflight);
             bool fits = json.Length <= hardCharacterLimit && (continuityPreflight == null || ReadBool(continuityPreflight, "fits", false));
             wire["providerPreflight"] = TestDict("fits", fits, "requestCharacters", json.Length,
-                "hardCharacterLimit", hardCharacterLimit, "continuity", continuityPreflight);
-            if (!fits) { wire["status"] = "blocked"; wire["errorCode"] = "prompt_hard_limit_exceeded"; }
+                "hardCharacterLimit", hardCharacterLimit, "continuity", continuityPreflight,
+                "estimatePolicy", "advisory_after_best_effort_preparation",
+                "dispatchAllowed", ConversationProviderPreflightAllowsDispatch(continuityPreflight));
+            if (!ConversationProviderPreflightAllowsDispatch(continuityPreflight))
+            { wire["status"] = "blocked"; wire["errorCode"] = "prompt_required_source_missing"; }
             wire["generationSettings"] = TestDict("reasoningMode", ReadString(settings, "reasoningMode", "selective"),
                 "reasoningEffort", ReadString(settings, "reasoningEffort", "medium"), "temperature", ReadDouble(body, "temperature", 0.7));
             return captured;
@@ -82,6 +251,8 @@ namespace ReignBetaServer
 
         private const int EvidenceWriterReplayMaxContinuations = 3;
         private const int EvidenceWriterReplayMaxRepairs = 4;
+        // Reserve allocation room for subsequent cases, seeded rows and continuations in the same fixture.
+        private const long EvidenceWriterReplayMaxImportedSequence = long.MaxValue - 1_000_000L;
         private sealed class EvidenceReplayRepairPending : Exception { }
 
         private static string EvidenceReplayCampaignIdentity(Dictionary<string, object> input)
@@ -158,7 +329,8 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
         private static bool EvidenceWriterReplayComplete(Dictionary<string, object> result) =>
             ReadString(result, "status", "") == "captured_writer_stored_next_read_prepared"
             && ReadString(ReadDictionary(result, "nextWriterWireCapture"), "status", "") == "captured"
-            && ReadBool(ReadDictionary(ReadDictionary(result, "nextWriterWireCapture"), "providerPreflight"), "fits", false)
+            && ReadBool(ReadDictionary(ReadDictionary(result, "nextWriterWireCapture"), "providerPreflight"), "dispatchAllowed", false)
+            && (!result.ContainsKey("durableRead") || ReadString(ReadDictionary(result, "durableRead"), "status", "") == "captured")
             && (!result.ContainsKey("continuation") || EvidenceWriterReplayComplete(ReadDictionary(result, "continuation")));
 
         private static string EvidenceReplaySemanticInputError(Dictionary<string, object> item)
@@ -240,16 +412,29 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             // Empty recentSourceIds models a fresh conversation, not a renamed
             // interlocutor. Keep the known peer's eligible source attribution.
             return FirstNonEmpty(ReadString(transcript.LastOrDefault(turn => ReadString(turn, "speakerId", "") == mappedPeer), "speaker", ""),
-                ReadString(original, "speakerName", ""), "Player");
+                ReadString(original, "speakerName", ""),
+                ReadString(ReadDictionary(item, "writerReplay"), "peerDisplayName", ""), "Player");
         }
+
+        // Fixture capacity only: production prompt budgets and all other replay modes retain their own limits.
+        private const int MemoryEvidenceReplayMaxSources = 2048;
+        private const int MemoryEvidenceReplayMaxCaseCharacters = 4 * 1024 * 1024;
+
+        private static int MemoryEvidenceReplayCaseCharacters(Dictionary<string, object> item) =>
+            Json.Serialize(item.Where(p => p.Key != "capturedMemoryExtractions").ToDictionary(p => p.Key, p => p.Value)).Length;
+
+        private static Dictionary<string, object> MemoryEvidenceReplayInputBounds(Dictionary<string, object> item) =>
+            TestDict("sourceCount", ReadDictionaryList(item, "sources").Count, "sourceLimit", MemoryEvidenceReplayMaxSources,
+                "serializedCharacters", MemoryEvidenceReplayCaseCharacters(item), "serializedCharacterLimit", MemoryEvidenceReplayMaxCaseCharacters,
+                "measurement", "serialized_JSON_UTF16_characters_not_provider_tokens", "authority", "isolated_fixture_capacity_only");
 
         private static string MemoryEvidenceReplayInputError(Dictionary<string, object> item, int continuationDepth = 0)
         {
             var sources = ReadDictionaryList(item, "sources");
             if (ReadString(item, "caseId", "").Length == 0 || ReadString(item, "query", "").Length == 0
                 || ReadString(item, "observerId", "").Length == 0 || ReadString(item, "peerId", "").Length == 0
-                || !item.ContainsKey("asOfSequence") || !item.ContainsKey("worldDay") || sources.Count == 0 || sources.Count > 512
-                || Json.Serialize(item.Where(p => p.Key != "capturedMemoryExtractions").ToDictionary(p => p.Key, p => p.Value)).Length > 1024 * 1024)
+                || !item.ContainsKey("asOfSequence") || !item.ContainsKey("worldDay") || sources.Count == 0 || sources.Count > MemoryEvidenceReplayMaxSources
+                || MemoryEvidenceReplayCaseCharacters(item) > MemoryEvidenceReplayMaxCaseCharacters)
                 return "missing_or_unbounded_case";
             if (item.ContainsKey("requiredEvidence") || item.ContainsKey("semanticExpectation")) return "labels_must_not_enter_candidate";
             string semanticError = EvidenceReplaySemanticInputError(item);
@@ -280,16 +465,27 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             if (item.ContainsKey("writerReplay"))
             {
                 var writer = ReadDictionary(item, "writerReplay");
+                string referenceModeError = ReplayReferenceGraphModeError(writer);
+                if (referenceModeError.Length > 0) return referenceModeError;
+                string initialNativeError = ReplayInitialNativeContextError(item, writer);
+                if (initialNativeError.Length > 0) return initialNativeError;
+                string inspectionError = ReplayQuestionLinkInspectionError(writer);
+                if (inspectionError.Length > 0) return inspectionError;
                 if (writer == null || !new[] { "dialogue", "party_chat", "event" }.Contains(ReadString(item, "route", "dialogue"))
                     || ReadString(writer, "model", "").Length is < 1 or > 200
                     || ReadString(writer, "nextContribution", "").Length is < 1 or > 24000
                     || !writer.ContainsKey("snapshotAsOfSequence")
                     || ReadLong(writer, "snapshotAsOfSequence", long.MaxValue) > ReadLong(item, "asOfSequence", 0)
+                    || ReadLong(item, "asOfSequence", long.MaxValue) > EvidenceWriterReplayMaxImportedSequence
                     || ReadLong(writer, "snapshotAsOfSequence", -1) < 0
                     || Json.Serialize(writer).Length > 256000) return "invalid_writer_replay";
-                var allowed = new[] { "model", "snapshotAsOfSequence", "profile", "characteristics", "state", "relationships",
-                    "sceneContext", "response", "repairResponses", "nextContribution", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse", "contextCapacity", "finalCheck", "generationSettings", "continuation" };
+                var allowed = new[] { "model", "snapshotAsOfSequence", "profile", "peerDisplayName", "characteristics", "state", "relationships",
+                    "sceneContext", "response", "repairResponses", "nextContribution", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse", "contextCapacity", "finalCheck", "generationSettings", "continuation", "initialNativeContext", "referenceGraphMode", "questionLinkInspection" };
                 if (writer.Keys.Any(k => !allowed.Contains(k, StringComparer.Ordinal))) return "unknown_writer_replay_field";
+                if (writer.TryGetValue("peerDisplayName", out var peerDisplayName)
+                    && (peerDisplayName is not string name || name.Length is < 1 or > 160 || name != name.Trim()
+                        || name.Any(c => char.IsControl(c) || c == '\u2028' || c == '\u2029')))
+                    return "invalid_writer_peer_display_name";
                 if (writer.ContainsKey("repairResponses"))
                 {
                     if (!IsConversationObjectArray(writer["repairResponses"])) return "invalid_writer_repairs";
@@ -303,6 +499,10 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 if (generationError.Length > 0) return generationError;
                 foreach (string key in new[] { "profile", "characteristics", "state", "relationships", "response", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse" })
                     if (writer.ContainsKey(key) && ReadDictionary(writer, key) == null) return "invalid_writer_replay_object";
+                if (ReadDictionary(writer, "response") is { } capturedResponse
+                    && capturedResponse.TryGetValue("requestSha256", out var requestHash)
+                    && (requestHash is not string responseHash || responseHash.Length != 64 || responseHash.Any(c => !Uri.IsHexDigit(c))))
+                    return "invalid_writer_response_request_sha256";
                 // Disabled legacy fixtures remain readable; retired stages can never run.
                 if (writer.ContainsKey("finalCheck") && (ReadDictionary(writer, "finalCheck") is not { } oldCheck
                     || oldCheck.GetValueOrDefault("enabled") is not bool || ReadBool(oldCheck, "enabled", false)))
@@ -337,7 +537,10 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     if (continuationError.Length > 0) return continuationError;
                 }
             }
-            return "";
+            string reviewError = ReplayReviewedFactInputError(item, sources);
+            if (reviewError.Length > 0) return reviewError;
+            string recoveryError = ReplayReviewedRecoveryInputError(item);
+            return recoveryError.Length > 0 ? recoveryError : DurableReadReplayInputError(item);
         }
 
         // Stable source identities let an unchanged captured continuation refer
@@ -361,12 +564,14 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
         private static Dictionary<string, object> ReplayEvidenceWriter(string campaign, string observer, string peer,
             Dictionary<string, object> item, Dictionary<string, object> context, Dictionary<string, object> settings,
             Dictionary<string, object> packet, List<Dictionary<string, object>> transcript,
-            Dictionary<string, object> preparedWriterRequest = null, int continuationDepth = 0)
+            Dictionary<string, object> preparedWriterRequest = null, int continuationDepth = 0, PublishedPartyReplayView publishedParty = null,
+            Func<string, string> mapSourceId = null)
         {
             if (continuationDepth > EvidenceWriterReplayMaxContinuations)
                 throw new InvalidOperationException("Captured writer continuation depth exceeds its bound.");
             var fixture = ReadDictionary(item, "writerReplay");
             if (fixture == null) return TestDict("status", "not_requested");
+            using var referenceMode = new EvidenceReplayReferenceModeScope(fixture);
             string mode = ReadString(item, "route", "dialogue"), model = ReadString(fixture, "model", "");
             string heroName = ReadString(ReadDictionary(fixture, "profile"), "name",
                 ReadString(transcript.LastOrDefault(t => ReadString(t, "speakerId", "") == observer), "speaker", "Observer"));
@@ -384,7 +589,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 payload["conversationSessionId"] = observer + ":writer_replay";
                 payload["sceneTurnId"] = observer + ":" + ReadString(item, "caseId", "writer_turn");
             }
-            payload["participants"] = new[] { observer, peer };
+            payload["participants"] = publishedParty?.Audience ?? new[] { observer, peer };
             payload["playerText"] = ReadString(item, "query", "");
             payload["mode"] = mode == "event" ? "social_event" : mode;
             payload["interactionMode"] = payload["mode"];
@@ -406,9 +611,23 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             }
             var empty = TestDict();
             var characteristics = CloneDictionary(ReadDictionary(fixture, "characteristics"));
-            var identity = TestDict("identityState", "verified", "canonicalNameAllowed", true, "usableName", playerName);
+            var initialNativeContext = MapReplayInitialNativeContext(fixture, ReadString(item, "observerId", ""),
+                ReadString(item, "peerId", ""), observer, peer);
+            Dictionary<string, object> initialPoliticalBinding = null;
+            if (initialNativeContext != null)
+            {
+                if (preparedWriterRequest != null || continuationDepth != 0)
+                    throw new InvalidOperationException("Initial native context cannot override a prepared or continued request.");
+                foreach (var pair in initialNativeContext) payload[pair.Key] = CloneDictionary((Dictionary<string, object>)pair.Value);
+                initialPoliticalBinding = BindInitialReplayPoliticalProfile(item, fixture, profile, characteristics,
+                    campaign, observer, ReadString(context, "timelineId", "main"));
+            }
+            var nativeIdentity = ReadDictionary(initialNativeContext, "identityView");
+            var identity = nativeIdentity == null
+                ? TestDict("identityState", "verified", "canonicalNameAllowed", true, "usableName", playerName)
+                : CloneDictionary(nativeIdentity);
             Dictionary<string, object> Request(Dictionary<string, object> turn, List<Dictionary<string, object>> prior,
-                Dictionary<string, object> memory)
+                Dictionary<string, object> memory, PublishedPartyReplayView initialView = null)
             {
                 string contribution = ReadString(turn, "playerText", "");
                 string scene = ReadString(fixture, "sceneContext", "");
@@ -430,15 +649,15 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     ? BuildEventPromptEnvelope(campaign, observer + ":event", observer, heroName, playerName, playerName,
                         contribution, scene, turn, profile, characteristics, CloneDictionary(ReadDictionary(fixture, "state")),
                         CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity,
-                        precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "")
+                        precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "", publishedParty: initialView)
                     : BuildDialoguePromptEnvelope(campaign, observer, heroName, playerName, playerName,
                         contribution, scene, profile, characteristics, CloneDictionary(ReadDictionary(fixture, "state")),
                         CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity, turn,
                         precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "");
-                    // Replay has no live transport preflight: never publish a supplied
-                    // response against an envelope that production would refuse.
-                    if (!ReadBool(ReadDictionary(envelope.Diagnostics, "continuityPreflight"), "fits", false))
-                        throw new InvalidOperationException("Captured writer context exceeds its verified input allowance.");
+                    // Replay retains production's evidence gate. Estimated size
+                    // remains advisory here just as at real provider dispatch.
+                    if (!ConversationProviderPreflightAllowsDispatch(ReadDictionary(envelope.Diagnostics, "continuityPreflight")))
+                        throw new InvalidOperationException("Captured writer context is missing required original evidence.");
                     var prepared = BuildConversationGenerationRequest(writerSettings, envelope, campaign, "", observer,
                         contribution, socialEvent, observer + ":event");
                     // The non-listening fixture has no native profile file. Bind its
@@ -452,9 +671,11 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 finally { CodexPerformanceSettings.Value = priorSettings; }
             }
             Dictionary<string, object> request;
+            ReviewedReplayWriterPlan expectedWriterPlan;
             try
             {
-                request = preparedWriterRequest == null ? Request(payload, transcript, packet) : CloneDictionary(preparedWriterRequest);
+                request = preparedWriterRequest == null ? Request(payload, transcript, packet, publishedParty) : CloneDictionary(preparedWriterRequest);
+                expectedWriterPlan = PrepareReplayReviewedWriterPlan(request, item, ReadDictionary(packet, "reviewedFactProjection"));
             }
             catch (InvalidOperationException ex)
             {
@@ -464,6 +685,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             }
             var pending = new List<string>();
             var result = TestDict("status", "writer_pending", "request", request,
+                "referenceGraphAudit", referenceMode.Audit,
                 "requestSha256", PromptHash(CanonicalJson(request)), "pendingResponses", pending,
                 "snapshotAsOfSequence", fixture["snapshotAsOfSequence"], "providerCalls", 0,
                 "continuationDepth", continuationDepth, "requestOrigin", preparedWriterRequest == null ? "prepared_here" : "preceding_turn_next_request",
@@ -471,15 +693,76 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 "sourceIdentityPolicy", "fixture_bound_accepted_turns_v1",
                 "excluded", new[] { "live_endpoint_repairs", "action_execution", "relationship_assessment_application",
                     "scene_social_identity_effects", "letter_delivery", "semantic_worker", "native_and_human_acceptance" });
-            result["providerWireCapture"] = ReadDictionary(CaptureMemoryReplayProviderRequest(request, writerSettings), "providerWireCapture");
-            if (ReadString(ReadDictionary(result, "providerWireCapture"), "status", "") == "blocked")
+            var providerWire = ReadDictionary(CaptureMemoryReplayProviderRequest(request, writerSettings), "providerWireCapture");
+            result["providerWireCapture"] = providerWire;
+            if (initialNativeContext != null) result["initialNativeContextAudit"] = TestDict(
+                "inputSha256", PromptHash(CanonicalJson(ReadDictionary(fixture, "initialNativeContext"))),
+                "mappedSha256", PromptHash(CanonicalJson(initialNativeContext)), "keys", initialNativeContext.Keys.ToArray(),
+                "actionIndexRetainedUnchanged", !initialNativeContext.ContainsKey("actionResolutionIndex")
+                    || CanonicalJson(ReadDictionary(payload, "actionResolutionIndex")) == CanonicalJson(ReadDictionary(initialNativeContext, "actionResolutionIndex")),
+                "captureOnly", true, "publicationAllowed", false, "idMapping", "exact_self_and_peer_values_only",
+                "politicalBinding", initialPoliticalBinding,
+                "limits", "Embedded IDs in prose are retained; fixture namespace and absent runtime-derived state prevent unqualified native parity claims. Index inclusion in payload does not mean all index bytes are in the writer wire.");
+            if (ReadString(providerWire, "status", "") == "blocked")
             {
                 result["status"] = "writer_preflight_blocked";
                 result["reason"] = "The exact serialized writer request failed production preflight; no response or memory was published.";
                 return result;
             }
+            if (expectedWriterPlan != null)
+            {
+                var body = TryParseJsonObject(ReadString(providerWire, "requestJson", ""));
+                var expectedFormat = ReadDictionary(request, "response_format");
+                if (CanonicalJson(ReadDictionary(body, "response_format")) != CanonicalJson(expectedFormat))
+                {
+                    result["status"] = "writer_reviewed_plan_schema_missing";
+                    return result;
+                }
+                var planAudit = TestDict("scope", expectedWriterPlan.DeliveryChoices == null
+                        ? "isolated_reviewed_facts_and_free_prose" : "isolated_reviewed_delivery",
+                    "schemaSha256", PromptHash(CanonicalJson(expectedFormat)), "planConformance", "pending");
+                if (expectedWriterPlan.DeliveryChoices != null) planAudit["deliveryChoicesSha256"] = expectedWriterPlan.DeliveryChoicesSha256;
+                result["reviewedWriterPlan"] = planAudit;
+            }
+            if (publishedParty != null)
+            {
+                result["publishedPartyView"] = publishedParty.Audit;
+                if (!publishedParty.WirePreservesHistory(providerWire))
+                {
+                    result["status"] = "writer_published_party_view_blocked";
+                    result["reason"] = "published_history_changed_on_serialized_wire";
+                    return result;
+                }
+            }
+            if (ReadDictionary(packet, "reviewedFactProjection") is { } projection)
+            {
+                result["reviewedFactProjection"] = projection;
+                string wireError = ReplayReviewedFactWireError(providerWire, item, transcript, observer, mapSourceId);
+                if (wireError.Length > 0)
+                {
+                    result["status"] = "writer_reviewed_fact_projection_blocked";
+                    result["reason"] = wireError;
+                    return result;
+                }
+            }
             var response = ReadDictionary(fixture, "response");
+            if (fixture.ContainsKey("questionLinkInspection"))
+                result["questionLinkInspection"] = InspectReplayQuestionLinks(campaign, fixture, payload, observer, peer);
             if (response == null) { pending.Add("response"); return result; }
+            if (response.TryGetValue("requestSha256", out var requestHash))
+            {
+                string expected = ReadString(providerWire, "requestSha256", "");
+                bool matched = expected.Length == 64 && requestHash is string supplied
+                    && string.Equals(supplied, expected, StringComparison.OrdinalIgnoreCase);
+                result["responseRequestBinding"] = TestDict("status", matched ? "verified" : "mismatched", "requestSha256", expected);
+                if (!matched)
+                {
+                    result["status"] = "writer_response_request_mismatch";
+                    result["reason"] = "The supplied response does not match the exact serialized writer request.";
+                    return result;
+                }
+            }
+            else result["responseRequestBinding"] = TestDict("status", "legacy_unbound");
             if (preparedWriterRequest != null)
             {
                 // Request(next, ...) already bound the complete production
@@ -489,8 +772,15 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 // reconstructing a narrower historical-only approximation.
                 CopyDeliveredMemoryRecallEvidence(context, payload, observer);
             }
-            if (fixture.ContainsKey("repairResponses"))
+            if (item.ContainsKey("reviewedRecoveryReplay"))
             {
+                response = ReplayReviewedRecovery(campaign, observer, peer, item, context, transcript, request,
+                    providerWire, response, result, writerSettings, pending);
+                if (response == null) return result;
+            }
+            else if (fixture.ContainsKey("repairResponses"))
+            {
+                bool deterministicOnly = item.ContainsKey("reviewedFactReplay");
                 var captures = ReadDictionaryList(fixture, "repairResponses");
                 var repairRequests = new List<Dictionary<string, object>>();
                 result["repairRequests"] = repairRequests;
@@ -499,6 +789,12 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     .Append("other_endpoint_repairs_and_live_transport").ToArray();
                 Dictionary<string, object> CapturedRepair(Dictionary<string, object> repairRequest)
                 {
+                    if (deterministicOnly)
+                    {
+                        result["status"] = "writer_reviewed_deterministic_repair_requires_provider";
+                        result["reason"] = "Native cleanup required a provider repair. This compact replay ended before exporting a repair request or publishing.";
+                        throw new EvidenceReplayRepairPending();
+                    }
                     int index = repairRequests.Count;
                     if (index >= EvidenceWriterReplayMaxRepairs) throw new InvalidOperationException("Conversation repair capture exceeded its bound.");
                     // Repairs have their own request dictionary; retain the same
@@ -538,7 +834,39 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             string finish = ReadString(response, "finishReason", "");
             var parsed = TryParseJsonObject(ReadString(response, "content", ""));
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
+            if (expectedWriterPlan != null)
+            {
+                var planAudit = ReadDictionary(result, "reviewedWriterPlan");
+                if (expectedWriterPlan.DeliveryChoices != null
+                    && !string.Equals(expectedWriterPlan.DeliveryChoicesSha256, ReadString(response, "reviewedDeliverySha256", ""), StringComparison.OrdinalIgnoreCase))
+                {
+                    planAudit["planConformance"] = "mismatch";
+                    result["status"] = "writer_reviewed_delivery_receipt_mismatch";
+                    return result;
+                }
+                bool verified = ApplyReplayReviewedWriterPlan(expectedWriterPlan, parsed, out string delivery);
+                planAudit["planConformance"] = verified ? "verified" : "mismatch";
+                if (!verified)
+                {
+                    result["status"] = "writer_reviewed_plan_response_mismatch";
+                    return result;
+                }
+                if (delivery.Length > 0)
+                {
+                    reply = ReadString(parsed, "reply", "");
+                    planAudit["delivery"] = delivery;
+                    planAudit["capturedResponseSha256"] = PromptHash(ReadString(response, "content", ""));
+                    planAudit["approvedReplySha256"] = PromptHash(reply);
+                }
+            }
             bool quiet = mode != "dialogue" && parsed != null && NormalizeSocialEventParticipation(parsed) == "quiet";
+            var checkedResponse = RejectProviderReservedSpeech(response, parsed);
+            if (!ReferenceEquals(checkedResponse, response))
+            {
+                result["status"] = "writer_response_rejected";
+                result["reason"] = ReadString(checkedResponse, "error", "");
+                return result;
+            }
             if (!ReadBool(response, "ok", false) || parsed == null || !quiet && string.IsNullOrWhiteSpace(reply)
                 || reply.Length > 24000 || IsTechnicalConversationNotice(reply)
                 || new[] { "memoryWrites", "beliefWrites", "obligationWrites", "comprehensionWrites", "continuityWrites" }
@@ -586,9 +914,12 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 PlayerText = ReadString(payload, "playerText", ""), Reply = reply, Timestamp = timestamp, Generation = generation,
                 Payload = payload, Motive = TestDict(), Profile = profile, Characteristics = characteristics, Parsed = parsed,
                 CommitEffects = false, PublishScene = false, PublishSocial = false, PublishIntroductions = false,
+                RetrievalEligible = !IsPureConversationRecallRequest(ReadString(payload, "playerText", "")),
                 Memories = Writes("memoryWrites", "memory"), Beliefs = Writes("beliefWrites", "belief"), Relationships = new(),
                 Obligations = Writes("obligationWrites", "obligation"), Comprehensions = Writes("comprehensionWrites", "comprehension"),
                 Continuity = ReadDictionaryList(parsed, "continuityWrites") };
+            if (mapSourceId != null || item.ContainsKey("durableReadReplay"))
+                AdvanceEvidenceReplaySequence(campaign, ReadLong(item, "asOfSequence", 0));
             var publication = PublishAcceptedConversationUnit(unit, accept => mode == "dialogue"
                 ? StoreConversationExchange(campaign, payload, observer, peer, playerName, heroName, unit.PlayerText, reply, unit.EventId, timestamp, acceptance: accept)
                 : StorePartyConversationExchange(campaign, payload, observer, peer, playerName, heroName, unit.PlayerText, reply, unit.EventId, timestamp, accept));
@@ -650,6 +981,13 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     return result;
                 }
                 result["status"] = pending.Count == 0 ? "captured_writer_stored_next_read_prepared" : "next_evidence_pending";
+                if (mapSourceId != null && publishedParty == null && item.ContainsKey("reviewedFactReplay")
+                    && !item.ContainsKey("reviewedRecoveryReplay") && !item.ContainsKey("durableReadReplay"))
+                    result["reviewedFactFollowUp"] = CaptureReplayReviewedFollowUp(campaign, observer, peer, item, CloneDictionary(next),
+                        nextTranscript, nextPacket, mapSourceId, writerSettings, (turn, lines, memory) => Request(turn, lines, memory));
+                if (item.ContainsKey("durableReadReplay"))
+                    result["durableRead"] = ReplayLaterDurableRead(campaign, observer, peer, item, payload, writerSettings,
+                        acceptedTurns, (turn, lines, memory) => Request(turn, lines, memory));
                 if (ReadDictionary(fixture, "continuation") is { } continuation)
                 {
                     if (pending.Count > 0)
@@ -729,18 +1067,28 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             if (!File.Exists(path) || new FileInfo(path).Length > 32 * 1024 * 1024)
                 throw new InvalidOperationException("Stage bounded memory-accuracy/evidence-input.json beside the validated artifact.");
             var input = ReadJsonObject(path);
-            var report = ReplayMemoryEvidenceFixture(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant());
+            if (ReadString(input, "schema", "") == DialogueAttributionReplaySchema)
+                return RunDialogueAttributionReplay(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant());
+            if (ReadString(input, "schema", "") == "reign-native-archive-contracts-v1")
+                return RunValidationNativeArchiveContracts(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant());
+            var publication = ReadString(input, "schema", "") != SceneFormationReplaySchema
+                && ReadDictionaryList(input, "cases").Any(c => c.ContainsKey("publishedPartyViewSha256"))
+                ? ReadPublishedPartyReplayFile(path) : null;
+            var report = ReplayMemoryEvidenceFixture(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(), publication);
             string resultPath = Path.Combine(TestsDir, "memory-accuracy", "evidence-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
             WriteJsonObject(resultPath, report);
             return TestDict("ok", report["ok"], "resultPath", resultPath, "completedCases", report["completedCases"],
                 "fullyReplayedCases", report["fullyReplayedCases"], "inputSha256", report["inputSha256"], "providerCalls", 0, "certificateEligible", false);
         }
 
-        private static Dictionary<string, object> ReplayMemoryEvidenceFixture(Dictionary<string, object> input, string inputHash)
+        private static Dictionary<string, object> ReplayMemoryEvidenceFixture(Dictionary<string, object> input, string inputHash,
+            byte[] publication = null)
         {
             if (ActiveServerPort > 0 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
                 || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Fixture replay requires non-listening isolated Verification Lab state.");
+            bool formationOnly = ReadString(input, "schema", "") == SceneFormationReplaySchema;
+            if (formationOnly) input = SceneFormationEvidenceManifest(input);
             int ordinaryTokens = EvidenceReplayOrdinaryTokens(input);
             string denseError = DenseReplayConfigError(input);
             if (denseError.Length > 0) throw new InvalidOperationException(denseError);
@@ -768,6 +1116,13 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             if (ReadString(input, "schema", "") != "reign-memory-evidence-replay-input-v1" || cases.Count < 1 || cases.Count > 256
                 || cases.Select(c => ReadString(c, "caseId", "")).Distinct(StringComparer.Ordinal).Count() != cases.Count)
                 throw new InvalidOperationException("Invalid evidence replay manifest.");
+            bool published = cases.Any(c => c.ContainsKey("publishedPartyViewSha256"));
+            if (published != (publication != null) || published && (cases.Count != 1 || precisionMode != "precision"
+                || input.ContainsKey("denseWorkerReplay") || captureLateInteraction || captureSelection || indexSpecialists))
+                throw new InvalidOperationException("Published party view requires one initial precision case and its detached receipt.");
+            if (cases.Any(c => c.ContainsKey("durableReadReplay")) && (cases.Count != 1 || precisionMode != "precision"
+                || input.ContainsKey("denseWorkerReplay") || captureLateInteraction || captureSelection || indexSpecialists))
+                throw new InvalidOperationException("Durable read replay requires one isolated precision case.");
             foreach (var item in cases)
             {
                 string error = MemoryEvidenceReplayInputError(item);
@@ -795,6 +1150,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 for (int index = 0; index < cases.Count && !ShouldCancelVerification(); index++)
                 {
                     var item = cases[index];
+                    using var referenceMode = new EvidenceReplayReferenceModeScope(ReadDictionary(item, "writerReplay"));
                     int sourceScopeIndex = index;
                     bool seedHistory = true;
                     if (denseWorker != null)
@@ -809,6 +1165,8 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     string observer = Map(ReadString(item, "observerId", "")), peer = Map(ReadString(item, "peerId", ""));
                     var sources = ReadDictionaryList(item, "sources").OrderBy(s => ReadLong(s, "sequence", 0)).ToList();
                     var context = EvidenceReplayMemoryContext(item, timeline, peer);
+                    if (formationOnly) context.Remove("memoryQueryText");
+                    var publishedParty = published ? ReadPublishedPartyReplayView(publication, item, sources, campaign, timeline, Map) : null;
                     var indexedSources = new List<Dictionary<string, object>>();
                     var extractionCaptures = ReadDictionaryList(item, "capturedMemoryExtractions")
                         .ToDictionary(c => ReadString(c, "sourceId", ""), StringComparer.Ordinal);
@@ -839,7 +1197,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                                 string id = Map(ReadString(source, "sourceId", ""));
                                 InsertConversationTurn(connection, id, session, id, ordinal++, Map(ReadString(source, "exchangeId", ReadString(source, "sourceId", ""))),
                                     ReadString(source, "role", ""), Map(ReadString(source, "speakerId", "")), ReadString(source, "speakerName", ReadString(source, "speakerId", "")),
-                                    ReadString(source, "text", ""), "in_person", ReadDouble(source, "worldDay", 0),
+                                    ReadString(source, "text", ""), published ? "party_chat" : "in_person", ReadDouble(source, "worldDay", 0),
                                     ReadLong(source, "sequence", 0), "", ReadStringList(source, "audience").Select(Map).ToList(), context);
                                 ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;",
                                     TestDict("sequence", ReadLong(source, "sequence", 0), "id", id));
@@ -875,6 +1233,12 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                         transaction.Commit();
                     }
                     indexingClock.Stop();
+                    if (formationOnly)
+                    {
+                        results.Add(CaptureSceneFormation(campaign, ReadString(item, "caseId", ""), sourceScopeIndex,
+                            sources.Select(source => Map(ReadString(source, "sessionId", ""))).Distinct(StringComparer.Ordinal)));
+                        continue;
+                    }
                     var requests = new List<Dictionary<string, object>>();
                     var pending = new List<string>();
                     var lateCaptures = new List<Dictionary<string, object>>();
@@ -918,7 +1282,8 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                         semanticDocuments = CaptureReplaySemanticDocuments(captureConnection, campaign, observer, peer,
                             context, settings, sources.Select(s => Map(ReadString(s, "sourceId", ""))));
                     }
-                    var transcript = EvidenceReplayRecentSources(item, sources).Select(s => TestDict("turnId", Map(ReadString(s, "sourceId", "")),
+                    publishedParty?.VerifyStoredSources(context);
+                    var transcript = publishedParty?.Transcript() ?? EvidenceReplayRecentSources(item, sources).Select(s => TestDict("turnId", Map(ReadString(s, "sourceId", "")),
                             "speakerId", Map(ReadString(s, "speakerId", "")), "speaker", ReadString(s, "speakerName", ReadString(s, "speakerId", "")),
                             "role", ReadString(s, "role", ""), "text", ObserverConversationText(ReadString(s, "text", ""),
                                 Map(ReadString(s, "speakerId", "")), observer, ReadString(s, "role", "") == "player"))).ToList();
@@ -928,9 +1293,15 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                     for (int round = 0; round < (denseWorker?.Rounds ?? 1); round++)
                     {
                         var queryClock = System.Diagnostics.Stopwatch.StartNew();
-                        var roundPacket = BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(item, "query", ""), 4000, context, settings);
+                        string query = ReadString(item, "query", "");
+                        var roundPacket = publishedParty == null ? BuildNpcMemoryPacket(campaign, observer, peer, "", query, 4000, context, settings)
+                            : BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, context, settings, false, publishedParty);
                         long packetMs = queryClock.ElapsedMilliseconds;
-                        var roundWriter = ReplayEvidenceWriter(campaign, observer, peer, item, context, settings, roundPacket, transcript);
+                        var writerPacket = item.ContainsKey("reviewedFactReplay")
+                            ? ProjectReplayReviewedFacts(campaign, observer, peer, item, context, Map, roundPacket, publishedParty)
+                            : roundPacket;
+                        var roundWriter = ReplayEvidenceWriter(campaign, observer, peer, item, context, settings, writerPacket, transcript,
+                            publishedParty: publishedParty, mapSourceId: Map);
                         if (denseWorker != null)
                         {
                             var semantic = ReadDictionary(roundPacket, "semanticRetrieval");
@@ -950,6 +1321,8 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                     bool writerComplete = !item.ContainsKey("writerReplay")
                         || EvidenceWriterReplayComplete(writer);
                     results.Add(TestDict("caseId", ReadString(item, "caseId", ""), "sourceScopeIndex", sourceScopeIndex,
+                        "inputBounds", MemoryEvidenceReplayInputBounds(item),
+                        "referenceGraphAudit", referenceMode.Audit,
                         "requests", requests, "packet", packet, "writerReplay", writer,
                         "specialistIndex", TestDict("enabled", indexSpecialists, "sources", indexedSources,
                             "fixtureAndIndexMs", indexingClock.ElapsedMilliseconds, "localModelCalls", 0,
@@ -988,6 +1361,12 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                      "Up to three optional writer continuations reuse the preceding captured request and persist in the same isolated campaign; missing stages stop that chain and do not certify subsequent recall.",
                     "providerWireCapture retains initial NanoGPT JSON from shared body/policy/cache/reasoning builders using fixture settings. It does not dispatch HTTP, load credentials, reproduce live cooldowns or authorize subscription/paid routing.",
                     "Missing responses remain pending. Independently review semantic claims; execution success is not accuracy." });
+            if (formationOnly)
+            {
+                report["mode"] = "scene_formation_baseline";
+                report["coverageLimits"] = new[] { "Native scene summaries from caller-scoped archived sources with generation disabled. The two budgets share exact source options.",
+                    "The replay commits and reopens each summary, source link and lexical row inside its disposable world. No retrieval, writer, model, label or provider is used." };
+            }
             report["denseReplayContracts"] = denseContracts;
             if (denseWorker != null) report["denseWorker"] = TestDict("initial", denseWorker.InitialStatus,
                 "final", denseWorker.Post("/vectors/status", TestDict()), "model", denseWorker.Model,

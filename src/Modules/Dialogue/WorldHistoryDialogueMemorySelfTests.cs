@@ -44,6 +44,45 @@ namespace ReignBetaServer
             teamEntities.Add(new Dictionary<string, object> { ["entityId"] = "temurtai_fixture", ["entityType"] = "hero",
                 ["name"] = "Temurtai", ["role"] = "tournament winner teammate actor" });
             fixtures.Add(teamVictory);
+            var categories = Reign.Core.Contracts.World.ReignNewsCategories.Switches.Keys
+                .Where(Reign.Core.Contracts.World.ReignNewsCategories.IsCategory).ToArray();
+            foreach (var entry in categories.Select((category, index) => new { category, index }))
+            {
+                var article = new Reign.Core.Contracts.World.ReignNewsArticle { Id = "public_fixture_" + entry.index,
+                    Category = entry.category, Title = "Public bulletin", Body = "PublicNoble_" + entry.index + " is the subject of this public report.",
+                    WorldDay = 100, PublicationDay = 110, ActorCaption = "PRIVATE_SNAPSHOT_SENTINEL" };
+                if (entry.index == 1)
+                {
+                    article.SourceEventType = "ruler_judgment"; article.SourceCorrelationId = "canonical_judgment";
+                    article.SourcePhase = "sentenced"; article.PublicVerdict = "CleanExecution"; article.ExecutionDueDay = 117;
+                }
+                var publication = evt(article.Id, "public_announcement", article.PublicationDay, article.Text, "major_world");
+                publication["source"] = "reign_public_news";
+                publication["summary"] = "UNSELECTED_PRODUCER_SUMMARY";
+                publication["sequence"] = entry.index == 0 ? 80 : 101;
+                publication["payload"] = Reign.Core.Contracts.World.ReignPublicNews.Snapshot(article);
+                publication["entities"] = new[] { TestDict("entityId", "public_noble_" + entry.index,
+                    "entityType", "hero", "name", "PublicNoble_" + entry.index, "role", "announcement subject") };
+                fixtures.Add(publication);
+            }
+            var sentence = evt("public_legacy_sentence", "ruler_judgment", 100, "Clean execution in fifteen days", "major_world");
+            sentence["source"] = "reign_system"; sentence["phase"] = "sentenced"; sentence["correlationId"] = "legacy_judgment";
+            sentence["payload"] = TestDict("judgmentId", "legacy_judgment", "verdict", "CleanExecution", "Deadline", 115d);
+            sentence["entities"] = new[] { TestDict("entityId", "unqid", "entityType", "hero", "name", "Unqid", "role", "political actor"),
+                TestDict("entityId", "rhagaea", "entityType", "hero", "name", "Rhagaea", "role", "political participant") };
+            fixtures.Add(sentence);
+            var cancelledSentence = evt("public_legacy_cancelled", "ruler_judgment", 109, "The captive left the original captor's custody; the sentence was cancelled.", "major_world");
+            cancelledSentence["source"] = "reign_system"; cancelledSentence["phase"] = "escaped"; cancelledSentence["correlationId"] = "legacy_judgment";
+            cancelledSentence["payload"] = TestDict("judgmentId", "legacy_judgment", "verdict", "CleanExecution", "Deadline", 115d, "CancellationReason", "escaped_or_rescued");
+            cancelledSentence["entities"] = sentence["entities"];
+            fixtures.Add(cancelledSentence);
+            foreach (string publicType in new[] { "war_declared", "peace_made" })
+            {
+                var publicDiplomacy = evt("public_native_" + publicType, publicType, 110, "The two realms publicly confirmed " + publicType + ".", "major_world");
+                publicDiplomacy["source"] = "bannerlord_native";
+                publicDiplomacy["entities"] = new[] { TestDict("entityId", "news_kingdom", "entityType", "kingdom", "name", "NewsRealm", "role", "actor") };
+                fixtures.Add(publicDiplomacy);
+            }
             for (int index = 0; index < 1; index++)
             {
                 var olderWin = evt("dialogue_older_win_" + index, "tournament_finished", 109d - index,
@@ -91,8 +130,64 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> sameDay;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
+                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('public_world_news_legacy_rules_v1','1');");
                 sameDay = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110d, observer,
                     "I am Michael of Howarton.", personalRoute, noVectors, true);
+                var publicOnly = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110, observer,
+                    "Good evening.", personalRoute, noVectors, false);
+                check("public_current_news_without_route_identity_or_vectors", publicOnly.Any(r => ReadString(r, "source", "") == "reign_public_news"));
+                var publicDiplomacyRows = LoadPublicWorldNews(connection, timelineId, 110, observer, "NewsRealm");
+                check("native_war_and_peace_are_immediate_public_news", has(publicDiplomacyRows, "public_native_war_declared")
+                    && has(publicDiplomacyRows, "public_native_peace_made"));
+                check("public_news_v2_backfills_native_diplomacy_after_v1_marker", ReadString(DetermineWorldHistoryKnowledge(connection,
+                    new List<string> { "public_native_war_declared" }, observer.NpcId, "foreign_kingdom", 110), "basis", "") == "secondhand");
+                var allCategories = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110, observer,
+                    string.Join(" ", Enumerable.Range(0, categories.Length).Select(i => "PublicNoble_" + i)), personalRoute, noVectors, false);
+                check("every_public_category_direct_archive_beyond_ambient_cap", categories.All(category => allCategories.Any(r =>
+                    ReadString(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "category", "") == category)));
+                var beforePublication = LoadKnownWorldHistoryForDialogue(connection, timelineId, 109, observer,
+                    "PublicNoble_0", personalRoute, noVectors, false);
+                check("event_date_does_not_anticipate_publication", !has(beforePublication, "public_fixture_0"));
+                var sentenceNews = LoadKnownWorldHistoryForDialogue(connection, timelineId, 110, observer,
+                    "What will happen to Rhagaea?", personalRoute, noVectors, false);
+                string sentenceText = FormatKnownWorldHistoryForDialogue(sentenceNews, 24000);
+                check("named_legacy_sentence_recalled_beyond_recent_news", has(sentenceNews, "public_legacy_sentence")
+                    && sentenceText.Contains("Rhagaea") && sentenceText.Contains("Unqid") && sentenceText.Contains("115")
+                    && sentenceText.Contains("execution has not been verified"));
+                check("later_escape_is_public_and_does_not_claim_execution_completed", has(sentenceNews, "public_legacy_cancelled")
+                    && FormatKnownWorldHistoryForDialogue(sentenceNews.Where(r => ReadString(r, "event_id", "") == "public_legacy_cancelled").ToList(), 6000)
+                        .Contains("pending judgment cancelled; this record does not establish an execution"));
+                check("public_snapshot_excludes_unselected_producer_fields", !Json.Serialize(allCategories).Contains("PRIVATE_SNAPSHOT_SENTINEL"));
+                string publicText = FormatKnownWorldHistoryForDialogue(allCategories, 24000);
+                check("canonical_public_sentence_retains_exact_deadline", publicText.Contains("Scheduled execution day 117")
+                    && publicText.Contains("execution has not been verified") && !publicText.Contains("UNSELECTED_PRODUCER_SUMMARY"));
+                var malformed = TestDict("event_type", "public_announcement", "source", "reign_public_news",
+                    "world_day", 110d, "payload_json", "{not-json}");
+                check("malformed_public_payload_rejected_without_throw", !ValidPublicWorldHistory(malformed));
+                var legacyRow = sentenceNews.First(r => ReadString(r, "event_id", "") == "public_legacy_sentence");
+                var schemaLess = TestDict("event_type", "public_announcement", "source", "reign_public_news",
+                    "correlation_id", "crier:judgment:legacy_judgment:sentenced", "world_day", 110d,
+                    "payload_json", Json.Serialize(TestDict("articleId", "crier:judgment:legacy_judgment:sentenced", "publicationDay", 110d)));
+                check("unvalidated_article_cannot_suppress_legacy_sentence", DistinctPublicWorldHistory(new[] { legacyRow, schemaLess })
+                    .Any(r => ReadString(r, "event_id", "") == "public_legacy_sentence"));
+                var longDirect = TestDict("event_id", "long_direct", "publicWorldNews", true, "publicDirectRecall", true,
+                    "summary", new string('x', 30000) + " REQUIRED_ARTICLE_END", "world_day", 110d);
+                var ordinary = TestDict("event_id", "ordinary_after_long", "summary", "ORDINARY_EVIDENCE_REMAINS", "world_day", 110d);
+                string longText = FormatKnownWorldHistoryForDialogue(new List<Dictionary<string, object>> { longDirect, ordinary }, 6000);
+                check("long_direct_article_keeps_full_text_and_later_evidence", longText.Contains("REQUIRED_ARTICLE_END")
+                    && longText.Contains("ORDINARY_EVIDENCE_REMAINS"));
+                observer.AsOfWorldHistorySequence = 80;
+                var sequenceBounded = LoadPublicWorldNews(connection, timelineId, 110, observer, "PublicNoble_0 PublicNoble_1");
+                check("public_news_obeys_native_sequence_boundary", has(sequenceBounded, "public_fixture_0") && !has(sequenceBounded, "public_fixture_1"));
+                observer.AsOfWorldHistorySequence = long.MaxValue;
+                string childTimeline = "public_news_verified_child";
+                ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,head_sequence,head_event_id,is_active,created_utc,updated_utc)
+VALUES($child,$campaign,$parent,'dialogue_win',100,'dialogue_win',0,$now,$now);",
+                    TestDict("child", childTimeline, "campaign", campaignId, "parent", timelineId, "now", DateTimeOffset.UtcNow.ToString("O")));
+                var inherited = LoadPublicWorldNews(connection, childTimeline, 110, observer, "PublicNoble_0 PublicNoble_1");
+                check("verified_fork_inherits_only_public_prefix", has(inherited, "public_fixture_0") && !has(inherited, "public_fixture_1"));
+                ExecuteSql(connection, "UPDATE world_history_timelines SET fork_event_id='unproved_fork' WHERE timeline_id=$child;", TestDict("child", childTimeline));
+                check("unverified_parent_link_grants_no_public_history", !has(LoadPublicWorldNews(connection, childTimeline, 110, observer, "PublicNoble_0"), "public_fixture_0"));
                 check("introduction_recognizes_without_keyword_or_vectors", has(sameDay, "dialogue_win"));
                 check("legacy_float_precision_does_not_hide_immediate_result", has(sameDay, "dialogue_legacy_precision"));
                 check("documented_total_exceeds_sample", sameDay.Any(row => ReadInt(row, "documentedPlayerTournamentWins", 0) == 4)
@@ -164,16 +259,34 @@ namespace ReignBetaServer
                 ["enableSemanticMemory"] = false, ["enableMinimeMemoryWorker"] = false,
                 ["enableMinimeMemoryReranking"] = false
             };
-            var packet = BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
-                "Lady Itaria, I was disappointed I did not see you compete in the last tournament here. I am Michael of Howarton.", 2500, context, offlineSettings);
-            string prompt = ReadString(packet, "memoryPacket", "");
-            // The protected recall policy precedes the authoritative history;
-            // history must still lead the evidence after that policy wrapper.
-            check("production_packet_injects_recorded_result", prompt.Contains("Michael won the tournament at Phycaon.")
-                && prompt.StartsWith(ProtectMemoryRecallSourcePolicy("itaria_fixture")
-                    + "\n\nKNOWN NATIVE WORLD HISTORY", StringComparison.Ordinal));
-            check("production_packet_provenance_and_budget", prompt.Contains("public tournament news; secondhand")
-                && ReadStringList(packet, "sourceEventIds").Contains("dialogue_win") && prompt.Length <= 10000);
+            foreach (bool legacyMode in new[] { true, false })
+            {
+                var modeSettings = new Dictionary<string, object>(offlineSettings) { ["legacyMemoryMode"] = legacyMode };
+                var packet = BuildNpcMemoryPacket(campaignId, "itaria_fixture", "main_hero", "town_phycaon",
+                    "Lady Itaria, I was disappointed I did not see you compete in the last tournament here. I am Michael of Howarton.", 2500, context, modeSettings);
+                string prompt = ReadString(packet, "memoryPacket", "");
+                var eventIds = ReadStringList(packet, "sourceEventIds");
+                var evidence = ReadDictionary(packet, "precisionEvidence");
+                bool factPresent = prompt.Contains("Michael won the tournament at Phycaon.");
+                bool modeCorrect = legacyMode ? evidence == null : ReadString(evidence, "mode", "") == "precision";
+                bool prefixCorrect = prompt.StartsWith(ProtectMemoryRecallSourcePolicy("itaria_fixture")
+                    + (legacyMode ? "\n\nKNOWN NATIVE WORLD HISTORY" : "\n\nMEMORY EVIDENCE"), StringComparison.Ordinal);
+                bool typedFact = legacyMode || ContinuityPromptRecords(prompt, false).Any(record => record.Kind == "native_confirmed"
+                    && record.Text.Contains("Michael won the tournament at Phycaon.") && record.Text.Contains("event dialogue_win"));
+                bool privateFutureForeignAbsent = !new[] { "dialogue_private", "dialogue_future", "dialogue_other", "dialogue_delayed" }
+                    .Any(eventIds.Contains) && !prompt.Contains("Michael won the hidden tournament.")
+                    && !prompt.Contains("Michael won the future tournament.") && !prompt.Contains("Michael won a tournament in another timeline.");
+                var diagnostic = TestDict("legacyMode", legacyMode, "factPresent", factPresent, "modeCorrect", modeCorrect,
+                    "prefixCorrect", prefixCorrect, "typedFact", typedFact, "secondhand", prompt.Contains("public tournament news; secondhand"),
+                    "eventIdPresent", eventIds.Contains("dialogue_win"), "privateFutureForeignAbsent", privateFutureForeignAbsent,
+                    "characters", prompt.Length, "sourceEventIds", eventIds);
+                string prefix = legacyMode ? "production_packet_" : "precision_packet_";
+                void PacketCheck(string name, bool passed) => checks.Add(TestDict("name", "dialogue_history_" + prefix + name,
+                    "passed", passed, "summary", name + (passed ? "" : ": " + Json.Serialize(diagnostic))));
+                PacketCheck("injects_recorded_result", factPresent && modeCorrect && prefixCorrect && typedFact);
+                PacketCheck("provenance_and_budget", prompt.Contains("public tournament news; secondhand")
+                    && eventIds.Contains("dialogue_win") && privateFutureForeignAbsent && prompt.Length <= 10000);
+            }
             return checks;
         }
     }

@@ -60,7 +60,7 @@ namespace ReignBetaServer
         private static readonly HashSet<string> ConsequentialWorldHistoryTypes =
             new HashSet<string>(new[]
             {
-                "birth", "given_birth", "child_conceived", "conception", "hero_killed",
+                "public_announcement", "tournament_started", "tournament_finished", "birth", "given_birth", "child_conceived", "conception", "hero_killed",
                 "hero_executed", "heroes_married", "marriage", "divorce",
                 "hero_prisoner_taken", "hero_prisoner_released", "hero_escaped",
                 "hero_wounded", "war_declared", "peace_made", "alliance_started",

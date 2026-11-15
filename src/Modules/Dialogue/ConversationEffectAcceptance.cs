@@ -114,9 +114,12 @@ namespace ReignBetaServer
                     if (hasAgency)
                     {
                         var evaluation = EvaluateConversationAgency(candidate, context);
-                        if (!ReadBool(evaluation, "ok", false))
+                        if (!ReadBool(evaluation, "ok", false) && !IsSinglePassConversation(payload))
                             throw new InvalidOperationException("The final response no longer supports its negotiation metadata.");
-                        if (ReadDictionaryList(evaluation, "updates").Count > 0)
+                        if (!ReadBool(evaluation, "ok", false))
+                            agency = TestDict("ok", true, "status", "invalid_metadata_excluded", "commitState", "excluded",
+                                "updates", new List<Dictionary<string, object>>(), "acceptedReplyHash", acceptedHash);
+                        else if (ReadDictionaryList(evaluation, "updates").Count > 0)
                         {
                             string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload));
                             agency = CommitConversationAgency(connection, candidate, context, turn, ownsTransaction: false);
@@ -124,7 +127,7 @@ namespace ReignBetaServer
                                 throw new InvalidOperationException("The negotiation changed or this turn already has a different accepted response.");
                         }
                         else agency = evaluation;
-                        agency["commitState"] = "committed";
+                        if (ReadString(agency, "commitState", "") != "excluded") agency["commitState"] = "committed";
                         agency["acceptedReplyHash"] = acceptedHash;
                     }
                     boundary?.Invoke("after_agency");

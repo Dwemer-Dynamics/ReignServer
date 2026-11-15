@@ -16,13 +16,15 @@ namespace ReignBeta.Shared.Rulers
         public const string Effects = "rulerSettlementEffectsEnabled";
         public const string CivilWars = "rulerCivilWarJudgmentsEnabled";
         public const string Reactions = "rulerUnauthorizedExecutionReactionsEnabled";
+        // Retain the old settings identifier without exposing an ineffective switch:
+        // Bannerlord 1.5.7 itself removed the foreign-governor loyalty penalty.
         public const string GovernorCulture = "rulerRemoveForeignGovernorPenalty";
         public const string Mortality = "rulerRequireLifeDeathEnabled";
         public static readonly IReadOnlyDictionary<string, string> Switches = new Dictionary<string, string>(StringComparer.Ordinal) {
             [Master] = "Ruler system", [Capitals] = "Capital residence and army departure rules",
             [Capture] = "Ruler capture protection", [Judgments] = "Captured ruler judgments",
             [Effects] = "Judgment settlement bonuses and penalties", [CivilWars] = "Civil-war ruler judgments",
-            [Reactions] = "Unauthorized ruler execution reactions", [GovernorCulture] = "Remove foreign-governor loyalty penalty",
+            [Reactions] = "Unauthorized ruler execution reactions",
             [Mortality] = "Require life and death"
         };
         private readonly Func<string, bool> _read;
@@ -82,8 +84,9 @@ namespace ReignBeta.Shared.Rulers
         public bool DefeatedLord { get; set; }
         public RulerJudgmentStage Stage { get; set; }
         public RulerVerdict Verdict { get; set; }
-        public double CapturedDay { get; set; }
-        public double SentencedDay { get; set; }
+        public RulerVerdict? PendingVerdict { get; set; }
+        public double CapturedDay { get; set; } = -1;
+        public double SentencedDay { get; set; } = -1;
         public double Deadline { get; set; }
         public double Draw { get; set; } = -1;
         public int? VictorAffinity { get; set; }
@@ -97,6 +100,7 @@ namespace ReignBeta.Shared.Rulers
         public bool NativeDeathObserved { get; set; }
         public bool NativeExecutionRequested { get; set; }
         public double NativeDeathDay { get; set; } = -1;
+        public double ResolvedDay { get; set; } = -1;
         public List<RulerClanSnapshot> Clans { get; set; } = new List<RulerClanSnapshot>();
         public Dictionary<string, double> Traits { get; set; } = new Dictionary<string, double>();
         public HashSet<string> Receipts { get; set; } = new HashSet<string>(StringComparer.Ordinal);
@@ -140,7 +144,7 @@ namespace ReignBeta.Shared.Rulers
     public static class ReignRulerPolicy
     {
         public const int DepartureTroops = 1000, ReturnTroops = 750;
-        public const double ExecutionDays = 15, ExileDays = 126, FugitiveDays = 31.5;
+        public const double DecisionDays = 7, ExecutionDays = 8, ExileDays = 126, FugitiveDays = 31.5;
         public static bool Execution(RulerVerdict verdict) => verdict == RulerVerdict.TortureExecution || verdict == RulerVerdict.CleanExecution || verdict == RulerVerdict.RebelExecution;
         public static bool CanDepart(bool commander, int healthyPresent, bool relocationOrReturn = false) => relocationOrReturn || (commander && healthyPresent >= DepartureTroops);
         public static bool CompleteReturnIfArrived(RulerState state, string rulerId, string? currentSettlementId)
@@ -208,13 +212,64 @@ namespace ReignBeta.Shared.Rulers
             foreach (var entry in scores.OrderBy(p => p.Key)) { target -= Math.Exp((entry.Value-maximum)/12); if (target < 0) return entry.Key; }
             return scores.Keys.OrderBy(k => k).Last();
         }
-        public static bool Cancel(RulerJudgment judgment, string reason)
+        public static bool Cancel(RulerJudgment judgment, string reason, double day = -1)
         {
             if (judgment.Stage == RulerJudgmentStage.Completed || judgment.Stage == RulerJudgmentStage.Cancelled || judgment.NativeDeathObserved || judgment.NativeExecutionRequested
                 || (judgment.Stage == RulerJudgmentStage.Applying && !Execution(judgment.Verdict))) return false;
-            judgment.Stage = RulerJudgmentStage.Cancelled; judgment.CancellationReason = reason; judgment.Failure = ""; return true;
+            judgment.Stage = RulerJudgmentStage.Cancelled; judgment.CancellationReason = reason; judgment.Failure = "";
+            if (Finite(day) && day >= 0) judgment.ResolvedDay = day;
+            return true;
         }
-        public static bool SentenceDue(RulerJudgment j, double day) => j.Stage == RulerJudgmentStage.Sentenced && Execution(j.Verdict) && day >= j.Deadline;
+        public static bool HasIssuedSentence(RulerJudgment j) => j.Stage == RulerJudgmentStage.Sentenced
+            || j.Stage == RulerJudgmentStage.Applying || j.Stage == RulerJudgmentStage.Completed
+            || j.Stage == RulerJudgmentStage.Cancelled && (Finite(j.SentencedDay) && j.SentencedDay > 0
+                || Finite(j.Deadline) && j.Deadline > 0);
+        public static void EnsureCaptureDay(RulerJudgment j, double day)
+        {
+            // Old saves without a capture timestamp begin a full waiting window.
+            // A valid day zero is retained, as are future timestamps after a rewind.
+            if ((j.Stage == RulerJudgmentStage.AwaitingDecision || j.Stage == RulerJudgmentStage.AwaitingAuthority)
+                && Finite(day) && day >= 0 && (!Finite(j.CapturedDay) || j.CapturedDay < 0)) j.CapturedDay = day;
+        }
+        public static void SetDecisionAuthority(RulerJudgment j, string rulerId)
+        {
+            if (j.VictorId == rulerId) return;
+            j.VictorId = rulerId;
+            // A queued choice belongs to its sovereign, not their successor.
+            j.PendingVerdict = null;
+        }
+        public static void EnsureSentenceDeadline(RulerJudgment j, double day)
+        {
+            // Preserve every valid absolute saved deadline. A corrupt non-finite
+            // value must not hold a captive forever; reconstruct only that value.
+            if (j.Stage == RulerJudgmentStage.Sentenced && Execution(j.Verdict)
+                && !Finite(j.Deadline) && Finite(day) && day >= 0)
+                j.Deadline = (Finite(j.SentencedDay) && j.SentencedDay >= 0 ? j.SentencedDay : day) + ExecutionDays;
+        }
+        public static bool DecisionDue(RulerJudgment j, double day) => j.Stage == RulerJudgmentStage.AwaitingDecision
+            && Finite(day) && Finite(j.CapturedDay) && j.CapturedDay >= 0 && day >= j.CapturedDay + DecisionDays;
+        public static Dictionary<string, object> TimingObservation(RulerJudgment j, double day)
+        {
+            bool captured = Finite(j.CapturedDay) && j.CapturedDay >= 0;
+            bool decided = HasIssuedSentence(j);
+            return new Dictionary<string, object>
+            {
+                ["judgmentId"] = j.Id, ["prisonerId"] = j.PrisonerId, ["victorId"] = j.VictorId,
+                ["stage"] = j.Stage.ToString(), ["capturedDay"] = captured ? j.CapturedDay : -1d,
+                ["decisionDueDay"] = captured ? j.CapturedDay + DecisionDays : -1d,
+                ["timeGateOpen"] = DecisionDue(j, day),
+                ["sentencedDay"] = decided && Finite(j.SentencedDay) ? j.SentencedDay : -1d,
+                ["executionDueDay"] = decided && Execution(j.Verdict) && Finite(j.Deadline) ? j.Deadline : -1d,
+                ["verdict"] = decided ? j.Verdict.ToString() : "", ["observedDay"] = Finite(day) ? day : -1d,
+                ["terminal"] = j.Stage == RulerJudgmentStage.Cancelled || j.Stage == RulerJudgmentStage.Completed,
+                ["resolvedDay"] = Finite(j.ResolvedDay) && j.ResolvedDay >= 0 ? j.ResolvedDay : -1d,
+                ["executionDue"] = SentenceDue(j, day), ["cancellationReason"] = j.CancellationReason,
+                ["failure"] = j.Failure, ["nativeDeathObserved"] = j.NativeDeathObserved,
+                ["nativeExecutionRequested"] = j.NativeExecutionRequested
+            };
+        }
+        public static bool SentenceDue(RulerJudgment j, double day) => j.Stage == RulerJudgmentStage.Sentenced && Execution(j.Verdict)
+            && Finite(day) && Finite(j.Deadline) && day >= j.Deadline;
         public static bool ObserveNativeExecution(RulerJudgment j, bool dead, bool nativeExecutionMarked)
         {
             if (j.Stage != RulerJudgmentStage.Applying || !Execution(j.Verdict)) throw new InvalidOperationException("No execution is being applied.");

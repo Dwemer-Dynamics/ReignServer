@@ -36,6 +36,11 @@ namespace ReignBetaServer
                     revision = ReadInt(state, "transcriptRevision", 0);
                     if (kind == "look_again" && ReadInt(payload, "expectedTranscriptRevision", -1) != revision)
                         return TavernHouseError("The conversation advanced; retry with its latest completed revision.", "stale_transcript");
+                    if (kind == "arrival")
+                    {
+                        var cachedArrival = TavernHouseSavedArrival(state, revision);
+                        if (cachedArrival != null) return cachedArrival;
+                    }
                     profiles = TavernHouseSceneProfiles(state);
                 }
                 string templateName = kind == "arrival" ? "tavern_house_arrival_image.txt" : "tavern_house_look_again_image.txt";
@@ -76,6 +81,8 @@ namespace ReignBetaServer
                 lock (TavernHouseLocks.GetOrAdd(path, _ => new object()))
                 {
                     var latest = ReadTavernHouseSession(path);
+                    if (kind == "arrival" && latest != null && ReadString(latest, "status", "") == "visiting")
+                    { latest["arrivalSceneCacheKey"] = cacheKey; SaveTavernHouseSession(path, latest); }
                     if (latest == null || ReadString(latest, "status", "") != "visiting" || ReadInt(latest, "imageRequestRevision", 0) != imageRevision
                         || (kind == "look_again" && ReadInt(latest, "transcriptRevision", 0) != revision))
                         return TavernHouseError("This image belongs to an older scene request. The current image is retained.", "stale_image");
@@ -84,6 +91,19 @@ namespace ReignBetaServer
                 return result;
             }
             catch (Exception ex) { return TavernHouseError(ex.Message, "image_failed"); }
+        }
+
+        private static Dictionary<string, object> TavernHouseSavedArrival(Dictionary<string, object> state, int revision)
+        {
+            string key = ReadString(state, "arrivalSceneCacheKey", "");
+            if (key.Length != 64 || key.Any(c => !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f'))) return null;
+            string folder = Path.Combine(Path.GetDirectoryName(TavernHouseSessionPath(state)), "scenes");
+            string image = Path.Combine(folder, key + ".png"), manifest = Path.Combine(folder, key + ".json");
+            if (!File.Exists(image) || !File.Exists(manifest)) return null;
+            var data = ReadJsonObject(manifest);
+            if (ReadString(data, "visitId", "") != ReadString(ReadDictionary(state, "receipt"), "visitId", "") || ReadString(data, "kind", "") != "arrival") return null;
+            return TestDict("ok", true, "cached", true, "cacheKey", key, "imageBase64", Convert.ToBase64String(File.ReadAllBytes(image)),
+                "transcriptRevision", revision, "promptRevision", ReadString(data, "promptRevision", ""), "manifestPath", manifest);
         }
 
         internal static List<Dictionary<string, object>> TavernHouseSceneProfiles(Dictionary<string, object> state)

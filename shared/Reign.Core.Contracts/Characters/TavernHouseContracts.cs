@@ -81,6 +81,12 @@ namespace ReignBeta.Shared.Characters
         public double StartedDay { get; set; }
         public bool Paid { get; set; }
         public bool ServerConfirmed { get; set; }
+        public string ActionTermsHash { get; set; } = "";
+        public string PreparationId { get; set; } = "";
+        public string PayeeHeroId { get; set; } = "";
+        public string PaymentState { get; set; } = "";
+        public int PaymentBeforeGold { get; set; }
+        public int PaymentAfterGold { get; set; }
         public string ConversationId { get; set; } = "";
         public bool Ended { get; set; }
     }

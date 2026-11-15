@@ -78,6 +78,7 @@
     ".md",
     ".props",
     ".ps1",
+    ".psm1",
     ".py",
     ".sln",
     ".slnx",

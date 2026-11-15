@@ -68,12 +68,24 @@ namespace ReignBetaServer
             // Pure, reproducible staging: the reviewed artifact is recomputed from
             // unchanged originals on apply. No provider participates in maintenance.
             string owner = ReadString(session, "npc_id", "");
-            var records = turns.Select(t => "[reported speech; speaker=" + ReadString(t, "speaker_id", "")
+            var views = turns.Select(t => ObserverConversationText(ReadString(t, "text", ""),
+                ReadString(t, "speaker_id", ""), "", ReadString(t, "role", "") == "player")).ToList();
+            var records = turns.Select((t, i) => "[reported speech; source=" + ReadString(t, "turn_id", "")
+                + "; speaker=" + ReadString(t, "speaker_id", "")
                 + "; role=" + ReadString(t, "role", "") + "; source day=" + ReadDouble(t, "world_day", 0d).ToString("R",CultureInfo.InvariantCulture)
-                + "] " + ReadString(t, "text", "")).ToList();
+                + "] " + views[i]).ToList();
             string summary = string.Join("\n---\n", records);
+            // Topic hints use the same public observation as new scene summaries.
+            // IDs and private narration must not become searchable topic words.
+            var topics = BuildMemorySummaryTopics(views.Select(view => TestDict("summary", view)), 8);
+            var tags = MergeStringLists(topics, new[] { "scene", "conversation", "reported_speech", "claim_attribution", "interpersonal_history" });
             return new Dictionary<string, object> { ["summary"] = summary, ["ownerId"] = owner, ["timelineId"] = timeline,
+                ["stagingVersion"] = "source-linked-scene-v2", ["tags"] = tags,
                 ["sourceHash"] = MemorySourceHash(turns), ["sourceTurnIds"] = turns.Select(t => ReadString(t, "turn_id", "")).ToList(),
+                ["sourceReferences"] = turns.Select((t, i) => TestDict("sourceType", "turn", "sourceId", ReadString(t, "turn_id", ""),
+                    "sourceHash", MemorySourceHash(new[] { t }), "viewHash", PromptHash(views[i]),
+                    "speakerId", ReadString(t, "speaker_id", ""), "role", ReadString(t, "role", ""),
+                    "worldDay", ReadDouble(t, "world_day", 0d))).ToList(),
                 ["tokenEstimate"] = EstimateContinuityTokens(summary), ["coverageComplete"] = true,
                 ["status"] = "extractive_complete", ["processingVersion"] = MemoryPrecisionVersion };
         }
@@ -93,8 +105,9 @@ namespace ReignBetaServer
             var prepared = PrepareStagedSceneMemory(session, turns, timeline);
             if (CanonicalJson(prepared) != CanonicalJson(ReadDictionary(operation, "prepared")))
                 throw new InvalidOperationException("Staged memory content differs from complete original evidence.");
-            string summaryId = "precision_scene_" + PromptHash(id + "|" + MemorySourceHash(turns)).Substring(0, 32);
+            string summaryId = "precision_scene_" + PromptHash(id + "|" + MemorySourceHash(turns) + "|" + ReadString(prepared, "stagingVersion", "")).Substring(0, 32);
             string summary = ReadString(prepared, "summary", "");
+            var tags = ReadStringList(prepared, "tags");
             var known = turns.SelectMany(t => TextListFromJson(ReadString(t, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             // A session can contain whispers. A shared summary can be used only
             // by observers present for every source record. Exact turn retrieval
@@ -105,14 +118,14 @@ namespace ReignBetaServer
             if (!known.Contains(owner, StringComparer.OrdinalIgnoreCase)) owner = "";
             ExecuteSql(connection, @"INSERT INTO summaries(summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,
 location_id,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,status,source,vector_id,embedding_status,updated_ts,payload_json,memory_lane)
-VALUES($id,$scope,$owner,'scene',$summary,$events,$start,$end,$count,$location,$known,'[]',$known,'[]','private',0.65,1.0,'[""scene"",""reported_speech""]','active','precision_staging','','not_indexed',$ts,$payload,'interpersonal_history')
+VALUES($id,$scope,$owner,'scene',$summary,$events,$start,$end,$count,$location,$known,'[]',$known,'[]','private',0.65,1.0,$tags,'active','precision_staging','','not_indexed',$ts,$payload,'interpersonal_history')
 ON CONFLICT(summary_id) DO NOTHING;", new Dictionary<string, object> {
                 ["id"] = summaryId, ["scope"] = "scene:" + id, ["owner"] = owner, ["summary"] = summary,
                 ["events"] = Json.Serialize(turns.Select(t => ReadString(t, "event_id", "")).Where(e => e.Length > 0).Distinct().ToList()),
                 ["start"] = turns.Min(t => ReadLong(t, "ts", 0)), ["end"] = turns.Max(t => ReadLong(t, "ts", 0)), ["count"] = turns.Count,
-                ["location"] = ReadString(session, "location_id", ""), ["known"] = Json.Serialize(known),
+                ["location"] = ReadString(session, "location_id", ""), ["known"] = Json.Serialize(known), ["tags"] = Json.Serialize(tags),
                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["payload"] = Json.Serialize(prepared) });
-            InsertSummaryFts(connection, summaryId, summary, new List<string> { "scene", "reported_speech" }, known);
+            InsertSummaryFts(connection, summaryId, summary, tags, known);
             int ordinal = 0;
             foreach (var turn in turns) LinkMemorySource(connection, "summary", summaryId, "turn", ReadString(turn, "turn_id", ""), ordinal++);
             LinkMemorySource(connection, "summary", summaryId, "session", id, 0);

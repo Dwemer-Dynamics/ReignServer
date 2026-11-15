@@ -62,6 +62,7 @@ namespace ReignBetaServer
             var spans = new List<Dictionary<string, object>>();
             var visible = new StringBuilder();
             bool own = speakerId.Length > 0 && string.Equals(speakerId, observerId, StringComparison.OrdinalIgnoreCase);
+            bool malformedMarkers = source.Count(c => c == '*') % 2 != 0;
             int cursor = 0;
             void Keep(int start, int length, string kind, bool narrated)
             {
@@ -70,7 +71,15 @@ namespace ReignBetaServer
                 spans.Add(TestDict("start", start, "length", length, "kind", kind, "text", text));
                 visible.Append(narrated ? "*" + text.Trim() + "*" : text);
             }
-            foreach (Match action in Regex.Matches(source, @"\*([^*]+)\*", RegexOptions.Singleline))
+            // With an odd number of markers, no pairing identifies which
+            // delimiter was omitted. Greedy pairing can turn later private
+            // narration into public speech. Do not guess a paragraph boundary:
+            // a private span may legitimately contain blank lines. Retain only
+            // the unambiguous prefix before the first marker for other readers.
+            // The author still receives the complete immutable source.
+            var actions = malformedMarkers && !own ? Enumerable.Empty<Match>()
+                : Regex.Matches(source, @"\*([^*]+)\*", RegexOptions.Singleline).Cast<Match>();
+            foreach (Match action in actions)
             {
                 Keep(cursor, action.Index - cursor, "spoken_statement", false);
                 if (own) Keep(action.Groups[1].Index, action.Groups[1].Length, "author_narration", true);
@@ -110,16 +119,19 @@ namespace ReignBetaServer
             {
                 int start = ReadInt(span, "start", 0), length = ReadInt(span, "length", 0);
                 if (start > accounted) accounting.Add(TestDict("start", accounted, "length", start - accounted,
-                    "disposition", "format_private_or_unresolved", "reason", "not_observer_evidence"));
+                    "disposition", "format_private_or_unresolved", "reason", malformedMarkers && !own
+                        ? "ambiguous_npc_narration_markers" : "not_observer_evidence"));
                 accounting.Add(TestDict("start", start, "length", length, "disposition", "delivered",
                     "kind", ReadString(span, "kind", "")));
                 accounted = start + length;
             }
             if (accounted < source.Length) accounting.Add(TestDict("start", accounted, "length", source.Length - accounted,
-                "disposition", "format_private_or_unresolved", "reason", "not_observer_evidence"));
-            return TestDict("schema", "reign-observer-projection-v2", "sourceSpeakerId", speakerId, "observerId", observerId,
+                "disposition", "format_private_or_unresolved", "reason", malformedMarkers && !own
+                    ? "ambiguous_npc_narration_markers" : "not_observer_evidence"));
+            return TestDict("schema", "reign-observer-projection-v4", "sourceSpeakerId", speakerId, "observerId", observerId,
                 "sourceHash", PromptHash(source), "visibleText", own ? source : visible.ToString().Trim(), "spans", spans,
                 "coverageSpans", accounting, "sourceLength", source.Length, "sourcePreserved", true,
+                "formatIntegrity", malformedMarkers ? "unbalanced_narration_markers" : "balanced_narration_markers",
                 "coverage", own ? "author_source" : "spoken_and_locally_supported_observable_spans");
         }
 

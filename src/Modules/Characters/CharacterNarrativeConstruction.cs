@@ -8,7 +8,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly ConcurrentDictionary<string, object> NarrativeConstructionLocks = new ConcurrentDictionary<string, object>();
+        private static readonly ConcurrentDictionary<string, object> NarrativeConstructionLocks = new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         private sealed class NarrativeOutputLimitException : InvalidOperationException
         {
@@ -259,20 +259,25 @@ namespace ReignBetaServer
                         ReadInt(settings, "characterConstructionMaxTokens", CharacterConstructionTokenCeiling));
                 // Publish only a complete document. The projections are derived from this
                 // single atomically written source, never from partially completed stages.
-                WriteJsonObject(path, narrative);
-                WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
-                var projection = new Dictionary<string, object> { ["narrative"] = narrative,
-                    ["background"] = new Dictionary<string, object> { ["nativeEncyclopediaText"] = ReadString(hero, "nativeEncyclopediaText", "") } };
-                ApplyNarrativePromptProjection(projection);
-                foreach (var part in new Dictionary<string, string> { ["background"] = "background", ["voice"] = "voice", ["motivations"] = "motivations",
-                    ["saveQuirks"] = "save_quirks", ["hiddenHistory"] = "hidden_history", ["secrets"] = "secrets" })
-                    WriteJsonObject(CharacterFile(campaignId, heroId, part.Value + ".json"), projection[part.Key]);
-                var ready = new Dictionary<string, object> { ["ok"] = true, ["status"] = "ready", ["llmUsed"] = true,
-                    ["constructionEngineVersion"] = CharacterConstructionEngineVersion, ["narrativeSchema"] = NarrativeSchema,
-                    ["source"] = source ?? "character_construction", ["constructedUtc"] = DateTime.UtcNow.ToString("o") };
-                WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), ready);
-                InvalidatePromptRuntimeCache();
-                return ready;
+                lock (NarrativeStateLock)
+                {
+                    if (source == TownNotableProfileSource && !TownProfilePublicationAllowed(campaignId, heroId))
+                        return TestDict("ok", false, "status", "speculative_superseded");
+                    WriteJsonObject(path, narrative);
+                    WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
+                    var projection = new Dictionary<string, object> { ["narrative"] = narrative,
+                        ["background"] = new Dictionary<string, object> { ["nativeEncyclopediaText"] = ReadString(hero, "nativeEncyclopediaText", "") } };
+                    ApplyNarrativePromptProjection(projection);
+                    foreach (var part in new Dictionary<string, string> { ["background"] = "background", ["voice"] = "voice", ["motivations"] = "motivations",
+                        ["saveQuirks"] = "save_quirks", ["hiddenHistory"] = "hidden_history", ["secrets"] = "secrets" })
+                        WriteJsonObject(CharacterFile(campaignId, heroId, part.Value + ".json"), projection[part.Key]);
+                    var ready = new Dictionary<string, object> { ["ok"] = true, ["status"] = "ready", ["llmUsed"] = true,
+                        ["constructionEngineVersion"] = CharacterConstructionEngineVersion, ["narrativeSchema"] = NarrativeSchema,
+                        ["source"] = source ?? "character_construction", ["constructedUtc"] = DateTime.UtcNow.ToString("o") };
+                    WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), ready);
+                    InvalidatePromptRuntimeCache();
+                    return ready;
+                }
             }
             catch (Exception ex)
             {
@@ -309,7 +314,8 @@ namespace ReignBetaServer
                 // New characters have their full story before speaking. A partial stage
                 // stays in its checkpoint and cannot be presented as a completed profile.
                 var result = ConstructNarrativeCharacter(campaignId, heroId, hero, false, source);
-                if (IsCharacterConstructionReady(result)) MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, source);
+                if (IsCharacterConstructionReady(result) && source != TownNotableProfileSource)
+                    MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, source);
                 return result;
             }
         }

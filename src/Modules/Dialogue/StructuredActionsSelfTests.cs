@@ -634,7 +634,7 @@ namespace ReignBetaServer
             string compact = StructuredActionCatalogPrompt();
             using (var catalog = System.Text.Json.JsonDocument.Parse(compact.Substring(compact.IndexOf('{'))))
             {
-                var definitions = ReignActionCatalog.All.Where(d => d.ConversationEligible).OrderBy(d => d.Id, StringComparer.Ordinal).ToArray();
+                var definitions = ReignActionCatalog.All.Where(d => d.ConversationEligible && d.Id != TavernHouseVisitAction.Id).OrderBy(d => d.Id, StringComparer.Ordinal).ToArray();
                 var actionRows = catalog.RootElement.GetProperty("actions");
                 var parameterRows = catalog.RootElement.GetProperty("parameters");
                 bool equal = actionRows.GetArrayLength() == definitions.Length;

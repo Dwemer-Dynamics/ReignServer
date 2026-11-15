@@ -98,11 +98,12 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             // Do not reclassify every recalled/quoted occurrence of "will".
             else if (Regex.IsMatch(quote.TrimStart(), @"^(?:I|we)\s+(?:will|shall|plan to|intend to|would like to)\b", RegexOptions.IgnoreCase))
                 type = "future_intention";
-            var bound = new Dictionary<string, object> { ["status"] = "supported_span", ["sourceEventId"] = eventId,
+            var bound = new Dictionary<string, object> { ["status"] = "supported_span", ["sourceEventId"] = ReadString(source, "eventId", eventId),
                 ["turnId"] = ReadString(source, "turnId", ""), ["speakerId"] = speaker,
+                ["timestamp"] = ReadLong(source, "timestamp", 0), ["acceptedSequence"] = ReadLong(source, "acceptedSequence", 0),
                 // Actor assertions remain claims; presence is not proof of acting.
                 ["claimedActorIds"] = ReadStringList(claimed, "actorIds"), ["evidenceType"] = type,
-                ["quote"] = quote, ["start"] = start, ["length"] = quote.Length, ["sourceHash"] = PromptHash(original) };
+                ["quote"] = quote, ["start"] = start, ["length"] = quote.Length, ["sourceHash"] = ReadString(source, "originalSourceHash", PromptHash(original)) };
             if (speakerAlias.Length > 0) bound["resolvedSpeakerAlias"] = speakerAlias;
             return bound;
         }
@@ -186,12 +187,23 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             string id = ReadString(write, "relatedTurnId", ""), kind = ReadString(write, "relationKind", "");
             if (id.Length == 0 && kind.Length == 0) return "";
             if (!new[] { "answer", "reciprocal_question", "correction", "activity_completion", "abandonment" }.Contains(kind)) return "invalid_relation_kind";
+            string quote = ReadString(write, "relatedQuote", "");
             var row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
                 new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+            if (row == null && quote.Length >= 12)
+            {
+                var access = new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay };
+                var candidates = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", id))
+                    .Where(candidate => MemoryTimeVisible(candidate, access, connection)
+                        && (ReadString(candidate, "speaker_id", "") == owner || TextListFromJson(ReadString(candidate, "participants_json", "[]")).Contains(owner))
+                        && ConversationTurnTextForRecall(candidate).Contains(quote, StringComparison.Ordinal)
+                        && ObserverConversationText(ConversationTurnTextForRecall(candidate), ReadString(candidate, "speaker_id", ""), owner,
+                            ReadString(candidate, "role", "") == "player").Contains(quote, StringComparison.Ordinal)).Take(2).ToList();
+                if (candidates.Count == 1) row = candidates[0];
+            }
             if (row == null || !MemoryTimeVisible(row, new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay }, connection)
                 || (ReadString(row, "speaker_id", "") != owner && !TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(owner)))
                 return "related_source_unavailable";
-            string quote = ReadString(write, "relatedQuote", "");
             if (quote.Length < 12 || !ConversationTurnTextForRecall(row).Contains(quote, StringComparison.Ordinal)) return "related_source_quote_mismatch";
             if (!ObserverConversationText(ConversationTurnTextForRecall(row), ReadString(row, "speaker_id", ""), owner, ReadString(row, "role", "") == "player").Contains(quote, StringComparison.Ordinal))
                 return "related_source_outside_observer_scope";
@@ -199,6 +211,8 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                 && ConversationInformationRequestForm(ConversationTurnTextForRecall(row), quote).Length == 0) return "related_source_not_question";
             write["relatedSpeakerId"] = ReadString(row, "speaker_id", "");
             write["relatedSourceHash"] = PromptHash(ReadString(row, "text", ""));
+            if (ReadString(row, "turn_id", "") != id)
+            { write["relatedSourceAlias"] = id; write["relatedTurnId"] = ReadString(row, "turn_id", ""); }
             return "";
         }
 

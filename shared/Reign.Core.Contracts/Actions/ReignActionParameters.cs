@@ -127,7 +127,7 @@ namespace Reign.Core.Contracts.Actions
             {
                 if (p.Key == "terms.accordType") p.Choices = new[] { "Trade", "MutualWatch", "Agricultural", "Artisan", "Garrison" };
                 if (p.Key == "terms.termKind") p.Choices = new[] { "fixed", "open_ended" };
-                if (p.Key == "terms.duelMode") p.Choices = new[] { "practice", "honor", "lethal" };
+                if (p.Key == "terms.duelMode") p.Choices = new[] { "practice", "training_together", "honor", "lethal" };
                 if (p.Key == "terms.response") p.Choices = new[] { "continue", "adapt", "hold", "withdraw", "cancel" };
                 if (p.Key == "terms.objective") p.Choices = CampaignObjectives;
                 if (p.Key == "terms.durationDays" && (id == "accept_temporary_party_guest" || id == "renew_temporary_party_guest"))

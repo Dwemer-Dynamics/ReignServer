@@ -23,6 +23,23 @@ namespace ReignBetaServer
             Check("private_fear_is_not_given_to_another_actor", ObserverConversationText("*He remembers his private fear of the throne.* I will listen.", "npc_a", "npc_b") == "I will listen.");
             Check("unclassified_narration_is_not_certified_as_observable", !ObserverConversationText("*A secret meaning lives here.* Good day.", "npc_a", "npc_b").Contains("secret meaning"));
             Check("truncated_narration_cannot_become_spoken", ObserverConversationText("Good day. *She remembers the secret", "npc_a", "npc_b") == "Good day.");
+            const string shiftedMarkers = "Good day. *She keeps a private thought across paragraphs.\r\n\r\nThe hidden route must never be spoken.\r\n\r\n*She lifts a finger.*\r\n\r\nThe greater answer is paid.\r\n\r\n*Her voice drops.*\r\n\r\nThe next answer stands on its own feet.\r\n\r\n*She smiles.*\r\n\r\nA later sentence.";
+            var malformedProjection = ProjectConversationNarration(shiftedMarkers, "npc_a", "npc_b");
+            Check("missing_early_marker_cannot_reclassify_later_private_spans", ReadString(malformedProjection, "visibleText", "") == "Good day."
+                && !ReadString(malformedProjection, "visibleText", "").Contains("hidden route"));
+            Check("ambiguous_projection_preserves_author_and_source_hash", ObserverConversationText(shiftedMarkers, "npc_a", "npc_a") == shiftedMarkers
+                && ReadString(malformedProjection, "sourceHash", "") == PromptHash(shiftedMarkers)
+                && ReadString(malformedProjection, "formatIntegrity", "") == "unbalanced_narration_markers"
+                && ReadBool(malformedProjection, "sourcePreserved", false));
+            var malformedCoverage = ReadDictionaryList(malformedProjection, "coverageSpans");
+            Check("ambiguous_projection_accounts_for_quarantine_without_repair", malformedCoverage.Sum(s => ReadInt(s, "length", 0)) == shiftedMarkers.Length
+                && malformedCoverage.Any(s => ReadString(s, "reason", "") == "ambiguous_npc_narration_markers")
+                && ReadDictionaryList(malformedProjection, "spans").All(s => shiftedMarkers.Substring(ReadInt(s, "start", 0), ReadInt(s, "length", 0)) == ReadString(s, "text", "")));
+            const string balancedParagraphs = "*She remembers a secret.\n\nShe thinks of the hidden route.* I heard you. *She nods.*";
+            Check("balanced_multiline_private_span_stays_private", !ObserverConversationText(balancedParagraphs, "npc_a", "npc_b").Contains("hidden route")
+                && ObserverConversationText(balancedParagraphs, "npc_a", "npc_b").Contains("I heard you."));
+            Check("malformed_player_story_keeps_existing_explicit_audience_semantics", ObserverConversationText(shiftedMarkers, "player", "npc_b", true) == shiftedMarkers);
+            Check("odd_literal_marker_is_conservatively_withheld_not_repaired", ObserverConversationText("The price is 2 * 3 coins.", "npc_a", "npc_b") == "The price is 2");
             Check("visible_whisper_preserved_without_content", ObserverConversationText("*The player whispers privately to Arin.*", "player", "npc_b").Contains("whispers privately"));
             var projection = ProjectConversationNarration(reply, "npc_a", "npc_b");
             Check("every_projected_span_pins_exact_source_bytes", ReadString(projection, "sourceHash", "") == PromptHash(reply)

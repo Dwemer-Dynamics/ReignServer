@@ -348,6 +348,16 @@ namespace ReignBetaServer
             bool includeBaselines)
         {
             bool explicitSuite = !string.IsNullOrWhiteSpace(requestedSuite);
+            if (string.Equals(requestedSuite, "categorized_memory", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "pipeline.categorized_memory", "categorized_memory", RunCategorizedMemorySubsystemSelfTests(), caseResultLimit:64);
+                return;
+            }
+            if (string.Equals(requestedSuite, "live_interaction", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "contracts.live_interaction", "live_interaction", RunLiveInteractionTestSelfTests(), caseResultLimit:512);
+                return;
+            }
             if (explicitSuite && ShouldRunVerificationSuite(requestedSuite, "war_economy_options"))
                 AddSubsystemListSummary(checks, "contracts.war_economy_options", "war_economy_options", RunWarEconomyOptionsSelfTests());
             if (string.Equals(requestedSuite, "memory_evidence_replay", StringComparison.OrdinalIgnoreCase))

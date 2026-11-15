@@ -26,3 +26,5 @@ release/ThirdParty/provenance.json text eol=lf
 
 # Linux dependency locks must hash identically in Windows and WSL builds.
 services/vector-worker/requirements*.txt text eol=lf
+# Tester bootstrap scripts execute directly in the Linux image.
+scripts/tester-package/*.sh text eol=lf

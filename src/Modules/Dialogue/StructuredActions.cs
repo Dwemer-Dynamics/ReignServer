@@ -73,7 +73,7 @@ namespace ReignBetaServer
                 TestDict("role", "system", "content", system),
                 TestDict("role", "user", "content", Json.Serialize(TestDict("playerText", ReadString(request, "playerText", ""),
                     "visibleReply", ReadFirstString(parsed, "reply", "body"), "actionContext", StructuredActionModelFacts(context)))
-                    + "\nREGISTERED TERMS: " + StructuredActionCatalogPrompt())
+                    + "\nREGISTERED TERMS: " + StructuredActionCatalogPrompt() + TavernVisitActionPrompt())
             };
             var repairRequest = TestDict("requestType", "dialogue_continuity_repair", "campaignId", campaignId,
                 "correlationId", correlationId, "heroStringId", heroId, "eventId", eventId,
@@ -99,6 +99,7 @@ namespace ReignBetaServer
                 var errors = ActionNegotiation.ValidateDecision(offered, decision, player, npc,
                     ReadString(context, "conversationId", ""), ReadDouble(context, "worldDay", 0));
                 if (errors.Count > 0) return Fail(string.Join(" ", errors));
+                ValidateTavernActionDecision(offered, decision, player, npc, ReadString(context, "conversationId", ""), ReadDouble(context, "worldDay", 0));
                 // Merge only the verified omitted field; preserve every original byte value.
                 parsed["structuredActionDecision"] = raw;
                 llm["content"] = Json.Serialize(parsed);
@@ -164,7 +165,7 @@ namespace ReignBetaServer
                 + "ACTION REQUEST AND NATIVE FACTS: " + Json.Serialize(StructuredActionModelFacts(context)) + "\n"
                 + AgreementPaymentHistoryPrompt(ReadDictionary(context, "fulfilledPaymentHistory"), false)
                 + RequestedPoliticalServiceQuoteCue(context)
-                + RequestedSpouseSeparationCue(context);
+                + RequestedSpouseSeparationCue(context) + TavernVisitActionPrompt();
         }
 
         private static string RequestedSpouseSeparationCue(Dictionary<string, object> context)
@@ -188,11 +189,11 @@ namespace ReignBetaServer
                 + "Principled unconditional support may still be free. If further explanations or unsupported conditions remain, keep negotiating with none instead of publishing a binding offer. These terms never guarantee membership, adoption or a government vote.\n";
         }
 
-        private static string StructuredActionCatalogPrompt()
+        private static string StructuredActionCatalogPrompt(bool tavernOnly = false)
         {
             var parameters = new List<object[]>();
             var indexes = new Dictionary<string, int>(StringComparer.Ordinal);
-            var actions = ReignActionCatalog.All.Where(d => d.ConversationEligible).OrderBy(d => d.Id, StringComparer.Ordinal)
+            var actions = ReignActionCatalog.All.Where(d => d.ConversationEligible && (tavernOnly ? d.Id == TavernHouseVisitAction.Id : d.Id != TavernHouseVisitAction.Id)).OrderBy(d => d.Id, StringComparer.Ordinal)
                 .Select(d => new object[] { d.Id, d.Label, d.MovesActor ? 1 : 0, d.Parameters.Select(p => {
                     var row = new object[] { p.Key, p.Kind, p.Required ? 1 : 0, p.Choices };
                     string key = Json.Serialize(row);
@@ -212,6 +213,11 @@ namespace ReignBetaServer
         private static Dictionary<string, object> StructuredActionPromptContext(Dictionary<string, object> payload)
         {
             var context = CloneDictionary(ReadDictionary(payload, "structuredActionContext") ?? TestDict());
+            context.Remove("tavernHouse");
+            var scopedProposal = ReadDictionary(context, "proposal");
+            if (!TavernActionScopeEnabled && scopedProposal != null
+                && TavernHouseVisitAction.Contains(Json.Deserialize<ActionAgreement>(Json.Serialize(scopedProposal))))
+                context.Remove("proposal");
             var payments = VerifiedAgreementPaymentHistory(payload);
             if (payments.Count > 0) context["fulfilledPaymentHistory"] = payments;
             else context.Remove("fulfilledPaymentHistory");
@@ -532,6 +538,7 @@ namespace ReignBetaServer
                 if (errors.Count > 0) throw new InvalidOperationException(string.Join(" ", errors));
                 var consentIssues = StructuredActionAcceptanceContradictions(parsed, payload);
                 if (consentIssues.Count > 0) throw new InvalidOperationException(ReadString(consentIssues[0], "detail", "Unresolved action consent."));
+                ValidateTavernActionDecision(offered, decision, player, npc, conversation, day);
                 ConstrainNpcStoryDuelProposal(payload, npc, player, decision);
                 output["kind"] = decision.Kind; output["proposalId"] = decision.ProposalId;
                 output["revision"] = decision.Revision; output["termsHash"] = decision.TermsHash; output["reason"] = decision.Reason;

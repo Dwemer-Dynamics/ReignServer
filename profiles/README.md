@@ -1,7 +1,8 @@
 # Reign character profile library
 
 The shipped v5 `profile_catalog.json` and preserved v4 foundation catalog contain
-1,195 profiles: 397 Sandbox nobles and 798 Reign court nobles. The court roster
+1,251 profiles: 453 native Sandbox/War Sails nobles and 798 Reign court nobles. The native
+roster includes all 56 NavalDLC Nord nobles, including the two deceased ancestors. The court roster
 has 133 independent six-person households, including 13 Nord households with 78
 adults. Every new Nord clan starts at tier 1; its members keep the ordinary
 renown, equipment, relationships and future rank rules.
@@ -13,6 +14,14 @@ approved concept/meaning library; it was not built through construction provider
 calls.
 
 ## Nord extension authoring
+
+The 2026-11-12 repair appends the native War Sails roster separately from the 78
+authored court nobles. `author_native_nord_profiles.py` uses canonical C# foundations,
+native biography/kinship and the approved local concept library. It verifies every
+prior profile object and narrative byte before installing the extension. The native
+roster's 43 traits, MBTI, life, voice and interests ship complete with no provider call.
+Foundation generation accepts `--naval-data` and runs before database housekeeping.
+The whole-roster regression and character/narrative suites must pass before deployment.
 
 The new family identities, home IDs and individual life seeds are authored in
 the paired client checkout's `ReignBeta/ModuleData/reign_nord_households.json` and

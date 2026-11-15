@@ -155,11 +155,12 @@ namespace ReignBetaServer
                         ["state"] = empty, ["relationships"] = empty, ["memorySummary"] = empty };
                     var transcriptFixture = new List<Dictionary<string, object>>
                     {
-                        new Dictionary<string, object> { ["turnId"] = "shared-history-beat", ["exchangeId"] = "shared-history-beat",
+                        new Dictionary<string, object> { ["sourceTurnId"] = "player-statement-1", ["turnId"] = "shared-history-beat", ["exchangeId"] = "shared-history-beat",
                             ["role"] = "player", ["speaker"] = "Ruler", ["speakerHeroStringId"] = "ruler", ["text"] = "PLAYER_HISTORY_SENTINEL" },
-                        new Dictionary<string, object> { ["turnId"] = "shared-history-beat", ["exchangeId"] = "shared-history-beat",
+                        new Dictionary<string, object> { ["sourceTurnId"] = "npc-statement-1", ["turnId"] = "shared-history-beat", ["exchangeId"] = "shared-history-beat",
                             ["role"] = "npc", ["speaker"] = "Fixture Speaker", ["speakerHeroStringId"] = id, ["text"] = "NPC_HISTORY_SENTINEL" }
                     };
+                    // The duplicated feed repeats durable statements; the shared beat is not a statement ID.
                     var rows = CanonicalizePromptTranscript(transcriptFixture.Concat(transcriptFixture), 30);
                     snapshot["priorLines"] = rows;
                     var messages = BuildTestMessages(empty, payload, snapshot,

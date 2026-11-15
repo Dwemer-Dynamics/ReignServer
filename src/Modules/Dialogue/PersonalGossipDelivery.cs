@@ -27,6 +27,9 @@ namespace ReignBetaServer
                     GossipFields("id", ReadString(data, "receivedMessageId", ""), "owner", ReadString(data, "speakerId", ""))).Count > 0;
             var ids = ReadStringList(data, "sourceTurnIds");
             if (ids.Count == 0) return false;
+            if (ReadString(data, "sourceOrigin", "") == "public_witness")
+                return PublicWitnessGossipSourcesActive(data, ids.SelectMany(id => QuerySql(c,
+                    "SELECT turn_id,speaker_id,text FROM conversation_turns WHERE turn_id=$id AND status='active';", GossipFields("id", id))));
             var text = new StringBuilder();
             foreach (string id in ids)
             {
@@ -90,10 +93,12 @@ ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timelin
                         {
                             string sourceQuote = ReadString(data, "sourceQuote", "");
                             var sourceTurns = ReadStringList(data, "sourceTurnIds").Take(2)
-                                .SelectMany(id => QuerySql(c, "SELECT speaker_id,text FROM conversation_turns WHERE turn_id=$id AND status='active';", GossipFields("id", id)))
+                                .SelectMany(id => QuerySql(c, "SELECT turn_id,speaker_id,text FROM conversation_turns WHERE turn_id=$id AND status='active';", GossipFields("id", id)))
                                 .ToList();
                             BindPersonalGossipEncounterTurns(data, sourceTurns);
-                            var quotedSpeakers = sourceTurns.Where(turn => GossipQuoteSupported(sourceQuote, ReadString(turn, "text", "")))
+                            var quoteSources = ReadString(data, "sourceOrigin", "") == "public_witness"
+                                ? ReadDictionaryList(data, "publicWitnessSources") : sourceTurns;
+                            var quotedSpeakers = quoteSources.Where(turn => GossipQuoteSupported(sourceQuote, ReadString(turn, "text", "")))
                                 .Select(turn => ReadString(turn, "speaker_id", "")).Distinct().ToList();
                             data["sourceQuoteSpeakerId"] = quotedSpeakers.Count == 1 ? quotedSpeakers[0] : "";
                         }
@@ -235,7 +240,9 @@ AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", G
                 "recipientId", ReadString(data, "recipientId", ""), "player", playerName,
                 "sourceQuoteSpeaker", quoteSpeaker == player ? playerName : quoteSpeaker == speaker ? speakerName : "an attributed earlier speaker",
                 "originalSourceFrame", ReadString(sourceFrame, "body", ""),
-                "sourceQuoteAddressee", ReadInt(data, "hop", 1) > 1 ? speakerName : quoteSpeaker == speaker ? playerName : speakerName,
+                "sourceQuoteAddressee", ReadInt(data, "hop", 1) == 1 && ReadString(data, "sourceOrigin", "") == "public_witness"
+                    ? ReadString(data, "witnessSourceAddresseeLabel", "the other participant")
+                    : ReadInt(data, "hop", 1) > 1 ? speakerName : quoteSpeaker == speaker ? playerName : speakerName,
                 "playerIdentityState", ReadString(ReadDictionary(data, "playerReference"), "identityState", "encountered_unknown"),
                 "personality", ReadDictionary(ReadDictionary(data, "traits"), "traitPercentages") ?? new Dictionary<string, object>(),
                 "intent", ReadString(data, "type", "positive"), "claimKind", ReadString(data, "claimKind", "assertion"),
@@ -317,6 +324,14 @@ AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", G
             {
                 if (author.Length == 0 || author == speaker || ReadString(data, "sourceQuoteAddresseeId", "") != speaker) return null;
                 introduction = ReadString(data, "sourceQuoteSpeakerName", "Someone") + " told me this: ";
+            }
+            else if (ReadString(data, "sourceOrigin", "") == "public_witness")
+            {
+                if (!ReadBool(data, "publicWitnessSourceVerified", false) || author.Length == 0
+                    || author != ReadString(data, "witnessSourceSpeakerId", "")) return null;
+                introduction = "I heard " + ReadString(data, "witnessSourceSpeakerLabel", "a participant") + " say to "
+                    + ReadString(data, "witnessSourceAddresseeLabel", "the other participant") + ": ";
+                account = "firsthand";
             }
             else if (author.Length > 0 && author == player) introduction = playerLabel + " told me this: ";
             else if (author.Length > 0 && author == speaker) { introduction = "I told " + playerLabel + ": "; account = "firsthand"; }

@@ -6,6 +6,8 @@ For paired development, clone the public Reign repository beside this checkout a
 
 Stage explicit reviewed paths only. Validate and audit both repositories before publication. Source publication is authorized when the user requests it; keep implementation PRs as drafts targeting unstable. A source PR does not establish clean-install or in-game acceptance.
 
+Every publication targeting unstable must also deliver the same qualified complete tester build as one ZIP on the user's Google Drive, including the Linux server and installation system, full Reign mod/shared portraits, required Windows helper and latest HTML instructions. Follow ../Reign/docs/agent/testing/RELEASE_PACKAGING.md and scripts/tester-package. Retain paired commit/report hashes, package inventory/SHA and verified Drive identity/link; never include player state or credentials. Source push alone is incomplete.
+
 Approved first-party shared portraits belong in the Reign client module at ReignBeta/PortraitCache/_shared, with the tracked ReignBeta/PortraitCache/shared-portrait-inventory.json. Deploy and package the verified module inventory; do not rely on a separate or machine-local first-party portrait payload.
 
 ## Dedicated ReignServer WSL operations
@@ -26,6 +28,8 @@ Approved first-party shared portraits belong in the Reign client module at Reign
 Use `product` for requested product-wide confidence and `all` where the manifest requires it. Select the same WSL distro for validation (`REIGN_WSL_DISTRO`) and deployment (`-Distro`). Never bypass an occupied validation lease or use active player data for verification.
 
 ### Deploy local changes
+
+Use the paired primary physical roots and the machine's reviewed deployment-source authority. Follow `../Reign/docs/agent/testing/UI_AND_DEPLOYMENT.md#reviewed-deployment-source` to prepare/review/promote exact report, source and artifact receipts, retained on E:. Deploy never creates or changes authority. Old worktree scripts are recovery-only. A fresh Linux-only candidate may use the retained qualified verifier; a client rebuild is not required solely for server deployment. Do not bypass a missing/stale checkpoint or delete recovery worktrees.
 
 1. Verify that `ReignServer` is separately registered with its own virtual disk; the deployment script selects it by default. Confirm `reignctl`, PostgreSQL, Apache and UTF-8 setup exist.
 2. Sync only the reviewed server source into `/var/www/html/ReignServer`, preserving its `.git`, ignored `data/` and ignored `runtime/`. Run `sudo reignctl prepare` inside that distro for pinned dependencies and models.

@@ -24,6 +24,23 @@ function Run-Case([string]$case) {
 }
 Run-Case 'healthy' | Out-Null; Assert-Calls 'browser'
 Run-Case 'unhealthy' | Out-Null; Assert-Calls 'recover,start,browser'
+# Production health acceptance must include verified service ownership.
+$validHealth = @{ ok=$true; service='BannerlordReignServer'; protocolVersion=1; serverVersion='fixture'; databaseName='reign'; databaseSchemaUpToDate=$true }
+foreach ($state in @('on','off','starting','stopping','unknown')) {
+    $accepted = Test-ReignManagedHealth -Health $validHealth -Control @{ok=$true;state=$state} -Version 'fixture'
+    if ($accepted -ne ($state -eq 'on')) { throw "Invalid managed health acceptance: $state" }
+}
+if (Test-ReignManagedHealth -Health $validHealth -Control $null -Version 'fixture') { throw 'Unavailable ownership was reused.' }
+if (Test-ReignManagedHealth -Health $validHealth -Control @{ok=$false;state='on'} -Version 'fixture') { throw 'Failed ownership was reused.' }
+if (Test-ReignManagedHealth -Health $validHealth -Control @{ok=$true;state='on'} -Version 'other') { throw 'Wrong version was reused.' }
+$script:calls.Clear()
+$script:healthCount = 0
+Ensure-ReignServer -Health {
+    $script:healthCount++
+    $state = if ($script:healthCount -eq 1) { 'off' } else { 'on' }
+    Test-ReignManagedHealth -Health $validHealth -Control @{ok=$true;state=$state} -Version 'fixture'
+} -Recover { $script:calls.Add('recover') } -StartServer { $script:calls.Add('start') } -OpenBrowser { $script:calls.Add('browser') } | Out-Null
+Assert-Calls 'recover,start,browser'
 foreach ($case in @('recovery-failure','start-failure','never-ready')) {
     $failed = $false
     try { Run-Case $case | Out-Null } catch { $failed = $true }
@@ -71,4 +88,4 @@ foreach ($failedUnit in @($true, $false)) {
 $resetFailed = $false
 try { Reset-ReignFailureIfNeeded -IsFailed { $true } -Reset { throw 'reset failed' } } catch { $resetFailed = $true }
 if (-not $resetFailed) { throw 'Expected failure when a failed unit cannot be reset.' }
-Write-Output 'reign-launcher-startup-contract-v1: 5 startup, 2 WSL path, 3 existing-UI, 4 tab-name and 3 failed-unit cases passed'
+Write-Output 'reign-launcher-startup-contract-v1: 6 startup, 8 managed health, 2 WSL path, 3 existing-UI, 4 tab-name and 3 failed-unit cases passed'

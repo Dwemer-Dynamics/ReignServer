@@ -32,6 +32,37 @@ class StartupPrerequisiteTests(unittest.TestCase):
         script = prefix + '\nroot="$1/runtime"; data="$1/data"; pidfile="$1/pids/server.pid"\n' + body
         return subprocess.run(['bash', '-c', script, 'fixture', str(fixture)], capture_output=True, text=True, timeout=10)
 
+    def test_public_start_and_stop_dispatch_before_acquiring_runtime_lease(self):
+        for action in ('start', 'stop'):
+            for exit_code in (0, 23):
+                with self.subTest(action=action, exit_code=exit_code), tempfile.TemporaryDirectory(prefix='reign-dispatch-') as directory:
+                    fixture = Path(directory)
+                    adapter = fixture / 'systemctl'
+                    adapter.write_text('#!/bin/sh\nprintf "%s\\n" "$*" > "$REIGN_TEST_CALLS"\nexit "$REIGN_TEST_EXIT"\n')
+                    adapter.chmod(0o755)
+                    script = self.lifecycle_functions().replace('/usr/bin/systemctl', str(adapter)).replace(
+                        '/run/lock/reignserver-runtime.lock', str(fixture / 'runtime.lock')) + '\nexit 99\n'
+                    env = dict(os.environ, REIGN_TEST_CALLS=str(fixture / 'calls'), REIGN_TEST_EXIT=str(exit_code))
+                    env.pop('INVOCATION_ID', None)
+                    result = subprocess.run(['bash', '-c', script, 'fixture', action], env=env,
+                                            capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, exit_code, result.stderr)
+                    self.assertEqual((fixture / 'calls').read_text(), action + ' reignserver.service\n')
+                    self.assertFalse((fixture / 'runtime.lock').exists(), 'Dispatch must not hold the callback lease.')
+
+    def test_systemd_callbacks_reach_process_functions_without_recursive_dispatch(self):
+        for action in ('start', 'stop'):
+            with self.subTest(action=action), tempfile.TemporaryDirectory(prefix='reign-callback-') as directory:
+                fixture = Path(directory)
+                script = self.lifecycle_functions().replace('/usr/bin/systemctl', '/never-call-systemctl').replace(
+                    '/run/lock/reignserver-runtime.lock', str(fixture / 'runtime.lock')) + '\nprintf callback\n'
+                result = subprocess.run(['bash', '-c', script, 'fixture', action],
+                                        env=dict(os.environ, INVOCATION_ID='isolated-systemd-invocation'),
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'callback')
+                self.assertTrue((fixture / 'runtime.lock').exists())
+
     def test_root_owned_stale_pid_can_be_replaced_while_server_stays_unprivileged(self):
         self.assertEqual(os.geteuid(), 0, 'PID access contract requires the dedicated root test adapter.')
         with tempfile.TemporaryDirectory(prefix='reign-startup-pid-') as directory:

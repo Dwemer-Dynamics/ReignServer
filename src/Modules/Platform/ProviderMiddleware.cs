@@ -117,6 +117,7 @@ namespace ReignBetaServer
             // normalization removes underscores and would demote group/helper
             // calls to background priority.
             string value = (requestType ?? "").Trim().ToLowerInvariant();
+            if (value == "character_construction" && CurrentTownProfileWork?.Foreground == true) return true;
             return value == "dialogue" || value == "social_event" || value == "party_chat"
                 || value == "generated_wilderness_event" || value == "correspondence";
         }

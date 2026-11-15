@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Workspace,
-    [string]$StagedModule
+    [string]$StagedModule,
+    [hashtable]$ApprovedSourceHashes
 )
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = (Resolve-Path -LiteralPath $Workspace).Path
@@ -57,9 +58,13 @@ foreach ($path in $trackedSet) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Tracked client content is missing: $path" }
     if ($StagedModule) {
         $target = Join-Path $StagedModule $relative
+        $expectedHash = if ($ApprovedSourceHashes) {
+            if (-not $ApprovedSourceHashes.ContainsKey($path)) { throw "Client file is absent from the reviewed source checkpoint: $path" }
+            $ApprovedSourceHashes[$path]
+        } else { (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash }
         if (-not (Test-Path -LiteralPath $target -PathType Leaf) -or
             (Get-Item -LiteralPath $target).Length -ne (Get-Item -LiteralPath $source).Length -or
-            (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash) {
+            (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $expectedHash) {
             throw "Staged client content differs from source: $path"
         }
     }

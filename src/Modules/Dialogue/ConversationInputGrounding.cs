@@ -15,7 +15,8 @@ namespace ReignBetaServer
             if (payload == null) return null;
             if (!PlayerInputSources.TryGetValue(payload, out var source))
             {
-                source = new AcceptedPlayerInputSource { Original = ReadFirstString(payload, "playerText", "text", "message") };
+                source = new AcceptedPlayerInputSource { Original = ReadFirstString(payload, "playerText", "text", "message"),
+                    PrivateFocusId = ResolvePlayerPrivateFocus(payload) };
                 PlayerInputSources.Add(payload, source);
             }
             return source;

@@ -32,6 +32,9 @@ namespace ReignBetaServer
                 Check(text == grass ? "grass_duel_reaches_current_writer" : "back_massage_reaches_current_writer",
                     ReadString(source.Interpretation, "status", "") == "validated" && ReadString(payload, "playerText", "").Contains(action)
                     && BuildCurrentConversationGrounding(payload, "npc").Contains(action) && source.Original == text);
+                Check(text == grass ? "structured_grass_uses_latest_reference" : "structured_massage_uses_latest_reference",
+                    !BuildCurrentConversationGrounding(payload, "npc", separateLatestPlayerMessage: true).Contains(action)
+                    && BuildCurrentConversationGrounding(payload, "npc", separateLatestPlayerMessage: true).Contains("LATEST PLAYER TURN"));
                 var ignored = TestDict("reply", "I am well. What is on your mind?", "actionResponses", new object[0]);
                 Check(text == grass ? "grass_no_mechanical_reaction_gate" : "massage_no_mechanical_reaction_gate", FindConversationGroundingViolations(ignored, payload, "npc").Count == 0);
                 string quote = text == grass ? "*She parries the grass blade and laughs.*" : "*She tenses beneath his hand.* Please stop touching my back.";
@@ -80,6 +83,32 @@ namespace ReignBetaServer
             var solo = people.Where(p => CharacterIdFrom(p) != "bystander").ToList();
             Check("mixed_whisper_preserves_actions_for_recipient", ProjectPlayerInputForAudience(whisperStory, "npc", solo, out _, out _) == whisperStory);
             const string namedWhisper = "*I take her hand and whisper to Mira* Wait here.";
+            const string quietAside = "*I smile and chuckle quietly as we continue to dance and speak quietly just for her.* Im not sure I would enjoy what they are likely thinking.";
+            var aside = Payload(quietAside); aside["activeHeroIds"] = new[] { "npc" };
+            var asideSource = CapturePlayerInput(aside);
+            asideSource.Interpretation = ValidateNarrationInterpretation(quietAside, InterpretAll(quietAside), aside);
+            ApplyPlayerInputAudienceToPayload(aside, "npc");
+            var otherListener = CloneDictionary(aside); CopyPlayerInputSource(aside, otherListener);
+            otherListener["activeHeroIds"] = new[] { "bystander" };
+            ApplyPlayerInputAudienceToPayload(otherListener, "bystander");
+            Check("exclusive_quiet_aside_uses_original_focus_across_listeners",
+                ReadString(aside, "playerText", "") == quietAside && ReadBool(aside, "privatePlayerInputForSpeaker", false)
+                && !ReadString(otherListener, "playerText", "").Contains("Im not sure")
+                && ReadString(otherListener, "playerText", "").Contains("continue to dance")
+                && asideSource.Original == quietAside && asideSource.PrivateFocusId == "npc");
+            Check("ambiguous_quiet_aside_has_no_invented_recipient",
+                !ProjectPlayerInputForAudience(quietAside, "npc", people, out _, out bool unknownPrivate).Contains("Im not sure") && !unknownPrivate
+                && !ProjectPlayerInputForAudience(quietAside, "bystander", people, out _, out _).Contains("Im not sure"));
+            const string quietPublic = "*I smile and chuckle quietly as we dance.* Everyone is welcome.";
+            Check("quiet_gesture_does_not_hide_public_speech", ProjectPlayerInputForAudience(quietPublic, "bystander", people, out _, out _) == quietPublic);
+            foreach (string publicVoice in new[] { "*I speak quietly, just for a moment.* Everyone is welcome.",
+                "*I speak low, just for everyone.* Everyone is welcome.", "*I lower my sword and speak to the hall.* Everyone is welcome." })
+                Check("quiet_public_voice_" + results.Count, ProjectPlayerInputForAudience(publicVoice, "bystander", people, out _, out _) == publicVoice);
+            var contraryFocus = Payload(namedWhisper); contraryFocus["activeHeroIds"] = new[] { "bystander" };
+            CapturePlayerInput(contraryFocus); ApplyPlayerInputAudienceToPayload(contraryFocus, "npc");
+            Check("explicit_named_whisper_overrides_original_focus", ReadString(contraryFocus, "playerText", "") == namedWhisper
+                && ReadBool(contraryFocus, "privatePlayerInputForSpeaker", false));
+            Check("no_roster_whisper_does_not_assume_current_listener", !ProjectPlayerInputForAudience(whisperStory, "npc", new(), out _, out _).Contains("Dont yell"));
             string unheard = ProjectPlayerInputForAudience(namedWhisper, "bystander", people, out _, out _);
             Check("explicit_whisper_preserves_action_but_scopes_words", unheard.Contains("I take her hand") && !unheard.Contains("Wait here")
                 && ProjectPlayerInputForAudience(namedWhisper, "npc", people, out _, out _) == namedWhisper);
@@ -89,6 +118,33 @@ namespace ReignBetaServer
                 && !sharedWhisper.Contains("we leave at dawn") && inlinePublic.Contains("I take her hand")
                 && inlinePublic.Contains("I brush her sleeve") && inlinePublic.Contains(".* *I face the group*")
                 && ProjectPlayerInputForAudience(inlineWhisper, "npc", people, out _, out _) == inlineWhisper);
+            const string reassured = "*I take her hand* your hand wont shake because its in mine, and it will always be in mine regardless of this.";
+            var ownershipPayload = Payload(reassured + "\r\n\r\nWhat did you say the market showed you?");
+            bool VoiceEcho(string reply, Dictionary<string, object> context, string observer = "npc") =>
+                FindCriticalConversationContinuityViolations(TestDict("reply", reply), context, observer)
+                    .Any(issue => ReadString(issue, "type", "") == "critical_continuity_player_voice_echo");
+            Check("player_narrated_reassurance_cannot_become_npc_speech", VoiceEcho(
+                "1085 Spring 25 Afternoon\r\n\r\n" + reassured + "\r\n\r\nThe stalls showed who could bargain.", ownershipPayload));
+            string reformatted = reassured.Replace("your hand", "Your  hand", StringComparison.Ordinal);
+            Check("player_voice_echo_survives_case_and_spacing_changes", VoiceEcho(reformatted,
+                Payload(reassured.Replace("*I", "*i", StringComparison.Ordinal))));
+            var remainingEcho = TestDict("reply", reformatted, "body", reformatted,
+                "memoryWrites", new[] { TestDict("text", "The recalled account is accepted.") });
+            string finalEcho = reformatted;
+            Check("failed_player_voice_repair_hides_echo_and_clears_writes",
+                !FinalizeConversationGrounding(ownershipPayload, "npc", remainingEcho, ref finalEcho)
+                && !finalEcho.Contains(reformatted, StringComparison.Ordinal)
+                && ReadString(remainingEcho, "body", "") == finalEcho
+                && ReadDictionaryList(remainingEcho, "memoryWrites").Count == 0
+                && ReadBool(ownershipPayload, "conversationGroundingFailed", false));
+            Check("own_reaction_and_attributed_quote_preserve_speakers",
+                !VoiceEcho("*I take his hand* I hear you. The stalls showed me who could bargain.", ownershipPayload)
+                && !VoiceEcho("You said, ‘" + reassured + "’ I remember.", ownershipPayload)
+                && !VoiceEcho("*I take her hand* I heard what you said and will answer you here.", ownershipPayload));
+            const string privateReassurance = "*I take her hand and whisper to Mira* Your hand is in mine for as long as you need it.";
+            var privatePayload = Payload(privateReassurance);
+            Check("player_voice_echo_uses_observer_projection", VoiceEcho(privateReassurance, privatePayload)
+                && !VoiceEcho(privateReassurance, privatePayload, "bystander"));
             Check("narrated_relocation_before_spoken_answer_is_checked", new[] {
                 "*She enters the tavern.* I accept your proposal.", "*She enters the tavern* I accept your proposal." }
                 .All(reply => CurrentSceneBodyContradictions("her bedchamber", reply).Count == 1));
@@ -105,6 +161,47 @@ namespace ReignBetaServer
             headingPayload["conversationSceneState"] = TestDict("conversationVenue", "her bedchamber");
             Check("scene_heading_retains_date_settlement_and_owner", RenderGroundedSceneHeading(headingPayload, "npc", TestDict(), "*She smiles.*")
                 == "1084 Winter 3 Night — Rovalt, Mira's bedchamber\n\n*She smiles.*");
+            const string internalScene = "Private conversation in the tavern house at Lycaron. Only the listed attendees and player can hear it. "
+                + "Keep your established native identity, personality, relationships, interests and memories.\n\nInternal role instructions.";
+            var noParticipants = TestDict("playerHeroStringId", "player", "playerName", "Player", "speaker", people[1],
+                "sceneContext", internalScene, "currentSettlementName", "Lycaron");
+            var fallbackPeople = NormalizeSceneParticipants(noParticipants, "npc");
+            Check("scene_prompt_never_becomes_native_location", ReadString(fallbackPeople.Single(p => ReadString(p, "role", "") == "player"), "nativeLocationDescription", "") == "Lycaron"
+                && ResolveSharedConversationVenue(noParticipants, fallbackPeople, new()) == "Lycaron"
+                && ReadString(noParticipants, "sceneContext", "") == internalScene);
+            var promptOnly = TestDict("playerHeroStringId", "player", "speaker", people[1], "sceneContext", "Only the listed attendees can hear this.");
+            var promptOnlyPeople = NormalizeSceneParticipants(promptOnly, "npc");
+            Check("short_prompt_is_not_a_venue_fallback", ResolveSharedConversationVenue(promptOnly, promptOnlyPeople, new()).Length == 0
+                && ReadString(promptOnlyPeople.Single(p => ReadString(p, "role", "") == "player"), "nativeLocationDescription", "").Length == 0);
+            const string cleanBody = "*She closes the ledger.* Good evening.";
+            foreach (string polluted in new[] { internalScene, new string('x', 500), "Internal instructions\n\nNext paragraph" })
+            {
+                var oldHeading = Payload("Hello."); oldHeading["conversationSceneState"] = TestDict("conversationVenue", polluted);
+                Check("legacy_prompt_heading_is_not_rendered_" + results.Count,
+                    RenderGroundedSceneHeading(oldHeading, "npc", TestDict(), cleanBody) == cleanBody);
+                var restoredState = ResolveSceneParticipantState("", TestDict("heroStringId", "player", "nativeLocationDescription", "the tavern house at Lycaron"),
+                    TestDict("location_override", polluted), false);
+                Check("legacy_prompt_override_falls_back_to_native_venue_" + results.Count,
+                    ReadString(restoredState, "location", "") == "the tavern house at Lycaron" && !ReadBool(restoredState, "hasNarrativeLocation", true));
+            }
+            var tavernRoster = new[] { TestDict("heroStringId", "madam", "name", "Madam"), TestDict("heroStringId", "worker", "name", "Worker") };
+            foreach (string phase in new[] { "negotiating", "visiting" })
+            {
+                var tavernState = TestDict("status", phase, "townName", "Lycaron", "playerHeroStringId", "player", "player", people[0],
+                    "madamId", "madam", "roster", tavernRoster, "receipt", TestDict("participantHeroIds", new[] { "worker" }));
+                var tavernChat = TestDict("sceneContext", internalScene, "sceneParticipants", people);
+                BindTavernHouseSceneParticipants(tavernState, tavernChat, TavernHousePresentProfiles(tavernState));
+                var exactPeople = NormalizeSceneParticipants(tavernChat, phase == "negotiating" ? "madam" : "worker");
+                string expectedNpc = phase == "negotiating" ? "madam" : "worker";
+                string venue = ResolveSharedConversationVenue(tavernChat, exactPeople, new());
+                tavernChat["conversationSceneState"] = TestDict("conversationVenue", venue);
+                Check("tavern_" + phase + "_heading_has_only_exact_attendees_and_native_venue",
+                    exactPeople.Select(CharacterIdFrom).SequenceEqual(new[] { expectedNpc, "player" })
+                    && exactPeople.All(p => ReadString(p, "nativeLocationDescription", "") == "the tavern house at Lycaron")
+                    && RenderGroundedSceneHeading(tavernChat, expectedNpc, TestDict(), cleanBody) == "the tavern house at Lycaron\n\n" + cleanBody
+                    && ReadString(tavernChat, "sceneContext", "") == internalScene
+                    && tavernRoster.All(p => !p.ContainsKey("nativeLocationDescription")) && !people[0].ContainsKey("nativeLocationDescription"));
+            }
             Check("escaped_adjacent_and_unclosed_delimiters", InputNarrationBlocks(@"literal \*star\* *I nod.**I wave.* *I stop").Count == 3
                 && !ReadBool(InputNarrationBlocks("*I stop").Single(), "closed", true));
             var pParty = Payload("Hello."); pParty["partyContext"] = TestDict("schema", "reign-party-context-v1", "partyId", "main_party", "worldDay", 20d,
@@ -165,6 +262,26 @@ namespace ReignBetaServer
                 && !unknownMembership.Any(issue => ReadString(issue, "detail", "").Contains("outside the complete")));
             ReadDictionary(pParty, "partyContext")["worldDay"] = 19d;
             Check("stale_roster_is_unknown", CurrentConversationPartyContext(pParty) == null);
+            var exactParty = TestDict("schema", "reign-party-context-v2", "complete", true, "memberCount", 3, "heroCount", 3,
+                "regularTroopCount", 0, "woundedMemberCount", 1, "prisonerCount", 0, "prisonerHeroCount", 0, "regularPrisonerCount", 0,
+                "members", new[] { TestDict("heroStringId", "player", "name", "Michael"), TestDict("heroStringId", "npc", "name", "Rhagaea", "membership", "temporary_guest"),
+                    TestDict("heroStringId", "ira", "name", "Ira", "membership", "temporary_guest") });
+            string exactFacts = BuildCurrentPartyFacts(exactParty, "npc", "player");
+            Check("complete_three_person_party_has_explicit_zero_without_global_privacy", exactFacts.Contains("Members: 3; heroes: 3; ordinary troops: 0")
+                && exactFacts.Contains("Prisoners (not party members): 0") && exactFacts.Contains("Only the named members")
+                && exactFacts.Contains("do not prove global privacy"));
+            Check("nonmember_cannot_read_tactical_counts", !BuildCurrentPartyFacts(exactParty, "visitor", "player").Contains("Members: 3"));
+            var missingWounded = CloneDictionary(exactParty); missingWounded.Remove("woundedMemberCount");
+            Check("missing_wounded_count_is_unknown_not_zero", BuildCurrentPartyFacts(missingWounded, "npc", "player").Contains("totals: unknown"));
+            foreach (string schema in new[] { "reign-party-context-v1", "reign-party-context-v2" })
+            {
+                var incompleteParty = CloneDictionary(exactParty); incompleteParty["schema"] = schema;
+                if (schema.EndsWith("v2")) incompleteParty["memberCount"] = 4;
+                string unknown = BuildCurrentPartyFacts(incompleteParty, "npc", "player");
+                Check("missing_or_inconsistent_totals_never_infer_zero_" + schema, unknown.Contains("totals: unknown") && !unknown.Contains("Only the named members"));
+            }
+            exactParty["attachedToArmy"] = true;
+            Check("army_is_separate_from_party_roster", BuildCurrentPartyFacts(exactParty, "npc", "player").Contains("other parties are separate"));
             Check("body_scene_drift_caught_without_heading", CurrentSceneBodyContradictions("camp stables", "*She walks across the tavern toward him.*").Count == 1
                 && CurrentSceneBodyContradictions("camp stables", "I remember yesterday in the tavern.").Count == 0);
             Check("captured_tavern_body_remains_invalid_after_heading_repair",
@@ -308,6 +425,18 @@ namespace ReignBetaServer
                 var groupHistory = ReadOriginalConversationHistory(campaign, group, "npc", "grounding-group", 100, new());
                 Check("group_history_has_one_exact_original", groupHistory.Count(row => ReadString(row, "role", "") == "player") == 1
                     && groupHistory.Any(row => ReadString(row, "text", "") == groupOriginal));
+                var quietGroup = Payload(quietAside, "quiet-floor"); quietGroup["campaignId"] = campaign;
+                quietGroup["conversationSessionId"] = "quiet-group"; quietGroup["activeHeroIds"] = new[] { "npc" };
+                var quietFloor = GroupConversationFloorApi(quietGroup);
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    var publicRows = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='quiet-group' AND status='active';");
+                    var sourceRows = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='quiet-group' AND status='source_only';");
+                    Check("quiet_aside_floor_stores_public_gesture_and_private_original", ReadBool(quietFloor, "ok", false)
+                        && ReadStringList(quietFloor, "addressedHeroStringIds").Contains("npc") && publicRows.Count > 0
+                        && publicRows.All(row => !ReadString(row, "text", "").Contains("Im not sure"))
+                        && sourceRows.Count == 1 && ReadString(sourceRows[0], "text", "") == quietAside);
+                }
 
                 Dictionary<string, object> ScenePayload(string text, string turn)
                 {

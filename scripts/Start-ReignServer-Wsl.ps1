@@ -15,6 +15,16 @@ function Ensure-ReignServer {
     return $healthResult
 }
 
+function Test-ReignManagedHealth {
+    param($Health, $Control, [string]$Version)
+    # A healthy HTTP process can still be outside the managed service. Reusing
+    # that process leaves Control Center unable to turn it off again.
+    return ($Health -and $Health.ok -and $Health.service -eq 'BannerlordReignServer' -and
+        $Health.protocolVersion -eq 1 -and $Health.serverVersion -eq $Version -and
+        $Health.databaseName -eq 'reign' -and $Health.databaseSchemaUpToDate -eq $true -and
+        $Control -and $Control.ok -and $Control.state -eq 'on')
+}
+
 function Resolve-ReignRecoveryPath {
     param([string]$Recovery)
     # --exec bypasses Linux shell parsing; slash form also preserves Windows paths.
@@ -139,11 +149,12 @@ function Show-ReignControlCenter {
 if ($LibraryOnly) { return }
 
 function Get-ReignServerHealth {
-    try { $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8089/health' -TimeoutSec 3 }
+    try {
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8089/health' -TimeoutSec 3
+        $control = Invoke-RestMethod -Uri 'http://127.0.0.1:8089/reign-control/status' -TimeoutSec 3
+    }
     catch { return $null }
-    if ($health.ok -and $health.service -eq 'BannerlordReignServer' -and
-        $health.protocolVersion -eq 1 -and $health.serverVersion -eq $record.version -and
-        $health.databaseName -eq 'reign' -and $health.databaseSchemaUpToDate -eq $true) { return $health }
+    if (Test-ReignManagedHealth -Health $health -Control $control -Version $record.version) { return $health }
     return $null
 }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
@@ -14,6 +15,77 @@ namespace ReignBetaServer
                 TestDict("heroStringId", "npc", "name", "Rhea"), TestDict("heroStringId", "player", "name", "Michael"), TestDict("heroStringId", "daughter", "name", "Ira") });
             var original = TestDict("id", "original_player", "speakerId", "player", "text", "I met Rhea before Ira. I left the salon, not the city.", "worldDay", 9d);
             var history = new List<Dictionary<string, object>> { original };
+            var readerClaim = new RecalledDialogueClaim { Clause = "I will learn who read it", Canonical = "reader inquiry", ClaimedActor = "npc" };
+            var irrelevantWho = TestDict("id", "irrelevant_who", "speakerId", "npc", "text", "As a woman who has chosen to walk into it.");
+            const string unknownReadingQuote = "Whether it reached you or was opened on the road, I do not yet know — and I will know, because my correspondence is not another's to read.";
+            var unknownReading = TestDict("id", "true_unknown_letter", "speakerId", "npc", "text", unknownReadingQuote);
+            foreach (var sourceOrder in new[] { new List<Dictionary<string, object>> { irrelevantWho, unknownReading }, new List<Dictionary<string, object>> { unknownReading, irrelevantWho } })
+            {
+                var readerSpans = DialogueClaimEvidenceSpans(readerClaim, sourceOrder);
+                Add("reader_evidence_ignores_unrelated_who_" + rows.Count, readerSpans.Count == 1
+                    && ReadString(ReadDictionary(readerSpans[0], "source"), "id", "") == "true_unknown_letter"
+                    && ReadString(readerSpans[0], "text", "") == unknownReadingQuote,
+                    "An unrelated who-clause cannot displace the source's complete unknown-reading statement, regardless of source order.");
+            }
+            Add("wh_only_claim_does_not_select_arbitrary_evidence", DialogueClaimEvidenceSpans(
+                new RecalledDialogueClaim { Clause = "Who was it", Canonical = "unbound identity question", ClaimedActor = "npc" },
+                new List<Dictionary<string, object>> { irrelevantWho, unknownReading }).Count == 0,
+                "A claim without topical terms abstains instead of selecting a sentence on a question word alone.");
+            Add("long_claim_question_words_alone_abstain", DialogueClaimEvidenceSpans(
+                new RecalledDialogueClaim { Clause = "Who knows what happened", Canonical = "unbound long inquiry", ClaimedActor = "npc" },
+                new List<Dictionary<string, object>> { TestDict("id", "question_words_only", "speakerId", "npc", "text", "Who chose what to carry?") }).Count == 0,
+                "Multiple shared question words cannot satisfy the long-claim threshold without a topical anchor.");
+            var lordPricingSpans = DialogueClaimEvidenceSpans(new RecalledDialogueClaim {
+                Clause = "A man who signs away every claim he has signs because he is cornered or because he is greedy, and both kinds remember the hand that stripped them",
+                Canonical = "lord pricing concern", ClaimedActor = "npc" }, new List<Dictionary<string, object>> {
+                TestDict("id", "lord_sale_warning", "speakerId", "daughter", "text", "First: a lord who sells his land remembers the price he was paid and the hand that paid it."),
+                TestDict("id", "name_list", "speakerId", "npc", "text", "I will make that list slowly, in my own hand, and every name on it becomes a debt I answer for at this table.") });
+            Add("question_word_guard_preserves_lord_pricing_span", lordPricingSpans.Count > 0
+                && ReadString(ReadDictionary(lordPricingSpans[0], "source"), "id", "") == "lord_sale_warning",
+                "Rejecting question-word-only anchors leaves original topical overlap counts and ranking intact for the natural sale-warning claim.");
+            var unknownLetter = new List<Dictionary<string, object>> { TestDict("id", "letter_uncertainty", "speakerId", "npc",
+                "text", "I sealed a summons. Whether it reached Ira or was opened on the road, I do not yet know.", "worldDay", 9d) };
+            foreach (string recalled in new[] { "The summons letter traveled a road and did not arrive.",
+                "I will find whose hands opened my sealed letter.", "I do not yet know whose hands read my letter." })
+            {
+                var recall = TestDict("reply", recalled);
+                Add("delivery_presupposition_covered_" + rows.Count, ExtractDialogueFactualClaims(recalled, payload, recall, "npc").Count > 0,
+                    "Negative arrival and unknown-agent access claims are represented for source checking.");
+                Add("unknown_delivery_is_not_proof_of_falsehood_" + rows.Count, FindDialogueIntegrityViolations(recall, payload, unknownLetter, "npc").Count == 0,
+                    "An explicit unknown source does not authorize an automatic factual correction.");
+            }
+            foreach (string allowed in new[] { "I do not yet know whether my letter was opened.", "If the letter was opened, I will investigate.", "I will open the letter tomorrow." })
+                Add("uncertain_or_future_delivery_not_completed_" + rows.Count,
+                    ExtractDialogueFactualClaims(allowed, payload, TestDict("reply", allowed), "npc").Count == 0,
+                    "Uncertainty about occurrence, conditionals and future actions do not become completed delivery claims.");
+            string customMemoryRules = "Use the character's private voice. Keep promises with their conditions.";
+            string scopedMemoryRules = ComposeSourceScopedMemoryWriteRules(customMemoryRules);
+            Add("custom_memory_rules_keep_source_scope", scopedMemoryRules.StartsWith(customMemoryRules, StringComparison.Ordinal)
+                && ComposeSourceScopedMemoryWriteRules(scopedMemoryRules) == scopedMemoryRules,
+                "Server scope guidance retains custom rules and composes once across repeated prompt paths.");
+            string stockMemoryRules = string.Join("\n", StockMemoryWriteRuleLines.Select(line => line.Original));
+            string compactMemoryRules = ComposeSourceScopedMemoryWriteRules(stockMemoryRules);
+            Add("stock_memory_rules_compact_with_source_scope", compactMemoryRules.Length < stockMemoryRules.Length
+                && compactMemoryRules.Contains(SourceScopedMemoryWriteRules, StringComparison.Ordinal)
+                && ComposeSourceScopedMemoryWriteRules(compactMemoryRules) == compactMemoryRules,
+                "The complete stock template gets source scope without increasing its size or composing twice.");
+            Add("stock_memory_rules_preserve_obligation_and_state_limits",
+                compactMemoryRules.Contains("Identify owed_by/owed_to, with canonical IDs when known", StringComparison.Ordinal)
+                && compactMemoryRules.Contains("all conditions and its exact source quote", StringComparison.Ordinal)
+                && compactMemoryRules.Contains("never renew fulfilled, withdrawn or superseded commitments", StringComparison.Ordinal)
+                && compactMemoryRules.Contains("stateUpdates: Only", StringComparison.Ordinal),
+                "Compaction retains unnamed-ID parties, promise conditions and lifecycle, and the state field restriction.");
+            Add("stock_memory_rules_keep_unknown_occurrence_unknown",
+                compactMemoryRules.Contains("An uncertain event must stay uncertain, never confirmed with only its actor unknown", StringComparison.Ordinal)
+                && compactMemoryRules.Contains("not transcripts", StringComparison.Ordinal),
+                "Occurrence uncertainty cannot be replaced by actor uncertainty; episodic records remain concise.");
+            Add("stock_memory_rules_normalize_line_endings_only_for_matching",
+                ComposeSourceScopedMemoryWriteRules(stockMemoryRules.Replace("\n", "  \r\n") + "\r\n") == compactMemoryRules,
+                "CRLF and trailing whitespace do not disable stock matching.");
+            string partlyCustomRules = stockMemoryRules.Replace("Only current mood", "Only current emotional mood");
+            Add("partly_custom_memory_rules_remain_verbatim",
+                ComposeSourceScopedMemoryWriteRules(partlyCustomRules).StartsWith(partlyCustomRules, StringComparison.Ordinal),
+                "A partially edited template is not partly rewritten by the stock compaction.");
             var prose = TestDict("reply", "Michael met Ira before Rhea. The room is warm.");
             var errors = FindDialogueFactualContradictions(prose, payload, history, "npc");
             Add("meeting_order_reversal", errors.Count == 1 && ReadString(errors[0], "sourceId", "") == "original_player", "Chronology is proved by an original self-report with the same actor and both named people.");
@@ -75,6 +147,18 @@ namespace ReignBetaServer
             pairs = ReadDictionaryList(plan, "pairs");
             Add("explicit_cross_turn_question_link", pairs.Count == 1 && ReadString(pairs[0], "premise", "").Contains("asked:")
                 && ReadDictionaryList(pairs[0], "sourceSpans").Count == 2, "An explicit accepted-turn link preserves both question and answer with separate original hashes.");
+            var relationDraft = TestDict("reply", "I asked whether you left the city, and you answered that you left the salon.");
+            var relationPlan = BuildDialogueClaimPlan(relationDraft, payload, linkedTurns, "npc");
+            Add("answer_relation_retains_linked_question_and_answer", ReadDictionaryList(relationPlan, "pairs").Any(p => ReadDictionaryList(p, "sourceSpans").Count == 2),
+                "A verified linked answer can carry both clauses into comparison.");
+            var questionOnly = BuildDialogueClaimPlan(relationDraft, payload, linkedTurns.Take(1).ToList(), "npc");
+            Add("question_alone_is_not_complete_answer_relation", ReadDictionaryList(questionOnly, "pairs").Count == 0
+                && ReadDictionaryList(questionOnly, "claims").Any(c => ReadString(c, "status", "") == "answer_relation_context_missing"),
+                "Question-only evidence stays an explicit relationship coverage gap, not a complete semantic comparison.");
+            linkedTurns[1]["acceptedSequence"] = 0L;
+            Add("missing_answer_sequence_does_not_attest_order", ReadDictionaryList(BuildDialogueClaimPlan(relationDraft, payload, linkedTurns, "npc"), "pairs").Count == 0,
+                "Missing sequence is unknown and never a chronological answer proof.");
+            linkedTurns[1]["acceptedSequence"] = 2L;
             linkedTurns[1].Remove("replyToTurnId");
             plan = BuildDialogueClaimPlan(TestDict("reply", "You left the salon."), payload, linkedTurns, "npc");
             Add("adjacency_is_not_question_ownership", ReadDictionaryList(plan, "pairs").All(p => !ReadString(p, "premise", "").Contains("asked:")), "Adjacent speakers alone never invent question ownership or answer resolution.");
@@ -116,6 +200,50 @@ namespace ReignBetaServer
             metadata = TestDict("memoryWrites", new List<Dictionary<string, object>> { Write("Michael received 16 letters.", "I received letters.") });
             Add("other_original_can_supply_count", QuarantineUncoveredDialogueFacts(metadata, payload, new() {
                 TestDict("id", "original_player", "speakerId", "player", "text", "I received letters."), TestDict("id", "other_player", "speakerId", "player", "text", "Michael received 16 letters.") }, "npc").Count == 0, "Eligible additional original evidence can establish detail omitted by one quote.");
+
+            foreach (string count in new[] { "two", "sixteen", "twenty-one" })
+            {
+                metadata = TestDict("memoryWrites", new[] { Write("Michael received " + count + " letters.", "I received letters.") });
+                Add("spelled_count_withheld_" + count, QuarantineUncoveredDialogueFacts(metadata, payload,
+                    new() { TestDict("id", "original_player", "speakerId", "player", "text", "I received letters.") }, "npc").Count == 1,
+                    "Written cardinals cannot add an exact total to an unspecified quantity.");
+            }
+            foreach (var pair in new[] { ("two", "2"), ("2", "two"), ("twenty-one", "21"), ("21", "twenty one") })
+            {
+                string countSourceText = "I received " + pair.Item2 + " letters.";
+                metadata = TestDict("memoryWrites", new[] { Write("Michael received " + pair.Item1 + " letters.", countSourceText) });
+                Add("equivalent_count_spelling_kept_" + rows.Count, QuarantineUncoveredDialogueFacts(metadata, payload,
+                    new() { TestDict("id", "original_player", "speakerId", "player", "text", countSourceText) }, "npc").Count == 0,
+                    "Comparisons normalize small cardinal spellings without rewriting source or prose.");
+            }
+            metadata = TestDict("memoryWrites", new[] { Write("Michael received 2 letters.", "I received 20 letters.") });
+            Add("numeric_token_not_substring", QuarantineUncoveredDialogueFacts(metadata, payload,
+                new() { TestDict("id", "original_player", "speakerId", "player", "text", "I received 20 letters.") }, "npc").Count == 1,
+                "The digit2 inside20 cannot support an exact count of2.");
+            foreach (string idiom in new[] { "No one answered.", "One of them answered.", "One day Michael will return.", "Rhea was in two minds." })
+                Add("nonquantity_idiom_not_number_" + rows.Count, !Regex.IsMatch(DialogueSpecificityComparisonText(idiom), @"\d"),
+                    "Pronoun one, temporal one day and indecision are not exact object counts.");
+            Add("number_name_and_larger_compounds_not_partial", DialogueSpecificityComparisonText("Two Rivers and two hundred letters.")
+                == "Two Rivers and two hundred letters.", "Proper names and unsupported larger compounds cannot become partial quantities.");
+            var meaningWrite = TestDict("kind", "question", "meaning", "Michael received two letters.", "text", "Michael received letters.",
+                "sourceEvidence", TestDict("turnId", "original_player", "speakerId", "player", "quote", "I received letters."));
+            metadata = TestDict("continuityWrites", new[] { meaningWrite });
+            var meaningPlan = BuildDialogueClaimPlan(metadata, payload,
+                new() { TestDict("id", "original_player", "speakerId", "player", "text", "I received letters.") }, "npc");
+            Add("canonical_meaning_enters_claim_plan", ReadInt(meaningPlan, "claimCount", 0) == 1
+                && CanonicalJson(ReadDictionaryList(meaningPlan, "claims")).Contains("two letters"),
+                "A benign text alias cannot hide the canonical continuity meaning.");
+            Add("canonical_meaning_extra_count_withheld", QuarantineUncoveredDialogueFacts(metadata, payload,
+                new() { TestDict("id", "original_player", "speakerId", "player", "text", "I received letters.") }, "npc").Count == 1,
+                "Continuity meaning has the same source sufficiency requirements as episodic text.");
+            metadata = TestDict("continuityWrites", new[] { TestDict("kind", "question", "meaning", "Michael received letters.",
+                "sourceEvidence", TestDict("turnId", "original_player", "speakerId", "player", "quote", "I received letters.")) });
+            Add("supported_continuity_meaning_kept", QuarantineUncoveredDialogueFacts(metadata, payload,
+                new() { TestDict("id", "original_player", "speakerId", "player", "text", "I received letters.") }, "npc").Count == 0,
+                "Correct continuity meaning survives the newly covered field.");
+            foreach (string recall in new[] { "You proposed separate baths.", "You clarified that you meant separate baths.", "Your original proposal was precise." })
+                Add("past_speech_act_coverage_" + rows.Count, ExtractDialogueFactualClaims(recall, payload, TestDict("reply", recall), "npc").Count > 0,
+                    "Past proposals and clarifications become explicit candidates, not automatic contradiction findings.");
 
             var pending = BuildDialogueClaimPlan(TestDict("memoryWrites", new List<Dictionary<string, object>> {
                 TestDict("text", "Michael received 16 letters.", "sourceEvidence", TestDict("turnId", "current_npc", "speakerId", "npc", "quote", "I received 16 letters.")) }),

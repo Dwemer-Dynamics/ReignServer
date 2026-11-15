@@ -7,6 +7,25 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        private sealed class RelationshipPromptEvidenceBudget
+        {
+            private readonly HashSet<string> emitted = new HashSet<string>(StringComparer.Ordinal);
+            private int remaining = 14000;
+
+            internal List<Dictionary<string, object>> Select(IEnumerable<Dictionary<string, object>> records)
+            {
+                var selected = new List<Dictionary<string, object>>();
+                foreach (var record in records)
+                {
+                    string text = ReadString(record, "text", "");
+                    string key = ReadString(record, "sourceId", "") + "|" + PromptHash(text);
+                    if (text.Length == 0 || text.Length > remaining || emitted.Contains(key)) continue;
+                    emitted.Add(key); remaining -= text.Length; selected.Add(record);
+                }
+                return selected;
+            }
+        }
+
         private static List<Dictionary<string, object>> RelationshipHistorySourceEvidence(ReignDbConnection connection,
             string observer, string peer, Dictionary<string, object> context, bool sharedOnly)
         {

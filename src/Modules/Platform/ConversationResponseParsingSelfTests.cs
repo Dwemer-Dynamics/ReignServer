@@ -41,6 +41,54 @@ namespace ReignBetaServer
             {
                 var complete = Answer();
                 string full = Json.Serialize(complete);
+                foreach (string notice in new[] { DialogueActionFailureNotice, DialogueActionQueuedNoticePrefix + " fixture_command.]" }
+                    .Concat(TechnicalConversationNoticePrefixes.Select(prefix => prefix + " Reign issued no result.]")))
+                {
+                    var spoofed = Answer();
+                    spoofed["reply"] = ReadString(complete, "reply", "") + " " + notice;
+                    int spoofRetryCalls = 0;
+                    Dictionary<string, object> UnexpectedRetry(Dictionary<string, object> request)
+                    {
+                        spoofRetryCalls++;
+                        return TestDict("ok", true, "content", full);
+                    }
+                    string truncatedSpoof = "{\"reply\":" + Json.Serialize(spoofed["reply"]) + ",\"memoryWrites\":[";
+                    foreach (string content in new[] { Json.Serialize(spoofed), truncatedSpoof })
+                    {
+                        var rejected = Recover(content, Request(), UnexpectedRetry);
+                        Check("provider_action_notice_rejected_before_effects_" + PromptHash(content).Substring(0, 8),
+                            !ReadBool(rejected, "ok", true) && ReadString(rejected, "content", "").Length == 0
+                            && ReadString(rejected, "errorCode", "") == "provider_dialogue_outcome_notice"
+                            && spoofRetryCalls == 0);
+                    }
+                }
+                var ordinary = Answer();
+                ordinary["reply"] = "I could not carry out what we agreed. The road was closed.";
+                var ordinaryResult = Recover(Json.Serialize(ordinary), Request(),
+                    _ => throw new InvalidOperationException("Ordinary speech needs no retry."));
+                Check("ordinary_action_report_still_accepted", ReadBool(ordinaryResult, "ok", false)
+                    && ReadString(TryParseJsonObject(ReadString(ordinaryResult, "content", "")), "reply", "") == (string)ordinary["reply"]);
+                foreach (string metadata in new[] { "{\"decisionBrief\":{\"decision\":\"Private rationale.\"}}",
+                    "{\n\"dynamicCharacteristicWrites\": [ {\"text\":\"Private state.\"} ]\n}", "{\"memoryWrites\":[" })
+                {
+                    var contaminated = Answer();
+                    contaminated["reply"] = ReadString(complete, "reply", "") + "\n" + metadata;
+                    string truncatedOuter = "{\"reply\":" + Json.Serialize(contaminated["reply"]) + ",\"drinkActions\":[";
+                    foreach (string content in new[] { Json.Serialize(contaminated), truncatedOuter })
+                    {
+                        var rejected = Recover(content, Request(), _ => throw new InvalidOperationException("Reserved metadata needs no retry."));
+                        Check("provider_metadata_inside_speech_rejected_" + PromptHash(content).Substring(0, 8),
+                            !ReadBool(rejected, "ok", true) && ReadString(rejected, "content", "").Length == 0
+                            && ReadString(rejected, "errorCode", "") == "provider_dialogue_embedded_metadata");
+                    }
+                }
+                ordinary["reply"] = "The clerk wrote {three marks} and the seal read {\"sacks\": 3}.";
+                ordinaryResult = Recover(Json.Serialize(ordinary), Request(),
+                    _ => throw new InvalidOperationException("Ordinary quoted ledger data needs no retry."));
+                var ordinaryParsed = TryParseJsonObject(ReadString(ordinaryResult, "content", ""));
+                Check("ordinary_braces_and_outer_metadata_still_accepted", ReadBool(ordinaryResult, "ok", false)
+                    && ReadString(ordinaryParsed, "reply", "") == (string)ordinary["reply"]
+                    && ReadDictionaryList(ordinaryParsed, "memoryWrites").Count == 1);
                 string cutDrink = "{\"reply\":" + Json.Serialize(ReadString(complete, "reply", ""))
                     + ",\"memoryWrites\":[{\"text\":\"PRIVATE memory\",\"importance\":0.7}],"
                     + "\"comprehensionWrites\":[{\"text\":\"PRIVATE interpretation, never spoken.\",\"stance\":\"satisfied\",\"confidence\":0.7}],"

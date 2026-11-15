@@ -339,6 +339,126 @@ namespace ReignBetaServer
                 }
                 Require(Rejects(() => BuildTavernHouseImageRequest(state, "unknown", "key", "", new byte[] { 1 })), "An unknown scene kind silently chose a provider profile.");
             });
+            Dictionary<string, object> BookingState() => TestDict("campaignId", "campaign", "timelineId", "timeline", "townId", "town",
+                "conversationSessionId", "session", "playerHeroStringId", "player", "madamId", "madam", "status", "negotiating",
+                "structuredActionProtocolVersion", Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion, "roster", roster);
+            Reign.Core.Contracts.Actions.ActionAgreement Booking(Dictionary<string, object> state)
+            {
+                var scope = TavernVisitContext(state);
+                var a = new Reign.Core.Contracts.Actions.ActionAgreement { Id = "exact-booking", PlayerId = "player", NpcId = "madam", ProposerId = "player",
+                    ConversationId = "conversation", State = Reign.Core.Contracts.Actions.AgreementState.Offered };
+                var c = new Reign.Core.Contracts.Actions.ActionClause { ActionId = Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id, ActorId = "player", RecipientId = "madam" };
+                Reign.Core.Contracts.Actions.TavernHouseVisitAction.Bind(c, scope); c.Arguments["participant1"] = "worker-a"; c.Arguments["price1"] = "120"; c.Arguments["totalGold"] = "120";
+                a.Clauses.Add(c); a.PlayerAcceptedHash = a.TermsHash(); return a;
+            }
+            Dictionary<string, object> BookingChat(Reign.Core.Contracts.Actions.ActionAgreement a) => Json.Deserialize<Dictionary<string, object>>(Json.Serialize(TestDict(
+                "structuredActionProtocolVersion", Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion, "playerHeroStringId", "player", "speakerHeroStringId", "madam",
+                "worldDay", 1, "structuredActionContext", TestDict("playerId", "player", "npcId", "madam", "conversationId", "conversation", "proposal", a))));
+            Dictionary<string, object> BookingDecision(Reign.Core.Contracts.Actions.ActionAgreement a, string kind) => Json.Deserialize<Dictionary<string, object>>(Json.Serialize(TestDict(
+                "reply", "We agree to those exact terms; payment will be confirmed by the house.", "structuredActionDecision", new Reign.Core.Contracts.Actions.ActionDecision {
+                    Kind = kind, ProposalId = kind == "none" ? "" : a.Id, Revision = kind == "none" ? 0 : a.Revision, TermsHash = kind == "none" ? "" : a.TermsHash() })));
+            Check("visit_action_catalog_and_schema_hidden_outside_tavern", () => {
+                using var scope = new TavernActionScopeLease(null);
+                Require(!StructuredActionFixedPrompt().Contains(Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id) && TavernVisitActionPrompt() == "", "Tavern action leaked into global prompt.");
+                var templates = CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Group).ToDictionary(name => name, name => "built-in fixture " + name);
+                var protocol = TestDict("structuredActionProtocolVersion", Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion);
+                var generic = CodexConversationSchemas.Select(CodexConversationContractKind.Group, templates, templates, protocol);
+                Require(generic.BuiltInContract && Json.Serialize(generic.Schema).Contains("give.gold"), "The fixture did not enable the built-in structured action schema.");
+                Require(!Json.Serialize(generic.Schema).Contains(Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id), "Global schema contains tavern action.");
+                using var active = new TavernActionScopeLease(TavernVisitContext(BookingState()));
+                Require(TavernVisitActionPrompt().Contains(Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id), "Dedicated prompt omitted action.");
+                Require(Json.Serialize(CodexConversationSchemas.Select(CodexConversationContractKind.Group, templates, templates, protocol).Schema).Contains(Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id), "Dedicated schema omitted action.");
+            });
+            Check("visit_action_forged_generic_and_visiting_contexts_rejected", () => {
+                using var scope = new TavernActionScopeLease(null);
+                foreach (string scene in new[] { "individual", "party_chat", "castle", "correspondence", "tavern_house" })
+                {
+                    var a = Booking(BookingState()); var chat = BookingChat(a); chat["sceneInterface"] = scene;
+                    CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                    Require(!ReadBool(ReadDictionary(chat, "validatedStructuredActionDecision"), "valid", true), "Caller sceneInterface forged tavern scope: " + scene);
+                }
+            });
+            Check("visit_action_typed_accept_prepares_exact_receipt_without_payment", () => {
+                var state = BookingState(); var a = Booking(state); var chat = BookingChat(a);
+                using var scope = new TavernActionScopeLease(TavernVisitContext(state));
+                CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                var response = TestDict("ok", true, "structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision"));
+                PrepareTavernVisitAction(state, chat, response);
+                var prepared = ReadDictionary(response, "preparedVisit");
+                Require(ReadString(prepared, "termsHash", "") == a.TermsHash() && ReadInt(ReadDictionary(prepared, "quote"), "totalGold", -1) == 120, "Typed accepted terms were not prepared.");
+                PrepareTavernVisitAction(state, chat, response);
+                Require(ReadDictionaryList(state, "preparedVisits").Count == 1 && !state.ContainsKey("receipt"), "Preparation repeated a payment or created duplicate operations.");
+                var receipt = TestDict("agreementId", a.Id, "actionTermsHash", a.TermsHash(), "preparationId", ReadString(prepared, "preparationId", ""), "payeeHeroId", "madam", "paymentState", "paid");
+                Require(ReadInt(ValidateTavernPreparedReceipt(state, receipt), "totalGold", -1) == 120, "Exact native receipt cannot confirm prepared quote.");
+                foreach (string key in new[] { "agreementId", "actionTermsHash", "preparationId", "payeeHeroId", "paymentState" })
+                {
+                    var forged = new Dictionary<string, object>(receipt); forged[key] = "changed"; bool blocked = false;
+                    try { ValidateTavernPreparedReceipt(state, forged); } catch (InvalidOperationException) { blocked = true; }
+                    Require(blocked, "Changed receipt binding passed: " + key);
+                }
+            });
+            Check("visit_action_speech_rejection_provider_failure_and_stale_roster_never_prepare", () => {
+                var state = BookingState(); var a = Booking(state); var chat = BookingChat(a);
+                using var scope = new TavernActionScopeLease(TavernVisitContext(state));
+                foreach (var response in new[] { TestDict("reply", "Paid and agreed."), TestDict("ok", false), TestDict("structuredActionDecision", TestDict("valid", false)) })
+                    PrepareTavernVisitAction(state, chat, response);
+                CaptureStructuredActionDecision(chat, BookingDecision(a, "reject"));
+                PrepareTavernVisitAction(state, chat, TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision")));
+                Require(ReadDictionaryList(state, "preparedVisits").Count == 0, "Speech or failed/rejected output prepared a visit.");
+                var changed = BookingState(); changed["roster"] = roster.Concat(new[] { Hero("new-worker", "New Worker") }).ToList();
+                using var updated = new TavernActionScopeLease(TavernVisitContext(changed));
+                CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                Require(!ReadBool(ReadDictionary(chat, "validatedStructuredActionDecision"), "valid", true), "Old roster was accepted.");
+            });
+            Check("visit_action_npc_offer_requires_saved_fingerprint_and_both_consents", () => {
+                var state = BookingState(); var a = Booking(state); a.ProposerId = "madam"; a.PlayerAcceptedHash = "";
+                a.NpcAcceptedHash = a.TermsHash(); a.PlayerAcceptedHash = a.TermsHash();
+                var chat = BookingChat(a); using var scope = new TavernActionScopeLease(TavernVisitContext(state));
+                CaptureStructuredActionDecision(chat, BookingDecision(a, "none"));
+                var response = TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision"));
+                PrepareTavernVisitAction(state, chat, response); Require(!response.ContainsKey("preparedVisit"), "An unrecorded NPC offer was accepted.");
+                state["structuredVisitOffer"] = Reign.Core.Contracts.Actions.TavernHouseVisitAction.Fingerprint(a);
+                PrepareTavernVisitAction(state, chat, response); Require(response.ContainsKey("preparedVisit"), "A recorded, mutually signed NPC offer could not prepare.");
+            });
+            Check("visit_action_consumes_offer_once_and_blocks_legacy_bypass", () => {
+                var state = BookingState(); var a = Booking(state); var chat = BookingChat(a);
+                using var scope = new TavernActionScopeLease(TavernVisitContext(state));
+                CaptureStructuredActionDecision(chat, BookingDecision(a, "accept"));
+                PrepareTavernVisitAction(state, chat, TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision")));
+                Require(ReadDictionaryList(state, "preparedVisits").Count == 1 && !state.ContainsKey("structuredVisitOffer"), "Offer not consumed once.");
+                var second = Booking(state); second.Id = "second-booking"; second.PlayerAcceptedHash = second.TermsHash();
+                var secondChat = BookingChat(second); CaptureStructuredActionDecision(secondChat, BookingDecision(second, "accept"));
+                var response = TestDict("structuredActionDecision", ReadDictionary(secondChat, "validatedStructuredActionDecision"));
+                PrepareTavernVisitAction(state, secondChat, response);
+                Require(response.ContainsKey("preparedVisitError") && !response.ContainsKey("preparedVisit") && ReadDictionaryList(state, "preparedVisits").Count == 1, "A second identity reused one session's payment preparation.");
+                bool blocked = false; try { ValidateTavernPreparedReceipt(state, TestDict("agreementId", a.Id)); } catch (InvalidOperationException) { blocked = true; }
+                Require(blocked, "Omitting the action hash bypassed a structured preparation.");
+                var upgraded = BookingState(); upgraded["visitActionProtocolVersion"] = 1; blocked = false;
+                try { ValidateTavernPreparedReceipt(upgraded, TestDict()); } catch (InvalidOperationException) { blocked = true; }
+                Require(blocked && ValidateTavernPreparedReceipt(BookingState(), TestDict()) == null, "Legacy paid recovery boundary changed.");
+            });
+            Check("visit_action_npc_proposal_stores_canonical_offer_without_transient_ids", () => {
+                var state = BookingState(); var a = Booking(state); var chat = BookingChat(a);
+                ReadDictionary(chat, "structuredActionContext").Remove("proposal");
+                var clause = a.Clauses.Single();
+                var proposal = new Reign.Core.Contracts.Actions.ActionDecision { Kind = "propose", Clauses = new List<Reign.Core.Contracts.Actions.ActionProposedTerm> {
+                    new Reign.Core.Contracts.Actions.ActionProposedTerm { ActionId = clause.ActionId, ActorId = clause.ActorId, RecipientId = clause.RecipientId,
+                        Arguments = clause.Arguments.Select(kv => new Reign.Core.Contracts.Actions.ActionArgument { Key = kv.Key, Value = kv.Value }).ToList() } } };
+                var parsed = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(TestDict("reply", "Worker A for 120 denars.", "structuredActionDecision", proposal)));
+                using var scope = new TavernActionScopeLease(TavernVisitContext(state)); CaptureStructuredActionDecision(chat, parsed);
+                var response = TestDict("structuredActionDecision", ReadDictionary(chat, "validatedStructuredActionDecision"));
+                PrepareTavernVisitAction(state, chat, response);
+                Require(ReadString(state, "structuredVisitOffer", "") == Reign.Core.Contracts.Actions.TavernHouseVisitAction.Fingerprint(a)
+                    && !response.ContainsKey("preparedVisit"), "NPC offer was not bound independently of local IDs or granted player consent.");
+            });
+            Check("visit_action_historical_reply_cannot_activate_old_payment", () => {
+                var state = TestDict("transcriptRevision", 2, "status", "negotiating");
+                var previous = TestDict("requestHash", "hash", "response", TestDict("transcriptRevision", 1, "preparedVisit", TestDict("agreementId", "old"),
+                    "structuredActionDecision", TestDict("valid", true)), "visiting", false);
+                var replay = ReplayTavernHouseCompletedTurn(state, previous, "hash", _ => { }, () => { });
+                Require(ReadBool(replay, "historicalReplay", false) && !replay.ContainsKey("preparedVisit") && !replay.ContainsKey("structuredActionDecision"), "Historical response retained executable metadata.");
+            });
+
             results.AddRange(RunTavernHouseRosterTests());
             results.AddRange(RunPreparedTavernPortraitSourceTests());
             return results;

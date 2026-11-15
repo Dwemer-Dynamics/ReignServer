@@ -34,13 +34,13 @@ namespace ReignBetaServer
 
         private static readonly string[] CommonFields =
         {
-            "reply", "participation", "reactionTargetHeroStringId", "addressedHeroStringIds", "decisionBrief",
+            "decisionBrief", "reply", "participation", "reactionTargetHeroStringId", "addressedHeroStringIds",
             "politicalConduct", "emotion", "intent", "relationshipSignal",
             "relationshipAssessments", "actionGate", "proposalDecisions", "conceptionGate", "socialSignals",
             "identityIntroductions", "memoryWrites", "beliefWrites", "relationshipUpdates",
             "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites",
             "courtKnowledgeWrites", "pregnancyDisclosures", "sceneStateUpdates", "viewWardrobeEvidence", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "stateUpdates", "continuityWrites",
-            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "raisedGossip",
+            "suggestedActions", "structuredActionDecision", "chancellorDecision", "rebellionDecision", "campaignOrder", "gossipSignals", "publicWitnessSignals", "raisedGossip",
             "npcStoryAssessments", "npcLeaveAssessment", "announcementReactions", "announcementReview", "communicationPlans"
         };
 
@@ -217,7 +217,7 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             var properties = CommonConversationProperties(kind, payload);
-            var required = new List<string> { "reply", "decisionBrief", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions" };
+            var required = new List<string> { "decisionBrief", "reply", "politicalConduct", "emotion", "intent", "relationshipSignal", "relationshipAssessments", "actionGate", "proposalDecisions" };
             if (HasStructuredActions(payload)) required.Add("structuredActionDecision");
             if (kind != CodexConversationContractKind.Individual)
             {
@@ -233,9 +233,9 @@ namespace ReignBetaServer
         {
             var properties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
+                ["decisionBrief"] = DecisionBrief(),
                 ["reply"] = String(),
                 ["addressedHeroStringIds"] = Array(String()),
-                ["decisionBrief"] = DecisionBrief(),
                 ["politicalConduct"] = PoliticalConduct(),
                 ["emotion"] = String(),
                 ["intent"] = String(),
@@ -285,6 +285,13 @@ namespace ReignBetaServer
                 ["drinkConsumptions"] = Array(DrinkConsumption()),
                 ["drinkSceneUpdates"] = Array(DrinkSceneUpdate()),
                 ["gossipSignals"] = Array(GossipSignal()),
+                ["publicWitnessSignals"] = Array(Object(new Dictionary<string, object> {
+                    ["topic"] = String(new[] { "shared_activity", "relationship", "politics", "gift", "conversation" }),
+                    ["evidenceQuote"] = String(), ["privacy"] = String(new[] { "public", "personal", "intimate", "secret" }),
+                    ["existencePrivacy"] = String(new[] { "public", "personal", "intimate", "secret" }), ["promisedSecrecy"] = Boolean(),
+                    ["salience"] = new Dictionary<string, object> {
+                        ["type"] = "integer", ["enum"] = new[] { 0, 25, 50, 75, 100 } }, ["confidence"] = Number(0, 1)
+                }, null, false)),
                 ["raisedGossip"] = Array(Object(new Dictionary<string, object> {
                     ["receiptId"] = String(), ["evidenceQuote"] = String() }, null, false)),
                 ["continuityWrites"] = Array(ContinuityWrite()),
@@ -424,7 +431,7 @@ namespace ReignBetaServer
             ["proposalId"] = String(), ["revision"] = Integer(), ["termsHash"] = String(), ["reason"] = String(),
             ["clauses"] = Array(Object(new Dictionary<string, object>
             {
-                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible).Select(d => d.Id)),
+                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible && (d.Id != Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id || Program.TavernActionScopeEnabled)).Select(d => d.Id)),
                 ["actorId"] = String(), ["recipientId"] = String(),
                 ["arguments"] = Array(Object(new Dictionary<string, object> { ["key"] = String(), ["value"] = String() }, null, false)),
                 ["dueDay"] = Number(0, null), ["durationDays"] = Number(0, null), ["installments"] = Integer(), ["intervalDays"] = Number(0, null),
@@ -589,6 +596,8 @@ namespace ReignBetaServer
                 ["sourceEvidence"] = SourceEvidence(),
                 ["sourceEvidenceSpans"] = Array(SourceEvidence()),
                 ["description"] = String(), ["owed_by"] = String(), ["owed_to"] = String(),
+                ["obligation_id"] = String(), ["recordKind"] = String(new[] { "promise", "request", "preference" }),
+                ["scope"] = String(), ["acceptanceStatus"] = String(new[] { "unknown", "accepted", "refused" }),
                 ["status"] = String(), ["importance"] = Number(0, 1), ["evidenceSourceIds"] = Array(String()), ["uncertainty"] = Number(0, 1)
             }, new[] { "description", "owed_by", "owed_to", "status", "importance" }, true);
         }

@@ -13,12 +13,17 @@ namespace ReignBetaServer
 
         private static void ResetRequiredPromptEvidence(Dictionary<string, object> payload)
         {
-            if (payload != null) RequiredPromptEvidence.Remove(payload);
+            if (payload != null)
+            {
+                RequiredPromptEvidence.Remove(payload);
+                ExpectedConversationReferenceSources.Remove(payload);
+            }
         }
 
         private static void CaptureRequiredPromptEvidence(Dictionary<string, object> payload, string section, string text)
         {
             if (payload == null) return;
+            CaptureConversationReferenceSources(payload, section, text);
             var sections = RequiredPromptEvidence.GetOrCreateValue(payload);
             sections[section] = ContinuityPromptRecords(text, section == "canonicalTranscript").Where(r => r.Required)
                 .Select(r => TestDict("id", r.SourceId, "section", section, "text", NormalizePromptSegment(r.Text),

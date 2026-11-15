@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Reign.Core.Contracts.World
@@ -49,6 +51,11 @@ namespace Reign.Core.Contracts.World
         public string ActorId = "", ActorName = "", ActorRealmId = "", ActorRealmName = "", ActorCaption = "";
         public string TargetId = "", TargetName = "", TargetRealmId = "", TargetRealmName = "", TargetCaption = "";
         public double WorldDay;
+        // Actual public announcement time, separate from the underlying event.
+        // Older articles have no proven publication timestamp.
+        public double PublicationDay = -1;
+        public string SourceEventType = "", SourceCorrelationId = "", SourcePhase = "", PublicVerdict = "";
+        public double? ExecutionDueDay;
         public bool Positive;
         public Reign.Core.Contracts.Government.GovernmentNewsEdition? GovernmentNews;
         public bool IsValid => !string.IsNullOrWhiteSpace(Id) && ReignNewsCategories.IsCategory(Category)
@@ -62,7 +69,33 @@ namespace Reign.Core.Contracts.World
         public int Version = 1;
         public List<ReignNewsArticle> Pending = new List<ReignNewsArticle>();
         public List<string> Seen = new List<string>();
+        public List<ReignNewsArticle> HistoryOutbox = new List<ReignNewsArticle>();
+        public HashSet<string> HistoryPublishedIds = new HashSet<string>(StringComparer.Ordinal);
         public Dictionary<string, string> CaptivityEpisodes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        public bool QueuePublicHistory(ReignNewsArticle article, double publicationDay)
+        {
+            if (article?.IsValid != true || HistoryPublishedIds.Contains(article.Id) || HistoryOutbox.Any(p => p.Id == article.Id)) return false;
+            if (double.IsNaN(publicationDay) || double.IsInfinity(publicationDay) || publicationDay < 0)
+                throw new ArgumentOutOfRangeException(nameof(publicationDay));
+            article.PublicationDay = publicationDay;
+            // Freeze the public projection at ingress; a caller retaining the UI
+            // article cannot revise pending world history or its publication day.
+            HistoryOutbox.Add(new ReignNewsArticle { Id = article.Id, Category = article.Category, Title = article.Title,
+                Headline = article.Headline, Body = article.Body, Consequences = article.Consequences,
+                ActorId = article.ActorId, ActorName = article.ActorName, ActorRealmId = article.ActorRealmId, ActorRealmName = article.ActorRealmName,
+                TargetId = article.TargetId, TargetName = article.TargetName, TargetRealmId = article.TargetRealmId, TargetRealmName = article.TargetRealmName,
+                WorldDay = article.WorldDay, PublicationDay = publicationDay,
+                SourceEventType = article.SourceEventType, SourceCorrelationId = article.SourceCorrelationId,
+                SourcePhase = article.SourcePhase, PublicVerdict = article.PublicVerdict, ExecutionDueDay = article.ExecutionDueDay });
+            return true;
+        }
+        public void MarkPublicHistoryEnqueued(string id)
+        {
+            if (!HistoryOutbox.Any(article => article.Id == id)) return;
+            HistoryPublishedIds.Add(id);
+            HistoryOutbox.RemoveAll(article => article.Id == id);
+        }
 
         public bool Publish(ReignNewsArticle article, ReignNewsOptions options, bool optionsConfirmed)
         {
@@ -88,7 +121,39 @@ namespace Reign.Core.Contracts.World
             Seen = (Seen ?? new List<string>()).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.Ordinal).ToList();
             if (Seen.Count > 4096) Seen = Seen.Skip(Seen.Count - 4096).ToList();
             CaptivityEpisodes = CaptivityEpisodes ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            HistoryOutbox = (HistoryOutbox ?? new List<ReignNewsArticle>()).Where(p => p?.IsValid == true)
+                .GroupBy(p => p.Id, StringComparer.Ordinal).Select(g => g.First()).ToList();
+            HistoryPublishedIds = new HashSet<string>(HistoryPublishedIds ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         }
+    }
+
+    public static class ReignPublicNews
+    {
+        public const string Schema = "reign-public-news-v1";
+        public static bool IsNativePublicDiplomacy(string eventType, string source, string dissemination)
+            => (eventType == "war_declared" || eventType == "peace_made") && source == "bannerlord_native" && dissemination == "major_world";
+        public static string EventId(string timeline, string articleId)
+        {
+            using (var sha = SHA256.Create())
+                return "public_news_" + BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(
+                    (timeline ?? "").Length + ":" + (timeline ?? "") + (articleId ?? "")))).Replace("-", "").ToLowerInvariant();
+        }
+        // Explicit public snapshot only. GovernmentNews/private producer objects
+        // are deliberately not serialized into the worldwide knowledge record.
+        public static Dictionary<string, object> Snapshot(ReignNewsArticle article) => new Dictionary<string, object>
+        {
+            ["schema"] = Schema, ["articleId"] = article.Id, ["category"] = article.Category,
+            ["publicationDay"] = article.PublicationDay, ["eventDay"] = article.WorldDay,
+            ["title"] = article.Title, ["headline"] = article.Headline, ["body"] = article.Body,
+            ["consequences"] = article.Consequences, ["evidenceKind"] = "public_report",
+            ["actorId"] = article.ActorId, ["actorName"] = article.ActorName,
+            ["actorRealmId"] = article.ActorRealmId, ["actorRealmName"] = article.ActorRealmName,
+            ["targetId"] = article.TargetId, ["targetName"] = article.TargetName,
+            ["targetRealmId"] = article.TargetRealmId, ["targetRealmName"] = article.TargetRealmName,
+            ["sourceEventType"] = article.SourceEventType, ["sourceCorrelationId"] = article.SourceCorrelationId,
+            ["sourcePhase"] = article.SourcePhase, ["publicVerdict"] = article.PublicVerdict,
+            ["executionDueDay"] = article.ExecutionDueDay ?? -1d
+        };
     }
 
     // Publication-time facts only; this formatter never resolves current campaign state.

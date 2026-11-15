@@ -46,9 +46,9 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                 && IsIntentionalConversationSilence(unit.Parsed) && string.IsNullOrWhiteSpace(unit.Reply);
             // Recheck exact accepted bytes after every rewrite; never publish a stale
             // successful receipt for a different final response.
-            if (!groundingFailed && FindCriticalConversationContinuityViolations(finalOpening, unit.Payload, unit.Hero).Count > 0)
+            if (!IsSinglePassConversation(unit.Payload) && !groundingFailed && FindCriticalConversationContinuityViolations(finalOpening, unit.Payload, unit.Hero).Count > 0)
                 throw new InvalidOperationException("The final response changed after its grounding check; the original contribution remains saved.");
-            if (ApproachOpeningViolations(finalOpening, unit.Payload).Count > 0)
+            if (!IsSinglePassConversation(unit.Payload) && ApproachOpeningViolations(finalOpening, unit.Payload).Count > 0)
                 throw new InvalidOperationException("The final spoken approach no longer matches its saved opening evidence.");
             lock (CampaignRelationshipWriteLock(unit.Campaign))
             {
@@ -146,6 +146,11 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         : AcceptCommunicationCommitments(connection, unit, source, sourceRows.Concat(
                             ReadStringList(privateExchange, "turnIds").SelectMany(id => QuerySql(connection,
                                 "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList());
+                    var references = StoreAcceptedConversationReferences(connection, unit, sourceRows.Concat(
+                        ReadStringList(privateExchange, "turnIds").SelectMany(id => QuerySql(connection,
+                            "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList(),
+                        suppressReplyEffects || ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local");
+                    boundary?.Invoke("after_reference_graph");
                     bool memoryComplete = !technicalNotice
                         && ReadString(ReadDictionary(memory, "continuity"), "status", "complete") == "complete"
                         && ReadString(memory, "sourceEvidenceStatus", "complete") == "complete";
@@ -156,7 +161,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         "memory", memory, "effects", effects, "privateExchange", privateExchange,
                         "personalRelationshipOwner", personalMatter ? "npc_lives" : "",
                         "scene", scene, "viewWardrobe", viewWardrobe, "social", social, "introductions", introductions, "playerAttention", attention, "npcLives", npcLives,
-                        "communications", communications,
+                        "communications", communications, "references", references,
                         "sourceIds", ReadStringList(source, "turnIds").Concat(ReadStringList(privateExchange, "turnIds")).ToArray(),
                         "effectPayload", TestDict("conversationAgencyReceipt", ReadDictionary(effectPayload, "conversationAgencyReceipt"),
                             "intoxicationReceipt", ReadDictionary(effectPayload, "intoxicationReceipt")));

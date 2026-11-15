@@ -4,6 +4,37 @@ using System.Linq;
 
 namespace ReignBeta.Shared.Characters
 {
+    // Indexes ledger identities, never mutable eligibility or Native Hero state.
+    // Native-thread owners supply their backing append-only list and a pure key
+    // selector. Invalidate after key/content replacement or loading; a count
+    // change alone detects appends/removals, not same-count in-place changes.
+    public sealed class PopulationIdentityIndex<T> where T : class
+    {
+        private readonly Func<T, string?> identity;
+        private readonly Dictionary<string, T> records = new Dictionary<string, T>(StringComparer.Ordinal);
+        private IReadOnlyList<T>? source;
+        private int count = -1;
+        public PopulationIdentityIndex(Func<T, string?> identity) { this.identity = identity; }
+        public T? Find(IReadOnlyList<T> people, string? id)
+        {
+            // Preserve FirstOrDefault semantics even for incomplete identities.
+            if (id == null) return people.FirstOrDefault(p => identity(p) == null);
+            if (!ReferenceEquals(source, people) || count != people.Count)
+            {
+                Invalidate();
+                foreach (T person in people)
+                {
+                    string? key = identity(person);
+                    if (key != null && !records.ContainsKey(key)) records.Add(key, person);
+                }
+                source = people;
+                count = people.Count;
+            }
+            return records.TryGetValue(id, out T? found) ? found : null;
+        }
+        public void Invalidate() { records.Clear(); source = null; count = -1; }
+    }
+
     // Reused buffers have a single synchronous pass lifetime. Native lookups
     // remain authoritative on misses and duplicate IDs; live Hero state is never
     // cached. The caller clears references before leaving its pass.

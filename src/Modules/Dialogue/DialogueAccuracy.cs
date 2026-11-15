@@ -54,7 +54,7 @@ namespace ReignBetaServer
             if (original == null || repaired == null || !ConversationStructuredObjectHasUsableVisibleReply(original)) return;
             foreach (string field in new[] { "relationshipAssessments", "memoryWrites", "beliefWrites", "relationshipUpdates",
                 "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "continuityWrites", "proposalDecisions",
-                "identityIntroductions", "socialSignals", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "gossipSignals", "raisedGossip", "communicationPlans" })
+                "identityIntroductions", "socialSignals", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "gossipSignals", "publicWitnessSignals", "raisedGossip", "communicationPlans" })
                 if (original.TryGetValue(field, out object value) && IsConversationObjectArray(value)) repaired[field] = value;
             foreach (string field in new[] { "decisionBrief", "actionGate", "conceptionGate", "stateUpdates" })
                 if (ReadDictionary(original, field) is Dictionary<string, object> value) repaired[field] = value;

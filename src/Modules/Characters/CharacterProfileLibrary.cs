@@ -668,8 +668,8 @@ namespace ReignBetaServer
 
             return new Dictionary<string, object>
             {
-                ["policy"] = "deterministic_first_response_then_background_enrichment",
-                ["backgroundWorkerStarted"] = true,
+                ["policy"] = "town_entry_full_profile_prewarm_with_first_contact_fallback",
+                ["backgroundWorkerStarted"] = TownProfiles.Count > 0,
                 ["automaticProfileUploadsEnabled"] = false,
                 ["legacyQueueStatuses"] = statuses,
                 ["pendingBackgroundCalls"] = PendingCharacterEnrichmentCount()
@@ -823,6 +823,7 @@ namespace ReignBetaServer
             string sandbox = ProfileArg(args, "--sandbox-data", "");
             string reign = ProfileArg(args, "--reign-data", "");
             string courtManifestPath = ProfileArg(args, "--court-manifest", "");
+            string naval = ProfileArg(args, "--naval-data", Path.GetFullPath(Path.Combine(sandbox, "..", "..", "NavalDLC", "ModuleData")));
             string output = ProfileArg(args, "--output", CharacterProfileCatalogPath);
             if (ReadString(ReadJsonObject(output), "packVersion", "") == NarrativePack)
                 throw new InvalidOperationException("The legacy foundation generator cannot overwrite a complete narrative catalog. Generate foundations to a separate path and use the guarded narrative authoring workflow.");
@@ -831,10 +832,26 @@ namespace ReignBetaServer
 
             XDocument nativeLords = XDocument.Load(Path.Combine(sandbox, "lords.xml"), LoadOptions.PreserveWhitespace);
             XDocument nativeHeroes = XDocument.Load(Path.Combine(sandbox, "heroes.xml"), LoadOptions.PreserveWhitespace);
+            var navalFiles = new[] { "naval_lords.xml", "heroes.xml", "clans.xml" }.Select(file => Path.Combine(naval, file)).ToArray();
+            if (navalFiles.Any(File.Exists))
+            {
+                if (!navalFiles.All(File.Exists)) throw new InvalidOperationException("Incomplete NavalDLC native profile sources.");
+                nativeLords.Root.Add(XDocument.Load(navalFiles[0]).Root.Elements().Select(node => new XElement(node)));
+                nativeHeroes.Root.Add(XDocument.Load(navalFiles[1]).Root.Elements().Select(node => new XElement(node)));
+            }
             XDocument courtLords = XDocument.Load(Path.Combine(reign, "reign_court_lords.xml"), LoadOptions.PreserveWhitespace);
             XDocument courtHeroes = XDocument.Load(Path.Combine(reign, "reign_court_heroes.xml"), LoadOptions.PreserveWhitespace);
             XDocument skills = XDocument.Load(Path.Combine(sandbox, "sandbox_skill_sets.xml"), LoadOptions.PreserveWhitespace);
             XDocument clans = XDocument.Load(Path.Combine(sandbox, "spclans.xml"), LoadOptions.PreserveWhitespace);
+            if (navalFiles.All(File.Exists))
+            {
+                // DLC clan XML also contains updates to existing mercenary clans.
+                // Import only missing identities; these unrelated partial updates
+                // must not duplicate or erase a Sandbox faction definition.
+                var existingClanIds = new HashSet<string>(clans.Root.Elements().Select(node => (string)node.Attribute("id")), StringComparer.OrdinalIgnoreCase);
+                clans.Root.Add(XDocument.Load(navalFiles[2]).Root.Elements()
+                    .Where(node => !existingClanIds.Contains((string)node.Attribute("id"))).Select(node => new XElement(node)));
+            }
             XDocument courtClans = XDocument.Load(Path.Combine(reign, "reign_court_clans.xml"), LoadOptions.PreserveWhitespace);
             Dictionary<string, object> courtManifest = ReadJsonObject(courtManifestPath);
             Dictionary<string, Dictionary<string, object>> courtRecords = ReadDictionaryList(courtManifest, "records").ToDictionary(x => ReadString(x, "id", ""), x => x, StringComparer.OrdinalIgnoreCase);
@@ -846,7 +863,7 @@ namespace ReignBetaServer
                     string coreId = (string)core.Attribute("id");
                     if (!skillSets.ContainsKey(coreId)) skillSets[coreId] = new XElement(core);
                 }
-            string navalSkillsPath = Path.GetFullPath(Path.Combine(sandbox, "..", "..", "NavalDLC", "ModuleData", "naval_skill_sets.xml"));
+            string navalSkillsPath = Path.Combine(naval, "naval_skill_sets.xml");
             if (File.Exists(navalSkillsPath))
                 foreach (XElement extension in XDocument.Load(navalSkillsPath).Descendants("SkillSet").Where(x => x.Attribute("id") != null))
                 {
@@ -899,6 +916,8 @@ namespace ReignBetaServer
                 {
                     ["expectedProfileCount"] = profiles.Count,
                     ["nativeSandboxCount"] = profiles.Count(x => ReadString(x, "source", "") == "native_sandbox"),
+                    ["nativeNordCount"] = profiles.Count(x => ReadString(x, "source", "") == "native_sandbox" && ReadString(ReadDictionary(x, "sourceFacts"), "cultureId", "") == "nord"),
+                    ["navalSourceHash"] = navalFiles.All(File.Exists) ? HashFiles(navalFiles) : "",
                     ["reignCourtCount"] = profiles.Count(x => ReadString(x, "source", "") == "reign_court"),
                     ["courtHouseholdCount"] = ReadInt(courtManifest, "household_count", 0),
                     ["traitCount"] = CoreTraitKeys.Length,
@@ -1567,6 +1586,7 @@ namespace ReignBetaServer
                     && ShouldRetryFailedConstruction(exhaustedBudget, changedBudgetSettings),
                 "An exhausted current creation budget does not trigger another automatic charge; a deliberate configuration change permits retry.", null));
             results.Add(ProfileSelfTest("background_character_worker_disabled", !ReadBool(settings, "backgroundCharacterEnrichmentEnabled", true), "Automatic background character construction is disabled by default.", null));
+            results.AddRange(RunTownNotableProfileSelfTests());
             return results;
         }
 

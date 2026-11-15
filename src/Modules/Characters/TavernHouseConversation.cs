@@ -157,6 +157,7 @@ namespace ReignBetaServer
                     chat["participants"] = selectedIds.Concat(new[] { ReadString(state, "playerHeroStringId", "") }).ToList();
                     chat["participantHeroIds"] = chat["participants"];
                     chat["player"] = ReadDictionary(state, "player"); chat["playerName"] = ReadString(ReadDictionary(state, "player"), "name", "Player");
+                    BindTavernHouseSceneParticipants(state, chat, present);
                     string phase = visiting ? "visit" : "negotiation";
                     string phaseSession = ReadString(state, "conversationSessionId", "") + "_" + phase;
                     chat["conversationSessionId"] = phaseSession;
@@ -176,12 +177,17 @@ namespace ReignBetaServer
                         + (visiting ? "Native payment and participant agreement are already complete. Speak only as your own character; respect each person's choices. This visit does not recruit anyone. Permanent recruitment requires your own explicit current agreement to join the player's clan as a companion, stating your numeric denar price or expressly free of charge, then the player's confirmation and native transfer."
                             : LoadPromptTemplate("tavern_house_negotiation_role.txt") + "\nAvailable native roster (identity and pricing choices only, not present witnesses): "
                                  + Json.Serialize(roster.Select(x => new { heroId = CharacterIdFrom(x), name = ReadString(x, "name", ""), isMadam = ReadBool(x, "isMadam", false) })));
+                    if (!visiting && UsesStructuredActions(chat)) state["visitActionProtocolVersion"] = 1;
+                    if (visiting) chat["sceneContext"] = ReadString(chat, "sceneContext", "")
+                        + "\nCONFIRMED NATIVE VISIT RECEIPT (facts only): " + Json.Serialize(ReadDictionary(state, "receipt"));
+                    using var tavernActionScope = new TavernActionScopeLease(visiting ? null : TavernVisitContext(state));
                     ApplyTavernHouseOpening(state, chat);
                     if (planOnly) return GroupConversationFloorApi(chat);
                     var response = DispatchTavernHouseDialogue(state, requestId, requestHash, chat,
                         () => PartyChatRespond(chat), pending => RecoverTavernHouseDialogue(state, pending),
                         () => SaveTavernHouseSession(path, state));
                     if (!ReadBool(response, "ok", false)) return response;
+                    PrepareTavernVisitAction(state, chat, response);
                     var transcript = ReadDictionaryList(state, "transcript");
                     string playerTurn = ReadString(payload, "playerTurnId", requestId);
                     string playerText = ReadString(payload, "playerText", "");
@@ -206,6 +212,28 @@ namespace ReignBetaServer
                 }
             }
             catch (Exception ex) { return TavernHouseError(ex.Message); }
+        }
+
+        private static void BindTavernHouseSceneParticipants(Dictionary<string, object> state,
+            Dictionary<string, object> chat, List<Dictionary<string, object>> present)
+        {
+            string town = ConversationLocationLabel(ReadString(state, "townName", ""));
+            string venue = "the tavern house" + (town.Length == 0 ? "" : " at " + town);
+            string playerId = ReadString(state, "playerHeroStringId", "");
+            var participants = present.Concat(new[] { ReadDictionary(state, "player") ?? TestDict() })
+                .Select(profile => {
+                    var person = new Dictionary<string, object>(profile, StringComparer.OrdinalIgnoreCase);
+                    person["heroStringId"] = CharacterIdFrom(profile);
+                    person["role"] = CharacterIdFrom(profile) == playerId ? "player" : "npc";
+                    person["nativeLocationDescription"] = venue;
+                    person["nativeLocationClass"] = "formal";
+                    return person;
+                }).ToList();
+            // Bind the exact private attendees, never the directory roster. Keep the
+            // prompt instructions in sceneContext separate from displayable geography.
+            chat["sceneParticipants"] = participants;
+            chat["nativeLocationDescription"] = venue;
+            chat["currentSettlementName"] = town;
         }
 
         internal static Dictionary<string, object> DispatchTavernHouseDialogue(Dictionary<string, object> state, string requestId, string requestHash,
@@ -314,7 +342,8 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                 || ReadBool(previous, "visiting", false) != (ReadString(state, "status", "") == "visiting"))
             {
                 var historical = new Dictionary<string, object>(replay);
-                historical.Remove("quote"); historical.Remove("recruitmentAgreement"); historical["historicalReplay"] = true;
+                historical.Remove("quote"); historical.Remove("recruitmentAgreement"); historical.Remove("preparedVisit");
+                historical.Remove("structuredActionDecision"); historical["historicalReplay"] = true;
                 return historical;
             }
             if (ReadBool(previous, "termsPending", false))
@@ -341,7 +370,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
         {
             try
             {
-                if (!visiting)
+                if (!visiting && !UsesStructuredActions(state))
                 {
                     var extracted = ExtractTavernHouseQuote(state, ReadString(response, "reply", ""));
                     if (ReadBool(extracted, "ok", false)) { state["quote"] = ReadDictionary(extracted, "quote"); response["quote"] = state["quote"]; }
@@ -456,7 +485,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                     if (ReadString(state, "status", "") == "closed") return TavernHouseError("This visit has ended and cannot be resumed.", "closed");
                     var incoming = ReadDictionary(payload, "receipt") ?? payload;
                     var existing = ReadDictionary(state, "receipt");
-                    var quote = ReadDictionary(state, "quote");
+                    var quote = ValidateTavernPreparedReceipt(state, incoming) ?? ReadDictionary(state, "quote");
                     if (existing != null && existing.Count > 0)
                     {
                         if (!TavernHouseReceiptMatches(existing, incoming)) return TavernHouseError("The native payment receipt conflicts with the stored visit.", "receipt_conflict");
@@ -475,6 +504,8 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                     double confirmationDay = ValidateTavernHouseConfirmationDay(payload, day);
                     var receipt = new Dictionary<string, object> { ["visitId"] = visitId, ["agreementId"] = ReadString(quote, "agreementId", ""),
                         ["participantHeroIds"] = ids, ["paidGold"] = ReadInt(incoming, "paidGold", 0), ["startedDay"] = day, ["nativePaymentConfirmed"] = true };
+                    foreach (string key in new[] { "actionTermsHash", "preparationId", "payeeHeroId", "paymentState" })
+                        if (incoming.TryGetValue(key, out var value)) receipt[key] = value;
                     // Reputation persists first with its own idempotent receipt. A process stop before the session write is safely replayed.
                     using (var connection = OpenCampaignConnection(ReadString(state, "campaignId", "")))
                     {
@@ -531,7 +562,10 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
         }
 
         internal static bool TavernHouseReceiptMatches(Dictionary<string, object> a, Dictionary<string, object> b)
-            => ReadString(a, "visitId", "") == ReadString(b, "visitId", "") && ReadString(a, "agreementId", "") == ReadString(b, "agreementId", "")
+            => ReadString(a, "actionTermsHash", "") == ReadString(b, "actionTermsHash", "")
+                && ReadString(a, "preparationId", "") == ReadString(b, "preparationId", "")
+                && ReadString(a, "payeeHeroId", "") == ReadString(b, "payeeHeroId", "")
+                && ReadString(a, "visitId", "") == ReadString(b, "visitId", "") && ReadString(a, "agreementId", "") == ReadString(b, "agreementId", "")
                 && ReadInt(a, "paidGold", -1) == ReadInt(b, "paidGold", -2) && ReadDouble(a, "startedDay", -1) == ReadDouble(b, "startedDay", -2)
                 && ReadStringList(a, "participantHeroIds").SequenceEqual(ReadStringList(b, "participantHeroIds"), StringComparer.Ordinal);
 

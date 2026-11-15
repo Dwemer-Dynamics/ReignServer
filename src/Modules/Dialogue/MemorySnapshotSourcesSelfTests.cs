@@ -98,6 +98,28 @@ SELECT 'foreign_'||n,'past','foreign_'||n,100+n,'foreign','player','player','car
                     var recent = LoadRecentConversationWindow(connection, plan, context, access, settings, recentAudit);
                     Check("recent_window_keeps_originals", recent.Any(e => e.Text.Contains(question)) && recent.Any(e => e.Text.Contains(answer))
                         && !recent.Any(e => e.Text.Contains("9000")), recentAudit);
+                    // Existing snapshots contain the old shadow mode and original
+                    // turns, not a newly prepared scene. The default reader must
+                    // work immediately without rewriting that snapshot or its rows.
+                    var defaultReader = DefaultSettings();
+                    defaultReader["enableSemanticMemory"] = false;
+                    defaultReader["minimeEnabled"] = false;
+                    defaultReader["useMemoryLlmForConsolidation"] = false;
+                    string restoredBefore = MemorySourceHash(QuerySql(connection, "SELECT * FROM conversation_turns ORDER BY turn_id;"));
+                    string restoredModeBefore = ReadString(ReadMemoryPrecisionState(connection), "mode", "");
+                    foreach (bool useLegacy in new[] { false, true, false })
+                    {
+                        defaultReader["legacyMemoryMode"] = useLegacy;
+                        var defaultPacket = BuildNpcMemoryPacket(campaign, "npc", "player", "", "caravan price", 4000, context, defaultReader);
+                        string delivered = ReadString(defaultPacket, "memoryPacket", "");
+                        Check("global_toggle_on_old_snapshot_" + (useLegacy ? "legacy" : "new") + "_" + results.Count,
+                            delivered.Contains(question) && delivered.Contains(answer) && delivered.Contains(acknowledgment)
+                            && !delivered.Contains("9000 denars")
+                            && (ReadDictionary(defaultPacket, "precisionEvidence") != null) == !useLegacy);
+                    }
+                    Check("global_toggle_does_not_rewrite_restored_sources_or_mode", restoredBefore ==
+                        MemorySourceHash(QuerySql(connection, "SELECT * FROM conversation_turns ORDER BY turn_id;"))
+                        && restoredModeBefore == ReadString(ReadMemoryPrecisionState(connection), "mode", ""));
                     foreach (string memoryMode in new[] { "legacy", "precision" })
                     foreach (string mode in new[] { "in_person", "party_chat", "social_event", "correspondence" })
                     {

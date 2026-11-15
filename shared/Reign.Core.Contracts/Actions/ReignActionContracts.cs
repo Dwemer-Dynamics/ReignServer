@@ -9,6 +9,7 @@ namespace Reign.Core.Contracts.Actions
 {
     public enum AgreementState { Draft, Offered, Counteroffered, Accepted, Reserved, InTransit, Waiting, Completed, Rejected, Cancelled, Impossible, RecoveryRequired }
     public enum ActionOrigin { Conversation, Console, Autonomous, GuardedTest }
+    public enum AgreementChannel { Unknown = 0, InPerson = 1, Correspondence = 2 }
     public enum TermTiming { Immediate, OnArrival, OnCondition, Installment }
 
     public sealed class ActionParameter
@@ -67,6 +68,7 @@ namespace Reign.Core.Contracts.Actions
         public string ConversationId { get; set; } = "";
         public string ProposerId { get; set; } = "";
         public ActionOrigin Origin { get; set; }
+        public AgreementChannel Channel { get; set; }
         public AgreementState State { get; set; }
         public List<ActionClause> Clauses { get; set; } = new List<ActionClause>();
         public string PlayerAcceptedHash { get; set; } = "";
@@ -102,6 +104,14 @@ namespace Reign.Core.Contracts.Actions
                 Add(c.Arguments.Count);
                 foreach (var kv in c.Arguments.OrderBy(x => x.Key, StringComparer.Ordinal)) { Add(kv.Key); Add(kv.Value); }
             }
+            // Unknown preserves every legacy v1 consent hash and committed
+            // schedule. New channel bindings are part of the reviewed terms.
+            if (Channel != AgreementChannel.Unknown)
+            {
+                Add("agreement-channel-v1");
+                Add(Channel == AgreementChannel.InPerson ? "in_person" : Channel == AgreementChannel.Correspondence
+                    ? "correspondence" : throw new InvalidOperationException("Unknown agreement channel."));
+            }
             using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(b.ToString()))).Replace("-", "").ToLowerInvariant();
         }
 
@@ -124,10 +134,27 @@ namespace Reign.Core.Contracts.Actions
         public string Message { get; set; } = "";
         public List<string> ObservedEffects { get; set; } = new List<string>();
         public double Day { get; set; }
+        public double ArrivalDay { get; set; }
+        public List<ActionClauseReceipt> Clauses { get; set; } = new List<ActionClauseReceipt>();
+    }
+
+    public sealed class ActionClauseReceipt
+    {
+        public string ClauseId { get; set; } = "";
+        public string ActionId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public double? DueDay { get; set; }
+        public string ConditionKind { get; set; } = "";
+        public bool Reserved { get; set; }
+        public bool Started { get; set; }
+        public int FulfilledInstallments { get; set; }
     }
 
     public static class AgreementRules
     {
+        public static bool IsImmediateInPerson(ActionAgreement agreement) => agreement != null
+            && agreement.Origin == ActionOrigin.Conversation && agreement.Channel == AgreementChannel.InPerson
+            && !string.IsNullOrWhiteSpace(agreement.ConversationId);
         // A completed native journal permits confirmation of the original terms,
         // never a new delivery or caller-supplied consent. Callers bind the draft
         // to their independently observed conversation before comparing hashes.
@@ -242,6 +269,7 @@ namespace Reign.Core.Contracts.Actions
                 foreach (var key in c.Arguments.Keys)
                     if (!definition.Parameters.Any(p => p.Key == key)) errors.Add("Unknown parameter: " + key);
             }
+            errors.AddRange(TavernHouseVisitAction.Validate(a));
             foreach (var group in a.Clauses.Where(c => c.ActionId == "government.support_vote")
                 .GroupBy(c => c.ActorId + "\n" + (c.Arguments.TryGetValue("businessId", out var id) ? id : "")))
                 if (group.Select(c => c.Arguments.TryGetValue("optionId", out var option) ? option : "").Distinct(StringComparer.Ordinal).Count() > 1)

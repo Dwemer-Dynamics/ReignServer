@@ -98,7 +98,8 @@ namespace ReignBetaServer
                 return TestDict("ok", false, "error", "The speaking plan for this already delivered turn is unavailable; resume with a new player turn.");
 
             var roster = new List<GroupTurnParticipant>();
-            string publicText = ProjectPlayerInputForAudience(text, "", profiles, out _, out _);
+            string privateFocus = CapturePlayerInput(payload).PrivateFocusId;
+            string publicText = ProjectPlayerInputForAudience(text, "", profiles, out _, out _, privateFocusId: privateFocus);
             publicText = ObserverConversationText(publicText, "__player_source__", "");
             foreach (string id in active)
             {
@@ -108,7 +109,7 @@ namespace ReignBetaServer
             var selected = GroupConversationTurnOrder.Plan(roster, publicText, campaign + "|" + timeline + "|" + session + "|" + beat, lines, replyFocusId);
             foreach (string id in active)
             {
-                ProjectPlayerInputForAudience(text, id, profiles, out _, out bool privatelyAddressed);
+                ProjectPlayerInputForAudience(text, id, profiles, out _, out bool privatelyAddressed, privateFocusId: privateFocus);
                 var actionInput = CloneDictionary(payload);
                 actionInput["hero"] = profiles.First(p => CharacterIdFrom(p).Equals(id, StringComparison.OrdinalIgnoreCase));
                 // The existing exact current handover parser identifies an action

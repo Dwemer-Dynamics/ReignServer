@@ -14,7 +14,9 @@ Use topic=question and an exact evidenceQuote containing the question you intend
 A statement such as 'I will ask her whether she would welcome the invitation' expresses an unresolved question even without a question mark; it is not merely a privacy-only impression.
 Choose the supported curiosity category from your own reply. A player's request alone, a refusal to ask, a hypothetical plan or a promise only to pass along settled news does not establish consultation intent.
 Preserve the exact question's scope: agreeing to ask about an invitation while refusing to ask for someone's reasons permits only the invitation question. Do not replace it with a convenient adjacent statement about the encounter.
-When there is no such signal, return one topic=impression entry classifying this exchange's privacy, with excitement/curiosity/hurt=0.
+Meaningful curiosity or excitement about the actual encounter belongs to a detailed topic such as shared_activity, relationship or conversation. A desire to consult someone is one kind of detailed signal, not a prerequisite for all detailed signals.
+For example, a personally meaningful public dance invitation can be shared_activity with supported curiosity=50; routine acknowledgement with no personal interest remains impression with all feelings=0. Never put a nonzero feeling on topic=impression.
+When there is no meaningful feeling or personal question, return one topic=impression entry classifying this exchange's privacy, with excitement/curiosity/hurt=0.
 That privacy-only entry grants no sharing intent: the server uses actual applied conversation relationship changes for impressions.
 Missing, malformed or unsupported privacy classification permits no gossip, including an impression that the encounter occurred.
 Each entry is {topic:'family|relationship|intimacy|politics|shared_activity|gift|question|conversation|impression',subjectId:'',
@@ -46,12 +48,18 @@ Use the opaque alias 'player' for the current player's confidence, even when you
 For other owners use only resolved identities actually supported by the quoted source, never a name from background context.
 When the player privately entrusts a plan or gift to you, include 'player'; naming only yourself as the confidant is incorrect.
 These private metadata aliases do not reveal an unknown player's identity or grant permission to contact them.
+For a public interaction, optionally return a separate publicWitnessSignals array with at most two entries {topic:'shared_activity|relationship|politics|gift|conversation', evidenceQuote:'exact current publicly spoken words', salience:0, confidence:0.0, privacy:'public|personal|intimate|secret', existencePrivacy:'public|personal|intimate|secret', promisedSecrecy:false}.
+Classify both privacy fields and the actual secrecy promise explicitly. Only public detail/public existence with no secrecy promise is eligible for this public-witness origin; confidential words do not become public merely because the venue has other people.
+This classifies what an actual bystander could hear, never a bystander's private feelings or a completed unseen event. Salience uses 0,25,50,75,100: 25 a mild social detail; 50 an interesting public choice or development, such as accepting a dance invitation; 75 a strong public revelation; 100 exceptional. Routine greetings are 0. Confidence must be >=0.80.
+Quote public speech outside narration markers. Do not quote thoughts, whispers, quiet exclusive asides, private replies, earlier retrieved material, hypothetical actions or a player's unaccepted proposal as a completed act. If the scene is private or no public witness is recorded, return []. A public statement proves only that its author said it.
+The server independently binds the exact public quotation to accepted source turns and actual native witnesses. It supplies identities, personality, audiences, probabilities, limits and delays; these metadata do not announce delivery.
 The server decides whether, to whom, when, and with what permitted exaggeration a story is told.
 Do not narrate an offscreen conversation or incoming answer as having happened because you emitted a signal.
 If you actually bring up a nominated received gossip topic in this reply, optionally include raisedGossip:[{receiptId,evidenceQuote}]
 with the exact words of this reply. Do not mark something raised merely because it was available in memory.";
 
-        private static string BuildPersonalGossipPrompt(string campaign, string hero, Dictionary<string, object> payload, List<string> sourceIds)
+        private static string BuildPersonalGossipPrompt(string campaign, string hero, Dictionary<string, object> payload, List<string> sourceIds,
+            bool separateIdentitySystemMessage = false)
         {
             if (ReadBool(payload, "officialMemoryFirewall", false) || !ReadBool(PersonalGossipSettings(), "enabled", true)) return "";
             try
@@ -158,7 +166,13 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
                     string id = "known_npc_identity_" + PromptHash(identitySection + "|" + body).Substring(0, 24).ToLowerInvariant();
                     string record = RenderContinuityRecord(id, "native_gossip_identity", hero, session, day, 140, true, body);
                     CaptureRequiredPromptEvidence(payload, identitySection, record);
-                    sourceIds.Add(id); text.AppendLine(record);
+                    sourceIds.Add(id);
+                    // Plan placement before protecting the enclosing context. The
+                    // native record is still required and is attached as a system
+                    // message by the structured conversation adapter.
+                    text.AppendLine(separateIdentitySystemMessage
+                        ? "Known native identity facts are supplied once in the authoritative system record " + id + "."
+                        : record);
                 }
                 SchedulePersonalGossip(campaign);
                 return text.ToString();
@@ -196,6 +210,25 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
             "native_gossip_identity_" + PromptHash(campaign + "|" + hero + "|" + GossipTimeline(payload) + "|"
                 + ReadDouble(payload, "worldDay", 0).ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Substring(0, 24);
 
+        private sealed class ProtectedGossipIdentityReference { internal string Hash; }
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PromptEnvelope, ProtectedGossipIdentityReference>
+            ProtectedGossipIdentityReferences = new();
+
+        private static void RegisterProtectedGossipIdentityReference(PromptEnvelope envelope, Dictionary<string, object> payload, string identity)
+        {
+            string normalized = NormalizePromptSegment(identity);
+            bool embedded = ReadDictionaryList(ReadDictionary(payload, "continuityEvidence"), "requiredContent")
+                .Any(record => ReadString(record, "id", "") == "protected_continuity_content"
+                    && PromptHash(ReadString(record, "text", "")) == ReadString(record, "hash", "")
+                    && NormalizePromptSegment(ReadString(record, "text", "")).Contains(normalized, StringComparison.Ordinal));
+            ProtectedGossipIdentityReferences.Remove(envelope);
+            if (embedded && normalized.Length > 0)
+                ProtectedGossipIdentityReferences.Add(envelope, new ProtectedGossipIdentityReference { Hash = PromptHash(identity) });
+        }
+
+        private static bool PreserveProtectedGossipIdentityReference(PromptEnvelope envelope, string hash)
+            => ProtectedGossipIdentityReferences.TryGetValue(envelope, out var reference) && reference.Hash == hash;
+
         private static void AttachPersonalGossipIdentityPrompt(PromptEnvelope envelope, string campaign, string hero, Dictionary<string, object> payload)
         {
             if (envelope == null || envelope.Messages.Count == 0 || ReadBool(payload, "officialMemoryFirewall", false)
@@ -217,6 +250,7 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
             envelope.Diagnostics["personalGossipIdentity"] = GossipFields("schema", "reign-gossip-native-identity-context-v1",
                 "ownerId", hero, "timelineId", GossipTimeline(payload), "sourceId", id,
                 "contentHash", PromptHash(content), "characters", content.Length, "additionalProviderCalls", 0);
+            RegisterProtectedGossipIdentityReference(envelope, payload, content);
             var continuity = ReadDictionary(payload, "continuityEvidence") ?? new Dictionary<string, object>();
             continuity["sourceIds"] = ReadStringList(continuity, "sourceIds").Concat(new[] { id }).Distinct(StringComparer.Ordinal).ToList();
             var required = ReadDictionaryList(continuity, "requiredContent");
@@ -252,7 +286,10 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
                     "topics", QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
                         .Select(row => GossipFields("id", ReadString(row, "topic_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
                             "status", ReadString(row, "status", ""), "shareChance", ReadInt(GossipJson(row), "shareChance", 0),
-                            "shareRoll", ReadInt(GossipJson(row), "shareRoll", 0), "candidateAudit", ReadDictionary(GossipJson(row), "candidateAudit"))).ToList());
+                            "shareRoll", ReadInt(GossipJson(row), "shareRoll", 0), "candidateAudit", ReadDictionary(GossipJson(row), "candidateAudit"),
+                            "sourceOrigin", ReadString(GossipJson(row), "sourceOrigin", "participant"),
+                            "witnessInterest", ReadInt(GossipJson(row), "witnessInterest", 0),
+                            "signalDiagnostic", ReadString(GossipJson(row), "signalDiagnostic", ""))).ToList());
             }
         }
 

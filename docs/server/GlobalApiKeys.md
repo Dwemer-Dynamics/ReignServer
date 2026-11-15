@@ -78,3 +78,7 @@ A key typed for the new URL stays in its field until **Save key**.
 serialized and checked again before the reference changes. A concurrent change returns `conflict`. A global write that
 succeeds but cannot be recorded locally returns `saved_not_bound` with the key id, and is not retried. An `unknown`
 outcome is never retried: reload and check Global API Keys.
+# Local installations (2026-11-13 repair)
+
+An installation without `/etc/reignserver/global-keys.json` keeps the existing local provider-key Save and masking workflow. No shared helper is installed or enrolled automatically. This preserves the user's explicit choice for the repaired installation. The masked status response declares `localKeyWorkflow`; unbound slots do not show shared-store controls. Enrollment switches new keys to guarded per-row shared-store saves, including Ollama Cloud. Existing binding entries, including malformed entries, always block local fallback and local overwrites while the store is unavailable. Other unbound slots remain independently editable.
+

@@ -239,14 +239,43 @@ AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now))
             using (var connection = OpenCampaignConnection(campaign))
             {
                 var counts = QuerySql(connection, "SELECT status,COUNT(*) AS count FROM memory_background_jobs GROUP BY status;");
+                var jobs = QuerySql(connection, "SELECT * FROM memory_background_jobs ORDER BY updated_ts DESC LIMIT 100;");
                 var result = new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaign,
-                    ["jobs"] = QuerySql(connection, "SELECT * FROM memory_background_jobs ORDER BY updated_ts DESC LIMIT 100;"),
+                    ["jobs"] = jobs,
                     ["counts"] = counts, ["precision"] = ReadMemoryPrecisionState(connection), ["leaseSeconds"] = 120,
-                    ["heartbeatSeconds"] = 30, ["reconciliationSeconds"] = 60 };
+                    ["heartbeatSeconds"] = 30, ["reconciliationSeconds"] = 60,
+                    ["effectiveMemoryMode"] = ResolveMemoryMode(LoadSettings()),
+                    ["referenceGraphMode"] = ConversationReferenceMode() };
                 foreach (string status in new[] { "pending", "running", "failed", "incomplete", "completed", "no_op" })
                     result[status] = ReadInt(counts.FirstOrDefault(r => ReadString(r, "status", "") == status), "count", 0);
+                result["attentionRequired"] = ReadInt(result, "failed", 0) + ReadInt(result, "incomplete", 0);
+                result["incompleteDiagnostics"] = MemoryIncompleteDiagnostics(jobs, ReadInt(result, "incomplete", 0));
                 return result;
             }
+        }
+
+        private static Dictionary<string, object> MemoryIncompleteDiagnostics(List<Dictionary<string, object>> jobs, int total)
+        {
+            var inspected = jobs.Where(job => ReadString(job, "status", "") == "incomplete").ToList();
+            var reasons = new Dictionary<string, int>(StringComparer.Ordinal);
+            int nonRetryable = 0;
+            foreach (var job in inspected)
+            {
+                var result = TryParseJsonObject(ReadString(job, "result_json", "{}")) ?? new Dictionary<string, object>();
+                if (!ReadBool(result, "retryable", true)) nonRetryable++;
+                string reason = ReadString(ReadDictionary(result, "compactionDiagnostic"), "reason", "");
+                if (reason.Length == 0)
+                    reason = string.Join("+", ReadDictionaryList(result, "summaries")
+                        .Select(summary => ReadString(ReadDictionary(summary, "compactionDiagnostic"), "reason", "unknown"))
+                        .Distinct().OrderBy(value => value, StringComparer.Ordinal));
+                // Only diagnostic categories leave this projection, never source text.
+                if (reason.Length == 0 || reason.Length > 200 || reason.Any(ch => !(ch >= 'a' && ch <= 'z') && ch != '_' && ch != '+')) reason = "unknown";
+                reasons[reason] = (reasons.TryGetValue(reason, out int count) ? count : 0) + 1;
+            }
+            return TestDict("totalIncomplete", total, "inspectedIncompleteJobs", inspected.Count,
+                "coverageComplete", inspected.Count == total, "coverage", "latest_100_jobs",
+                "nonRetryableInspected", nonRetryable, "reasons", reasons.ToDictionary(pair => pair.Key, pair => (object)pair.Value, StringComparer.Ordinal),
+                "sourceRetention", "Original source retention and retrieval eligibility are separate from compaction completion.");
         }
     }
 }

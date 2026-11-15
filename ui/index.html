@@ -384,11 +384,12 @@
     <section id='llm' class='page'>
       <div class='card'>
         <h2>LLM Backend</h2>
-        <p class='hint'>Choose NanoGPT, OpenRouter, a custom API or your ChatGPT Codex subscription. Each keeps its own model selections. Changes apply after saving.</p>
+        <p class='hint'>Choose NanoGPT, OpenRouter, Ollama Cloud, a custom API or your ChatGPT Codex subscription. Each keeps its own model selections. Changes apply after saving.</p>
         <label>Chat provider
           <select id='llmProvider' onchange='changeChatProvider()'>
             <option value='nanogpt'>NanoGPT</option>
             <option value='openrouter'>OpenRouter</option>
+            <option value='ollama_cloud'>Ollama Cloud</option>
             <option value='openai_compatible'>Custom OpenAI-compatible API</option>
             <option value='codex_subscription'>ChatGPT Codex subscription</option>
           </select>
@@ -629,6 +630,8 @@
     <section id='memory' class='page'>
       <div class='card'>
         <h2>Character Memory</h2>
+        <label><input id='legacyMemoryMode' type='checkbox'> Legacy Memory Mode</label>
+        <p class='hint'>Off by default. The new memory system uses attributed sources, topic tags and linked conversations, defaults to the latest 30 messages, and budgets the full request to 120,000 estimated tokens. Turn this on to use the previous memory retrieval system. Your stored conversations are retained in either mode. Save Changes applies this choice to all campaigns, including older saves.</p>
         <p class='hint'>World memory is stored per campaign in PostgreSQL with full-text and semantic indexing. Recent NPC-specific conversations remain available as attributed raw turns; older continuity is supplied by scene summaries, middle-term consolidation, rolling arcs, and ranked retrieval. Complete group transcripts are retained when the NPC participated.</p>
         <p class='hint'>Beliefs, rumors, interpretations, and commitments also enter a time-versioned knowledge graph with source lineage, perspective ownership, validity intervals, and supersession links.</p>
         <h3>Recent Raw Continuity</h3>
@@ -1321,16 +1324,17 @@
     });
     const ids = ['host','port','apiUrl','apiKey','siteUrl','appTitle','promptCacheMode','promptCacheFallbackCooldownSeconds','dialogueModel','characterConstructionModel','diplomacyModel','eventsModel','fastModel','memoryModel','relationshipModel','correspondenceModel','strategyModel','reasoningMode','reasoningEffort','reasoningFallbackCooldownSeconds','enableSemanticMemory','vectorProvider','embeddingModel','vectorWorkerUrl','vectorSearchTopK','vectorScoreWeight','vectorQueryTimeoutMs','embeddingBatchSize','qdrantUrl','qdrantApiKey','enableMemoryConsolidation','useMemoryLlmForConsolidation','memoryConsolidationMinItems','memoryConsolidationWindowMinutes','memoryConsolidationMaxGroups','memoryConsolidationMaxSourceItems','memoryConsolidationMaxSummaryChars','actionPlannerModel','enableHiddenActionPlanner','showActionGateDebug','actionPlannerMaxTokens','actionRouterModel','enableActionRouterLlm','enableActionRouterRepair','actionRouterAlwaysRun','actionRouterCandidateCount','actionRouterMaxTokens','temperature','maxTokens','characterConstructionMaxTokens','promptWarningCharacterLimit','promptHardCharacterLimit','portraitProvider','portraitNanoGptImageGenerationsUrl','portraitNanoGptChatCompletionsUrl','portraitNanoGptApiKey','portraitNanoGptImageModel','portraitAtlasGenerateImageUrl','portraitAtlasUploadMediaUrl','portraitAtlasPredictionUrlPrefix','portraitAtlasApiKey','portraitAtlasImageModel','portraitAtlasWanNegativePrompt','portraitImageStrength','adultPortraitInferenceSteps','adultSceneryInferenceSteps','portraitInferenceSteps','portraitGuidanceScale','portraitNativeSourceMode','portraitNativeSourceGeneratorPath','sceneryProvider','sceneryNanoGptImageModel','sceneryAtlasImageModel','sceneryAtlasWanNegativePrompt','sceneryImageStrength','sceneryInferenceSteps','sceneryGuidanceScale','enableLiveLog','enableRequestLogging','enableLlmLogging','prettyJsonLogs','openTelemetryOtlpEndpoint','providerMaxConcurrency','providerQueueTimeoutMs','providerRequestTimeoutMs','providerCircuitFailureThreshold','providerCircuitBreakSeconds','autoCaptureReplayCorpus','textureTraceEnabled','maxContextMemories','memoryTags','saveSyncEnabled','autoOpenBrowser'];
     const boolIds = new Set(['enableSemanticMemory','enableMemoryConsolidation','useMemoryLlmForConsolidation','enableHiddenActionPlanner','showActionGateDebug','enableActionRouterLlm','enableActionRouterRepair','actionRouterAlwaysRun','enableLiveLog','enableRequestLogging','enableLlmLogging','prettyJsonLogs','autoCaptureReplayCorpus','textureTraceEnabled','saveSyncEnabled','autoOpenBrowser']);
-    const secretIds = new Set(['nanoGptApiKey','openRouterApiKey','apiKey','portraitNanoGptApiKey','portraitAtlasApiKey','qdrantApiKey']);
+    const secretIds = new Set(['nanoGptApiKey','openRouterApiKey','ollamaCloudApiKey','apiKey','portraitNanoGptApiKey','portraitAtlasApiKey','qdrantApiKey']);
     const imageProfiles = ['portrait','scenery','adultPortrait','adultScenery'];
     ids.push('portraitGenerationMethod','portraitVisionProvider','portraitVisionModel','portraitVisionNanoGptModel');
-    ids.push('nanoGptApiKey','openRouterApiKey');
+    ids.push('nanoGptApiKey','openRouterApiKey','ollamaCloudApiKey');
     imageProfiles.forEach(prefix => ids.push(prefix + 'OpenRouterImageModel'));
     @CHAT_PROVIDER_SCRIPT@
     @CODEX_PERFORMANCE_SCRIPT@
     ['adultPortrait','adultScenery'].forEach(prefix => ['Provider','NanoGptImageModel','AtlasImageModel','AtlasWanNegativePrompt','ImageStrength','InferenceSteps','GuidanceScale'].forEach(suffix => ids.push(prefix + suffix)));
     const intIds = new Set(['port','promptCacheFallbackCooldownSeconds','reasoningFallbackCooldownSeconds','maxContextMemories','maxTokens','characterConstructionMaxTokens','promptWarningCharacterLimit','promptHardCharacterLimit','vectorSearchTopK','vectorScoreWeight','vectorQueryTimeoutMs','embeddingBatchSize','memoryConsolidationMinItems','memoryConsolidationWindowMinutes','memoryConsolidationMaxGroups','memoryConsolidationMaxSourceItems','memoryConsolidationMaxSummaryChars','actionRouterCandidateCount','actionRouterMaxTokens','actionPlannerMaxTokens','adultPortraitInferenceSteps','adultSceneryInferenceSteps','portraitInferenceSteps','sceneryInferenceSteps','providerMaxConcurrency','providerQueueTimeoutMs','providerRequestTimeoutMs','providerCircuitFailureThreshold','providerCircuitBreakSeconds']);
-    ids.push('recentRawConversationTurns','recentRawConversationCharBudget');
+    ids.push('recentRawConversationTurns','recentRawConversationCharBudget','legacyMemoryMode');
+    boolIds.add('legacyMemoryMode');
     ids.push('llmProvider','codexExecutable','codexHome');
     intIds.add('recentRawConversationTurns');
     intIds.add('recentRawConversationCharBudget');
@@ -1635,7 +1639,8 @@
       if (button.disabled || !beginWarEconomySave()) return;
       // Typed provider keys are never sent with the main Save and never dropped: everything else (including a new API URL)
       // saves, and the typed keys stay in their inputs for Save key.
-      const typedKeys = Object.fromEntries(globalKeySlotIds.map(id => [id, document.getElementById(id)])
+      const typedKeys = Object.fromEntries(globalKeySlotIds.filter(id => !globalKeyState.localWorkflow
+        || globalKeyState.slots[id]?.bound || globalKeyState.slots[id]?.binding).map(id => [id, document.getElementById(id)])
         .filter(([, el]) => el && el.value && el.value !== el.dataset.savedMask).map(([id, el]) => [id, el.value]));
       const keptKeyText = !Object.keys(typedKeys).length ? '' : ' ' + (globalKeyState.available ? 'Typed provider key kept: use Save key beside it to store it in Global API Keys.'
         : globalKeyUnavailableText() + ' Your typed key was kept.');
@@ -1733,8 +1738,8 @@
     // Provider keys are saved only to DwemerDistro Global API Keys; Reign keeps the reference and never receives the
     // stored value back. Rows are always shown (disabled with the reason when not set up or stopped). Each row saves on
     // its own and refreshes only itself, so other unsaved inputs survive. Nothing is selected or imported automatically.
-    const globalKeySlotIds = ['apiKey','openRouterApiKey','nanoGptApiKey','portraitNanoGptApiKey','portraitAtlasApiKey'];
-    const globalKeyState = { enrolled:false, available:false, outcome:'', slots:{}, savedApiUrl:'' };
+    const globalKeySlotIds = ['apiKey','openRouterApiKey','ollamaCloudApiKey','nanoGptApiKey','portraitNanoGptApiKey','portraitAtlasApiKey'];
+    const globalKeyState = { enrolled:false, available:false, localWorkflow:false, outcome:'', slots:{}, savedApiUrl:'' };
     const globalKeyMessages = { created:'Saved to Global API Keys', updated:'Global key updated', unchanged:'No change', bound:'Using the selected global key',
       unbound:'No longer using the global key.', unknown:'Result unknown. Reload and check Global API Keys before trying again.',
       conflict:'The key or its selection changed elsewhere. Reload and try again.', missing:'That global key no longer exists.',
@@ -1750,6 +1755,7 @@
     }
 
     function applyGlobalKeyStatus(j) {
+      globalKeyState.localWorkflow = j.localKeyWorkflow === true;
       globalKeyState.outcome = j.outcome || 'unavailable';
       globalKeyState.enrolled = j.enrolled !== false && j.outcome !== 'not_enrolled';
       globalKeyState.available = globalKeyState.enrolled && !!j.available;
@@ -1786,6 +1792,10 @@
       if (!input) return;
       let row = document.getElementById(slot.slot + 'GlobalRow');
       globalKeyState.slots[slot.slot] = slot;
+      if (globalKeyState.localWorkflow && !slot.bound && !slot.binding) {
+        if (row) row.remove();
+        return;
+      }
       if (!row) {
         row = document.createElement('div');
         row.id = slot.slot + 'GlobalRow';
@@ -2064,7 +2074,7 @@
     function traitPercentageBand(value){value=Number(value);if(value<=-2)return [0,20];if(value===-1)return [21,40];if(value===0)return [41,60];if(value===1)return [61,80];return [81,100];}
     function remapTraitPercentage(percentage,oldValue,newValue){const oldBand=traitPercentageBand(oldValue),nextBand=traitPercentageBand(newValue),clamped=Math.max(oldBand[0],Math.min(oldBand[1],Number(percentage))),position=(clamped-oldBand[0])/(oldBand[1]-oldBand[0]);return Math.max(nextBand[0],Math.min(nextBand[1],Math.round(nextBand[0]+position*(nextBand[1]-nextBand[0]))));}
     function renderTraits(){
-      const doc=characterEditorState.data.documents.traits||{},foundation=doc.foundationTraits||{},percentages=doc.traitPercentages||{},defs=characterEditorState.data.traitDefinitions||{},constructed=characterEditorState.data.documents.constructed||{},library=renderProfileLibraryCard(),mbti=characterEditorState.data.mbtiProfile||{},ready=(characterProfileUsable(constructed.status)||mbti.source==='notable_mbti_template')&&Object.keys(foundation).length>0,mbtiSource=mbti.source==='notable_mbti_template'?'Assigned from notable MBTI template':mbti.source==='derived_from_personality_traits'?'Derived from personality traits':'Insufficient personality data',mbtiCard=`<div class='card'><h3>${editorEscape(mbti.type||'XXXX')} — ${editorEscape(mbti.title||'Unavailable')}</h3><p>${editorEscape(mbti.description||'This character does not yet have enough personality data for an MBTI profile.')}</p><div class='editorFields'><div class='editorField'><label>Source</label><strong>${editorEscape(mbtiSource)}</strong></div><div class='editorField'><label>Template version</label><span>${editorEscape(mbti.templateVersion||'—')}</span></div><div class='editorField'><label>Assigned campaign day</label><span>${Number(mbti.assignedDay)>=0?editorEscape(mbti.assignedDay):'Derived'}</span></div><div class='editorField'><label>Native trait sync</label><span>${editorEscape(mbti.nativeSyncStatus||'not applicable')}</span></div></div></div>`;
+      const doc=characterEditorState.data.documents.traits||{},foundation=doc.foundationTraits||{},percentages=doc.traitPercentages||{},defs=characterEditorState.data.traitDefinitions||{},constructed=characterEditorState.data.documents.constructed||{},library=renderProfileLibraryCard(),mbti=characterEditorState.data.mbtiProfile||{},ready=(characterEditorState.data.traitKeys||Object.keys(foundation)).length>0&&(characterEditorState.data.traitKeys||Object.keys(foundation)).every(key=>foundation[key]!==undefined),mbtiSource=mbti.source==='notable_mbti_template'?'Assigned from notable MBTI template':mbti.source==='derived_from_personality_traits'?'Derived from personality traits':mbti.source==='pregenerated_noble_catalog'?'Pregenerated character profile':'Insufficient personality data',mbtiCard=`<div class='card'><h3>${editorEscape(mbti.type||'XXXX')} — ${editorEscape(mbti.title||'Unavailable')}</h3><p>${editorEscape(mbti.description||'This character does not yet have enough personality data for an MBTI profile.')}</p><div class='editorFields'><div class='editorField'><label>Source</label><strong>${editorEscape(mbtiSource)}</strong></div><div class='editorField'><label>Template version</label><span>${editorEscape(mbti.templateVersion||'—')}</span></div><div class='editorField'><label>Assigned campaign day</label><span>${Number(mbti.assignedDay)>=0?editorEscape(mbti.assignedDay):'Derived'}</span></div><div class='editorField'><label>Native trait sync</label><span>${editorEscape(mbti.nativeSyncStatus||'not applicable')}</span></div></div></div>`;
       if(!ready)return mbtiCard+library+`<div class='card'><h3>Personality not generated</h3><p class='hint'>The game has captured this character's native profile, but Reign has not constructed their 43-trait personality yet.</p>${constructed.status==='failed'?`<p class='editorStatus error'>${editorEscape(constructed.diagnostic||constructed.error||'The previous construction attempt failed.')}</p>`:''}<div class='actions'><button onclick='constructCharacterPersonality()'>Generate Personality</button></div></div>`;
       const portrait=doc.personalityPortrait||{},portraitKeys=['coreTemperament','socialStyle','trustAndAttachment','powerAndStatus','decisionStyle','emotionalPattern','moralBoundaries','underPressure','internalContradictions'];
       const portraitFields=portraitKeys.map(key=>`<div class='editorField wide'><label>${editorLabel(key)}</label><textarea data-doc='traits' data-path='personalityPortrait~${key}' onchange='editorInputChanged(this)'>${editorEscape(portrait[key]||'')}</textarea></div>`).join('');

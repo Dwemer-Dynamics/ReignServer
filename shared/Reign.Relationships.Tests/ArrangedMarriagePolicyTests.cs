@@ -6,36 +6,33 @@ namespace Reign.Relationships.Tests;
 
 public sealed class ArrangedMarriagePolicyTests
 {
+    [Fact]
+    public void WeddingReceiptAcknowledgesOnlyTheSameTerminalStateAndBooking()
+    {
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(false, 1, "a", true, 2, "a"));
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "a", true, 2, "b"));
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "a", false, 1, "a"));
+        Assert.True(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "a", true, 2, "a"));
+        Assert.False(ArrangedMarriagePolicy.CanAcknowledgeWeddingReceipt(true, 2, "", true, 2, ""));
+    }
+
+    [Fact]
+    public void ReceiptFeeMetadataHandlesMalformedAndOverflowingQuotesWithoutThrowing()
+    {
+        Assert.True(ArrangedMarriagePolicy.TryReceiptFee(new[] { "20000", "1000" }, out int fee));
+        Assert.Equal(21000, fee);
+        foreach (var input in new[] { new[] { "" }, new[] { "invalid" }, new[] { "-1" }, new[] { "2,000" },
+            new[] { int.MaxValue.ToString(), "1" } })
+        {
+            Assert.False(ArrangedMarriagePolicy.TryReceiptFee(input, out fee));
+            Assert.Equal(0, fee);
+        }
+    }
     [Theory]
     [InlineData(6, 1, 100000)] [InlineData(1, 6, 100000)]
     [InlineData(3, 3, 0)] [InlineData(1, 2, 20000)]
     public void FeeIsSymmetricAndHasNoTierGapVeto(int a, int b, int expected)
         => Assert.Equal(expected, ArrangedMarriagePolicy.Fee(a, b));
-
-    [Theory]
-    [InlineData(2, 4, 0, 40000)]
-    [InlineData(4, 2, 20000, -20000)]
-    [InlineData(2, 3, -90000, 1)]
-    [InlineData(3, 2, 90000, -1)]
-    [InlineData(3, 3, 19000, 19000)]
-    public void PlayerQuoteLimitsAppraisalAndPreservesUnequalTierDirection(int playerTier, int leaderTier, long adjustment, int expected)
-        => Assert.Equal(expected, ArrangedMarriagePolicy.PlayerQuote(playerTier, leaderTier, adjustment));
-
-    [Theory]
-    [InlineData(10, 9.999, false)]
-    [InlineData(10, 10, true)]
-    [InlineData(10, 39.999, true)]
-    [InlineData(10, 40, false)]
-    public void PlayerReplyWindowUsesTheSendDayForAQueuedCourier(double delivery, double dispatch, bool expected)
-        => Assert.Equal(expected, ArrangedMarriagePolicy.PlayerReplyWindow(delivery, dispatch));
-
-    [Theory]
-    [InlineData(18.9, false, false, false)]
-    [InlineData(19, false, false, true)]
-    [InlineData(19, true, false, false)]
-    [InlineData(19, false, true, false)]
-    public void UnattendedCeremonyRespectsTheWindowPlayerAndAppeal(double now, bool playerSpouse, bool appeal, bool expected)
-        => Assert.Equal(expected, ArrangedMarriagePolicy.CanConcludeUnattended(now, 19, playerSpouse, appeal));
 
     [Fact]
     public void PeerPreferenceDoesNotAlterApproval()

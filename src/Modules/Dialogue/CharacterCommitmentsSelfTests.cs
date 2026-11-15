@@ -21,7 +21,57 @@ namespace ReignBetaServer
                     File.WriteAllText(Path.Combine(directory, id + ".json"), Json.Serialize(diagnostic));
                 }
             }
+            var requestFocus = TestDict("recordKind", "request", "owed_by", "player", "owed_to", "npc", "status", "unresolved",
+                "acceptanceStatus", "accepted", "sourceValidation", "supported_span", "description", "Please use my name.",
+                "sourceEvidence", TestDict("status", "supported_span", "speakerId", "player", "quote", "Please use my name instead of sir."));
+            NormalizeDialogueCommitment(requestFocus, "npc");
+            Check("request_quote_does_not_prove_acceptance", ReadString(requestFocus, "acceptanceStatus", "") == "unknown"
+                && ReadString(requestFocus, "interpretationStatus", "") == "model_inferred" && !ReadBool(requestFocus, "claimEntailmentVerified", true));
+            requestFocus["sourceEvidenceSpans"] = new[] { TestDict("status", "supported_span", "speakerId", "npc", "quote", "Then no more of it. Michael, unadorned.") };
+            requestFocus["acceptanceStatus"] = "accepted";
+            NormalizeDialogueCommitment(requestFocus, "npc");
+            Check("dual_quotes_remain_interpretation_and_observer_private", ReadString(requestFocus, "acceptanceStatus", "") == "accepted"
+                && ReadString(requestFocus, "interpretationStatus", "") == "model_inferred" && ReadStringList(requestFocus, "known_by").SequenceEqual(new[] { "npc" }));
+            requestFocus["recordKind"] = "preference"; requestFocus["status"] = "fulfilled";
+            NormalizeDialogueCommitment(requestFocus, "npc");
+            Check("standing_preference_survives_one_compliant_reply", ReadString(requestFocus, "status", "") == "active");
+            var reportedOffer = TestDict("owed_by", "ira", "owed_to", "player", "recordKind", "promise", "status", "unresolved",
+                "sourceValidation", "supported_span", "sourceEvidence", TestDict("status", "supported_span", "speakerId", "rhagaea", "quote", "Ira offered to announce her defeat."));
+            NormalizeDialogueCommitment(reportedOffer, "rhagaea");
+            Check("reporter_is_not_automatically_proposer", ReadString(reportedOffer, "quotedSpeakerId", "") == "rhagaea"
+                && ReadString(reportedOffer, "owed_by", "") == "ira" && !ReadBool(reportedOffer, "claimEntailmentVerified", true));
+            var forged = TestDict("recordKind", "threat", "owed_to", "", "acceptanceStatus", "accepted",
+                "sourceEvidence", TestDict("status", "supported_span", "speakerId", "player", "quote", "There is no matching source."),
+                "sourceEvidenceSpans", new[] { TestDict("status", "supported_span", "speakerId", "", "quote", "Invented acceptance") });
+            AttachConversationWriteEvidence(new[] { forged }, new(), "npc", "event");
+            NormalizeDialogueCommitment(forged, "npc");
+            Check("binder_removes_forged_support_and_unknown_kind_is_not_promise", ReadString(forged, "bindingStatus", "") == "unbound"
+                && ReadString(forged, "acceptanceStatus", "") == "unknown" && ReadString(forged, "recordKind", "") == "unclassified");
+            var firstObserver = CloneDictionary(reportedOffer); var secondObserver = CloneDictionary(reportedOffer);
+            NormalizeDialogueCommitment(firstObserver, "ira"); NormalizeDialogueCommitment(secondObserver, "rhagaea");
+            Check("observers_get_distinct_interpretation_ids", StableCommitmentId(firstObserver) != StableCommitmentId(secondObserver));
+            ReadDictionary(firstObserver, "sourceEvidence")["timestamp"] = 10L;
+            var previousInterpretation = TestDict("timeline_id", ContinuityTimeline(firstObserver), "owed_by", "ira", "owed_to", "player",
+                "status", "unresolved", "known_by_json", Json.Serialize(new[] { "ira" }), "payload_json", Json.Serialize(firstObserver));
+            var newer = CloneDictionary(firstObserver); ReadDictionary(newer, "sourceEvidence")["timestamp"] = 20L;
+            Check("newer_same_scope_bound_interpretation_can_be_revised", DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
+            newer["bindingStatus"] = "unbound";
+            Check("unbound_revision_cannot_overwrite_bound_interpretation", !DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
+            newer["bindingStatus"] = "bound"; ReadDictionary(newer, "sourceEvidence")["timestamp"] = 5L;
+            Check("older_quote_cannot_retire_newer_interpretation", !DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
+            ReadDictionary(newer, "sourceEvidence")["timestamp"] = 20L; firstObserver["interpretationStatus"] = "native_confirmed";
+            previousInterpretation["payload_json"] = Json.Serialize(firstObserver);
+            Check("dialogue_cannot_replace_native_or_confirmed_record", !DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
             const string corein = "I'll give you my word on two of the three. I'll go with you. I'll speak to my father — my mouth, my timing, my framing, the way I already told you. Those I can promise because they're mine to give. The clan-name promise is not mine to give yet.";
+            var sourceRow = TestDict("turn_id", "commitment_source", "role", "npc", "speaker_id", "npc", "text", corein);
+            var sourceObserver = new KnowledgeAccessContext { NpcId = "npc" };
+            string requiredSource = RenderContinuityRecord("commitment_source", "accepted_exchange", "npc", "session", 20, 120, true, corein);
+            string optionalSource = RenderContinuityRecord("commitment_source", "accepted_exchange", "npc", "session", 20, 120, false, corein);
+            Check("required_exact_source_referenced_once", !CommitmentContextTurn(sourceRow, sourceObserver, requiredSource).Contains(corein)
+                && CommitmentContextTurn(sourceRow, sourceObserver, requiredSource).Contains("visible_source_hash"));
+            Check("optional_missing_changed_or_wrong_id_keeps_original", new[] { "", optionalSource,
+                requiredSource.Replace("commitment_source", "wrong_source"), requiredSource.Replace("Those I can promise", "Changed source") }
+                .All(history => CommitmentContextTurn(sourceRow, sourceObserver, history).Contains(corein)));
             var clauses = ExplicitPromiseClauses(corein);
             Check("corein_two_promises_not_conditional_clan_acceptance", clauses.Count == 2 && clauses[0] == "I'll go with you." && clauses[1].Contains("I'll speak to my father")
                 && !clauses.Any(c => c.Contains("clan-name")));
@@ -267,6 +317,37 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 ExecuteSql(connection, "UPDATE character_performance_events SET source_hash='changed' WHERE competition_id='battle_0';");
                 Check("changed_or_foreign_receipt_cannot_borrow_snapshot_proof", ReadInt(ReadPlayerPerformanceCounts(connection, "recovered", "player", 20d, access), "battleWins", 0) == 106
                     && ReadInt(ReadPlayerPerformanceCounts(connection, "unrelated_branch", "player", 20d, access), "battleWins", 0) == 0);
+                InsertObligation(connection, "native_fixture", TestDict("obligation_id", "native_protected", "description", "Native confirmed terms.",
+                    "owed_by", "ira", "owed_to", "player", "known_by", new[] { "ira" }, "timelineId", "revision_fixture"), 100, "native");
+                foreach (string observer in new[] { "ira", "rhagaea" })
+                {
+                    var proposal = CloneDictionary(reportedOffer);
+                    proposal["obligation_id"] = "native_protected"; proposal["timelineId"] = "revision_fixture";
+                    proposal["description"] = "An inferred report about the terms.";
+                    NormalizeDialogueCommitment(proposal, observer);
+                    InsertObligation(connection, "proposal_event", CloneDictionary(proposal), 200, "dialogue");
+                    InsertObligation(connection, "proposal_event", CloneDictionary(proposal), 200, "dialogue");
+                }
+                var proposals = QuerySql(connection, "SELECT * FROM obligations WHERE payload_json::jsonb->>'proposedRevisionOf'='native_protected';");
+                Check("incompatible_proposal_replay_is_idempotent_and_observer_scoped", proposals.Count == 2
+                    && proposals.Select(row => ReadString(row, "known_by_json", "")).Distinct().Count() == 2
+                    && ReadString(QuerySql(connection, "SELECT description FROM obligations WHERE obligation_id='native_protected';").Single(), "description", "") == "Native confirmed terms.");
+                var revision = CloneDictionary(reportedOffer); revision["timelineId"] = "revision_fixture";
+                revision["description"] = "An unresolved interpreted request.";
+                ReadDictionary(revision, "sourceEvidence")["timestamp"] = 200L;
+                NormalizeDialogueCommitment(revision, "ira");
+                string revisionId = StableCommitmentId(revision);
+                InsertObligation(connection, "revision_event", CloneDictionary(revision), 200, "dialogue");
+                revision["obligation_id"] = revisionId; revision["description"] = "The model interprets the newer statement as fulfillment.";
+                revision["status"] = "fulfilled"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 300L;
+                InsertObligation(connection, "revision_event_later", CloneDictionary(revision), 300, "dialogue");
+                var revised = QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single();
+                Check("newer_bound_revision_persists_source_and_history", ReadString(revised, "status", "") == "fulfilled"
+                    && ReadDictionaryList(TryParseJsonObject(ReadString(revised, "payload_json", "{}")), "interpretationHistory").Count == 1);
+                revision["status"] = "active"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 400L;
+                InsertObligation(connection, "revival_event", revision, 400, "dialogue");
+                Check("inferred_revival_does_not_overwrite_closed_record", ReadString(QuerySql(connection,
+                    "SELECT status FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single(), "status", "") == "fulfilled");
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             results.AddRange(RunCommitmentSourceContextAssertions());

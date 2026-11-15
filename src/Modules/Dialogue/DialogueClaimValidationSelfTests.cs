@@ -10,6 +10,8 @@ namespace ReignBetaServer
         {
             var rows = new List<Dictionary<string, object>>();
             rows.AddRange(RunDialogueClaimEvidenceAssertions());
+            rows.AddRange(RunDialogueAttributionReplayAssertions());
+            rows.AddRange(RunDialogueAnswerSupportAssertions());
             void Add(string name, bool passed, string detail) => rows.Add(TestDict("name", "claim_validation_" + name, "passed", passed, "detail", detail));
             var payload = TestDict("playerHeroStringId", "player", "worldDay", 10d, "participantProfiles", new List<Dictionary<string, object>> {
                 TestDict("heroStringId", "npc", "name", "Rhea"), TestDict("heroStringId", "player", "name", "Michael") });
@@ -245,6 +247,30 @@ namespace ReignBetaServer
                     && StructuredResponseIsComplete(ReadString(accepted, "content", ""), "dialogue")
                     && ReadString(TryParseJsonObject(ReadString(accepted, "content", "")), "reply", "").StartsWith("I told you", StringComparison.Ordinal),
                     "One targeted writer repair can correct both roles without producing a self-addressed instruction.");
+                var finalParsed = TryParseJsonObject(ReadString(accepted, "content", ""));
+                var finalReceipt = ReadDictionary(finalParsed, "dialogueClaimValidation");
+                string finalHash = MemorySelectionTextHash(ReadFirstString(finalParsed, "reply", "body", "response", "text")).ToLowerInvariant();
+                Add("changed_repair_rechecks_final_prose", ReadString(finalReceipt, "draftReplyHash", "") == finalHash
+                    && ReadString(finalReceipt, "acceptedReplyHash", "") == finalHash
+                    && ReadString(finalReceipt, "proposedDraftReplyHash", "") != finalHash
+                    && ReadString(finalReceipt, "acceptedSemanticCoverage", "") == "rechecked_comparison_hints_only"
+                    && !ReadBool(finalReceipt, "semanticAccuracyCertified", true), "Final marked prose gets a fresh bound comparison, never the original draft's semantic receipt.");
+                var introduced = TestDict("reply", "I told you to stop talking about the future. You said the bridge has fallen.");
+                var introducedReceipt = RecheckCorrectedDialogueClaims(introduced, payload, history, "npc", finalReceipt);
+                Add("new_repaired_claim_is_replanned", ReadString(introducedReceipt, "draftReplyHash", "") == MemorySelectionTextHash(ReadString(introduced, "reply", "")).ToLowerInvariant()
+                    && ReadDictionaryList(introducedReceipt, "claimCoverage").Any(c => Json.Serialize(c).Contains("bridge", StringComparison.Ordinal)),
+                    "A new assertion introduced by repair appears in final claim coverage, with unknown evidence remaining unknown.");
+                var unchangedReceipt = RecheckCorrectedDialogueClaims(introduced, payload, history, "npc", introducedReceipt);
+                Add("identical_repair_reuses_comparison", ReadString(unchangedReceipt, "acceptedSemanticCoverage", "") == "unchanged_reply_comparison_reused",
+                    "No extra helper work is needed for byte-identical final prose.");
+                var newExactRepair = RetryDialogueIntegrityViolation(TestDict("ok", true, "content", Json.Serialize(toldOriginal)),
+                    TestDict("requestType", "dialogue"), payload, history, "fixture", "fixture", "dialogue", "npc", "",
+                    _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "I told you to stop talking about the future. Michael said stop talking about the future."))), false);
+                var newExactParsed = TryParseJsonObject(ReadString(newExactRepair, "content", ""));
+                Add("repair_introducing_new_exact_error_is_not_clean", !ReadBool(newExactRepair, "ok", false)
+                    || ConversationRepairFailed(newExactParsed, ReadString(newExactParsed, "reply", ""))
+                    || FindDialogueIntegrityViolations(newExactParsed, payload, history, "npc").Count == 0,
+                    "A new exact-source inversion cannot survive as a clean accepted correction.");
                 DialogueClaimExtractorReplay.Value = request => TestDict("ok", true, "schema", "reign-dialogue-claim-extraction-v1", "sourceId", request["sourceId"],
                     "textHash", request["textHash"], "modelHash", new string('a', 64), "remoteCalls", 0, "offsetEncoding", "utf16", "authority", "claim_candidates_only",
                     "claims", new List<Dictionary<string, object>> { TestDict("speaker", TestDict("text", "You", "start", 0, "end", 3, "confidence", .99),

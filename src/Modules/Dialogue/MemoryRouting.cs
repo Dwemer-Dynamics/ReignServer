@@ -506,12 +506,15 @@ WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY
             string role = NormalizeMemoryCategory(ReadString(turn, "role", ""));
             string speaker = ReadString(turn, "speaker_name", ReadString(turn, "role", "Unknown"));
             string body = ConversationTurnTextForRecall(turn);
+            string published = knowledge != null && PublishedPartyReplayReads.TryGetValue(knowledge, out var party)
+                ? party.ExactBody(turn, knowledge) : null;
+            if (published != null) body = published;
             var sourcePayload = TryParseJsonObject(ReadString(turn, "payload_json", "{}")) ?? TestDict();
             // Accepted interpreter spans already carry an observer-specific
             // projection. A second verb heuristic can erase a valid clause that
             // starts mid-sentence. Retrieval's source/audience gates still apply.
             bool interpretedPlayer = HasValidatedPlayerSourceProjection(turn);
-            if (knowledge != null && !interpretedPlayer)
+            if (knowledge != null && !interpretedPlayer && published == null)
             {
                 if (role.Equals("player", StringComparison.OrdinalIgnoreCase)
                     && ReadString(turn, "speaker_id", "") != knowledge.NpcId)
@@ -604,10 +607,21 @@ WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY
 
         private static bool IsPureConversationRecallRequest(string topic)
         {
-            if (!LooksLikeMostRecentConversationRecall(topic) && !LooksLikeExactFactRestatement(topic)) return false;
-
             string text = Regex.Replace(topic ?? string.Empty, @"\s+", " ").Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(text)) return false;
+
+            // A standalone question about prior terms is recall even without an
+            // explicit reference to a past conversation. Anchor the entire turn
+            // so a present report or an additional request cannot take this path.
+            var standaloneTerms = Regex.Match(text,
+                @"^(?:before we go,\s*)?what\s+(?:exactly\s+)?were\s+(?:my|your|our|the)\s+(?:conditions|terms|requirements)(?:\s+(?:for|on)\s+(?<subject>[^,.!?;]{1,300}))?\?$",
+                RegexOptions.CultureInvariant);
+            if (standaloneTerms.Success)
+                return !Regex.IsMatch(standaloneTerms.Groups["subject"].Value,
+                    @"\b(?:and|but)\s+(?:(?:can|could|will|would|should|shall|do|did)\s+)?(?:i|we|you|tell|remember|note|record)\b",
+                    RegexOptions.CultureInvariant);
+            if (IsStandaloneHistoricalSpeechRecall(text)) return true;
+            if (!LooksLikeMostRecentConversationRecall(text) && !LooksLikeExactFactRestatement(text)) return false;
 
             // Exact-history routing and recall-write quarantine are different decisions. A turn
             // may ask for an old scene while also supplying new first-person information. Those
@@ -631,13 +645,61 @@ WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY
                 if (recallClause) continue;
 
                 if (Regex.IsMatch(clause,
-                    @"\b(?:i|we)\s+(?:am|are|was|were|have|had|did|set|put|placed|gave|brought|bought|sold|found|saw|heard|learned|met|saved|captured|lost|won|made|built|hid|left|took|owe|promise|intend|will|carry|own|believe|claim)\b",
+                    @"\b(?:i|we)\s+(?:(?:just|also|already|actually)\s+)?(?:am|are|was|were|have|had|did|set|put|placed|gave|brought|bought|sold|found|saw|heard|learned|met|saved|captured|lost|won|made|built|hid|left|took|owe|promise|intend|will|carry|own|believe|claim|counted|reported)\b",
                     RegexOptions.CultureInvariant))
                 {
                     return false;
                 }
             }
 
+            return true;
+        }
+
+        private static bool IsStandaloneHistoricalSpeechRecall(string text)
+        {
+            // Limit this write-suppression rule to an anchored past exchange and
+            // one or two reporting questions. An open-ended complement can
+            // smuggle a current report or instruction into a historical question.
+            const RegexOptions options = RegexOptions.CultureInvariant;
+            const string mixedTerms = @"\b(?:and|or|but|then|now|today|currently|just|already|also|since|because|given|i|we|you|is|am|are|has|have|can|will|shall|must)\b";
+            // A speaking manner only affects eligibility. The exact authored turn
+            // remains in the prompt and transcript. Other narration stays mixed.
+            var speakingManner = Regex.Match(text,
+                @"^\*i\s+(?:lower\s+my\s+voice|whisper|murmur|speak\s+(?:quietly|softly))(?:\s+(?:by|beside|near)\s+(?:the\s+)?[\p{L}'-]{2,32})?\.?\*\s*",
+                options);
+            if (speakingManner.Success) text = text[speakingManner.Length..];
+            if (Regex.IsMatch(text, @"[*:""“”—–]", options)) return false;
+            var exchange = Regex.Match(text,
+                @"^when\s+(?:i|you|we)\s+(?:(?:first|last)\s+)?(?:(?:addressed|asked|answered|warned)\s+(?:you|me|us)|(?:spoke|talked)(?:\s+(?:to|with)\s+(?:you|me|us))?)(?:\s+(?:here|there)|\s+(?:of|about)\s+(?<topic>[^,.!?;]{1,96}))?,\s*(?<questions>[^.!?;]{1,480})\?$",
+                options);
+            if (!exchange.Success)
+            {
+                // A paired explanation refers to the prior statement. Leave a
+                // standalone question about motives on the ordinary write path.
+                var explanation = Regex.Match(text,
+                    @"^when you said you (?:were|had|could) (?<statement>[^,.!?;]{1,96}), what did you mean by (?<meaning>[^,.!?;]{1,96}), and why did you bring up (?<subject>[^,.!?;]{1,96})\?$",
+                    options);
+                return explanation.Success && new[] { "statement", "meaning", "subject" }.All(part =>
+                    !Regex.IsMatch(explanation.Groups[part].Value,
+                        mixedTerms + @"|\b(?:me|us|my|our|mine|ours|your|still|anymore|were|had|could|would|should|so)\b", options));
+            }
+            string topic = exchange.Groups["topic"].Value;
+            if (Regex.IsMatch(topic, mixedTerms, options)
+                || Regex.IsMatch(topic, @"\b(?:my|our|your|me|us|was|were|had|could|would|should)\b", options)) return false;
+            string[] questions = Regex.Split(exchange.Groups["questions"].Value, @",\s+and\s+", options);
+            if (questions.Length > 2) return false;
+            bool asksException = questions[0].StartsWith("what exception ", StringComparison.Ordinal);
+            foreach (string question in questions)
+            {
+                var reporting = Regex.Match(question,
+                    @"^(?:what(?:\s+(?:limit|reason|example|comparison|rule|condition|exception|warning|term|number|name|amount|place|time))?|how)\s+did\s+(?:i|you|we)\s+(?:(?:actually|exactly|originally)\s+)?(?:say|tell|ask|answer|offer|promise|judge|think|mean|give|explain|describe|correct)\b(?<detail>[^,]{0,280})$",
+                    options);
+                if (!reporting.Success) return false;
+                string detail = reporting.Groups["detail"].Value;
+                if (Regex.IsMatch(detail, mixedTerms, options)
+                    || Regex.IsMatch(detail, @"\b(?:about|of|concerning|regarding)\s+(?:my|our)\b", options)
+                    || (asksException && Regex.IsMatch(detail, @"\b(?:me|us|my|our|still|anymore)\b", options))) return false;
+            }
             return true;
         }
 

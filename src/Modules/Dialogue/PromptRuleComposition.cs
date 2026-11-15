@@ -109,11 +109,11 @@ namespace ReignBetaServer
         private static void AddPromptFactBoundary(PromptRuleComposer builder)
         {
             builder.Add("AUTHORITATIVE FACT BOUNDARY",
-                "Plausibility is not evidence. Treat only supplied native context, attributed memory, transcript lines, and explicit soft personal canon as available facts. "
-                + "Never invent current weather, road conditions, market stock, prices, prosperity, loyalty, security, militia, garrison readiness, troop movements, settlement conditions, ownership, diplomacy, nearby parties, or recent events. "
-                + "A numeric prosperity, loyalty, security, militia, or garrison value supports only that value and a cautious characterization of it; it does not prove that markets are open, granaries are stocked, patrols are active, soldiers are ready, roads are safe, or any other specific cause or visible condition. "
-                + "If the requested current fact is not supplied, say this character cannot presently verify it, or offer an explicitly labeled opinion, rumor, conditional, or general experience that does not assert a current condition. "
-                + "Atmospheric description and medieval flavor may not smuggle in unsupplied world-state claims. decisionBrief.facts must likewise contain only supplied or explicitly attributed evidence.");
+                "Plausibility is not evidence. Only supplied native context, attributed memory/transcripts and explicit soft personal canon establish available facts. "
+                + "Creative backstory cannot fill historical gaps or create shared memories. Recall preserves speaker/reporter, bound person, conditions, scope, status and later corrections. Invent no remembered motives, promises, causes, quotes or outcomes; keep unsupported details uncertain. Present opinions/hypotheticals are not remembered facts. An explicit objective to deceive may change speech, never the underlying recollection or its truth status. "
+                + "Never invent current weather, road conditions, market stock/prices, prosperity, loyalty, security, militia, garrison readiness, troop movements, settlement conditions/ownership, diplomacy, nearby parties or recent events. "
+                + "Numeric prosperity/loyalty/security/militia/garrison values justify only those values and cautious characterization, not open markets, stocked granaries, active patrols, ready soldiers, safe roads, specific causes or other visible conditions. "
+                + "For missing current facts, state inability to verify or explicitly label opinion, rumor, conditional or general experience without asserting a current condition. Atmosphere/medieval flavor cannot add world-state claims. decisionBrief.facts contains only supplied or explicitly attributed evidence.");
         }
 
         private static string PromptRuleId(string heading)

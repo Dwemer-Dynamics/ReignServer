@@ -1,5 +1,15 @@
 # Control Center saves and server power
 
+## Ollama Cloud text provider
+
+In **LLM Backend → Chat provider**, choose **Ollama Cloud**, enter an API key from [Ollama settings](https://ollama.com/settings/keys), choose cloud model IDs under **Models**, then save. The default is `gemma4:31b`; any exact ID from the [cloud library](https://ollama.com/search?c=cloud) can be entered. No local Ollama installation is needed. Reign uses `https://ollama.com/v1/chat/completions` with bearer authentication. Usage follows the player's Ollama plan.
+
+The Ollama key and all eleven request-type model selections are saved independently of other providers. Blank or masked key submissions preserve the saved key; **Clear Ollama Cloud Key** removes only that credential. It uses the existing secret vault and UI masking. The same provider can be selected for banter and Fast Approach. This is text support; image profiles retain their existing providers.
+
+Ollama Cloud currently does not support structured outputs, so Reign omits `response_format` and retains its existing JSON instructions, parsing and response validation. Thinking uses the documented `reasoning_effort`; supported levels and the ability to disable thinking vary by model (GPT-OSS cannot disable it). See [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility) and [cloud capabilities](https://docs.ollama.com/cloud). Offline contracts do not establish live model quality, quota or account acceptance.
+
+## Saving and power controls
+
 Save Changes saves settings and every edited prompt in the prompt library, including edits retained after changing the selected prompt or page. Save Selected Prompt saves only that prompt. These controls preserve the exact submitted text. Reload Prompts refreshes saved versions while retaining drafts; Discard Selected Edits explicitly replaces that draft with the server copy. Browser refresh/close warns while a prompt draft remains. Castle Chat's paired prompt editor retains its separate Save Both control.
 
 The prompt API validates every name/text and expected baseline before writing, atomically replaces each prompt file, invalidates the prompt cache, and acknowledges the text read back from disk. A concurrent edit is rejected unless the desired text is already stored (safe retry after a lost response). Multi-file saves are not a transaction: if an I/O error occurs partway through, completed files remain saved, remaining drafts are retained, and the UI reports failure. No prompt text is added to operational logs. The existing server-owned private prompt directory and umask stay in force.
@@ -16,6 +26,8 @@ An unhealthy/offline server is recovered before restart: stop the exact managed 
 
 Validation: the MCP test suite runs `scripts/test-reign-control.py` with fake service/health operations and an isolated Apache syntax check. The `interaction_architecture` Lab suite emits the exact HTML and tests prompt persistence under run-owned storage. Its browser fixtures drive `src/Modules/Platform/control-center-save-power-contract.mjs`; all traffic is intercepted. Retain the full `control-center-ui-contract.mjs` navigation/palette matrix too. Live stop/start, worker shutdown/warm-up, Windows localhost/WSL access and reboot acceptance follow authorized deployment; offline contracts do not establish those results.
 ## Startup PID and WSL login prerequisites (2026-10-05)
+
+2026-11-14 managed ownership: public `reignctl start`/`stop` delegates to the fixed `reignserver.service` before acquiring the runtime lease, so command-line startup has the same owner as browser power controls. Systemd supplies `INVOCATION_ID` to its root callbacks; those run the existing locked, unprivileged process launch/owned-session stop logic without recursively calling systemctl. This environment value is lifecycle routing, not authentication or added browser privilege. Launcher reuse requires both valid application health and successful control status `on`; a healthy unmanaged process follows the existing exact executable/UID/session recovery. Unknown status still fails closed. The CGI/sudoers permissions are unchanged. Isolated contracts cover both CLI actions and exit propagation, callback recursion/lease ordering, and HTTP-healthy/unmanaged recovery.
 
 The root lifecycle controller creates `/run/reignserver` as root:root 0755 and `server.pid` as root:root 0644. It redirects the unprivileged launcher's PID output itself; the `reign` shell never opens the root PID record. This permits reuse of a stale root-owned record after the existing ownership/foreign-listener checks, while preserving unprivileged server execution and systemd's trusted PID contract. Symlinked/nonregular PID paths fail before writes. The runtime lock is neither replaced nor removed. A failed child launch removes only its newly initialized PID record.
 

@@ -42,6 +42,9 @@ namespace ReignBeta.Shared
         public const double PatrolPursuitDays = 0.25d;
         public const int PatrolCooldownDays = 3;
         public const int MaximumKeepSpeakers = 4;
+        public static bool CanOfferLiberationConversation(bool nativeReleaseContext, bool eligibleHero,
+            bool initializationPending, bool serverEnabled, bool rescueEnabled) =>
+            nativeReleaseContext && eligibleHero && !initializationPending && serverEnabled && rescueEnabled;
         public static bool EligibleKeepNoble(bool isLord, bool atCurrentSettlement, bool belongsToPlayerParty, bool inPlayerRoster) =>
             isLord && atCurrentSettlement && !belongsToPlayerParty && !inPlayerRoster;
         public static double FightingUnitPower(int healthyMembers, int tier) => Math.Max(0, healthyMembers) * Math.Pow(1d + Math.Max(0, tier), 2d);

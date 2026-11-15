@@ -134,7 +134,7 @@ namespace ReignBetaServer
             if (parsed == null || !ReadBool(llm, "ok", false) || ReadBool(llm, "visibleRepairFailure", false)
                 || ReadBool(ReadDictionary(llm, "conversationAgency"), "visibleFailure", false)
                 || !NpcApproachReplyShape(view)
-                || !ValidateAgencyRepairedResponse(view, motive, payload, identity, prior, hero, heroName, playerName))
+                || !IsSinglePassConversation(payload) && !ValidateAgencyRepairedResponse(view, motive, payload, identity, prior, hero, heroName, playerName))
                 return TestDict("ok", false, "error", "The approach could not be grounded in the current conversation. Please try again.",
                     "npcApproachGroundingFailed", true);
             var draft = TestDict("ok", true, "reply", reply,

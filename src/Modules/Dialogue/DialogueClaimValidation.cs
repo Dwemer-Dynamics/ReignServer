@@ -142,7 +142,7 @@ namespace ReignBetaServer
                 if (double.IsFinite(day) && ReadDouble(source, "worldDay", day) > day) continue;
                 if (ReadLong(source, "acceptedSequence", 0) > sequence || ReadLong(source, "timestamp", ReadLong(source, "ts", 0)) > timestamp) continue;
                 string visible = ObserverConversationText(text, actor, observer, ReadString(source, "role", "") == "player");
-                string id = FirstNonEmpty(ReadFirstString(source, "turnId", "id", "sourceId", "exchangeId"), "prior_" + PromptHash(actor + "|" + visible));
+                string id = FirstNonEmpty(ReadFirstString(source, "sourceTurnId", "turn_id", "id", "sourceId", "turnId", "exchangeId"), "prior_" + PromptHash(actor + "|" + visible));
                 result.Add(TestDict("id", id, "speakerId", actor, "text", visible,
                     "sourceHash", MemorySelectionTextHash(visible).ToLowerInvariant(), "addressedIds", ReadStringList(source, "addressedIds"),
                     "worldDay", ReadDouble(source, "worldDay", double.NaN), "acceptedSequence", ReadLong(source, "acceptedSequence", 0),

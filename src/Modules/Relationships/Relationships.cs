@@ -1472,19 +1472,9 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             };
             string correlationId = EnsureCorrelationId(llmRequest);
             if (UsesStructuredActions(memoryContextPayload)) llmRequest["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
-            Dictionary<string, object> llm = ChatWithLlm(llmRequest);
-            llm = RetryMalformedStructuredResponse(
-                llm, llmRequest, campaignId, correlationId, "correspondence", senderId,
-                "mail_" + ReadString(receivedLetter, "letter_id", ""));
             memoryContextPayload["turnId"] = "mail_" + ReadString(receivedLetter, "letter_id", correlationId);
             memoryContextPayload["playerText"] = letterBody;
-            llm = RetryDialogueIntegrityViolation(llm, llmRequest, memoryContextPayload,
-                ReadDictionaryList(memoryContextPayload, "memoryEvidenceRecentTurns"), campaignId, correlationId,
-                "correspondence", senderId, ReadString(memoryContextPayload, "turnId", correlationId));
-            llm = EnforceConversationAgencyResponse(llm, llmRequest, motiveDecision, memoryContextPayload,
-                campaignId, correlationId, "correspondence", senderId, persist: false,
-                validateRepair: candidate => ValidateAgencyRepairedResponse(candidate, motiveDecision, memoryContextPayload,
-                    ReadDictionary(motiveDecision, "identityView"), null, senderId, senderName, recipientName));
+            Dictionary<string, object> llm = GenerateSinglePassConversation(llmRequest, memoryContextPayload, "correspondence");
             Dictionary<string, object> parsed = PrepareCorrespondenceDelivery(llm);
             if (parsed != null)
             {

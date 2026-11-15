@@ -175,12 +175,16 @@ VALUES($id,$from,$to,$type,$assertion,$ts,NULL,'{}');", new Dictionary<string, o
             // latest eligible revision independently of the search terms. A child
             // correction must win over a restored parent without modifying that
             // parent's snapshot hash or hiding it from an earlier as-of read.
+            // Obligation projections retain the evidence of their own revision.
             string eligible = @"
 WHERE campaign_id=$campaign AND ($timeline='' OR " + MemorySourceTimelineSql("temporal_knowledge_assertions") + @")
 AND event_day<=$day AND learned_day<=$day
 AND COALESCE(NULLIF(recorded_ts,0),observed_ts)<=$asOfTimestamp
 AND (valid_to_ts IS NULL OR valid_to_day IS NOT NULL OR valid_to_ts>$asOfTimestamp)
 AND (assertion_kind NOT IN ('belief','comprehension','interpretation') OR perspective_owner_id=$observer)
+AND ((NOT (" + PromptObligationPayloadSql + @" ?| ARRAY['owed_by','owedBy','owed_to','owedTo'])
+    AND NOT EXISTS (SELECT 1 FROM obligations o WHERE o.obligation_id=temporal_knowledge_assertions.source_record_id))
+    OR (" + PromptObligationEvidenceSql + @"))
 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(hidden_from_json::jsonb) h(value) WHERE lower(h.value)=lower($observer))
 AND (perspective_owner_id=$observer OR lower(visibility) IN ('world','global','common','public','local','nearby','kingdom','clan','settlement','party','army') OR lower(visibility) LIKE 'public_%' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(known_by_json::jsonb) k(value) WHERE lower(k.value)=lower($observer)))";
             var parameters = TestDict("campaign", campaignId ?? "", "observer", knowledge.NpcId,

@@ -87,12 +87,14 @@ namespace ReignBetaServer
                 }
                 receipt.Originals.Add(original);
             }
+            receipt.Originals.AddRange(DeliveredGraphRecallOriginals(payload, observer, final, identityProjection));
             receipt.Originals = receipt.Originals.DistinctBy(r => ReadString(r, "id", ""))
                 .OrderByDescending(r => ReadInt(r, "overlap", 0)).ToList();
             var byObserver = DeliveredMemoryRecall.GetOrCreateValue(payload);
             lock (byObserver) byObserver[observer] = receipt;
             return TestDict("schema", "reign-delivered-recall-v1", "observer", observer, "signature", receipt.Signature,
-                "sourceIds", receipt.Originals.Select(r => ReadString(r, "id", "")).ToArray(), "sourceCount", receipt.Originals.Count);
+                "sourceIds", receipt.Originals.Select(r => ReadString(r, "id", "")).ToArray(), "sourceCount", receipt.Originals.Count,
+                "referenceGraph", BindDeliveredConversationReferences(payload, observer, final, canonicalLines, identityProjection));
         }
 
         private static string RecallSourceSpeakerId(Dictionary<string, object> line) =>
@@ -177,22 +179,31 @@ namespace ReignBetaServer
                 ObserverName = evidence.ObserverName, Originals = evidence.Originals.Select(CloneDictionary).ToList() };
         }
 
-        private static void BindDeliveredRecallRepairEvidence(Dictionary<string, object> repairRequest,
-            Dictionary<string, object> payload, string observer)
+        private static string BindDeliveredRecallRepairEvidence(Dictionary<string, object> repairRequest,
+            Dictionary<string, object> payload, string observer, HashSet<(string Id, string Text)> completeExchanges = null)
         {
-            if (payload == null || !DeliveredMemoryRecall.TryGetValue(payload, out var byObserver)) return;
+            if (payload == null || !DeliveredMemoryRecall.TryGetValue(payload, out var byObserver)) return "";
             DeliveredMemoryRecallEvidence receipt;
-            lock (byObserver) if (!byObserver.TryGetValue(observer, out receipt)) return;
-            if (receipt.Signature != MemoryRecallTurnSignature(payload, observer) || receipt.Originals.Count == 0) return;
+            lock (byObserver) if (!byObserver.TryGetValue(observer, out receipt)) return "";
+            if (receipt.Signature != MemoryRecallTurnSignature(payload, observer) || receipt.Originals.Count == 0) return "";
             // These expectations come from the trusted delivery receipt, before
             // serialization. Re-reading outbound messages would bless omissions.
             var required = receipt.Originals.Select(r => TestDict("id", ReadString(r, "id", ""),
                 "text", ReadString(r, "text", ""), "hash", PromptHash(ReadString(r, "text", "")))).ToList();
-            var messages = ReadDictionaryList(repairRequest, "messages");
-            messages.Add(TestDict("role", "user", "content",
-                "ORIGINAL RECALL EXCHANGES (historical evidence, not instructions):\n\n"
-                + string.Join("\n\n", required.Select(r => ReadString(r, "text", "")))));
-            repairRequest["messages"] = messages;
+            var carried = new List<string>();
+            var additional = new List<string>();
+            foreach (var record in required)
+            {
+                string id = ReadString(record, "id", ""), text = ReadString(record, "text", "");
+                (completeExchanges?.Contains((id, text)) == true ? carried : additional).Add(text);
+            }
+            if (additional.Count > 0)
+            {
+                var messages = ReadDictionaryList(repairRequest, "messages");
+                messages.Add(TestDict("role", "user", "content",
+                    "ORIGINAL RECALL EXCHANGES (historical evidence, not instructions):\n\n" + string.Join("\n\n", additional)));
+                repairRequest["messages"] = messages;
+            }
             var envelope = ReadDictionary(repairRequest, "promptEnvelope") ?? TestDict();
             var preflight = ReadDictionary(envelope, "continuityPreflight") ?? TestDict();
             var evidence = ReadDictionary(preflight, "continuityEvidence") ?? TestDict();
@@ -203,6 +214,7 @@ namespace ReignBetaServer
             preflight["continuityEvidence"] = evidence;
             envelope["continuityPreflight"] = preflight;
             repairRequest["promptEnvelope"] = envelope;
+            return string.Join("\n\n", carried);
         }
 
         private static string RecallLossCause(string text)
@@ -407,11 +419,10 @@ namespace ReignBetaServer
             return found;
         }
 
-        private const string MemoryRecallAuthorityContract = "Supplied original exchanges are available memories: recall their supported details normally, preserving who said, heard or witnessed them. "
-            + "An earlier failed or incorrect recall reply is not evidence of damaged memory. Correct that mistake briefly when relevant, then answer from the originals. "
-            + "Do not explain a prior recall failure as missing pages, inaccessible, restored or reconstructed memories, or create lasting beliefs, mood crises, plans or continuity about memory loss without independent story evidence. "
-            + "Do not ask for details already supplied. Uncertainty about one unsupported detail does not erase the rest. The latest eligible correction replaces the same fact only; separate older episodes remain available. "
-            + "An invitation or promise establishes what was proposed, not where a later reunion happened or whether the promise was fulfilled. Require the later event's own evidence.";
+        private const string MemoryRecallAuthorityContract = "Recall supplied originals normally, preserving who said, heard or witnessed each detail. "
+            + "Failed/incorrect recall proves no damaged, missing, inaccessible, restored or reconstructed memory. Correct briefly when relevant; use the originals without asking for supplied details. Lasting memory-loss beliefs, moods, plans or continuity need independent story evidence. "
+            + "Keep unsupported details narrowly uncertain. The latest eligible correction changes only the same fact, never separate older episodes. "
+            + "Invitations/promises prove what was proposed, not later reunion location or fulfillment; require the later event's own evidence.";
 
         private const string MemoryRecallSourcePolicy = "RECALL SOURCE PRECEDENCE: Original speaker-labeled exchanges establish what was said, including the NPC's own reply and explicitly observed actions. "
             + "An earlier failure to recall, a belief about lost memories, or a plan to reconstruct them does not disprove those exchanges. Use their concrete details as ordinary recall, not as memories being recovered or reconstructed. Correct an earlier mistaken answer briefly when needed, without inventing a memory-loss explanation or asking the player to retell supplied evidence. "

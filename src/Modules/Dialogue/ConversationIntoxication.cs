@@ -42,6 +42,10 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
             bool validClock = !double.IsNaN(hour) && !double.IsInfinity(hour) && hour >= 0;
             double previousHour = ReadDouble(stored, "hour", hour);
             bool hasClock = ReadBool(stored, "hasClock", false) && !double.IsNaN(previousHour) && !double.IsInfinity(previousHour);
+            // A legacy narrative offset must not hold recovery in the future.
+            // Rebase once without granting any recovery; original receipts remain.
+            if (validClock && hasClock && previousHour > hour && ReadString(stored, "clockAuthority", "") != "native_campaign")
+                previousHour = hour;
             var state = new IntoxicationState
             {
                 Drinks = FiniteNonnegative(ReadDouble(stored, "drinks", 0)),
@@ -65,7 +69,7 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
         private static Dictionary<string, object> IntoxicationRecord(IntoxicationState state) => new Dictionary<string, object>
         {
             ["schema"] = "reign-conversation-intoxication-v1", ["drinks"] = state.Drinks,
-            ["hour"] = state.Hour, ["hasClock"] = state.HasClock,
+            ["hour"] = state.Hour, ["hasClock"] = state.HasClock, ["clockAuthority"] = "native_campaign",
             ["threshold"] = state.Threshold, ["ratio"] = state.Ratio,
             ["stage"] = state.Stage, ["alcoholBlocked"] = state.AlcoholBlocked,
             ["vessel"] = DrinkVesselRecord(state.Vessel),
@@ -107,7 +111,7 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
         private static double IntoxicationWorldHour(Dictionary<string, object> payload)
         {
             double day = ReadDouble(payload, "worldDay", double.NaN);
-            return day >= 0 && !double.IsInfinity(day) ? NarrativeEffectiveHour(payload, day * 24d) : double.NaN;
+            return day >= 0 && !double.IsInfinity(day) ? day * 24d : double.NaN;
         }
 
         private static void EnsureIntoxicationSchema(ReignDbConnection connection)

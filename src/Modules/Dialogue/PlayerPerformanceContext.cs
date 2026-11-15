@@ -30,7 +30,8 @@ UNIQUE(event_id,subject_id));");
             string role = ReadString(entity, "role", "");
             if (kind == "social_outcome")
             {
-                if (ReadString(facts, "duelMode", "").Equals("practice", StringComparison.OrdinalIgnoreCase)) return "";
+                if (ReadString(facts, "duelMode", "").Equals("practice", StringComparison.OrdinalIgnoreCase)
+                    || ReadString(facts, "duelMode", "").Equals("training_together", StringComparison.OrdinalIgnoreCase)) return "";
                 if (!ReadString(facts, "sourceEventId", "").StartsWith("duel|", StringComparison.Ordinal)) return "";
                 string subject = ReadFirstString(entity, "entity_id", "entityId");
                 string duelWinner = ReadString(facts, "winnerHeroId", ""), loser = ReadString(facts, "loserHeroId", "");

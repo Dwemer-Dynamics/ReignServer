@@ -46,6 +46,66 @@ namespace ReignBetaServer
             string root = Path.Combine(Path.GetTempPath(), "reign-global-keys-" + Guid.NewGuid().ToString("N"));
             try
             {
+                var localPatch = TestDict("ollamaCloudApiKey", "fixture-local-new", "nanoGptApiKey", "fixture-local-nano");
+                var malformedLocalBinding = TestDict("globalKeyBindings", TestDict("ollamaCloudApiKey", TestDict("keyId", "malformed")));
+                check("unenrolled_local_workflow_retained", LocalProviderKeyWriteRefusal(localPatch, TestDict(), false) == null);
+                check("enrolled_local_secret_write_refused", LocalProviderKeyWriteRefusal(localPatch, TestDict(), true) != null);
+                check("unenrolled_binding_never_becomes_local", LocalProviderKeyWriteRefusal(localPatch, malformedLocalBinding, false) != null
+                    && LocalProviderKeyWriteRefusal(TestDict("nanoGptApiKey", "fixture-other-slot"), malformedLocalBinding, false) == null);
+                // Named Ollama migration carries an opaque reference once, without
+                // depending on the store being available or resolving a secret.
+                string ollamaOrigin = NormalizedOrigin(OllamaCloudChatUrl);
+                Func<Dictionary<string, object>> legacyOllama = () => TestDict("llmProvider", "openai_compatible",
+                    "apiUrl", OllamaCloudChatUrl, "apiKey", "shadow-local",
+                    "globalKeyBindings", TestDict("apiKey", TestDict("keyId", keyId, "provider", "custom_openai", "origin", ollamaOrigin)));
+                var migration = legacyOllama();
+                NormalizeChatProviderProfiles(migration);
+                check("ollama_migration_reference_only_offline", BoundKeyId(migration, "ollamaCloudApiKey") == keyId
+                    && BoundKeyId(migration, "apiKey") == keyId && ReadString(migration, "ollamaCloudApiKey", "missing") == ""
+                    && calls.Count == 0);
+                var migrationBindings = ReadDictionary(migration, "globalKeyBindings");
+                migrationBindings.Remove("ollamaCloudApiKey");
+                NormalizeChatProviderProfiles(migration);
+                check("ollama_migration_not_replayed_after_unbind", !HasGlobalKeyBindingEntry(migration, "ollamaCloudApiKey") && calls.Count == 0);
+                foreach (string defect in new[] { "origin", "provider", "keyId" })
+                {
+                    var bad = legacyOllama();
+                    ReadDictionary(ReadDictionary(bad, "globalKeyBindings"), "apiKey")[defect] = "invalid";
+                    NormalizeChatProviderProfiles(bad);
+                    check("ollama_invalid_legacy_" + defect + "_no_plaintext_copy", !HasGlobalKeyBindingEntry(bad, "ollamaCloudApiKey")
+                        && ReadString(bad, "ollamaCloudApiKey", "missing") == "" && calls.Count == 0);
+                }
+                var dedicated = legacyOllama();
+                dedicated["ollamaCloudApiKey"] = "existing-dedicated";
+                NormalizeChatProviderProfiles(dedicated);
+                check("ollama_migration_preserves_dedicated_value", ReadString(dedicated, "ollamaCloudApiKey", "") == "existing-dedicated"
+                    && !HasGlobalKeyBindingEntry(dedicated, "ollamaCloudApiKey"));
+                var malformed = legacyOllama();
+                ReadDictionary(malformed, "globalKeyBindings")["ollamaCloudApiKey"] = TestDict("keyId", "bad", "provider", "custom_openai", "origin", ollamaOrigin);
+                malformed["ollamaCloudApiKey"] = "shadow-local";
+                NormalizeChatProviderProfiles(malformed);
+                check("ollama_malformed_binding_blocks_fallback", ProviderSecret(malformed, "ollamaCloudApiKey", OllamaCloudChatUrl) == ""
+                    && ProviderKeyUnavailable(malformed, "ollamaCloudApiKey", "") && calls.Count == 0);
+                var markerPatch = TestDict("globalKeyMigrations", TestDict("ollamaCloudFromApiKey", false), "legacyMemoryMode", true);
+                var filteredPatch = WithoutGlobalKeyMigrationPatch(markerPatch);
+                check("migration_marker_server_owned_patch_clone", !filteredPatch.ContainsKey("globalKeyMigrations")
+                    && markerPatch.ContainsKey("globalKeyMigrations") && ReadBool(filteredPatch, "legacyMemoryMode", false));
+                var boundOllama = legacyOllama(); NormalizeChatProviderProfiles(boundOllama);
+                bool namedBinding;
+                string namedKey = ResolveLlmRequestApiKey(boundOllama, TestDict("apiUrl", "https://attacker.invalid/", "apiKey", "payload-secret"), out namedBinding);
+                check("ollama_named_request_resolves_once_canonical", namedKey == secret && namedBinding && calls.Count == 1
+                    && ReadString(ReadDictionary(calls[0], "body"), "origin", "") == ollamaOrigin);
+                calls.Clear();
+                boundOllama["llmProvider"] = CodexSubscriptionProvider;
+                check("subscription_never_resolves_global_key", ResolveLlmRequestApiKey(boundOllama, null, out namedBinding) == "" && !namedBinding && calls.Count == 0);
+                var customOverride = legacyOllama();
+                check("custom_explicit_key_does_not_resolve_stored_binding", ResolveLlmRequestApiKey(customOverride,
+                    TestDict("apiKey", "explicit-fixture", "apiUrl", "https://fixture.invalid/"), out namedBinding) == "explicit-fixture"
+                    && !namedBinding && calls.Count == 0);
+                boundOllama["llmProvider"] = OllamaCloudProvider;
+                ReadDictionary(ReadDictionary(boundOllama, "globalKeyBindings"), "ollamaCloudApiKey")["provider"] = "openrouter";
+                check("named_slot_wrong_provider_refused_locally", ResolveLlmRequestApiKey(boundOllama, null, out namedBinding) == "" && namedBinding && calls.Count == 0);
+
                 var binding = new Dictionary<string, object> { ["keyId"] = keyId, ["provider"] = "openrouter", ["origin"] = OpenRouterOrigin };
                 var settings = new Dictionary<string, object> { ["llmProvider"] = "openrouter", ["openRouterApiKey"] = "",
                     ["nanoGptApiKey"] = "fixture-local", ["globalKeyBindings"] = new Dictionary<string, object> { ["openRouterApiKey"] = binding } };

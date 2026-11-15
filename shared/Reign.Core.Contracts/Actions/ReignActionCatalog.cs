@@ -164,6 +164,17 @@ namespace Reign.Core.Contracts.Actions
                 Parameters = new List<ActionParameter> { P("pregnancyId", "Pregnancy", "pregnancy", true),
                     new ActionParameter { Key = "disclosure", Label = "Whom to expose", Required = true,
                         Choices = new[] { "mother_only", "name_father" } } } });
+            var tavern = new ActionDefinition { Id = TavernHouseVisitAction.Id, Label = "Arrange a private visit", Family = "tavern",
+                Adapter = "tavern:visit", Source = "ReignTavernHouseAction", Description = "The active Tavern House only: pay the exact agreed total and begin a private visit with one to four named available adults." };
+            foreach (string key in new[] { "campaignId", "timelineId", "townId", "sessionId", "rosterHash" })
+                tavern.Parameters.Add(new ActionParameter { Key = key, Label = key, Kind = "text", Required = true, Automatic = true });
+            tavern.Parameters.Add(new ActionParameter { Key = "totalGold", Label = "Total denars", Kind = "money", Required = true, Automatic = true });
+            for (int index = 1; index <= 4; index++)
+            {
+                tavern.Parameters.Add(P("participant" + index, "Participant " + index, "hero", index == 1));
+                tavern.Parameters.Add(P("price" + index, "Denars for participant " + index, "money", index == 1));
+            }
+            actions.Add(tavern);
             AddCampaignActions(actions);
             actions.Add(new ActionDefinition { Id = ReignSpouseSeparation.ActionId, Label = "Leave your spouse by letter", Family = "regular",
                 Adapter = "family:leave_spouse", Source = "ReignSpouseSeparationAction",
