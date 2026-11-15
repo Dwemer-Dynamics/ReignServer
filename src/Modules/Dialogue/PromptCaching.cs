@@ -1277,7 +1277,8 @@ namespace ReignBetaServer
 
             List<Dictionary<string, object>> lines = transcriptLines ?? new List<Dictionary<string, object>>();
             List<string> keys = lines.Select(PromptTranscriptIdentity).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-            int unique = keys.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            // Unidentified lines cannot be proven duplicates; each remains a separate statement.
+            int unique = keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() + lines.Count - keys.Count;
             Dictionary<string, object> settings = LoadSettings();
             int warning = ReadInt(settings, "promptWarningCharacterLimit", 100000);
             int hard = ReadInt(settings, "promptHardCharacterLimit", 240000);
@@ -1312,7 +1313,7 @@ namespace ReignBetaServer
             string stable = ReadFirstString(row, "sourceTurnId", "turn_id", "id", "contributionId", "contribution_id");
             string session = ReadFirstString(row, "sessionId", "session_id");
             string exchange = ReadFirstString(row, "exchangeId", "exchange_id", "sceneTurnId", "turnId");
-            string speaker = ReadFirstString(row, "speakerHeroStringId", "speaker_id", "heroStringId", "speaker");
+            string speaker = ReadFirstString(row, "speakerHeroStringId", "speaker_id", "speakerId", "heroStringId", "speaker");
             string role = ReadString(row, "role", "");
             // Event turnId identifies the whole group beat: player and NPCs share
             // it. Deduplicate one speaker's contribution, not the entire exchange.
@@ -2450,8 +2451,8 @@ namespace ReignBetaServer
                 ["globalInstructions"] = "STATIC", ["canonicalTranscript"] = "turn one"
             }, new List<Dictionary<string, object>>
             {
-                new Dictionary<string, object> { ["turnId"] = "turn_1", ["text"] = "turn one" },
-                new Dictionary<string, object> { ["turnId"] = "turn_1", ["text"] = "turn one" }
+                new Dictionary<string, object> { ["sourceTurnId"] = "statement_1", ["turnId"] = "shared_beat", ["text"] = "turn one" },
+                new Dictionary<string, object> { ["sourceTurnId"] = "statement_1", ["turnId"] = "shared_beat", ["text"] = "turn one" }
             });
             Dictionary<string, object> transcriptDiagnostics = ReadDictionary(first.Diagnostics, "canonicalTranscript") ?? new Dictionary<string, object>();
             add("prompt_section_and_duplicate_diagnostics", ReadDictionary(first.Diagnostics, "sectionSizes") != null
@@ -2459,6 +2460,37 @@ namespace ReignBetaServer
                 && ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == 1
                 && ReadInt(transcriptDiagnostics, "duplicateLineCount", 0) == 1,
                 "Prompt diagnostics expose per-section sizes and duplicate conversation identities before provider submission.", first.Diagnostics);
+            var unidentified = new List<Dictionary<string, object>>
+            {
+                TestDict("turnId", "shared_beat", "text", "Yes.", "role", "player", "speakerHeroStringId", "player"),
+                TestDict("turnId", "shared_beat", "text", "Yes.", "role", "player", "speakerHeroStringId", "player")
+            };
+            AttachPromptSectionDiagnostics(first, new Dictionary<string, string>(), unidentified);
+            transcriptDiagnostics = ReadDictionary(first.Diagnostics, "canonicalTranscript");
+            add("prompt_unidentified_statements_are_not_duplicate_evidence",
+                ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == 2
+                && ReadInt(transcriptDiagnostics, "duplicateLineCount", -1) == 0
+                && CanonicalizePromptTranscript(unidentified, 30).Count == 2,
+                "Equal words in one group beat are retained unless statement identity proves a duplicate.", first.Diagnostics);
+            var mixedIdentities = unidentified.Concat(new[]
+            {
+                TestDict("sourceTurnId", "known_statement", "text", "Yes.", "role", "player", "speakerHeroStringId", "player"),
+                TestDict("sourceTurnId", "known_statement", "text", "Yes.", "role", "player", "speakerHeroStringId", "player")
+            }).ToList();
+            AttachPromptSectionDiagnostics(first, new Dictionary<string, string>(), mixedIdentities);
+            transcriptDiagnostics = ReadDictionary(first.Diagnostics, "canonicalTranscript");
+            int mixedCanonicalCount = CanonicalizePromptTranscript(mixedIdentities, 30).Count;
+            add("prompt_mixed_identity_diagnostics_match_retained_statements", mixedCanonicalCount == 3
+                && ReadInt(transcriptDiagnostics, "uniqueLineCount", 0) == mixedCanonicalCount
+                && ReadInt(transcriptDiagnostics, "duplicateLineCount", -1) == mixedIdentities.Count - mixedCanonicalCount,
+                "One proven duplicate is counted without treating either unidentified reply as a duplicate.", first.Diagnostics);
+            var attributedSequence = new List<Dictionary<string, object>>
+            {
+                TestDict("turnId", "shared_beat", "sequence", 1, "text", "Agreed.", "role", "npc", "speakerId", "ira"),
+                TestDict("turnId", "shared_beat", "sequence", 1, "text", "Agreed.", "role", "npc", "speakerId", "rhagaea")
+            };
+            add("prompt_native_speaker_id_preserves_distinct_authors", CanonicalizePromptTranscript(attributedSequence, 30).Count == 2,
+                "The native speakerId field participates in identity even when equal words and sequence occur in one beat.", null);
             Dictionary<string, string> oversizedValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["campaignId"] = "budget_campaign",
