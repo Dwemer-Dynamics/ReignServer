@@ -2647,6 +2647,10 @@ namespace ReignBetaServer
                     {
                         response = TerminalActionReportApi(request.JsonBody);
                     }
+                    else if (request.Method == "POST" && request.Path == IndividualViewInsertionRoute)
+                    {
+                        response = IndividualViewInsertionApi(request.JsonBody);
+                    }
                     else if (request.Method == "POST" && request.Path == "/campaign-commands/report")
                     {
                         response = CampaignCommandReportApi(request.JsonBody);
@@ -9638,6 +9642,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 RetrievalEligible = !recallOnlyTurn && ShouldPersistGovernmentCertificationConversationSideEffects(governmentCertificationMemoryIsolation),
                 CommitEffects = publishContextEffects, PublishScene = publishContextEffects,
                 PublishSocial = publishContextEffects && !recallOnlyTurn, PublishIntroductions = publishContextEffects,
+                ViewInsertionRequested = !officialAmbassador && IndividualViewInsertionRequested(payload),
                 SceneMode = ReadString(payload, "mode", "dialogue"), ConceptionGate = conceptionGate };
             Dictionary<string, object> conversationExchange = PublishAcceptedConversationUnit(acceptedUnit,
                 accept => StoreConversationExchange(campaignId, socialExchangePayload, heroId, dialoguePlayerId,
@@ -27880,6 +27885,8 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
         private const int IngressMaxIdentityHeaderChars = 256;
         private const long IngressMaxJsonBodyBytes = 64L * 1024L * 1024L;
         private const long IngressMaxSupportBundleBytes = 8L * 1024L * 1024L;
+        // The view-insertion acknowledgment carries exactly 11 bounded strings.
+        private const long IngressMaxViewInsertionAckBytes = 16L * 1024L;
         private const long IngressMaxCampaignUploadBytes = CampaignBackupMaxExpandedBytes;
         private const int IngressIdleTimeoutMs = 30000;
         private const int IngressHeaderBudgetMs = 30000;
@@ -28159,7 +28166,8 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             long limit = campaignUpload ? IngressMaxCampaignUploadBytes
                 : requestPath.Equals("/api/support-bundle", StringComparison.OrdinalIgnoreCase) ? IngressMaxSupportBundleBytes
                 : requestPath == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute
-                    ? Reign.Core.Contracts.Actions.TerminalActionReportProtocol.MaxRequestBodyBytes : IngressMaxJsonBodyBytes;
+                    ? Reign.Core.Contracts.Actions.TerminalActionReportProtocol.MaxRequestBodyBytes
+                : requestPath == IndividualViewInsertionRoute ? IngressMaxViewInsertionAckBytes : IngressMaxJsonBodyBytes;
             if (bodyLength > limit) throw new HttpIngressException(413, "Request body is too large.", requestPath, "body_limit");
             if (bodyLength == 0)
             {
