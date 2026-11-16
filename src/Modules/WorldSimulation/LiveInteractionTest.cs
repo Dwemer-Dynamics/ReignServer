@@ -5222,7 +5222,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "Unattended /continuesave readiness has a separate bounded Save Sync restoration allowance, so large campaign snapshots cannot cause a false game-load timeout.");
             add("save_sync_load_retry_receipt_idempotency",
                 saveCoordinatorSource.Contains("[\"loadSessionId\"] = Guid.NewGuid().ToString(\"N\")")
-                && saveCoordinatorSource.Contains("RunLoadHandshakeAsync(generation, loadPayload)")
+                && saveCoordinatorSource.Contains("RunLoadHandshakeAsync(generation, loadPayload, campaign, scope)")
                 && postgreSqlSaveSyncSource.Contains("TryReplaySaveSyncLoadReceipt")
                 && postgreSqlSaveSyncSource.Contains("StoreSaveSyncLoadReceipt")
                 && postgreSqlSaveSyncSource.Contains("[\"idempotentReplay\"] = true"),

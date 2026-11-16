@@ -1937,11 +1937,12 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 string serverClientText = File.Exists(serverClientPath)
                     ? File.ReadAllText(serverClientPath)
                     : "";
+                string compactServerClientText = string.Concat(serverClientText.Where(c => !char.IsWhiteSpace(c)));
                 add("live_test_control_plane_bypasses_shared_endpoint_breaker",
-                    serverClientText.Contains("bool liveTestRoute = route.StartsWith(", StringComparison.Ordinal)
-                    && serverClientText.Contains("if (!liveTestRoute", StringComparison.Ordinal)
-                    && serverClientText.Contains("LiveTestClient", StringComparison.Ordinal)
-                    && serverClientText.Contains("ReignServerEndpoint.ReportTransportFailure();", StringComparison.Ordinal),
+                    compactServerClientText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
+                    && compactServerClientText.Contains("if(!liveTestRoute&&!ReignServerEndpoint.TryBeginRequest(outstringunavailable,outprobeClaim))", StringComparison.Ordinal)
+                    && compactServerClientText.Contains("HttpClientrouteClient=liveTestRoute?LiveTestClient:", StringComparison.Ordinal)
+                    && compactServerClientText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
                     "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client without inheriting unrelated passive-system endpoint backoff.",
                     serverClientPath);
                 string liveTestClientPath =
