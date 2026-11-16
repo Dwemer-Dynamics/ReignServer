@@ -529,6 +529,24 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 string missingCampaign = "view_insertion_missing_" + Guid.NewGuid().ToString("N");
                 Check("view_insertion_unknown_campaign_is_not_created", ReadString(Ack(viewDescriptor, "campaignId", missingCampaign), "reason", "") == "unknown_campaign"
                     && !ReignPostgreSqlStorage.CampaignExists(missingCampaign));
+                // Low-level registration only: a known schema with no campaign initialization.
+                string coldCampaign = "view_insertion_cold_" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    using (ReignPostgreSqlStorage.OpenCampaignConnection(coldCampaign)) { }
+                    int ColdTables()
+                    {
+                        using var metadata = ReignPostgreSqlStorage.OpenMetadataConnection();
+                        return ReadInt(QuerySql(metadata, "SELECT COUNT(*) AS n FROM pg_tables WHERE schemaname=$schema;",
+                            TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(coldCampaign))).Single(), "n", -1);
+                    }
+                    int coldBefore = ColdTables();
+                    var coldAck = Ack(viewDescriptor, "campaignId", coldCampaign);
+                    Check("view_insertion_cold_registered_campaign_is_not_initialized", ReignPostgreSqlStorage.CampaignExists(coldCampaign)
+                        && coldBefore == 0 && ColdTables() == 0 && ReadString(coldAck, "disposition", "") == "unknown"
+                        && ReadString(coldAck, "reason", "") == "no_view_insertion_descriptor", coldAck);
+                }
+                finally { ReignPostgreSqlStorage.DropCampaign(coldCampaign); }
                 var extra = TestDict("schema", IndividualViewInsertionAckSchema, "acknowledgedTs", "1");
                 foreach (string key in IndividualViewInsertionIdentityFields) extra[key] = ReadString(viewDescriptor, key, "");
                 Check("view_insertion_rejects_extra_or_app_time_fields", ReadString(IndividualViewInsertionApi(extra), "disposition", "") == "invalid"
@@ -579,6 +597,26 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 try { Publish(stale); } catch (InvalidOperationException) { restoreRejected = true; }
                 Check("restore_rejects_entire_pending_unit", restoreRejected && Count("conversation_turns", "event_id", stale.EventId) == 0
                     && Count("events", "event_id", stale.EventId) == 0 && Count("conversation_accepted_units", "unit_id", stale.EventId) == 0);
+                using (var connection = OpenCampaignConnection(campaign))
+                    generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                var edited = Unit("view_insertion_edited_source"); edited.ViewInsertionRequested = true;
+                var editedDescriptor = ReadDictionary(ReadDictionary(Publish(edited), "acceptedUnit"), "viewInsertion");
+                string beforeEdit = StoredReceipt(edited.EventId);
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    // The real editor statements; every active npc-session row is listed so only the target text changes.
+                    var rows = QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
+WHERE s.npc_id='npc' AND t.status='active';").Select(row => TestDict("id", ReadString(row, "turn_id", ""),
+                        "text", ReadString(row, "turn_id", "") == ReadString(editedDescriptor, "sourceTurnId", "")
+                            ? ReadString(row, "text", "") + " Edited." : ReadString(row, "text", ""),
+                        "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""),
+                        "worldDay", ReadDouble(row, "world_day", 0d))).ToList();
+                    SyncEditorConversationTurns(connection, "npc", rows);
+                }
+                var editedAck = editedDescriptor == null ? null : Ack(editedDescriptor);
+                Check("view_insertion_edited_source_rejects_matching_descriptor_without_mutation", editedDescriptor != null
+                    && ReadString(editedAck, "disposition", "") == "conflict" && ReadString(editedAck, "reason", "") == "source_mismatch"
+                    && StoredReceipt(edited.EventId) == beforeEdit, editedAck);
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;

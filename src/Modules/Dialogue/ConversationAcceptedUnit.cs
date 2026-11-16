@@ -286,12 +286,24 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 return TestDict("ok", false, "schema", IndividualViewInsertionResultSchema, "disposition", "invalid",
                     "error", "The view insertion acknowledgment is invalid.");
             string campaign = ack["campaignId"];
-            // Never creates an unknown campaign; opening a known campaign may run its normal initialization.
+            // Never uses OpenCampaignConnection: that helper creates directories and runs cold
+            // campaign initialization/migration. The registry answers unknown campaigns; a known
+            // schema is read through a metadata connection with a transaction-local search_path.
+            // No table or schema is created; the only write is the validated receipt update.
             if (!ReignPostgreSqlStorage.CampaignExists(campaign)) return Reply("unknown", "unknown_campaign");
-            using var connection = OpenCampaignConnection(campaign);
-            // An acknowledgment never creates the accepted-unit table; absent means no descriptor exists.
-            if (!TableExists(connection, "conversation_accepted_units")) return Reply("unknown", "no_view_insertion_descriptor");
-            using var transaction = connection.BeginTransaction();
+            string schema = ReignPostgreSqlStorage.CampaignSchemaName(campaign);
+            using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
+            using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
+            // First statement of the transaction; disposal rolls back and restores search_path.
+            QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
+            // Absent prerequisites mean no descriptor can exist; an acknowledgment never creates them.
+            if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => TableExists(connection, table)))
+                return Reply("unknown", "no_view_insertion_descriptor");
+            // Lock order matches source publication (source turn, then the restore fence, then
+            // the unit) and the durable source readers (turn first). The share lock is held
+            // through commit, so editor/source rewrites of this turn wait or are seen here.
+            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id FOR SHARE;",
+                TestDict("id", ack["sourceTurnId"])).FirstOrDefault();
             string current = ReadString(QuerySql(connection,
                 "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
             var stored = QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
@@ -307,8 +319,6 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 || ReadString(receipt, "restoreGeneration", "") != ack["restoreGeneration"])
                 return Reply("conflict", "identity_mismatch");
             if (current != ack["restoreGeneration"]) return Reply("stale", "restore_generation_changed");
-            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
-                TestDict("id", ack["sourceTurnId"])).FirstOrDefault();
             var audience = TextListFromJson(ReadString(source, "participants_json", "[]"));
             if (source == null || ReadString(source, "role", "") != "npc" || ReadString(source, "status", "") != "active"
                 || ReadString(source, "speaker_id", "") != ack["speakerHeroStringId"]
