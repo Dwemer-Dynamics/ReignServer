@@ -79,6 +79,12 @@ namespace ReignBetaServer
         private static volatile bool ShutdownRequested;
         private static volatile bool DeleteAllCampaignDataPending;
         private static readonly ManualResetEventSlim DeleteAllCampaignResponseSent = new ManualResetEventSlim(true);
+        // Innermost lock (after CampaignDataGate, then CampaignBackupMutationLock). Guards only the
+        // pending delete-all owner, its captured settings and the listener's closed flag; it is
+        // never held across I/O, a wait, a shutdown request or a deletion phase.
+        private static readonly object DeleteAllScheduleLock = new object();
+        private static bool DeleteAllSchedulingClosed;
+        private static Dictionary<string, object> DeleteAllScheduledSettings;
         private static readonly AsyncLocal<string> CampaignsRootOverride = new AsyncLocal<string>();
         private static int InteractiveRequestCount;
         private static long LastInteractiveRequestCompletedUtcTicks;
@@ -707,11 +713,13 @@ namespace ReignBetaServer
             }
 
             InitializeReignTelemetry(settings);
+            ShutdownRequested = false;
             StartPriorityBackgroundScheduler();
+            // Startup maintenance is admitted first, ahead of every other producer and memory fan-out.
+            ResumePendingReputationReasonJobs();
             StartContinuousRelationshipWorker();
             StartWorldTestRollupWorker();
             ResumePendingMemoryBackgroundJobs();
-            ResumePendingReputationReasonJobs();
             StartSemanticMemorySubsystem(settings);
             ProcessPendingCampaignRetirementsAtStartup();
             ResumePendingSaveSyncOptimizations();
@@ -728,7 +736,6 @@ namespace ReignBetaServer
                 ["settingsPath"] = SettingsPath
             });
 
-            ShutdownRequested = false;
             StartCampaignRetirementMonitor();
             ActiveListener = listener;
             using var terminate = System.Runtime.InteropServices.PosixSignalRegistration.Create(
@@ -770,31 +777,141 @@ namespace ReignBetaServer
             }
             finally
             {
+                bool requestedFromUi = ShutdownRequested;
                 ActiveListener = null;
                 try { listener.Stop(); } catch { }
-                if (DeleteAllCampaignDataPending) DeleteAllCampaignResponseSent.Wait(5000);
-                StopSemanticMemorySubsystem();
-                if (DeleteAllCampaignDataPending)
+                // Atomically close delete-all scheduling and claim its one pending owner. A request
+                // that has not published by now is refused rather than promised a deletion.
+                bool deleteAllClaimed;
+                Dictionary<string, object> deleteAllSettings;
+                lock (DeleteAllScheduleLock)
                 {
-                    CampaignDataGate.EnterWriteLock();
+                    DeleteAllSchedulingClosed = true;
+                    deleteAllClaimed = DeleteAllCampaignDataPending;
+                    deleteAllSettings = DeleteAllScheduledSettings;
+                    DeleteAllScheduledSettings = null;
+                }
+                // Idempotent; also closes admission when the listener exited exceptionally.
+                Task backgroundFence = StopPriorityBackgroundScheduler("listener_closed");
+                // Published before any quiescence snapshot so the semantic pump observes it.
+                ShutdownRequested = true;
+                if (deleteAllClaimed)
+                {
                     try
                     {
-                        CompleteDeleteAllCampaignData();
+                        DeleteAllCampaignResponseSent.Wait(5000);
+                        // No campaign, backup or schedule lock is held across any wait or deletion phase.
+                        Dictionary<string, object> quiescence = WaitForDeleteAllQuiescence(backgroundFence, 5000);
+                        CompleteScheduledDeleteAllCampaignData(deleteAllSettings, quiescence,
+                            DeleteAllPreDeleteBlockReason, DeleteExternalSemanticCollection,
+                            () =>
+                            {
+                                // The stop captures the exact owned worker with the pump under
+                                // SemanticWorkerLock before any wait, kills and awaits only that process
+                                // with no lock held, and returns true only for proven exit with no newer
+                                // tracked worker. Anything else throws here and blocks local deletion.
+                                if (!StopSemanticMemorySubsystem(5000))
+                                    throw new InvalidOperationException(
+                                        "the owned vector worker exit was not proven within 5000 ms, or a newer worker is tracked");
+                            },
+                            () =>
+                            {
+                                CampaignDataGate.EnterWriteLock();
+                                try { return CompleteDeleteAllCampaignData(); }
+                                finally { CampaignDataGate.ExitWriteLock(); }
+                            },
+                            WriteDeleteAllFailureReceipt);
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteDeleteAllFailureReceipt(new Dictionary<string, object>
+                        {
+                            ["ok"] = false,
+                            ["completedUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                            ["error"] = ex.Message
+                        });
                     }
                     finally
                     {
                         DeleteAllCampaignDataPending = false;
                         DeleteAllCampaignResponseSent.Set();
-                        CampaignDataGate.ExitWriteLock();
                     }
                 }
-                LogOperational("server.stop", new Dictionary<string, object> { ["port"] = port, ["requestedFromUi"] = ShutdownRequested });
+                else StopSemanticMemorySubsystem();
+                LogOperational("server.stop", new Dictionary<string, object>
+                {
+                    ["port"] = port, ["requestedFromUi"] = requestedFromUi, ["backgroundSettled"] = backgroundFence.IsCompleted
+                });
                 ActiveServerPort = 0;
             }
         }
 
+        // Delete-all only. One bounded budget (one Stopwatch) shared by the scheduler stop fence, the
+        // accepted-handler count and the existing semantic pump task. Called from the accept loop's own
+        // finally after listener.Stop(), so ActiveIngressConnections can only fall: each accepted
+        // handler decrements it in its Task.Run finally. In-flight handlers (settings save, Save Sync)
+        // can restart the pump, so the pump is snapshotted under SemanticWorkerLock only after ingress
+        // reaches zero, and awaited outside it and every campaign/backup lock. Task faults are
+        // observed, never rethrown into shutdown. Unrelated workers are not covered.
+        private static Dictionary<string, object> WaitForDeleteAllQuiescence(Task backgroundFence, int timeoutMs)
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            int Remaining() => (int)Math.Max(0L, timeoutMs - watch.ElapsedMilliseconds);
+            bool WaitObserved(Task task)
+            {
+                if (task == null) return true;
+                bool done = Task.WaitAny(new[] { task }, Remaining()) == 0;
+                if (done) _ = task.Exception;
+                return done;
+            }
+            bool schedulerSettled = WaitObserved(backgroundFence);
+            bool ingressSettled = Volatile.Read(ref ActiveIngressConnections) <= 0;
+            while (!ingressSettled && Remaining() > 0)
+            {
+                Thread.Sleep(Math.Min(20, Remaining()));
+                ingressSettled = Volatile.Read(ref ActiveIngressConnections) <= 0;
+            }
+            bool pumpSettled = false;
+            if (ingressSettled)
+            {
+                Task pump;
+                lock (SemanticWorkerLock) pump = SemanticPumpTask;
+                pumpSettled = WaitObserved(pump);
+            }
+            // A replaced pump can already be inside a campaign read lease. Enter and immediately exit
+            // the write lock on the same remaining budget: prior read leases finish first, and later
+            // stale acquisitions see ShutdownRequested and refuse. Nothing else runs while it is held.
+            bool campaignReadLeasesDrained = false;
+            if (schedulerSettled && ingressSettled && pumpSettled)
+            {
+                try
+                {
+                    if (CampaignDataGate.TryEnterWriteLock(Remaining()))
+                    {
+                        CampaignDataGate.ExitWriteLock();
+                        campaignReadLeasesDrained = true;
+                    }
+                }
+                catch (Exception) { campaignReadLeasesDrained = false; }
+            }
+            return new Dictionary<string, object>
+            {
+                ["settled"] = schedulerSettled && ingressSettled && pumpSettled && campaignReadLeasesDrained,
+                ["campaignReadLeasesDrained"] = campaignReadLeasesDrained,
+                ["schedulerSettled"] = schedulerSettled,
+                ["ingressSettled"] = ingressSettled,
+                ["activeIngressConnections"] = Volatile.Read(ref ActiveIngressConnections),
+                ["semanticPumpSettled"] = pumpSettled,
+                ["waitedMs"] = watch.ElapsedMilliseconds
+            };
+        }
+
         private static Dictionary<string, object> RequestServerShutdown(string source = "control_center")
         {
+            // Close background admission before the accept loop can observe shutdown. This never
+            // waits for the active callback, but the first caller settles queued never-started
+            // releases synchronously, so no caller may hold a campaign or backup lock here.
+            StopPriorityBackgroundScheduler(source ?? "control_center");
             if (ShutdownRequested)
             {
                 return new Dictionary<string, object> { ["ok"] = true, ["status"] = "stopping" };
@@ -1128,8 +1245,8 @@ namespace ReignBetaServer
                     }
                     else if (request.Method == "POST" && request.Path == "/api/campaigns/delete-all")
                     {
-                        response = DeleteAllCampaignBackupData(request.JsonBody);
-                        deleteAllResponsePending = DeleteAllCampaignDataPending;
+                        // Only the request that published the pending owner signals its response.
+                        response = DeleteAllCampaignBackupData(request.JsonBody, out deleteAllResponsePending);
                     }
                     else if (request.Method == "POST" && request.Path == "/api/campaigns/cleanup-zero-save")
                     {
@@ -2656,6 +2773,10 @@ namespace ReignBetaServer
             // systemd and the launcher while campaign requests remain gated.
             if (path == "/health" || path == "/" || path == "/index.html"
                 || path == "/assets/reign-icon.webp" || path == "/assets/ReignLogo.png")
+                return CampaignRequestAccess.None;
+            // Stop reads no campaign state and may synchronously settle never-started background
+            // releases, so it must run without campaign ownership. Access policy is unchanged.
+            if (path == "/api/shutdown")
                 return CampaignRequestAccess.None;
             bool isLiveTestPath = path.Equals("/tests/live", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("/tests/live/", StringComparison.OrdinalIgnoreCase);
@@ -8233,7 +8354,9 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             }
             Dictionary<string, object> capturedHero = new Dictionary<string, object>(
                 hero ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
-            EnqueuePriorityBackgroundWork("character.enrichment", "maintenance", () =>
+            // A never-started release (busy, stopping or canceled before start) frees exactly this
+            // key; once started, the callback's own finally owns it.
+            TryEnqueuePriorityBackgroundWork("character.enrichment", "maintenance", () =>
             {
                 try
                 {
@@ -8247,7 +8370,10 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 {
                     lock (CharacterEnrichmentLock) PendingCharacterEnrichments.Remove(key);
                 }
-            });
+            }, _ =>
+            {
+                lock (CharacterEnrichmentLock) PendingCharacterEnrichments.Remove(key);
+            }, out _);
         }
 
         private static Dictionary<string, object> ConstructCharacterFiles(string campaignId, string heroId, Dictionary<string, object> hero, bool force, bool useLlm)

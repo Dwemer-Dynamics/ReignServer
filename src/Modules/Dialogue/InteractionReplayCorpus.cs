@@ -250,6 +250,7 @@ namespace ReignBetaServer
         private static void ScheduleReplayCorpusCapture(string campaignId, string correlationId)
         {
             if (!ReadBool(LoadSettings(), "autoCaptureReplayCorpus", true)) return;
+            // Best-effort: a busy/stopping refusal skips the capture, counted only in scheduler status.
             EnqueuePriorityBackgroundWork("replay.capture", "maintenance", () => ReplayCorpusCaptureApi(new Dictionary<string, object>
             { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["label"] = "Automatic production capture" }));
         }

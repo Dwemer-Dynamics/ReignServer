@@ -81,18 +81,60 @@ namespace ReignBetaServer
                 Dictionary<string, object> options = NormalizeVerificationOptions(payload);
                 if (ReadString(options, "suite", "") == "codex_performance" && ReadString(options, "tier", "") != "quick" && ReadString(options, "tier", "") != "offline")
                     ValidateCodexPerformanceRun(options);
+                // Admission precedes any status change, so a refusal leaves the previous status.
+                // Lock order is VerificationLock -> scheduler gate only: the scheduler never calls
+                // out under its gate, and the outcome continuation below takes VerificationLock on
+                // a pool thread, so it cannot observe this run before it is published here.
+                PriorityWorkAdmission admission = TryEnqueuePriorityBackgroundWork("verification.run", "normal",
+                    () => RunVerification(options), null, out Task scheduled);
+                if (admission != PriorityWorkAdmission.Accepted)
+                {
+                    bool busy = admission == PriorityWorkAdmission.Busy;
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false,
+                        ["accepted"] = false,
+                        ["reason"] = busy ? PriorityWorkNotStartedBusy : PriorityWorkNotStartedStopping,
+                        ["error"] = busy
+                            ? "The background scheduler is at capacity; verification was not queued."
+                            : "The server is stopping; verification was not queued.",
+                        ["status"] = CloneDictionary(VerificationStatus)
+                    };
+                }
                 VerificationCancelRequested = false;
                 TryDelete(VerificationCancelPath);
                 VerificationStatus = NewVerificationStatus("queued", "Verification run queued.");
                 VerificationStatus["tier"] = ReadString(options, "tier", "offline");
                 VerificationStatus["suite"] = ReadString(options, "suite", "");
-                VerificationTask = EnqueuePriorityBackgroundWork("verification.run", "normal", () => RunVerification(options));
+                VerificationTask = scheduled;
+                scheduled.ContinueWith(PublishVerificationTerminal, CancellationToken.None,
+                    TaskContinuationOptions.NotOnRanToCompletion, TaskScheduler.Default);
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true,
                     ["accepted"] = true,
                     ["status"] = CloneDictionary(VerificationStatus)
                 };
+            }
+        }
+
+        // Canceled means the scheduler stopped before RunVerification started; faulted means it
+        // threw before publishing a terminal status. The task identity guard ignores a later run.
+        // A user cancel of a queued run is unchanged: RunVerification clears the request on start.
+        private static void PublishVerificationTerminal(Task task)
+        {
+            lock (VerificationLock)
+            {
+                _ = task.Exception;
+                string state = ReadString(VerificationStatus, "state", "");
+                if (!ReferenceEquals(VerificationTask, task) || (state != "queued" && state != "running")) return;
+                Dictionary<string, object> terminal = task.IsCanceled
+                    ? NewVerificationStatus("cancelled", "Verification run was not started because the server is stopping.")
+                    : NewVerificationStatus("failed", "Verification run failed unexpectedly; see the server log.");
+                terminal["runId"] = ReadString(VerificationStatus, "runId", "");
+                terminal["tier"] = ReadString(VerificationStatus, "tier", "");
+                terminal["suite"] = ReadString(VerificationStatus, "suite", "");
+                VerificationStatus = terminal;
             }
         }
 

@@ -60,6 +60,8 @@ VALUES($id,$type,$owner,$group,$session,'pending',$hash,$version,$generation,$ts
             string id;
             using (var connection = OpenCampaignConnection(campaignId))
                 id = EnqueueMemoryJob(connection, campaignId, "memory_consolidation", ownerId, groupKey, sessionId);
+            // Rejection leaves the row pending (no claim, no attempt consumed); the 60 s
+            // reconciliation timer re-admits it.
             EnqueuePriorityBackgroundWork("memory.consolidation", "maintenance", () => ProcessMemoryBackgroundJob(campaignId, id));
             return new Dictionary<string, object> { ["ok"] = true, ["queued"] = true, ["jobId"] = id, ["ownerId"] = ownerId, ["groupKey"] = groupKey ?? "" };
         }
@@ -203,7 +205,10 @@ WHERE job_id=$id AND lease_token=$token AND status='running';", new Dictionary<s
         private static void QueueMemoryReconciliation()
         {
             if (Interlocked.Exchange(ref MemoryReconcileQueued, 1) != 0) return;
-            EnqueuePriorityBackgroundWork("memory.reconcile", "maintenance", () => {
+            // MemoryReconcileQueued is cleared exactly once: by the callback's finally after it
+            // runs, or by the not-started release when admission is refused or the queued
+            // callback is canceled before start. The timer then retries on its next tick.
+            TryEnqueuePriorityBackgroundWork("memory.reconcile", "maintenance", () => {
                 try
                 {
                     foreach (var campaign in ReignPostgreSqlStorage.ListCampaignMetadata())
@@ -223,13 +228,17 @@ WHERE job_id=$id AND lease_token=$token AND status='running';", new Dictionary<s
                             foreach (string id in QuerySql(connection, @"SELECT job_id FROM memory_background_jobs WHERE attempt_count<4 AND next_attempt_ts<=$now
 AND (status IN ('pending','failed') OR (status='running' AND lease_until<=$now)) ORDER BY created_ts LIMIT 50;", new Dictionary<string, object> { ["now"] = now })
                                 .Select(r => ReadString(r, "job_id", "")).ToList())
-                                 EnqueuePriorityBackgroundWork("memory.resume", "maintenance", () => ProcessMemoryBackgroundJob(campaignId, id));
+                            {
+                                // A refused resume leaves its row pending and unclaimed; the next tick retries.
+                                if (TryEnqueuePriorityBackgroundWork("memory.resume", "maintenance",
+                                    () => ProcessMemoryBackgroundJob(campaignId, id), null, out _) != PriorityWorkAdmission.Accepted) break;
+                            }
                          }
                          ReconcileMemorySpecialistIndex(campaignId);
                     }
                 }
                 finally { Interlocked.Exchange(ref MemoryReconcileQueued, 0); }
-            });
+            }, _ => Interlocked.Exchange(ref MemoryReconcileQueued, 0), out _);
         }
 
         private static Dictionary<string, object> MemoryBackgroundStatusApi(Dictionary<string, string> query)

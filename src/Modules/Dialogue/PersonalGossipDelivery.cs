@@ -13,11 +13,15 @@ namespace ReignBetaServer
         {
             if (campaign.StartsWith("__gossip_test_", StringComparison.Ordinal) || !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
                 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1" || !PersonalGossipWorkers.TryAdd(campaign, 0)) return;
-            _ = EnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
+            // The marker is released exactly once: by the callback's finally after it runs, or by
+            // the scheduler's not-started release on busy/stopping rejection or pre-start
+            // cancellation. Pending rows, leases and generation fences are untouched; the next
+            // existing scheduling trigger re-admits the campaign.
+            TryEnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
             {
                 try { RunPersonalGossipWork(campaign, ComposePersonalGossip); }
                 finally { PersonalGossipWorkers.TryRemove(campaign, out _); }
-            });
+            }, reason => PersonalGossipWorkers.TryRemove(campaign, out _), out _);
         }
 
         private static bool GossipSourcesActive(ReignDbConnection c, Dictionary<string, object> data)
