@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using TerminalActionReportProtocol = Reign.Core.Contracts.Actions.TerminalActionReportProtocol;
 
 namespace ReignBetaServer
 {
@@ -896,6 +897,11 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                         @"SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id FOR UPDATE;",
                         new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                     if (prior == null) return TestDict("ok", false, "error", "A native relationship receipt does not exist in this campaign.", "receiptId", receiptId);
+                    if (ReadString(prior, "receipt_id", "").StartsWith(TerminalActionReportProtocol.ReceiptIdPrefix, StringComparison.Ordinal))
+                    {
+                        string actionError = CompletedActionReceiptAckError(connection, prior, nativeReceipt, measuredReceipt, receiptIds.Count);
+                        if (actionError.Length > 0) return TestDict("ok", false, "error", actionError, "receiptId", receiptId);
+                    }
                     string observer = ReadString(prior, "observer_id", ""), target = ReadString(prior, "target_id", "");
                     if (subjectId.Length > 0 || targetId.Length > 0)
                     {
@@ -964,6 +970,84 @@ WHERE receipt_id=$id AND native_application_status!='applied';", args);
                 transaction.Commit();
             }
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["updatedCount"] = updated, ["receiptIds"] = receiptIds };
+        }
+
+        // Opt-in terminal action report: one pending receipt for the aggregate pair
+        // delta, inside the caller's transaction. Transcript, continuity and trust
+        // readers select status='applied' AND severity_tier<>'routine', so this row
+        // never becomes conversation memory. The delta is the action aggregate
+        // (-25..15), never the conversation ±20 reconciliation.
+        private static string StageCompletedActionRelationshipReceipt(ReignDbConnection connection, string campaignId,
+            string timelineId, string actionId, string generation, string reportSha256,
+            string subjectId, string targetId, int sharedDelta, long ts)
+        {
+            string receiptId = TerminalActionReportProtocol.ReceiptId(actionId, timelineId, generation, reportSha256);
+            ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
+receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,mode,act_kind,severity_tier,valence,
+base_delta,modifier_delta,final_delta,native_pair_delta,evidence_json,summary,status,native_application_status,created_ts)
+VALUES($id,$campaign,$timeline,$exchange,$action,$subject,$target,$mode,$mode,$tier,$valence,
+$delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictionary<string, object>
+            {
+                ["id"] = receiptId, ["campaign"] = campaignId, ["timeline"] = timelineId,
+                ["exchange"] = TerminalActionReportProtocol.ExchangeId(actionId, generation), ["action"] = actionId,
+                ["subject"] = subjectId, ["target"] = targetId, ["mode"] = TerminalActionReportProtocol.ReceiptMode,
+                ["tier"] = TerminalActionReportProtocol.ReceiptSeverityTier, ["valence"] = sharedDelta < 0 ? "negative" : "positive",
+                ["delta"] = sharedDelta, ["status"] = TerminalActionReportProtocol.ReceiptStatus, ["ts"] = ts,
+                ["summary"] = "Completed action native relationship effect.",
+                ["evidence"] = Json.Serialize(new Dictionary<string, object>
+                {
+                    ["schema"] = TerminalActionReportProtocol.MarkerSchema, ["actionId"] = actionId,
+                    ["timelineId"] = timelineId, ["reportGeneration"] = generation,
+                    ["reportSha256"] = reportSha256, ["plannedNativeDelta"] = sharedDelta
+                })
+            });
+            return receiptId;
+        }
+
+        // Reads the staged action receipt after re-deriving its identity. Applied
+        // receipts are reported as such and are never offered as a new native effect.
+        private static Dictionary<string, object> CompletedActionRelationshipEffect(ReignDbConnection connection,
+            string receiptId, string actionId, string timelineId, string generation, string reportSha256)
+        {
+            Dictionary<string, object> row = QuerySql(connection,
+                "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
+                new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
+            var evidence = TryParseJsonObject(ReadString(row, "evidence_json", "{}")) ?? new Dictionary<string, object>();
+            if (row == null || receiptId != TerminalActionReportProtocol.ReceiptId(actionId, timelineId, generation, reportSha256)
+                || ReadString(row, "timeline_id", "") != timelineId || ReadString(evidence, "actionId", "") != actionId
+                || ReadString(evidence, "reportGeneration", "") != generation || ReadString(evidence, "reportSha256", "") != reportSha256)
+                throw new InvalidOperationException("The accepted terminal report does not match its relationship receipt.");
+            return new Dictionary<string, object>
+            {
+                ["receiptId"] = receiptId, ["subjectId"] = ReadString(row, "observer_id", ""), ["targetId"] = ReadString(row, "target_id", ""),
+                ["delta"] = ReadInt(evidence, "plannedNativeDelta", 0), ["timelineId"] = timelineId,
+                ["reportGeneration"] = generation, ["reportSha256"] = reportSha256,
+                ["nativeApplicationStatus"] = ReadString(row, "native_application_status", "pending")
+            };
+        }
+
+        // Measured acknowledgment of an action receipt stays bound to its exact
+        // report, timeline and the current campaign generation, including repeats.
+        private static string CompletedActionReceiptAckError(ReignDbConnection connection, Dictionary<string, object> prior,
+            Dictionary<string, object> nativeReceipt, bool measuredReceipt, int receiptCount)
+        {
+            if (!measuredReceipt || receiptCount != 1)
+                return "An action relationship receipt requires exactly one measured native acknowledgment.";
+            var evidence = TryParseJsonObject(ReadString(prior, "evidence_json", "{}")) ?? new Dictionary<string, object>();
+            string timeline = ReadString(evidence, "timelineId", ""), generation = ReadString(evidence, "reportGeneration", "");
+            string sha = ReadString(evidence, "reportSha256", ""), actionId = ReadString(evidence, "actionId", "");
+            bool bound;
+            try
+            {
+                bound = ReadString(prior, "receipt_id", "") == TerminalActionReportProtocol.ReceiptId(actionId, timeline, generation, sha)
+                    && ReadString(prior, "timeline_id", "") == timeline && ReadString(nativeReceipt, "timelineId", "") == timeline
+                    && ReadString(nativeReceipt, "reportGeneration", "") == generation && ReadString(nativeReceipt, "reportSha256", "") == sha;
+            }
+            catch (ArgumentException) { bound = false; }
+            if (!bound) return "The native acknowledgment does not match its action report binding.";
+            string current = ReadString(QuerySql(connection,
+                "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
+            return current.Length > 0 && current == generation ? "" : "The action relationship receipt belongs to a different campaign generation.";
         }
 
         private static Dictionary<string, object> AdjudicateConversationRelationship(

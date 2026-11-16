@@ -108,11 +108,25 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Distinct subjectId and targetId are required." };
             }
 
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "campaignDay", 0d));
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
+                Dictionary<string, object> applied = RelationshipEvaluateCore(connection, payload, campaignId, eventId, subjectId, targetId);
+                if (!ReadBool(applied, "idempotent", false))
+                    CompleteRelationshipEvaluationReputation(connection, campaignId, ReadString(payload, "timelineId", "main"),
+                        targetId, ReadDouble(applied, "worldDay", 0d), eventId, ReadInt(applied, "nativeRelationDelta", 0));
+                return applied;
+            }
+        }
+
+        // Connection-scoped directional evaluation. It may run inside a caller-owned
+        // transaction; court-popularity recompute and job scheduling stay with the caller.
+        private static Dictionary<string, object> RelationshipEvaluateCore(ReignDbConnection connection,
+            Dictionary<string, object> payload, string campaignId, string eventId, string subjectId, string targetId)
+        {
+            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "campaignDay", 0d));
+            {
                 Dictionary<string, object> priorEvaluation = QuerySql(connection,
                     "SELECT * FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
                     new Dictionary<string, object> { ["event"] = eventId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
@@ -174,22 +188,35 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
                         ["reason"] = ReadString(applied, "reason", ""),
                         ["source"] = ReadFirstString(payload, "source", "eventType", "type"), ["ts"] = ts
                     });
-                if (nativeDelta != 0)
-                {
-                    EnsureSocialReputationSchema(connection);
-                    bool popularityChanged = RecomputeCourtPopularityReputations(connection, campaignId,
-                        ReadString(payload, "timelineId", "main"), targetId, worldDay,
-                        eventId + "|court_popularity");
-                    if (popularityChanged)
-                    {
-                        ReconcileSocialRelationshipsForSubjects(connection, campaignId,
-                            ReadString(payload, "timelineId", "main"), new[] { targetId }, worldDay);
-                        if (!campaignId.StartsWith("__", StringComparison.Ordinal))
-                            SchedulePendingReputationReasonJobs(campaignId);
-                    }
-                }
                 return applied;
             }
+        }
+
+        private static void CompleteRelationshipEvaluationReputation(ReignDbConnection connection, string campaignId,
+            string timelineId, string targetId, double worldDay, string eventId, int nativeDelta)
+        {
+            if (RecomputeRelationshipEvaluationReputation(connection, campaignId, timelineId,
+                    targetId, worldDay, eventId, nativeDelta, schemaReady: false)
+                && !campaignId.StartsWith("__", StringComparison.Ordinal))
+                SchedulePendingReputationReasonJobs(campaignId);
+        }
+
+        // Derived court popularity and dependent public standing for one evaluated
+        // target. Every write uses the supplied connection, so it joins a
+        // caller-owned transaction. With schemaReady the caller has already run
+        // EnsureSocialReputationSchema outside that transaction (its legacy
+        // migration issues its own BEGIN). Reason scheduling stays with the caller.
+        private static bool RecomputeRelationshipEvaluationReputation(ReignDbConnection connection, string campaignId,
+            string timelineId, string targetId, double worldDay, string eventId, int nativeDelta, bool schemaReady)
+        {
+            if (nativeDelta == 0) return false;
+            if (!schemaReady) EnsureSocialReputationSchema(connection);
+            bool popularityChanged = RecomputeCourtPopularityReputations(connection, campaignId,
+                timelineId, targetId, worldDay, eventId + "|court_popularity");
+            if (popularityChanged)
+                ReconcileSocialRelationshipsForSubjects(connection, campaignId,
+                    timelineId, new[] { targetId }, worldDay, schemaReady);
+            return popularityChanged;
         }
 
         private static Dictionary<string, object> RetiredRelationshipMechanicResult(string feature)
@@ -810,13 +837,35 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         private static List<Dictionary<string, object>> EvaluateCompletedActionRelationships(Dictionary<string, object> payload)
         {
             List<Dictionary<string, object>> changes = new List<Dictionary<string, object>>();
-            if (IsPracticeDuelActionReport(payload)) return changes;
+            List<Dictionary<string, object>> directions = CompletedActionRelationshipDirections(payload);
+            if (directions.Count == 0) return changes;
+            List<int> nativeDeltas = new List<int>();
+            foreach (Dictionary<string, object> direction in directions)
+            {
+                Dictionary<string, object> evaluation = RelationshipEvaluateApi(direction);
+                int delta = ReadInt(evaluation, "nativeRelationDelta", 0);
+                if (delta != 0 && !ReadBool(evaluation, "idempotent", false)) nativeDeltas.Add(delta);
+            }
+            int sharedDelta = CompletedActionSharedDelta(nativeDeltas);
+            if (sharedDelta != 0)
+            {
+                changes.Add(new Dictionary<string, object> { ["subjectId"] = ReadString(directions[0], "subjectId", ""), ["targetId"] = ReadString(directions[0], "targetId", ""), ["delta"] = sharedDelta, ["eventId"] = "action_relationship_" + ReadString(directions[0], "actionId", "") });
+            }
+            return changes;
+        }
+
+        // Actor-toward-target first, then the reverse. Empty when the report has no
+        // relationship effect. A null timeline keeps the legacy "main" default.
+        private static List<Dictionary<string, object>> CompletedActionRelationshipDirections(Dictionary<string, object> payload, string timelineId = null)
+        {
+            List<Dictionary<string, object>> directions = new List<Dictionary<string, object>>();
+            if (IsPracticeDuelActionReport(payload)) return directions;
             string status = ReadString(payload, "status", "");
             string actorId = ReadFirstString(payload, "actorHeroStringId", "actorHeroId");
             string targetId = ReadFirstString(payload, "targetHeroStringId", "targetHeroId");
             if (!status.Equals("completed", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(actorId) || string.IsNullOrWhiteSpace(targetId) || actorId.Equals(targetId, StringComparison.OrdinalIgnoreCase))
             {
-                return changes;
+                return directions;
             }
 
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -824,19 +873,18 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             string actionType = ReadFirstString(payload, "type", "command");
             if (IsTemporaryPartyGuestLifecycleAction(CanonicalCommand(actionType)))
             {
-                return changes;
+                return directions;
             }
             string summary = FirstNonEmpty(ReadFirstString(payload, "message"), ReadFirstString(ReadDictionary(payload, "result"), "message", "debugMessage"), actionType + " completed");
             Dictionary<string, object> actor = ReadDictionary(payload, "actorHero") ?? new Dictionary<string, object>();
             Dictionary<string, object> target = ReadDictionary(payload, "targetHero") ?? new Dictionary<string, object>();
-            List<int> nativeDeltas = new List<int>();
             foreach (Tuple<string, string, Dictionary<string, object>, Dictionary<string, object>> pair in new[]
             {
                 Tuple.Create(actorId, targetId, actor, target),
                 Tuple.Create(targetId, actorId, target, actor)
             })
             {
-                Dictionary<string, object> evaluation = RelationshipEvaluateApi(new Dictionary<string, object>
+                Dictionary<string, object> direction = new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["eventId"] = "action_relationship_" + actionId + "_" + pair.Item1 + "_toward_" + pair.Item2,
@@ -850,19 +898,35 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
                     ["source"] = "completed_game_action",
                     ["actionId"] = actionId
-                });
-                int delta = ReadInt(evaluation, "nativeRelationDelta", 0);
-                if (delta != 0 && !ReadBool(evaluation, "idempotent", false)) nativeDeltas.Add(delta);
+                };
+                if (timelineId != null) direction["timelineId"] = timelineId;
+                directions.Add(direction);
             }
-            if (nativeDeltas.Count > 0)
+            return directions;
+        }
+
+        private static int CompletedActionSharedDelta(List<int> nativeDeltas) => nativeDeltas.Count == 0 ? 0
+            : Clamp((int)Math.Round(nativeDeltas.Average(), MidpointRounding.AwayFromZero), -25, 15);
+
+        // Opt-in terminal reports only: both directional evaluations and their
+        // idempotency rows join the caller's transaction. The caller has verified
+        // that no directional row predates the protocol, so none is idempotent here.
+        private static int EvaluateCompletedActionRelationshipsInTransaction(ReignDbConnection connection,
+            List<Dictionary<string, object>> directions, List<Dictionary<string, object>> evaluations)
+        {
+            List<int> nativeDeltas = new List<int>();
+            foreach (Dictionary<string, object> direction in directions)
             {
-                int sharedDelta = Clamp((int)Math.Round(nativeDeltas.Average(), MidpointRounding.AwayFromZero), -25, 15);
-                if (sharedDelta != 0)
-                {
-                    changes.Add(new Dictionary<string, object> { ["subjectId"] = actorId, ["targetId"] = targetId, ["delta"] = sharedDelta, ["eventId"] = "action_relationship_" + actionId });
-                }
+                Dictionary<string, object> evaluation = RelationshipEvaluateCore(connection, direction,
+                    ReadString(direction, "campaignId", "default"), ReadString(direction, "eventId", ""),
+                    ReadString(direction, "subjectId", ""), ReadString(direction, "targetId", ""));
+                if (ReadBool(evaluation, "idempotent", false))
+                    throw new InvalidOperationException("A protocol terminal report found a pre-existing directional relationship receipt.");
+                evaluations.Add(evaluation);
+                int delta = ReadInt(evaluation, "nativeRelationDelta", 0);
+                if (delta != 0) nativeDeltas.Add(delta);
             }
-            return changes;
+            return CompletedActionSharedDelta(nativeDeltas);
         }
 
         private static bool IsTemporaryPartyGuestLifecycleAction(string actionType)

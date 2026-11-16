@@ -60,6 +60,195 @@ namespace ReignBetaServer
             payload = NewContribution(payload, "two_gifts"); payload["playerText"] = "I give you 100 gold and I give you 50 coins.";
             var two = RunPlayerActionTurn(payload, () => throw new InvalidOperationException("Injected reply exception"));
             add("two_independent_intents_survive_exception", ReadDictionaryList(two, "queuedDialogueActions").Count == 2, two);
+            // Opt-in terminal report: interruption, exact replay, identity conflict and the staged action delta.
+            string protocolId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").FirstOrDefault(), "id", "");
+            var protocolRecord = ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "record");
+            string protocolActor = ReadString(protocolRecord, "actorHeroStringId", ""), protocolGeneration;
+            using (var connection = OpenCampaignConnection(campaign))
+                protocolGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+            Func<string, string, string> protocolReport = (player, message) => Json.Serialize(TestDict("campaignId", campaign,
+                "serverActionId", protocolId, "actionId", protocolId, "timelineId", "player_actions_timeline", "playerHeroStringId", player,
+                "sharedActivityGeneration", protocolGeneration, "status", "completed", "type", "RegularTransferGold", "message", message,
+                "actorHeroStringId", protocolActor, "targetHeroStringId", ReadString(protocolRecord, "targetHeroStringId", ""),
+                "termsHash", ReadString(protocolRecord, "termsHash", ""), "worldDay", 20d));
+            Func<string, string, Dictionary<string, object>> protocolEnvelope = (player, json) =>
+            {
+                Reign.Core.Contracts.Actions.TerminalActionReportProtocol.TryReportSha256(json, out string sha, out _);
+                return TestDict("schema", Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema, "campaignId", campaign,
+                    "timelineId", "player_actions_timeline", "playerHeroStringId", player, "generation", protocolGeneration, "actionId", protocolId,
+                    "termsHash", ReadString(protocolRecord, "termsHash", ""), "status", "completed", "reportJson", json, "reportSha256", sha);
+            };
+            string protocolJson = protocolReport(protocolActor, "A kind gift was handed over with thanks.");
+            Func<string, int> protocolCount = sql => { using (var c = OpenCampaignConnection(campaign)) return QuerySql(c, sql, TestDict("id", protocolId)).Count; };
+            const string directionalSql = "SELECT event_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';";
+            const string actionReceiptSql = "SELECT receipt_id FROM conversation_relationship_receipts WHERE source_turn_id=$id AND mode='completed_action' AND status='action_effect' AND severity_tier='routine';";
+            // Derived court-popularity metrics and dependent standing/reputation rows for the action pair.
+            var derivedArgs = TestDict("campaign", campaign, "actor", protocolActor, "target", ReadString(protocolRecord, "targetHeroStringId", ""));
+            const string derivedMetricSql = "SELECT subject_id,positive_count,negative_count,calculated_day FROM court_dynamic_reputation_metrics WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND domain='popularity' AND subject_id IN ($actor,$target) ORDER BY subject_id;";
+            Func<ReignDbConnection, string> derivedSnapshot = c => Json.Serialize(new object[] { QuerySql(c, derivedMetricSql, derivedArgs),
+                QuerySql(c, "SELECT subject_id,standing_value,revision FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id;", derivedArgs),
+                QuerySql(c, "SELECT subject_id,tag_id,status,reputation_value FROM character_reputations WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id,tag_id;", derivedArgs) });
+            Func<string> derivedCommitted = () => { using (var c = OpenCampaignConnection(campaign)) { EnsureSocialReputationSchema(c); EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
+            string derivedBefore = derivedCommitted();
+            int derivedMetricsBefore, derivedMetricsInTransaction = -1;
+            using (var c = OpenCampaignConnection(campaign)) derivedMetricsBefore = QuerySql(c, derivedMetricSql, derivedArgs).Count;
+            bool interrupted = false;
+            try
+            {
+                TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson), (step, c) =>
+                {
+                    if (step != 2) return;
+                    derivedMetricsInTransaction = QuerySql(c, derivedMetricSql, derivedArgs).Count(r => ReadDouble(r, "calculated_day", 0d) == 20d);
+                    throw new InvalidOperationException("Injected pre-commit failure.");
+                });
+            }
+            catch (InvalidOperationException) { interrupted = true; }
+            var afterInterrupt = ReadDurableConversationAction(campaign, protocolId);
+            add("terminal_report_interruption_rolls_back_everything", interrupted && !IsProtocolOwnedTerminalAction(afterInterrupt)
+                && !IsTerminalActionReportStatus(ReadString(afterInterrupt, "status", "")) && protocolCount(directionalSql) == 0 && protocolCount(actionReceiptSql) == 0, afterInterrupt);
+            add("terminal_report_interruption_rolls_back_derived_standing", derivedMetricsBefore == 0 && derivedMetricsInTransaction > 0
+                && derivedCommitted() == derivedBefore, TestDict("inTransaction", derivedMetricsInTransaction, "before", derivedBefore));
+            var changedType = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson.Replace("\"RegularTransferGold\"", "\"RegularDuelPlayer\"")));
+            add("terminal_report_changed_action_type_rejected", ReadString(changedType, "reason", "") == "action_type_mismatch"
+                && !IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, protocolId)) && protocolCount(directionalSql) == 0, changedType);
+            // Read-only preflight: the same predicates, distinct dispositions, no writes and no campaign creation.
+            Func<string, string, string, string, Dictionary<string, object>> preflight = (camp, id, gen, terms) => TerminalActionReportPreflightApi(
+                new Dictionary<string, string> { ["campaignId"] = camp, ["timelineId"] = "player_actions_timeline", ["playerHeroStringId"] = protocolActor,
+                    ["generation"] = gen, ["actionId"] = id, ["termsHash"] = terms });
+            string protocolTerms = ReadString(protocolRecord, "termsHash", ""), rowBeforePreflight = Json.Serialize(ReadDurableConversationAction(campaign, protocolId));
+            var eligible = preflight(campaign, protocolId, protocolGeneration, protocolTerms);
+            string absentCampaign = "player_actions_absent_" + Guid.NewGuid().ToString("N");
+            add("terminal_report_preflight_distinguishes_dispositions", ReadString(eligible, "disposition", "") == "eligible"
+                && ReadString(eligible, "schema", "") == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.PreflightSchema
+                && ReadString(eligible, "reportType", "") == "RegularTransferGold" && ReadString(eligible, "actionId", "") == protocolId
+                && ReadString(preflight(campaign, protocolId, "other_generation", protocolTerms), "disposition", "") == "stale"
+                && ReadString(preflight(campaign, protocolId, protocolGeneration, new string('0', 64)), "disposition", "") == "conflict"
+                && ReadString(preflight(campaign, "pa_absent_action", protocolGeneration, protocolTerms), "disposition", "") == "unknown"
+                && ReadString(preflight(campaign, "da_other_class", protocolGeneration, protocolTerms), "disposition", "") == "unknown"
+                && ReadString(preflight(absentCampaign, protocolId, protocolGeneration, protocolTerms), "disposition", "") == "unknown", eligible);
+            // A known row made ineligible by a foreign projection owner answers ineligible only for
+            // its exact current scope; stale or mismatched scope never permits legacy fallback.
+            Action<string, bool> foreignOwner = (id, present) => { using (var c = OpenCampaignConnection(campaign)) { EnsureRebellionSchema(c);
+                ExecuteSql(c, present ? @"INSERT INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
+second_kingdom_id,first_ruler_id,second_ruler_id,command,terms_json,terms_hash,status,created_day,updated_day,expires_day,queued_action_id)
+VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peace','{}','h','queued',20,20,30,$id);"
+                    : "DELETE FROM negotiated_action_drafts WHERE negotiation_id=$n AND campaign_id=$campaign AND queued_action_id=$id;",
+                    TestDict("n", "terminal_report_foreign_" + id, "campaign", campaign, "id", id)); } };
+            string foreignId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").ElementAtOrDefault(1), "id", "");
+            string foreignTerms = ReadString(ReadDictionary(ReadDurableConversationAction(campaign, foreignId), "record"), "termsHash", "");
+            foreignOwner(foreignId, true);
+            var foreignIneligible = preflight(campaign, foreignId, protocolGeneration, foreignTerms);
+            add("terminal_report_preflight_ineligible_requires_exact_current_scope", foreignId.Length > 0
+                && ReadString(foreignIneligible, "disposition", "") == "ineligible" && ReadString(foreignIneligible, "reason", "") == "foreign_projection_owner"
+                && ReadString(preflight(campaign, foreignId, "other_generation", foreignTerms), "disposition", "") == "stale"
+                && ReadString(preflight(campaign, foreignId, protocolGeneration, new string('0', 64)), "disposition", "") == "conflict", foreignIneligible);
+            foreignOwner(foreignId, false);
+            add("terminal_report_preflight_is_write_free", Json.Serialize(ReadDurableConversationAction(campaign, protocolId)) == rowBeforePreflight
+                && !ReignPostgreSqlStorage.CampaignExists(absentCampaign), null);
+            var protocolFirst = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
+            var protocolEffect = ReadDictionary(protocolFirst, "nativeEffect");
+            List<int> directionalDeltas;
+            using (var connection = OpenCampaignConnection(campaign))
+                directionalDeltas = QuerySql(connection, "SELECT native_delta FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';",
+                    TestDict("id", protocolId)).Select(r => ReadInt(r, "native_delta", 0)).Where(d => d != 0).ToList();
+            add("terminal_report_stages_one_isolated_action_delta", ReadString(protocolFirst, "disposition", "") == "accepted"
+                && ReadInt(protocolEffect, "delta", 0) != 0 && ReadInt(protocolEffect, "delta", 0) == CompletedActionSharedDelta(directionalDeltas)
+                && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1
+                && IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, protocolId)), protocolFirst);
+            // The retried first acceptance commits exactly one derived metric per changed target, at the report day.
+            List<string> derivedTargets;
+            List<Dictionary<string, object>> derivedMetrics;
+            using (var connection = OpenCampaignConnection(campaign))
+            {
+                derivedTargets = QuerySql(connection, "SELECT target_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%' AND native_delta<>0;",
+                    TestDict("id", protocolId)).Select(r => ReadString(r, "target_id", "")).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+                derivedMetrics = QuerySql(connection, derivedMetricSql, derivedArgs);
+            }
+            string derivedAfterFirst = derivedCommitted();
+            add("terminal_report_commits_one_set_of_derived_writes", derivedTargets.Count > 0
+                && derivedMetrics.Select(r => ReadString(r, "subject_id", "")).OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(derivedTargets)
+                && derivedMetrics.All(r => ReadDouble(r, "calculated_day", 0d) == 20d)
+                && ReadString(protocolFirst, "memoryProjectionStatus", "").Length > 0 && !protocolFirst.ContainsKey("projectionStatus"),
+                TestDict("targets", derivedTargets, "metrics", derivedMetrics));
+            // Action memory commits with projectedTs under the exact outbox row lock: one row per owner, stable IDs.
+            const string memorySql = "SELECT owner_id,memory_id FROM memories WHERE event_id='action_' || $id ORDER BY owner_id,memory_id;";
+            Func<ReignDbConnection, string> memoryIn = c => Json.Serialize(QuerySql(c, memorySql, TestDict("id", protocolId)));
+            Func<string> memoryRows = () => { using (var c = OpenCampaignConnection(campaign)) return memoryIn(c); };
+            Func<bool> onePerOwner = () => { using (var c = OpenCampaignConnection(campaign)) { var rows = QuerySql(c, memorySql, TestDict("id", protocolId));
+                return rows.Count > 0 && rows.Select(r => ReadString(r, "owner_id", "")).Distinct().Count() == rows.Count; } };
+            Func<bool> markerProjected = () => ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "terminalReport")?.ContainsKey("projectedTs") == true;
+            Action clearProjected = () => { using (var c = OpenCampaignConnection(campaign)) ExecuteSql(c,
+                "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedTs}')::text WHERE action_id=$id;", TestDict("id", protocolId)); };
+            Func<Action<ReignDbConnection>, bool> project = seam => ProjectAcceptedTerminalReport(campaign, protocolId, ReadString(protocolFirst, "reportSha256", ""),
+                protocolGeneration, TryParseJsonObject(protocolJson), protocolRecord, ReadString(protocolFirst, "authoritativeStatus", ""), seam);
+            string firstMemory = memoryRows();
+            bool repeatsCompleted = new[] { 0, 1 }.All(_ => ReadString(TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson)), "memoryProjectionStatus", "") == "completed");
+            add("terminal_report_exact_repeat_keeps_one_stable_memory_per_owner", ReadString(protocolFirst, "memoryProjectionStatus", "") == "completed"
+                && markerProjected() && onePerOwner() && repeatsCompleted && memoryRows() == firstMemory, firstMemory);
+            // A failure after the memory write but before projectedTs rolls both back and stays pending.
+            clearProjected();
+            bool rewrittenInTransaction = false;
+            bool failedProjection = project(c => { rewrittenInTransaction = memoryIn(c) != firstMemory; throw new InvalidOperationException("Injected pre-marker failure."); });
+            add("terminal_report_pre_marker_failure_rolls_back_memory", !failedProjection && rewrittenInTransaction
+                && memoryRows() == firstMemory && !markerProjected(), memoryRows());
+            bool resumed = project(null);
+            string resumedMemory = memoryRows();
+            add("terminal_report_resumed_projection_is_stable", resumed && markerProjected() && onePerOwner() && project(null)
+                && ReadString(TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson)), "memoryProjectionStatus", "") == "completed"
+                && memoryRows() == resumedMemory, resumedMemory);
+            // Concurrent exact projection: the second caller waits on the row lock, then sees projectedTs.
+            clearProjected();
+            string lockedMemory = "";
+            System.Threading.Tasks.Task<bool> concurrent = null;
+            bool lockHolder = project(c => { lockedMemory = memoryIn(c); concurrent = System.Threading.Tasks.Task.Run(() => project(null)); concurrent.Wait(250); });
+            bool waiter = concurrent != null && concurrent.Wait(30000) && concurrent.Result;
+            add("terminal_report_concurrent_projection_writes_once", lockHolder && waiter && markerProjected() && onePerOwner()
+                && lockedMemory.Length > 0 && memoryRows() == lockedMemory, TestDict("locked", lockedMemory, "committed", memoryRows()));
+            var protocolReplay =TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
+            add("terminal_report_exact_replay_leaves_derived_writes", derivedCommitted() == derivedAfterFirst, null);
+            add("terminal_report_exact_replay_reuses_receipt", ReadString(protocolReplay, "reason", "") == "exact_replay"
+                && ReadString(ReadDictionary(protocolReplay, "nativeEffect"), "receiptId", "") == ReadString(protocolEffect, "receiptId", "")
+                && ReadInt(ReadDictionary(protocolReplay, "nativeEffect"), "delta", 0) == ReadInt(protocolEffect, "delta", 0)
+                && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1, protocolReplay);
+            // A foreign projection owner appearing after acceptance cannot downgrade the protocol owner.
+            foreignOwner(protocolId, true);
+            var foreignReplay = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
+            var foreignOwned = preflight(campaign, protocolId, protocolGeneration, protocolTerms);
+            foreignOwner(protocolId, false);
+            add("terminal_report_accepted_owner_survives_later_foreign_owner", ReadString(foreignReplay, "reason", "") == "exact_replay"
+                && ReadString(foreignOwned, "disposition", "") == "accepted" && ReadString(foreignOwned, "reason", "") == "protocol_owned"
+                && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1, foreignReplay);
+            add("terminal_report_changed_payload_or_owner_conflicts",
+                ReadString(TerminalActionReportApi(protocolEnvelope(protocolActor, protocolReport(protocolActor, "A different result."))), "disposition", "") == "conflict"
+                && ReadString(TerminalActionReportApi(protocolEnvelope("intruder_hero", protocolReport("intruder_hero", "A kind gift was handed over with thanks."))), "disposition", "") == "conflict"
+                && ReadString(ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "terminalReport"), "sha256", "") == ReadString(protocolFirst, "reportSha256", ""), null);
+            var ownedPreflight = preflight(campaign, protocolId, protocolGeneration, protocolTerms);
+            add("terminal_report_preflight_reports_protocol_owner", ReadString(ownedPreflight, "disposition", "") == "accepted"
+                && ReadString(ownedPreflight, "reason", "") == "protocol_owned", ownedPreflight);
+            // A late legacy report of the same status is answered from the protocol row without projections.
+            var legacyLate = ReportAction(TestDict("campaignId", campaign, "serverActionId", protocolId, "status", "completed", "result", TestDict("message", "Late legacy report.")));
+            add("terminal_report_legacy_report_defers_to_protocol_owner", ReadString(legacyLate, "terminalReportOwner", "") == "protocol"
+                && ReadString(legacyLate, "status", "") == "completed" && !legacyLate.ContainsKey("memoryStore")
+                && ReadString(ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "report"), "message", "") == "A kind gift was handed over with thanks."
+                && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1, legacyLate);
+            // A legacy terminal winner cannot be upgraded into the protocol.
+            string legacyId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").ElementAtOrDefault(1), "id", "");
+            ReportAction(TestDict("campaignId", campaign, "serverActionId", legacyId, "status", "completed", "result", TestDict("message", "Legacy handover.")));
+            var legacyWinner = preflight(campaign, legacyId, protocolGeneration, ReadString(ReadDictionary(ReadDurableConversationAction(campaign, legacyId), "record"), "termsHash", ""));
+            add("terminal_report_preflight_keeps_legacy_winner", legacyId.Length > 0 && ReadString(legacyWinner, "disposition", "") == "conflict"
+                && ReadString(legacyWinner, "reason", "") == "legacy_terminal_status"
+                && !IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, legacyId)), legacyWinner);
+            var legacyOverwrite = ReadDurableConversationAction(campaign, protocolId); legacyOverwrite["report"] = TestDict("message", "Saved action result.");
+            SaveDurableConversationAction(campaign, legacyOverwrite);
+            add("terminal_report_evidence_survives_same_status_legacy_save", ReadString(ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "report"), "message", "")
+                == "A kind gift was handed over with thanks.", null);
+            Func<string, Dictionary<string, object>> protocolAck = ackGeneration => ConversationRelationshipNativeReceiptApi(TestDict("campaignId", campaign,
+                "receiptIds", new List<string> { ReadString(protocolEffect, "receiptId", "") }, "nativeReceipt", TestDict(
+                    "schema", "reign-native-relationship-receipt-v2", "subjectId", ReadString(protocolEffect, "subjectId", ""), "targetId", ReadString(protocolEffect, "targetId", ""),
+                    "priorNativeRelation", 0, "nativeRelation", ReadInt(protocolEffect, "delta", 0), "delta", ReadInt(protocolEffect, "delta", 0),
+                    "timelineId", "player_actions_timeline", "reportGeneration", ackGeneration, "reportSha256", ReadString(protocolFirst, "reportSha256", ""))));
+            add("terminal_report_ack_requires_generation_binding", !ReadBool(protocolAck("other_generation"), "ok", true)
+                && ReadBool(protocolAck(protocolGeneration), "ok", false), null);
             payload = NewContribution(payload, "refused_gift"); payload["playerText"] = "I give you 100 gold.";
             var refused = RunPlayerActionTurn(payload, () => TestDict("ok", true, "reply", "I refuse to accept your gold."));
             add("specific_gift_refusal_has_no_transfer", ReadDictionaryList(refused, "queuedDialogueActions").Count == 0, refused);
@@ -195,6 +384,9 @@ namespace ReignBetaServer
             catch (InvalidOperationException) { staleBatchRejected = true; }
             add("restored_campaign_rejects_pre_restore_action_publication", staleBatchRejected
                 && ReadDurableConversationAction(campaign, "da_stale_batch") == null, null);
+            var staleReplay = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
+            add("terminal_report_stale_generation_offers_no_effect", ReadString(staleReplay, "disposition", "") == "stale"
+                && ReadDictionary(staleReplay, "nativeEffect") == null && !ReadBool(protocolAck(protocolGeneration), "ok", true), staleReplay);
             var point = SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");
             point["timelineId"] = "player_actions_timeline";
             var registered = SaveSyncRegisterApi(point);

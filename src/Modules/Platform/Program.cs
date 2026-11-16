@@ -985,7 +985,10 @@ namespace ReignBetaServer
                             ["dataDir"] = DataDir,
                             ["processId"] = Process.GetCurrentProcess().Id,
                             ["port"] = ActiveServerPort,
-                            ["managedBy"] = "ReignServer"
+                            ["managedBy"] = "ReignServer",
+                            // Exact additive capability: the route, preflight and legacy guards are wired.
+                            [Reign.Core.Contracts.Actions.TerminalActionReportProtocol.HealthCapabilityField] =
+                                Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema
                         };
                     }
                     else if (request.Method == "POST" && request.Path.StartsWith("/chat-view/", StringComparison.Ordinal))
@@ -2518,6 +2521,14 @@ namespace ReignBetaServer
                     else if (request.Method == "POST" && request.Path == "/actions/report")
                     {
                         response = ReportAction(request.JsonBody);
+                    }
+                    else if (request.Method == "GET" && request.Path == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute)
+                    {
+                        response = TerminalActionReportPreflightApi(request.Query);
+                    }
+                    else if (request.Method == "POST" && request.Path == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute)
+                    {
+                        response = TerminalActionReportApi(request.JsonBody);
                     }
                     else if (request.Method == "POST" && request.Path == "/campaign-commands/report")
                     {
@@ -4064,7 +4075,9 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                 && ReadString(ReadDictionary(payload, "result"), "resultCode", "") == "practice_duel_completed";
         }
 
-        private static Dictionary<string, object> StoreActionResultMemory(Dictionary<string, object> payload, string source)
+        // existingConnection: the caller owns the open transaction (see StoreWorldMemoryEvent).
+        private static Dictionary<string, object> StoreActionResultMemory(Dictionary<string, object> payload, string source,
+            ReignDbConnection existingConnection = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -4106,7 +4119,7 @@ VALUES($comprehension_id,$event_id,$owner_id,$text,$stance,$confidence,$known_by
                 evt["timelineId"] = ReadString(payload, "timelineId", "");
                 evt["eventType"] = "practice_duel_completed";
             }
-            return StoreWorldMemoryEvent(evt, source);
+            return StoreWorldMemoryEvent(evt, source, existingConnection);
         }
 
         private static Dictionary<string, object> StoreTurnMemoryLayers(
@@ -21408,6 +21421,9 @@ The previous attempt did not complete a JSON object within its output budget.
 
             bool found = false;
             bool ignoredStatusRegression = false;
+            // A protocol terminal report (TerminalActionReportApi) owns its row: the legacy
+            // report returns that canonical status and writes no evidence, audit or projection.
+            bool protocolOwned = false;
             string authoritativeStatus = status;
             lock (FileLock)
             {
@@ -21418,6 +21434,13 @@ The previous attempt did not complete a JSON object within its output budget.
                     {
                         matchedRecord = ReadDictionary(row, "record") ?? new Dictionary<string, object>();
                         correlationId = FirstNonEmpty(correlationId, ReadString(row, "correlationId", ""), ReadString(matchedRecord, "correlationId", ""));
+                        found = true;
+                        if (IsProtocolOwnedTerminalAction(row))
+                        {
+                            protocolOwned = true;
+                            authoritativeStatus = status = ReadString(row, "status", "");
+                            break;
+                        }
                         status = NormalizeActionReportStatus(matchedRecord, payload,
                             reportedStatus);
                         authoritativeStatus = status;
@@ -21449,25 +21472,48 @@ The previous attempt did not complete a JSON object within its output budget.
                             authoritativeStatus = currentStatus;
                             ignoredStatusRegression = true;
                         }
-                        found = true;
                         SaveDurableConversationAction(campaignId, row);
+                        // The save refreshes row from a protocol winner that committed after the queue read.
+                        if (IsProtocolOwnedTerminalAction(row))
+                        {
+                            protocolOwned = true;
+                            authoritativeStatus = status = ReadString(row, "status", "");
+                        }
                         break;
                     }
                 }
 
-                WriteActionQueueUnlocked(campaignId, queue);
-                AppendJsonLineToPath(CampaignFile(campaignId, "actions", "actions.jsonl"), new Dictionary<string, object>
+                if (!protocolOwned)
                 {
-                    ["id"] = id,
-                    ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    ["campaignId"] = campaignId,
-                    ["status"] = status,
-                    ["report"] = payload
-                });
+                    WriteActionQueueUnlocked(campaignId, queue);
+                    AppendJsonLineToPath(CampaignFile(campaignId, "actions", "actions.jsonl"), new Dictionary<string, object>
+                    {
+                        ["id"] = id,
+                        ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                        ["campaignId"] = campaignId,
+                        ["status"] = status,
+                        ["report"] = payload
+                    });
+                }
             }
 
             correlationId = FirstNonEmpty(correlationId, ReadFirstString(ReadDictionary(payload, "result"), "correlationId"));
-            LogOperational("action.report", new Dictionary<string, object> { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found });
+            LogOperational("action.report", new Dictionary<string, object> { ["campaignId"] = campaignId, ["correlationId"] = correlationId, ["id"] = id, ["status"] = status, ["reportedStatus"] = reportedStatus, ["found"] = found, ["protocolOwned"] = protocolOwned });
+            if (protocolOwned)
+            {
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = true,
+                    ["campaignId"] = campaignId,
+                    ["correlationId"] = correlationId,
+                    ["id"] = id,
+                    ["status"] = authoritativeStatus,
+                    ["reportedStatus"] = reportedStatus,
+                    ["found"] = true,
+                    ["ignoredStatusRegression"] = true,
+                    ["terminalReportOwner"] = "protocol"
+                };
+            }
             Dictionary<string, object> result = ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
             List<string> reportErrors = new List<string>();
             string debugMessage = ReadFirstString(result, "debugMessage", "DebugMessage", "message", "Message");
@@ -27985,7 +28031,9 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             bool campaignUpload = request.Method == "POST" && requestPath.Equals("/api/campaigns/import", StringComparison.OrdinalIgnoreCase)
                 && !request.ContentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase);
             long limit = campaignUpload ? IngressMaxCampaignUploadBytes
-                : requestPath.Equals("/api/support-bundle", StringComparison.OrdinalIgnoreCase) ? IngressMaxSupportBundleBytes : IngressMaxJsonBodyBytes;
+                : requestPath.Equals("/api/support-bundle", StringComparison.OrdinalIgnoreCase) ? IngressMaxSupportBundleBytes
+                : requestPath == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute
+                    ? Reign.Core.Contracts.Actions.TerminalActionReportProtocol.MaxRequestBodyBytes : IngressMaxJsonBodyBytes;
             if (bodyLength > limit) throw new HttpIngressException(413, "Request body is too large.", requestPath, "body_limit");
             if (bodyLength == 0)
             {
