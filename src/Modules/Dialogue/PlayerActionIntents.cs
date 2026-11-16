@@ -639,14 +639,17 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             ReadString(stored, "fingerprint", "") == termsHash && ReadString(record, "termsHash", "") == termsHash
             && ReadString(stored, "timeline_id", "") == timeline && ReadString(record, "actorHeroStringId", "") == player;
 
-        // The client reports ReignWorldActionType.ToString() parsed from the record's
-        // command (no type/typeValue is published). Bind it exactly so a changed type
-        // cannot alter relationship exclusions, duel handling or memory adjudication.
+        // The client reports ReignWorldActionType.ToString() for the record's exact transfer
+        // command. NormalizeActionCommand stores that same mapped name as type; older rows
+        // carry the command only. Any other stored type, or any typeValue (which the client
+        // prefers over both), is never accepted. Bind it exactly so a changed type cannot
+        // alter relationship exclusions, duel handling or memory adjudication.
         private static string TerminalReportExpectedType(Dictionary<string, object> record)
         {
             string command = ReadString(record, "command", "");
-            return record == null || record.ContainsKey("type") || record.ContainsKey("typeValue") ? ""
-                : command == "transfer_gold" ? "RegularTransferGold" : command == "transfer_item" ? "RegularTransferItem" : "";
+            if (record == null || record.ContainsKey("typeValue") || (command != "transfer_gold" && command != "transfer_item")) return "";
+            string expected = MapCommandToActionType(command);
+            return !record.TryGetValue("type", out object stored) || (stored is string type && type == expected) ? expected : "";
         }
 
         // Protected read-only preflight on the same versioned path. It answers, before any

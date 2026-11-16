@@ -500,7 +500,9 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && ReadString(viewDescriptor, "sessionId", "") == "accepted_unit_session" && ReadString(viewDescriptor, "timelineId", "") == "agency_timeline"
                     && ReadString(viewDescriptor, "restoreGeneration", "") == generation
                     && ReadString(viewDescriptor, "textSha256", "") == ConversationExactTextHash(view.Reply)
-                    && viewReplay != null && Json.Serialize(viewReplay) == Json.Serialize(viewDescriptor), viewDescriptor);
+                    // The replay is read back from JSONB, which reorders object keys; compare semantically
+                    // (keys sorted, values and array order kept exactly).
+                    && viewReplay != null && CanonicalJson(viewReplay) == CanonicalJson(viewDescriptor), viewDescriptor);
                 Dictionary<string, object> Ack(Dictionary<string, object> descriptor, string field = null, string value = null)
                 {
                     var body = TestDict("schema", IndividualViewInsertionAckSchema);
