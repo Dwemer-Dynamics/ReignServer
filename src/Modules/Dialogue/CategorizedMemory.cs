@@ -1011,9 +1011,12 @@ WHERE session_id=$id;", new Dictionary<string, object>
             }
         }
 
+        private static void LockConversationSourceSession(ReignDbConnection connection, string sessionId) =>
+            ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "conversation_source:" + sessionId));
+
         private static void LockConversationSourcePublication(ReignDbConnection connection, string sessionId)
         {
-            ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));", TestDict("key", "conversation_source:" + sessionId));
+            LockConversationSourceSession(connection, sessionId);
             if (!string.IsNullOrWhiteSpace(_playerActionGeneration))
             {
                 var current = QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single();

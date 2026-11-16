@@ -299,11 +299,15 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             // Absent prerequisites mean no descriptor can exist; an acknowledgment never creates them.
             if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => TableExists(connection, table)))
                 return Reply("unknown", "no_view_insertion_descriptor");
-            // Lock order matches source publication (source turn, then the restore fence, then
-            // the unit) and the durable source readers (turn first). The share lock is held
-            // through commit, so editor/source rewrites of this turn wait or are seen here.
-            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id FOR SHARE;",
-                TestDict("id", ack["sourceTurnId"])).FirstOrDefault();
+            // A publisher takes this session lock first, and its duplicate insert-or-ignore can
+            // still bump the restore fence by statement trigger before it rewrites existing source
+            // rows, so it may hold the fence while waiting on this turn. Taking the same session
+            // lock first serializes with it; the exact-replay shortcut runs only after both row
+            // locks, so it cannot avoid the inversion. Then source turn before fence, as the
+            // direct editor update trigger orders them; the share lock is held through commit.
+            LockConversationSourceSession(connection, ack["sessionId"]);
+            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session FOR SHARE;",
+                TestDict("id", ack["sourceTurnId"], "session", ack["sessionId"])).FirstOrDefault();
             string current = ReadString(QuerySql(connection,
                 "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
             var stored = QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
