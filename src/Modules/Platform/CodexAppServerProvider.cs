@@ -132,6 +132,38 @@ namespace ReignBetaServer
             return NormalizeChatProviderProfiles(settings) || retiredMemoryChanged || changed;
         }
 
+        // Settings that choose a process image or its environment (Codex app-server/schema/version launches, Codex image
+        // jobs, the native portrait generator). An HTTP save may keep the stored value or return to the official default;
+        // any other value is operator-owned and is written to settings.json outside the HTTP API. Every launch site reads
+        // the stored settings, so guarding this single write path covers them all.
+        private static readonly (string Key, string Default, string Label)[] OperatorOwnedProcessSettings =
+        {
+            ("codexExecutable", "codex", "Codex executable"), ("codexHome", "", "CODEX_HOME"),
+            ("portraitNativeSourceGeneratorPath", "", "native portrait generator path")
+        };
+
+        private static string OperatorOwnedProcessSettingRefusal(Dictionary<string, object> stored, Dictionary<string, object> incoming)
+        {
+            if (incoming == null) return null;
+            var refused = new List<string>();
+            foreach (var (key, fallback, label) in OperatorOwnedProcessSettings)
+            {
+                if (!incoming.TryGetValue(key, out object value)) continue;
+                string requested = value == null ? "" : value is string text ? text.Trim() : "\u0000";
+                string current = ReadString(stored, key, fallback).Trim();
+                if (fallback.Length > 0)
+                {
+                    if (requested.Length == 0) requested = fallback;
+                    if (current.Length == 0) current = fallback;
+                }
+                if (requested != current && requested != fallback) refused.Add(label + " (" + key + ")");
+            }
+            if (refused.Count == 0) return null;
+            return "Not saved: " + string.Join(", ", refused) + " can only be set offline. "
+                + "Reload to keep the current value or clear the field for the default. "
+                + "To set it: sudo reignctl stop, edit " + SettingsPath + ", then sudo reignctl start.";
+        }
+
         private static bool UsesCodexSubscription(Dictionary<string, object> settings)
         {
             return NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider)) == CodexSubscriptionProvider;

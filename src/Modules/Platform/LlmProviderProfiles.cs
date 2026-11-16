@@ -95,8 +95,29 @@ namespace ReignBetaServer
             return provider == NanoGptProvider || provider == OpenRouterProvider || provider == OllamaCloudProvider;
         }
 
+        // Outbound provider URLs are absolute http(s) with a host and no embedded credentials; anything else (file:, ftp:,
+        // userinfo) is never handed to the transport. Plain HTTP stays valid for local/private OpenAI-compatible servers.
+        private static bool IsDispatchableProviderUrl(string value) =>
+            Uri.TryCreate((value ?? "").Trim(), UriKind.Absolute, out Uri uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            && string.IsNullOrEmpty(uri.UserInfo) && !string.IsNullOrEmpty(uri.Host);
+
+        // Named providers always use their fixed URL. The custom endpoint may be overridden per request; a stored key then
+        // follows only a same-origin override, while an explicit one-off payload key goes where the caller sent it.
+        // ChatWithLlm refuses an override that would rely on the saved key elsewhere (StoredKeyForeignDestination) and
+        // ProviderSecret withholds it as well; a bound key keeps its own global_key_unavailable refusal.
         private static string LlmRequestApiUrl(Dictionary<string, object> settings, Dictionary<string, object> payload) =>
             IsNamedLlmApiProvider(settings) ? LlmApiUrl(settings) : ReadString(payload, "apiUrl", LlmApiUrl(settings));
+
+        // True when the request carries no key of its own and would otherwise use the slot's saved, unbound key at a
+        // destination outside that key's origin. Empty saved keys (deliberately keyless endpoints) never match.
+        private static bool StoredKeyForeignDestination(Dictionary<string, object> settings, Dictionary<string, object> payload, string apiUrl)
+        {
+            if (UsesCodexSubscription(settings) || (payload != null && payload.ContainsKey("apiKey"))) return false;
+            string slot = LlmApiKeySlot(settings);
+            return !HasGlobalKeyBindingEntry(settings, slot) && ReadString(settings, slot, "").Length > 0
+                && !LocalKeyDestinationAllowed(settings, slot, new[] { apiUrl });
+        }
 
         private static string LlmRequestApiKey(Dictionary<string, object> settings, Dictionary<string, object> payload)
             => ResolveLlmRequestApiKey(settings, payload, out _);
