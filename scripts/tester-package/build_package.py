@@ -22,6 +22,19 @@ CLIENT_DLLS={'ArenaOverhaul.1.4.6.dll','JpegLibrary.dll','Reign.Core.Contracts.d
              'System.Buffers.dll','System.Memory.dll','System.Runtime.CompilerServices.Unsafe.dll'}
 HELPER_FILES={'Bannerlord.NativeCharacterImageGenerator.App.exe','Bannerlord.NativeCharacterImageGenerator.runtimeconfig.json',
               'Bannerlord.NativePortraitRenderHost.exe','Bannerlord.NativePortraitRenderHost.exe.config'}
+# Reference outputs of separately installed modules; the release lock must name each module, and none is bundled.
+EXTERNAL_DLLS={'Bannerlord.ButterLib.dll':'Bannerlord.ButterLib'}
+
+def select_client_dlls(names, lock):
+    """Return the exact bundled client DLL set; refuse unknown, case-varied, unlocked external or missing names."""
+    if lock.get('schema')!='reign-external-dependencies-v1': raise ValueError('Unsupported external dependency lock')
+    modules={e.get('id') for e in lock.get('artifacts',[]) if e.get('role')=='bannerlord-module'}
+    selected=set()
+    for name in names:
+        if name in CLIENT_DLLS: selected.add(name)
+        elif name not in EXTERNAL_DLLS or EXTERNAL_DLLS[name] not in modules: raise ValueError('Unexpected client assembly: '+name)
+    if selected!=CLIENT_DLLS: raise ValueError('Missing required client assembly')
+    return selected
 
 def sha(path):
     with Path(path).open('rb') as stream:
@@ -155,6 +168,12 @@ def assemble(args):
     for name in ('Prepare-MemorySelection.py','Prepare-LinuxRuntime.py'):
         if image.get('preparationSha256',{}).get(name)!=sha(server/'scripts'/name):
             raise ValueError('Dependency image preparation source differs')
+    artifact = Path(report['ArtifactRoot'])
+    hashes = report['DeploymentArtifactHashes']
+    if 'release/dependencies.lock.json' not in selected_sources: raise ValueError('Untracked release input')
+    client_dlls=select_client_dlls([PurePosixPath(n).name for n in hashes
+        if PurePosixPath(n).parent.as_posix()=='client/out' and PurePosixPath(n).suffix.lower()=='.dll'],
+        read(server/'release/dependencies.lock.json'))
     if args.output.exists():
         raise ValueError('Output directory already exists; preserve earlier candidate')
     args.output.mkdir(parents=True)
@@ -169,8 +188,6 @@ def assemble(args):
         if relative.startswith(CONTENT) or relative in ('SubModule.xml', 'PortraitCache/shared-portrait-inventory.json'):
             a.copy(workspace / name, 'ReignBeta/' + relative)
     inventory_check(target / 'ReignBeta/PortraitCache/_shared', read(target / 'ReignBeta/PortraitCache/shared-portrait-inventory.json'))
-    artifact = Path(report['ArtifactRoot'])
-    hashes = report['DeploymentArtifactHashes']
     for name, digest in hashes.items():
         p = PurePosixPath(name)
         if name.startswith('client/out/native-portrait-generator/'):
@@ -178,7 +195,7 @@ def assemble(args):
                 raise ValueError('Unexpected Windows helper artifact')
             a.copy(artifact / name, 'portrait-helper/' + name.removeprefix('client/out/native-portrait-generator/'), digest)
         elif p.parent.as_posix() == 'client/out' and p.suffix.lower() == '.dll':
-            if p.name not in CLIENT_DLLS: raise ValueError('Unexpected client assembly: '+p.name)
+            if p.name not in client_dlls: continue  # preflight admitted only a locked external module here
             a.copy(artifact / name, 'ReignBeta/bin/Win64_Shipping_Client/' + p.name, digest)
         elif name in ('client/out/.version.txt', 'client/out/.version_number.txt'):
             a.copy(artifact / name, 'ReignBeta/' + p.name, digest)
