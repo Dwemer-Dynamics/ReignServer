@@ -520,8 +520,11 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                 EnsureCourtSocialReputationSchema(connection);
                 using (var transaction = connection.BeginTransaction())
                 {
+                    // The receipt/memory triggers later UPDATE this row; a shared lock here could be held
+                    // by a second writer queued on the outbox row and deadlock that upgrade. Take it once,
+                    // still before the outbox row, in the mode the trigger needs.
                     string current = ReadString(QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
+                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
                     var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                         TestDict("id", actionId)).FirstOrDefault();
                     var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
@@ -781,8 +784,9 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                 using (var connection = OpenCampaignConnection(campaign))
                 using (var transaction = connection.BeginTransaction())
                 {
+                    // Same order and mode as acceptance: the memory trigger updates this row.
                     string current = ReadString(QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
+                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
                     var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                         TestDict("id", actionId)).FirstOrDefault();
                     var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");

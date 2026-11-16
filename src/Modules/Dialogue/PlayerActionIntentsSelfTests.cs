@@ -224,6 +224,39 @@ VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peac
             bool waiter = concurrent != null && concurrent.Wait(30000) && concurrent.Result;
             add("terminal_report_concurrent_projection_writes_once", lockHolder && waiter && markerProjected() && onePerOwner()
                 && lockedMemory.Length > 0 && memoryRows() == lockedMemory, TestDict("locked", lockedMemory, "committed", memoryRows()));
+            // Generation upgrade under contention: a writer holds the generation shared and the outbox row, a
+            // projection queues behind it, then the holder's memory trigger updates the generation row. A
+            // projection that queued on the outbox while holding the generation shared deadlocks that upgrade.
+            clearProjected();
+            System.Threading.Tasks.Task<bool> queued = null;
+            bool queuedObserved = false, holderUpgraded = false;
+            string holderError = "";
+            using (var c = OpenCampaignConnection(campaign))
+            using (var transaction = c.BeginTransaction())
+            {
+                Func<long> revision = () => ReadLong(QuerySql(c, "SELECT source_revision FROM memory_precision_state WHERE state_id='current';").Single(), "source_revision", 0);
+                QuerySql(c, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;");
+                QuerySql(c, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", protocolId));
+                long revisionBefore = revision();
+                queued = System.Threading.Tasks.Task.Run(() => project(null));
+                // Proceed only once the projection is actually blocked by this transaction.
+                for (int i = 0; i < 300 && !queuedObserved && !queued.IsCompleted; i++)
+                {
+                    queuedObserved = ReadLong(QuerySql(c, "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid));").Single(), "n", 0) > 0;
+                    if (!queuedObserved) System.Threading.Thread.Sleep(50);
+                }
+                try
+                {
+                    // A statement trigger fires with zero rows: the real memory trigger upgrades the generation row.
+                    ExecuteSql(c, "DELETE FROM memories WHERE false;");
+                    holderUpgraded = revision() > revisionBefore;
+                    transaction.Commit();
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { holderUpgraded = false; holderError = ex.GetType().Name; }
+            }
+            bool queuedProjected = queued != null && queued.Wait(30000) && queued.Result;
+            add("terminal_report_queued_projection_never_blocks_generation_upgrade", queuedObserved && holderUpgraded && queuedProjected
+                && markerProjected() && onePerOwner(), TestDict("queued", queuedObserved, "upgraded", holderUpgraded, "projected", queuedProjected, "error", holderError));
             var protocolReplay =TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
             add("terminal_report_exact_replay_leaves_derived_writes", derivedCommitted() == derivedAfterFirst, null);
             add("terminal_report_exact_replay_reuses_receipt", ReadString(protocolReplay, "reason", "") == "exact_replay"
