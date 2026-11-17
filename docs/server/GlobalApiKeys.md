@@ -27,6 +27,15 @@ Each outbound request resolves its slot in this order:
 A bound or automatic global key that cannot be resolved (DwemerDistro stopped, key removed or changed) refuses the
 request with a fixed error before anything is sent; it never falls back to sending without a key.
 
+When the store's status cannot be read (for example DwemerDistro stopped, or Global API Keys not set up), no automatic key
+can be chosen, so there is nothing to refuse: an unbound slot without a Reign-only key goes straight to step 4. Features that
+need a key show their usual missing-key message, and the custom endpoint (`apiKey`) is called without a key, exactly as a
+custom endpoint saved with no key is. Only a key that was chosen (bound, or automatic from a readable status) and then
+fails to resolve is refused. Because status results (failures included) are kept for 5 seconds, a just-stopped DwemerDistro
+still refuses an automatic key until the cached status expires; after that the slot is keyless, and after a restart it
+stays keyless for up to 5 more seconds. If a custom endpoint must never be called without a key, bind its global key or
+save a Reign-only key for it.
+
 The store's status metadata (key ids, providers, origins, labels, previews and the provider catalog, never a value) is
 kept in memory for 5 seconds and shared by every presence check and automatic choice; failures are kept for the same
 time. Concurrent requests wait for the single status call in flight (bounded by its 15-second deadline) instead of
