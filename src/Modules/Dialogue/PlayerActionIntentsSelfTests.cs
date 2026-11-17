@@ -165,7 +165,195 @@ VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peac
             foreignOwner(foreignId, false);
             add("terminal_report_preflight_is_write_free", Json.Serialize(ReadDurableConversationAction(campaign, protocolId)) == rowBeforePreflight
                 && !ReignPostgreSqlStorage.CampaignExists(absentCampaign), null);
-            var protocolFirst = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
+            // FileLock contention on the real first acceptance. Once the acceptance holds its
+            // generation and outbox row locks (seam 0), a peer takes FileLock and makes an actual
+            // durable publication, which queues behind that transaction. A whoremonger source on
+            // the target's standing plus a spouse profile makes the pair resolution read
+            // profile.json; the baseline read it under FileLock with those row locks held, so the
+            // acceptance waited on the peer while the peer waited on the acceptance. Waits are
+            // bounded: if evaluation stalls, a watchdog cancels only the peer's blocked statement
+            // (through a metadata connection, never FileLock), the peer releases FileLock, and the
+            // acceptance finishes late with the assertion failed.
+            string pairTarget = ReadString(protocolRecord, "targetHeroStringId", "");
+            string profilePath = CharacterFile(campaign, pairTarget, "profile.json");
+            string originalProfile;
+            lock (FileLock) originalProfile = System.IO.File.Exists(profilePath) ? System.IO.File.ReadAllText(profilePath) : null;
+            var spouseProfile = ReadJsonObject(profilePath); spouseProfile["spouseId"] = protocolActor;
+            WriteJsonObject(profilePath, spouseProfile);
+            var standingKey = TestDict("campaign", campaign, "timeline", "player_actions_timeline", "subject", pairTarget);
+            Dictionary<string, object> priorStanding, ordinaryStanding;
+            using (var c = OpenCampaignConnection(campaign))
+            {
+                EnsureSocialReputationSchema(c);
+                priorStanding = QuerySql(c, @"SELECT standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts,calculation_status,last_error
+FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey).FirstOrDefault();
+                ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
+VALUES($campaign,$timeline,$subject,-5,$sources,1,1,20,$ts) ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
+standing_value=-5,sources_json=$sources,revision=character_public_standing.revision+1,calculated_revision=character_public_standing.revision+1,updated_ts=$ts;",
+                    new Dictionary<string, object>(standingKey) { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                        ["sources"] = Json.Serialize(new List<Dictionary<string, object>> { TestDict("sourceType", "rumor", "tagId", "whoremonger",
+                            "rawValue", -5, "effectiveContribution", -5d, "sourceId", "filelock_fixture") }) });
+                // The ordinary reader, outside any snapshot scope, reads the same profiles from disk.
+                ordinaryStanding = ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", protocolActor, pairTarget);
+            }
+            const string peerActionId = "da_filelock_peer";
+            var peerRow = TestDict("id", peerActionId, "campaignId", campaign, "status", "queued", "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                "record", TestDict("serverActionId", peerActionId, "actionId", peerActionId, "campaignId", campaign, "source", "dialogue_auto_commit",
+                    "command", "accept_temporary_party_guest", "actorHeroStringId", "npc_batch", "targetHeroStringId", "player_batch",
+                    "termsHash", "fixture_terms", "termsJson", Json.Serialize(TestDict("timelineId", "player_actions_timeline"))));
+            var peerHolds = new System.Threading.ManualResetEventSlim();
+            var evaluated = new System.Threading.ManualResetEventSlim();
+            System.Threading.Tasks.Task peer = null, watchdog = null;
+            bool peerQueued = false, peerQueuedAtCommit = false, fileLockHeldByPeer = false, unsnappedRefused = false, watchdogFired = false;
+            Dictionary<string, object> protocolFirst = null, snapshotStanding = null, peerPublication = null, chemistryAtEvaluation = null;
+            string peerError = "", acceptanceError = "", watchdogError = "", restoreError = "";
+            int peerPid = 0, watchdogCancelled = 0;
+            // Backends currently waiting on a lock held by this connection's backend. pg_locks
+            // and pg_blocking_pids are read live on every call; pg_stat_activity is a snapshot
+            // fixed at its first read in a transaction and would miss a peer backend opened later.
+            Func<ReignDbConnection, List<int>> blockedWaiters = c => QuerySql(c,
+                "SELECT DISTINCT pid FROM pg_locks WHERE NOT granted AND pg_backend_pid()=ANY(pg_blocking_pids(pid));")
+                .Select(r => ReadInt(r, "pid", 0)).Where(pid => pid != 0).ToList();
+            try
+            {
+                protocolFirst = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson), (step, c) =>
+                {
+                    if (step == 0)
+                    {
+                        int acceptancePid = ReadInt(QuerySql(c, "SELECT pg_backend_pid() AS pid;").Single(), "pid", 0);
+                        peer = System.Threading.Tasks.Task.Run(() =>
+                        {
+                            lock (FileLock)
+                            {
+                                peerHolds.Set();
+                                try
+                                {
+                                    peerPublication = PublishConversationActionBatch(campaign, TestDict("campaignId", campaign,
+                                        "timelineId", "player_actions_timeline", "sceneTurnId", "filelock_peer"),
+                                        TestDict("ok", true, "reply", "Agreed."), new List<Dictionary<string, object>> { peerRow }, protocolGeneration);
+                                }
+                                catch (Exception ex) { peerError = ex.GetType().Name; }
+                            }
+                        });
+                        try
+                        {
+                            // Continue only once the peer, holding FileLock, is the one backend queued
+                            // behind this transaction; that exact pid is the only one ever cancelled.
+                            if (peerHolds.Wait(10000))
+                                for (int i = 0; i < 400 && !peerQueued && !peer.IsCompleted; i++)
+                                {
+                                    List<int> waiters = blockedWaiters(c);
+                                    if (waiters.Count == 1) { peerPid = waiters[0]; peerQueued = true; }
+                                    else peer.Wait(25);
+                                }
+                        }
+                        finally
+                        {
+                            // Started whenever the peer exists, even if the handshake failed. Bounded:
+                            // one 10 s wait, then at most one cancel of the identified peer backend while
+                            // it is still waiting on this acceptance. An unidentified peer is never
+                            // cancelled; its blocked statement is then bounded by its command timeout.
+                            int knownPeer = peerPid;
+                            watchdog = System.Threading.Tasks.Task.Run(() =>
+                            {
+                                try
+                                {
+                                    if (evaluated.Wait(10000)) return;
+                                    watchdogFired = true;
+                                    if (knownPeer == 0) return;
+                                    using (var meta = ReignPostgreSqlStorage.OpenMetadataConnection())
+                                        watchdogCancelled = QuerySql(meta, @"SELECT pg_cancel_backend(pid) AS cancelled FROM (SELECT DISTINCT pid FROM pg_locks
+WHERE pid=$peer AND NOT granted AND $acceptance=ANY(pg_blocking_pids(pid))) AS waiting;",
+                                            TestDict("peer", knownPeer, "acceptance", acceptancePid)).Count(r => ReadBool(r, "cancelled", false));
+                                }
+                                catch (Exception ex) { watchdogError = ex.GetType().Name; }
+                            });
+                        }
+                    }
+                    else if (step == 1)
+                    {
+                        evaluated.Set();
+                        bool entered = System.Threading.Monitor.TryEnter(FileLock);
+                        if (entered) System.Threading.Monitor.Exit(FileLock);
+                        fileLockHeldByPeer = !entered;
+                        // The pair row exactly as the production evaluation just wrote it in this
+                        // transaction, before reputation recompute can change the target's standing.
+                        chemistryAtEvaluation = QuerySql(c, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
+effective_affinity_a_to_b,effective_affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair;",
+                            TestDict("pair", AmbientPairKey(protocolActor, pairTarget))).FirstOrDefault();
+                        // Inside the acceptance scope the pair resolves from its snapshot; any other hero is refused.
+                        snapshotStanding = ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", protocolActor, pairTarget);
+                        try { ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", "player_actions_unsnapped_observer", pairTarget); }
+                        catch (InvalidOperationException) { unsnappedRefused = true; }
+                    }
+                    else peerQueuedAtCommit = peerPid != 0 && blockedWaiters(c).Contains(peerPid);
+                });
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException)) { acceptanceError = ex.GetType().Name; }
+            finally
+            {
+                // Release and join every worker before restoring the fixture inputs, whatever happened.
+                evaluated.Set();
+                Func<System.Threading.Tasks.Task, bool> joinWorker = task =>
+                {
+                    try { return task == null || task.Wait(30000); }
+                    catch (AggregateException) { peerError = FirstNonEmpty(peerError, "worker_faulted"); return true; } // Completed.
+                };
+                bool workersJoined = joinWorker(peer) & joinWorker(watchdog);
+                if (!workersJoined) peerError = FirstNonEmpty(peerError, "worker_not_joined");
+                else { peerHolds.Dispose(); evaluated.Dispose(); }
+                // Never wait unboundedly on FileLock here: a peer that failed to join may still hold it.
+                if (System.Threading.Monitor.TryEnter(FileLock, 30000))
+                    try
+                    {
+                        if (originalProfile == null) System.IO.File.Delete(profilePath);
+                        else System.IO.File.WriteAllText(profilePath, originalProfile);
+                    }
+                    finally { System.Threading.Monitor.Exit(FileLock); }
+                else restoreError = "profile_restore_skipped_file_lock_busy";
+                using (var c = OpenCampaignConnection(campaign))
+                    if (priorStanding == null)
+                        ExecuteSql(c, "DELETE FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey);
+                    else ExecuteSql(c, @"UPDATE character_public_standing SET standing_value=$value,sources_json=$priorSources,revision=$revision,
+calculated_revision=$calculated,last_changed_day=$day,updated_ts=$updated,calculation_status=$status,last_error=$error
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
+                        new Dictionary<string, object>(standingKey) { ["value"] = ReadInt(priorStanding, "standing_value", 0),
+                            ["priorSources"] = ReadString(priorStanding, "sources_json", "[]"), ["revision"] = ReadInt(priorStanding, "revision", 1),
+                            ["calculated"] = ReadInt(priorStanding, "calculated_revision", 1), ["day"] = ReadDouble(priorStanding, "last_changed_day", 0d),
+                            ["updated"] = ReadLong(priorStanding, "updated_ts", 0), ["status"] = ReadString(priorStanding, "calculation_status", "ready"),
+                            ["error"] = ReadString(priorStanding, "last_error", "") });
+            }
+            add("terminal_report_acceptance_never_waits_on_file_lock_holder", peerQueued && peerQueuedAtCommit && fileLockHeldByPeer
+                && !watchdogFired && peerError.Length == 0 && acceptanceError.Length == 0 && watchdogError.Length == 0 && restoreError.Length == 0
+                && ReadString(protocolFirst, "reason", "") == "first_acceptance" && ReadInt(ReadDictionary(protocolFirst, "nativeEffect"), "delta", 0) != 0
+                && IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, protocolId)) && protocolCount(actionReceiptSql) == 1
+                && ReadBool(peerPublication, "committed", false) && ReadInt(peerPublication, "createdCount", 0) == 1
+                && ReadDurableConversationAction(campaign, peerActionId) != null,
+                TestDict("peerQueued", peerQueued, "peerQueuedAtCommit", peerQueuedAtCommit, "fileLockHeldByPeer", fileLockHeldByPeer,
+                    "watchdogFired", watchdogFired, "watchdogCancelled", watchdogCancelled, "watchdogError", watchdogError,
+                    "peerPid", peerPid, "peerError", peerError, "acceptanceError", acceptanceError, "restoreError", restoreError,
+                    "acceptance", protocolFirst, "peerPublication", peerPublication));
+            // Production consumed the snapshot: ApplyAtomicDirectionalRelationshipDelta wrote each
+            // effective column as Clamp(affinity + ResolveObserverPublicStanding(row hero A/B).value)
+            // inside the file scope. The actor->target column therefore carries the stored -5 plus the
+            // spouse adjustment that only the snapshotted profile.json can supply in that scope (a
+            // missing snapshot entry throws); without the adjustment it would be affinity - 5.
+            bool actorIsA = ReadString(chemistryAtEvaluation, "hero_a_id", "").Equals(protocolActor, StringComparison.OrdinalIgnoreCase);
+            int pairAffinity = ReadInt(chemistryAtEvaluation, actorIsA ? "affinity_a_to_b" : "affinity_b_to_a", 0);
+            int pairEffective = ReadInt(chemistryAtEvaluation, actorIsA ? "effective_affinity_a_to_b" : "effective_affinity_b_to_a", int.MinValue);
+            bool effectiveConsumedSnapshot = chemistryAtEvaluation != null
+                && new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ReadString(chemistryAtEvaluation, "hero_a_id", ""), ReadString(chemistryAtEvaluation, "hero_b_id", "") }
+                    .SetEquals(new[] { protocolActor, pairTarget })
+                && pairEffective == Clamp(pairAffinity + ReadInt(ordinaryStanding, "value", 0), -100, 100)
+                && pairEffective != Clamp(pairAffinity - 5, -100, 100);
+            add("terminal_report_pair_snapshot_matches_ordinary_reader", snapshotStanding != null && unsnappedRefused
+                && ReadDouble(ordinaryStanding, "whoremongerSpouseAdjustment", 0d) != 0d
+                && Json.Serialize(snapshotStanding) == Json.Serialize(ordinaryStanding) && effectiveConsumedSnapshot,
+                TestDict("snapshot", snapshotStanding, "ordinary", ordinaryStanding, "unsnappedRefused", unsnappedRefused,
+                    "chemistryAtEvaluation", chemistryAtEvaluation, "actorAffinity", pairAffinity, "actorEffective", pairEffective,
+                    "effectiveConsumedSnapshot", effectiveConsumedSnapshot));
+            // Keep the remaining cases independent of a failed contention case.
+            protocolFirst = protocolFirst ?? TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
             var protocolEffect = ReadDictionary(protocolFirst, "nativeEffect");
             List<int> directionalDeltas;
             using (var connection = OpenCampaignConnection(campaign))

@@ -471,6 +471,8 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
         private static bool IsProtocolOwnedTerminalAction(Dictionary<string, object> row) => ReadDictionary(row, "terminalReport") != null;
 
         // beforeCommit is a self-test seam; it receives the connection that owns the open transaction.
+        // First acceptance invokes it with 0 (row locks held, before evaluation), 1 (after evaluation)
+        // and 2 (immediately before commit).
         private static Dictionary<string, object> TerminalActionReportApi(Dictionary<string, object> payload,
             Action<int, ReignDbConnection> beforeCommit = null)
         {
@@ -508,6 +510,10 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             Dictionary<string, object> response, record, marker;
             bool firstAcceptance = false, popularityChanged = false;
             var evaluations = new List<Dictionary<string, object>>();
+            // A poll or publication can hold FileLock while queued on the rows locked below,
+            // so the pair's file-derived inputs are captured first, with no lock held.
+            RelationshipFileSnapshot pairFiles = CaptureTerminalReportPairFiles(campaign, timeline, player,
+                generation, actionId, termsHash, report);
             // Lock order: campaign relationship writer, then database. Never FileLock here.
             using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
             using (var connection = OpenCampaignConnection(campaign))
@@ -574,14 +580,23 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                             "SELECT event_id FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
                             TestDict("event", ReadString(d, "eventId", ""), "subject", ReadString(d, "subjectId", ""), "target", ReadString(d, "targetId", ""))).Count > 0))
                         { evidence = "pre_protocol"; directions.Clear(); }
-                        int shared = EvaluateCompletedActionRelationshipsInTransaction(connection, directions, evaluations);
-                        beforeCommit?.Invoke(1, connection);
-                        // Derived court popularity and dependent public standing commit with
-                        // the directional result, receipt and marker, or roll back with them.
-                        foreach (var evaluation in evaluations)
-                            popularityChanged |= RecomputeRelationshipEvaluationReputation(connection, campaign, timeline,
-                                ReadString(evaluation, "targetId", ""), ReadDouble(evaluation, "worldDay", 0d),
-                                ReadString(evaluation, "eventId", ""), ReadInt(evaluation, "nativeRelationDelta", 0), schemaReady: true);
+                        beforeCommit?.Invoke(0, connection);
+                        int shared;
+                        // File-derived inputs come only from the pre-lock snapshot of this exact pair;
+                        // without one every such read is refused (rollback), never taken under FileLock.
+                        // Database standing/roster reads still pass through to this transaction.
+                        using (new RelationshipStandingContext(connection, campaign, timeline,
+                            pairFiles ?? RelationshipFileSnapshot.Refusing(campaign, timeline)))
+                        {
+                            shared = EvaluateCompletedActionRelationshipsInTransaction(connection, directions, evaluations);
+                            beforeCommit?.Invoke(1, connection);
+                            // Derived court popularity and dependent public standing commit with
+                            // the directional result, receipt and marker, or roll back with them.
+                            foreach (var evaluation in evaluations)
+                                popularityChanged |= RecomputeRelationshipEvaluationReputation(connection, campaign, timeline,
+                                    ReadString(evaluation, "targetId", ""), ReadDouble(evaluation, "worldDay", 0d),
+                                    ReadString(evaluation, "eventId", ""), ReadInt(evaluation, "nativeRelationDelta", 0), schemaReady: true);
+                        }
                         string receiptId = shared == 0 ? "" : StageCompletedActionRelationshipReceipt(connection, campaign, timeline, actionId,
                             generation, sha, ReadString(directions[0], "subjectId", ""), ReadString(directions[0], "targetId", ""), shared, now);
                         marker = TestDict("schema", TerminalActionReportProtocol.MarkerSchema, "sha256", sha, "utf8Bytes", bytes,
@@ -636,6 +651,48 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             record != null && ReadString(row, "id", "") == actionId && ReadString(row, "campaignId", "") == campaign
             && ReadString(record, "serverActionId", "") == actionId && ReadString(record, "campaignId", "") == campaign
             && TerminalReportIdentityMatches(stored, record, timeline, player, termsHash);
+
+        // Unlocked, read-only probe run before the relationship lock and the acceptance
+        // transaction. It only decides whether a first acceptance would evaluate the pair
+        // and, if so, which durable row's actor/target to snapshot; the transaction rechecks
+        // every predicate under its row locks. It never reads a client-chosen path: both
+        // heroes must equal the stored record and the restated report identity. Replays,
+        // non-relationship reports, mismatched identity, stale generations, legacy or
+        // foreign-owned rows and type mismatches read no files (null).
+        // Its predicates must stay no stricter than the transaction's. The only one that can
+        // turn from refusing to admitting is the foreign-owner probe: if an owner is removed
+        // between this probe and the row locks, the transaction evaluates under a refusing
+        // scope, and any file-derived read rolls the whole acceptance back (HTTP 500, nothing
+        // committed). The client keeps the report "posted" and re-sends the exact persisted
+        // envelope, which re-probes here.
+        private static RelationshipFileSnapshot CaptureTerminalReportPairFiles(string campaign, string timeline,
+            string player, string generation, string actionId, string termsHash, Dictionary<string, object> report)
+        {
+            var directions = CompletedActionRelationshipDirections(report, timeline);
+            if (directions.Count == 0) return null;
+            string target;
+            using (var connection = OpenCampaignConnection(campaign))
+            {
+                if (!TableExists(connection, "conversation_action_outbox") || !TableExists(connection, "memory_precision_state")) return null;
+                string current = ReadString(QuerySql(connection,
+                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
+                var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
+                    TestDict("id", actionId)).FirstOrDefault();
+                var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
+                var record = ReadDictionary(row, "record");
+                target = ReadString(record, "targetHeroStringId", "");
+                string expectedType = TerminalReportExpectedType(record);
+                if (row == null || !TerminalReportScopeMatches(stored, row, record, campaign, actionId, timeline, player, termsHash)
+                    || ReadString(report, "actorHeroStringId", "") != player || ReadString(report, "targetHeroStringId", "") != target
+                    || ReadString(directions[0], "subjectId", "") != player || ReadString(directions[0], "targetId", "") != target
+                    || ReadDictionary(row, "terminalReport") != null || IsTerminalActionReportStatus(ReadString(row, "status", ""))
+                    || current.Length == 0 || current != generation
+                    || TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", "")).Length > 0
+                    || expectedType.Length == 0 || ReadString(report, "type", "") != expectedType)
+                    return null;
+            }
+            return RelationshipFileSnapshot.Capture(campaign, timeline, new[] { player, target });
+        }
 
         private static bool TerminalReportIdentityMatches(Dictionary<string, object> stored, Dictionary<string, object> record,
             string timeline, string player, string termsHash) =>
