@@ -1731,19 +1731,6 @@ namespace ReignBetaServer
                     || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
         }
 
-        private static string FirstNonEmpty(params string[] values)
-        {
-            foreach (string value in values)
-            {
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value.Trim();
-                }
-            }
-
-            return "";
-        }
-
         private static bool UsesImageReferenceAdapter(string model)
         {
             return !string.IsNullOrWhiteSpace(model) && model.Trim().StartsWith("gpt-image-", StringComparison.OrdinalIgnoreCase);
