@@ -2481,7 +2481,29 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     {
                         ["loadSessionId"] = loadSessionId
                     };
+                // Terminal report recovery authority: the old snapshot's own restore generation, read
+                // directly from its immutable schema. The live generation is advanced first, so the
+                // context can only record the snapshot's value if the real restore brings back
+                // memory_precision_state before the context captures it.
+                string oldSnapshotGeneration = SaveSyncTestSqlValue(campaignId,
+                    "SELECT restore_generation FROM " + ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, SaveSyncPostgreSqlSnapshotPointId(oldStoredPoint))
+                    + ".memory_precision_state WHERE state_id='current';", "restore_generation");
+                AdvanceMemoryRestoreGeneration(campaignId);
+                string preRollbackGeneration = SaveSyncTestSqlValue(campaignId,
+                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';", "restore_generation");
                 Dictionary<string, object> rolledBack = SaveSyncLoadApi(loadSessionPayload, false);
+                string rollbackSourceGeneration = SaveSyncTestSqlValue(campaignId,
+                    "SELECT source_generation FROM memory_restored_source_context WHERE state_id='current';", "source_generation");
+                string rollbackLoadSession = SaveSyncTestSqlValue(campaignId,
+                    "SELECT load_session_id FROM memory_restored_source_context WHERE state_id='current';", "load_session_id");
+                add("rollback_context_records_snapshot_generation",
+                    ReadString(rolledBack, "result", "") == "rolled_back"
+                    && oldSnapshotGeneration.Length > 0 && preRollbackGeneration.Length > 0
+                    && preRollbackGeneration != oldSnapshotGeneration
+                    && rollbackSourceGeneration == oldSnapshotGeneration
+                    && rollbackLoadSession == loadSessionId,
+                    "A real rollback restores memory_precision_state with the snapshot, so the restore context records the target snapshot's own generation (not the pre-load live one) and the load session that bound it. snapshot="
+                    + oldSnapshotGeneration + " preLoad=" + preRollbackGeneration + " context=" + rollbackSourceGeneration);
                 Dictionary<string, object> rollbackCounts = ReadDictionary(rolledBack, "countsBySubsystem") ?? new Dictionary<string, object>();
                 bool affectedCountsAuditable = new[] { "conversations", "events", "memories", "relationships", "worldHistory", "rumors", "actions", "diplomacy", "rebellions", "court", "reputation", "characterState" }
                     .All(subsystem => ReadLong(ReadDictionary(rollbackCounts, subsystem), "removed", 0) > 0);
@@ -2593,6 +2615,14 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     && File.ReadAllBytes(newestNativeSavePath)
                         .SequenceEqual(newestNativeSaveBytes)
                     && ReadInt(imported, "nativeSavesRestored", 0) == 2;
+                // The real ImportCampaignArchive stamp (not a simulated update): the exported context
+                // was bound to a verified no-op session, and the imported one names no load at all.
+                string importedLoadSession = ReadBool(imported, "ok", false) ? SaveSyncTestSqlValue(campaignId,
+                    "SELECT load_session_id FROM memory_restored_source_context WHERE state_id='current';", "load_session_id") : "";
+                add("import_stamps_restore_context_load_session",
+                    boundSession == "noop_b_" + token
+                    && importedLoadSession == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ImportedLoadSession,
+                    "A backup import stamps the restored context with the imported-load marker, so no earlier load proof matches it. imported=" + importedLoadSession);
                 add("export_import_preserves_save_sync", roundTrip, roundTrip ? "Campaign export/import round-trips the ledger, immutable save snapshots, status, recovery metadata, and exact native Bannerlord saves." : "Save Sync backup round trip failed. Export=" + Json.Serialize(export) + " Import=" + Json.Serialize(imported));
                 TryDeleteFile(oldNativeSavePath);
                 TryDeleteFile(newestNativeSavePath);

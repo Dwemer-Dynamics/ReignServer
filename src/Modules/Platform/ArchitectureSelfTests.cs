@@ -1533,59 +1533,36 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["buildVersion"] = CurrentConversationBuildVersion()
                     });
                 string qualificationSourceRoot = FindVerificationSourceRoot();
-                string economyBehaviorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
+                string qualificationClientRoot = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignEconomyCampaignBehavior.cs", "src");
-                string economyModelsPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignEconomyModels.cs", "src");
-                string economySubModulePath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "SubModule.cs", "src/Modules/Platform");
-                string economyTelemetryPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignWorldTestClient.cs", "src");
-                string economyBehaviorText = File.Exists(economyBehaviorPath) ? File.ReadAllText(economyBehaviorPath) : "";
-                string economyModelsText = File.Exists(economyModelsPath) ? File.ReadAllText(economyModelsPath) : "";
-                string economySubModuleText = File.Exists(economySubModulePath) ? File.ReadAllText(economySubModulePath) : "";
-                string economyTelemetryText = File.Exists(economyTelemetryPath) ? File.ReadAllText(economyTelemetryPath) : "";
-                string kingdomEventBehaviorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignKingdomEventsCampaignBehavior.cs", "src");
-                string kingdomEventRecordPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignKingdomEventRecord.cs", "src");
-                string kingdomEventSavePath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignBetaSaveDefiner.cs", "src");
-                string kingdomEventSettingsPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignBetaSettings.cs", "src");
-                string kingdomEventBehaviorText = File.Exists(kingdomEventBehaviorPath) ? File.ReadAllText(kingdomEventBehaviorPath) : "";
-                string kingdomEventRecordText = File.Exists(kingdomEventRecordPath) ? File.ReadAllText(kingdomEventRecordPath) : "";
-                string kingdomEventSaveText = File.Exists(kingdomEventSavePath) ? File.ReadAllText(kingdomEventSavePath) : "";
-                string kingdomEventSettingsText = File.Exists(kingdomEventSettingsPath) ? File.ReadAllText(kingdomEventSettingsPath) : "";
-                string kingdomNewsQueuePath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignNewsCampaignBehavior.cs", "src/Modules/WorldSimulation/News");
-                string kingdomNewsNoticesPath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignNewsNativeNotices.cs", "src/Modules/WorldSimulation/News");
-                string kingdomNewsScreenPath = string.IsNullOrWhiteSpace(qualificationSourceRoot) ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignDiplomacyAnnouncementScreenManager.cs", "src/Modules/Diplomacy/UI");
-                string kingdomNewsQueueText = File.Exists(kingdomNewsQueuePath) ? File.ReadAllText(kingdomNewsQueuePath) : "";
-                string kingdomNewsNoticesText = File.Exists(kingdomNewsNoticesPath) ? File.ReadAllText(kingdomNewsNoticesPath) : "";
-                string kingdomNewsScreenText = File.Exists(kingdomNewsScreenPath) ? File.ReadAllText(kingdomNewsScreenPath) : "";
-                string actionResultPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignActionResult.cs", "src");
-                string diplomacyExecutorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignDiplomacyExecutor.cs", "src");
-                string actionBehaviorPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignAICampaignBehavior.cs", "src");
-                string relationshipCampaignPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignRelationshipCampaignBehavior.cs", "src");
+                    : Path.Combine(qualificationSourceRoot, "ReignBeta");
+                string economyBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignEconomyCampaignBehavior.cs");
+                string economyModelsPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignEconomyModels.cs");
+                string economyTelemetryPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignWorldTestClient.cs");
+                string economyBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string economyModelsText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string economySubModuleText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string economyTelemetryText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignKingdomEventsCampaignBehavior.cs");
+                string kingdomEventRecordPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignKingdomEventRecord.cs");
+                string kingdomEventSavePath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignBetaSaveDefiner.cs");
+                string kingdomEventSettingsPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignBetaSettings.cs");
+                string kingdomEventBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventBehaviorTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignKingdomEventsCampaignBehavior");
+                string kingdomEventRecordText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventSaveText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomEventSettingsText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsQueuePath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignNewsCampaignBehavior.cs");
+                string kingdomNewsNoticesPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignNewsNativeNotices.cs");
+                string kingdomNewsScreenPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignDiplomacyAnnouncementScreenManager.cs");
+                string kingdomNewsQueueText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsNoticesText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsScreenText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string kingdomNewsScreenTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignDiplomacyAnnouncementScreenManager");
+                string actionResultPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignActionResult.cs");
+                string diplomacyExecutorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignDiplomacyExecutor.cs");
+                string actionBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignAICampaignBehavior.cs");
+                string relationshipCampaignPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignRelationshipCampaignBehavior.cs");
                 string liveTestServerPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
                     ? ""
                     : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignServer"), "LiveInteractionTest.cs", "src");
@@ -1595,16 +1572,14 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         Path.Combine(qualificationSourceRoot, "ReignServer"),
                         "PassiveWorldControl.cs",
                         "ReignLiveTest/Features/WorldSimulation");
-                string passiveWorldHostPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignLiveInteractionPassiveWorldHost.cs", "src");
-                string actionResultText = File.Exists(actionResultPath) ? File.ReadAllText(actionResultPath) : "";
-                string diplomacyExecutorText = File.Exists(diplomacyExecutorPath) ? File.ReadAllText(diplomacyExecutorPath) : "";
-                string actionBehaviorText = File.Exists(actionBehaviorPath) ? File.ReadAllText(actionBehaviorPath) : "";
-                string relationshipCampaignText = File.Exists(relationshipCampaignPath) ? File.ReadAllText(relationshipCampaignPath) : "";
+                string passiveWorldHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionPassiveWorldHost.cs");
+                string actionResultText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string diplomacyExecutorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string actionBehaviorText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string relationshipCampaignText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string liveTestServerText = File.Exists(liveTestServerPath) ? File.ReadAllText(liveTestServerPath) : "";
                 string passiveWorldControllerText = File.Exists(passiveWorldControllerPath) ? File.ReadAllText(passiveWorldControllerPath) : "";
-                string passiveWorldHostText = File.Exists(passiveWorldHostPath) ? File.ReadAllText(passiveWorldHostPath) : "";
+                string passiveWorldHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 add("kingdom_catastrophe_and_prosperity_contract",
                     kingdomEventBehaviorText.Contains("IsDailyTrigger(campaignId, day)", StringComparison.Ordinal)
                     && kingdomEventBehaviorText.Contains("IsBeneficial(campaignId, day)", StringComparison.Ordinal)
@@ -1628,8 +1603,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && kingdomEventSaveText.Contains("typeof(ReignKingdomEventRecord), 44", StringComparison.Ordinal)
                     && kingdomEventSettingsText.Contains("Enable Kingdom Catastrophes and Boons", StringComparison.Ordinal)
                     && kingdomEventSettingsText.Contains("Force Kingdom Catastrophe or Boon", StringComparison.Ordinal)
-                    && !kingdomEventBehaviorText.Contains("desertion", StringComparison.OrdinalIgnoreCase)
-                    && !kingdomEventBehaviorText.Contains("recruitment_surge", StringComparison.OrdinalIgnoreCase),
+                    && !kingdomEventBehaviorTextScoped.Contains("desertion", StringComparison.OrdinalIgnoreCase)
+                    && !kingdomEventBehaviorTextScoped.Contains("recruitment_surge", StringComparison.OrdinalIgnoreCase),
                     "The client contract wires every approved kingdom-wide effect, saved roll ordering, treaty/civil-war guards, living NPC succession, player exclusion, history/notification integration, and a separate force-event control without troop or desertion mechanics.",
                     new Dictionary<string, object>
                     {
@@ -1640,7 +1615,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     });
                 add("kingdom_event_announcement_queue_contract",
                     kingdomEventBehaviorText.Contains("ReignNewsCampaignBehavior.Instance?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal)
-                    && !kingdomEventBehaviorText.Contains("PendingAnnouncementEventIds", StringComparison.Ordinal)
+                    && !kingdomEventBehaviorTextScoped.Contains("PendingAnnouncementEventIds", StringComparison.Ordinal)
                     && kingdomNewsNoticesText.Contains("Category = ReignNewsCategories.WorldEvents", StringComparison.Ordinal)
                     && kingdomNewsNoticesText.Contains("Publish(news)", StringComparison.Ordinal)
                     && kingdomNewsQueueText.Contains("var news = _state.Pending[0]", StringComparison.Ordinal)
@@ -1656,7 +1631,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && kingdomNewsScreenText.Contains("if (!IsOpen || _layer == null || _vm == null)", StringComparison.Ordinal)
                     && kingdomNewsScreenText.Contains("_activeEventId != eventId", StringComparison.Ordinal)
                     && kingdomNewsScreenText.Contains("UnregisterActiveStateDisableRequest()", StringComparison.Ordinal)
-                    && !kingdomNewsScreenText.Contains("InformationManager.HideInquiry()", StringComparison.Ordinal),
+                    && !kingdomNewsScreenTextScoped.Contains("InformationManager.HideInquiry()", StringComparison.Ordinal),
                     "Kingdom events use the shared Herald queue: one owned announcement at a time, exact head acknowledgement, epoch-safe callbacks, foreign inquiry exclusion and guarded harness/focus cleanup without dismissing another inquiry.",
                     new Dictionary<string, object> { ["behaviorPath"] = kingdomEventBehaviorPath,
                         ["queuePath"] = kingdomNewsQueuePath, ["noticesPath"] = kingdomNewsNoticesPath,
@@ -1862,17 +1837,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     File.Exists(finalGauntletLongHorizonPath)
                         ? File.ReadAllText(finalGauntletLongHorizonPath)
                         : "";
-                string gauntletFixtureHostPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionGauntletFixtures.cs",
-                            "src/Modules");
-                string gauntletFixtureHostText =
-                    File.Exists(gauntletFixtureHostPath)
-                        ? File.ReadAllText(gauntletFixtureHostPath)
-                        : "";
+                string gauntletFixtureHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionGauntletFixtures.cs");
+                string gauntletFixtureHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string finalGauntletRunnerPath =
                     string.IsNullOrWhiteSpace(qualificationSourceRoot)
                         ? ""
@@ -1931,12 +1897,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && liveTestControllerText.Contains("return 900;", StringComparison.Ordinal),
                     "One-off close and scene-boundary commands retain a 15-minute accuracy-preserving liveness boundary instead of the ordinary-turn timeout.",
                     liveTestControllerPath);
-                string serverClientPath = string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                    ? ""
-                    : VerificationSourceLocator.ResolveUnique(Path.Combine(qualificationSourceRoot, "ReignBeta"), "ReignServerClient.cs", "src");
-                string serverClientText = File.Exists(serverClientPath)
-                    ? File.ReadAllText(serverClientPath)
-                    : "";
+                string serverClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignServerClient.cs");
+                string serverClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 string compactServerClientText = string.Concat(serverClientText.Where(c => !char.IsWhiteSpace(c)));
                 add("live_test_control_plane_bypasses_shared_endpoint_breaker",
                     compactServerClientText.Contains("boolliveTestRoute=route.StartsWith(\"/tests/live/\"", StringComparison.Ordinal)
@@ -1945,19 +1907,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && compactServerClientText.Contains("if(!liveTestRoute)ReignServerEndpoint.ReportTransportFailure(probeClaim);", StringComparison.Ordinal),
                     "Loopback heartbeat, polling, acknowledgement, and lifecycle routes use their short-timeout client without inheriting unrelated passive-system endpoint backoff.",
                     serverClientPath);
-                string liveTestClientPath =
-                    string.IsNullOrWhiteSpace(
-                        qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveTestClient.cs",
-                            "src/Modules");
-                string liveTestClientText =
-                    File.Exists(liveTestClientPath)
-                        ? File.ReadAllText(
-                            liveTestClientPath)
-                        : "";
+                string liveTestClientPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveTestClient.cs");
+                string liveTestClientText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string liveTestClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(qualificationClientRoot, "ReignServerClient");
                 add("native_identity_authority_context_is_always_on",
                     serverClientText.Contains(
                         "BuildNativePoliticalContext(",
@@ -1985,51 +1937,14 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["liveTestClient"] =
                             liveTestClientPath
                     });
-                string liveTestHostPath =
-                    string.IsNullOrWhiteSpace(
-                        qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionTestHost.cs",
-                            "src/Modules");
-                string liveTestHostText =
-                    File.Exists(liveTestHostPath)
-                        ? File.ReadAllText(liveTestHostPath)
-                        : "";
-                string correspondenceVmPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignCorrespondenceScreenVM.cs",
-                            "src/Modules/Dialogue");
-                string correspondenceVmText =
-                    File.Exists(correspondenceVmPath)
-                        ? File.ReadAllText(correspondenceVmPath)
-                        : "";
-                string correspondenceHostPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionCorrespondenceHost.cs",
-                            "src/Modules/Dialogue");
-                string correspondenceHostText =
-                    File.Exists(correspondenceHostPath)
-                        ? File.ReadAllText(correspondenceHostPath)
-                        : "";
-                string courtHostPath =
-                    string.IsNullOrWhiteSpace(qualificationSourceRoot)
-                        ? ""
-                        : VerificationSourceLocator.ResolveUnique(
-                            Path.Combine(qualificationSourceRoot, "ReignBeta"),
-                            "ReignLiveInteractionCourtHost.cs",
-                            "src/Modules/Court");
-                string courtHostText =
-                    File.Exists(courtHostPath)
-                        ? File.ReadAllText(courtHostPath)
-                        : "";
+                string liveTestHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionTestHost.cs");
+                string liveTestHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string correspondenceVmPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignCorrespondenceScreenVM.cs");
+                string correspondenceVmText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string correspondenceHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionCorrespondenceHost.cs");
+                string correspondenceHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
+                string courtHostPath = VerificationSourceLocator.DescribeClientSourcePath(qualificationClientRoot, "ReignLiveInteractionCourtHost.cs");
+                string courtHostText = VerificationSourceLocator.ReadClientSourceText(qualificationClientRoot);
                 add("live_bridge_enabled_mode_capability_contract",
                     liveTestHostText.Contains(
                         "GetSupportedModes()",
@@ -2043,7 +1958,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && liveTestClientText.Contains(
                         "ReignLiveInteractionTestHost.GetSupportedModes()",
                         StringComparison.Ordinal)
-                    && !liveTestClientText.Contains(
+                    && !liveTestClientTextScoped.Contains(
                         "new JArray(\"individual_chat\", \"party_chat\", \"social_event\", \"wilderness_event\", \"social_balance\")",
                         StringComparison.Ordinal),
                     "The game heartbeat advertises correspondence and court only through fresh production availability checks instead of a stale hard-coded mode list.",

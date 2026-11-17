@@ -4949,39 +4949,17 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "The named recipient owns the durable benefit, witnesses retain independent proportionate reactions, and a later coercive demand links and diminishes appreciation.");
 
             string sourceRoot = FindVerificationSourceRoot();
-            Func<string, string> clientSourcePath = fileName => string.IsNullOrWhiteSpace(sourceRoot)
-                ? "" : VerificationSourceLocator.ResolveUnique(Path.Combine(sourceRoot, "ReignBeta"), fileName, "src");
+            string clientSourceRoot = string.IsNullOrWhiteSpace(sourceRoot) ? "" : Path.Combine(sourceRoot, "ReignBeta");
             Func<string, string> serverSourcePath = fileName => string.IsNullOrWhiteSpace(sourceRoot)
                 ? "" : VerificationSourceLocator.ResolveUnique(Path.Combine(sourceRoot, "ReignServer"), fileName, "src");
-            string hostPath = clientSourcePath("ReignLiveInteractionTestHost.cs");
-            string eligibilityPath = clientSourcePath("ReignConversationEligibility.cs");
-            string partySessionPath = clientSourcePath("ReignPartyChatSession.cs");
-            string individualManagerPath = clientSourcePath("ReignIndividualChatScreenManager.cs");
-            string individualVmPath = clientSourcePath("ReignIndividualChatScreenVM.cs");
-            string uiCalibrationPath = clientSourcePath("ReignLiveInteractionUiCalibrationHost.cs");
-            string auditRunnerPath = clientSourcePath("ReignNpcDialogueAuditRunner.cs");
-            string correspondencePath = clientSourcePath("ReignCorrespondenceClient.cs");
-            string socialEventClientPath = clientSourcePath("ReignSocialEventClient.cs");
-            string actionValidatorPath = clientSourcePath("ReignActionValidator.cs");
             string identitySystemPath = serverSourcePath("IdentitySystem.cs");
             string socialReputationPath = serverSourcePath("SocialReputation.cs");
             string worldRelationshipPath = serverSourcePath("WorldRelationshipModel.cs");
-            string aiBehaviorPath = clientSourcePath("ReignAICampaignBehavior.cs");
-            string settingsPath = clientSourcePath("ReignBetaSettings.cs");
-            string socialVmPath = clientSourcePath("ReignSocialEventScreenVM.cs");
-            string subModulePath = string.IsNullOrWhiteSpace(sourceRoot) ? "" :
-                VerificationSourceLocator.ResolveUnique(Path.Combine(sourceRoot, "ReignBeta"), "SubModule.cs", "src/Modules/Platform");
-            string liveClientPath = clientSourcePath("ReignLiveTestClient.cs");
-            string diplomacyBehaviorPath = clientSourcePath("ReignWorldDiplomacyCampaignBehavior.cs");
             string passiveWorldControlPath = string.IsNullOrWhiteSpace(sourceRoot) ? "" :
                 VerificationSourceLocator.ResolveUnique(
                     Path.Combine(sourceRoot, "ReignServer"),
                     "PassiveWorldControl.cs",
                     "ReignLiveTest/Features/WorldSimulation");
-            string initializationGatePath = clientSourcePath("ReignCampaignInitializationGate.cs");
-            string campaignPreparationPath = clientSourcePath("ReignCampaignPreparationCampaignBehavior.cs");
-            string characterInitializationPath = clientSourcePath("ReignCharacterEditorCampaignBehavior.cs");
-            string notablePopupPath = clientSourcePath("ReignNotableGenerationPopupManager.cs");
             string notableMbtiPath = serverSourcePath("NotableMbtiProfiles.cs");
             string serverProgramPath = serverSourcePath("Program.cs");
             string qualificationRunnerPath = string.IsNullOrWhiteSpace(sourceRoot) ? "" :
@@ -5001,40 +4979,35 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             string campaignBackupsPath = serverSourcePath("CampaignBackups.cs");
             string worldDiplomacyDirectorPath = serverSourcePath("WorldDiplomacyDirector.cs");
             string kingdomLeaderDiplomacyPath = serverSourcePath("KingdomLeaderDiplomacy.cs");
-            string saveBehaviorPath = clientSourcePath("ReignSaveSyncCampaignBehavior.cs");
-            string saveCoordinatorPath = clientSourcePath("ReignSaveSyncCoordinator.cs");
-            string mainThreadPath = clientSourcePath("ReignMainThread.cs");
-            string nativeUiCalibrationPath = clientSourcePath("ReignLiveInteractionNativeUiCalibrationHost.cs");
-            string relationshipBehaviorPath = clientSourcePath("ReignRelationshipCampaignBehavior.cs");
-            string rebellionBehaviorPath = clientSourcePath("ReignRebellionCampaignBehavior.cs");
-            string rulerBehaviorPath = clientSourcePath("ReignRulerReputationCampaignBehavior.cs");
-            string debugActionsPath = clientSourcePath("ReignBetaDebugActions.cs");
-            string eventBehaviorPath = clientSourcePath("ReignSocialEventsCampaignBehavior.cs");
-            string familyBehaviorPath = clientSourcePath("ReignFamilyCampaignBehavior.cs");
-            string hostSource = File.Exists(hostPath) ? File.ReadAllText(hostPath) : "";
-            string eligibilitySource = File.Exists(eligibilityPath) ? File.ReadAllText(eligibilityPath) : "";
-            string partySessionSource = File.Exists(partySessionPath) ? File.ReadAllText(partySessionPath) : "";
-            string individualManagerSource = File.Exists(individualManagerPath) ? File.ReadAllText(individualManagerPath) : "";
-            string individualVmSource = File.Exists(individualVmPath) ? File.ReadAllText(individualVmPath) : "";
-            string uiCalibrationSource = File.Exists(uiCalibrationPath) ? File.ReadAllText(uiCalibrationPath) : "";
-            string auditRunnerSource = File.Exists(auditRunnerPath) ? File.ReadAllText(auditRunnerPath) : "";
-            string correspondenceSource = File.Exists(correspondencePath) ? File.ReadAllText(correspondencePath) : "";
-            string socialEventClientSource = File.Exists(socialEventClientPath) ? File.ReadAllText(socialEventClientPath) : "";
-            string actionValidatorSource = File.Exists(actionValidatorPath) ? File.ReadAllText(actionValidatorPath) : "";
+            string hostSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string hostSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignLiveInteractionTestHost");
+            string eligibilitySource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string partySessionSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string individualManagerSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string individualVmSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string uiCalibrationSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string auditRunnerSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string correspondenceSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string correspondenceSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignServerClient");
+            string socialEventClientSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string socialEventClientSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignServerClient");
+            string actionValidatorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string identitySystemSource = File.Exists(identitySystemPath) ? File.ReadAllText(identitySystemPath) : "";
             string socialReputationSource = File.Exists(socialReputationPath) ? File.ReadAllText(socialReputationPath) : "";
             string worldRelationshipSource = File.Exists(worldRelationshipPath) ? File.ReadAllText(worldRelationshipPath) : "";
-            string aiBehaviorSource = File.Exists(aiBehaviorPath) ? File.ReadAllText(aiBehaviorPath) : "";
-            string settingsSource = File.Exists(settingsPath) ? File.ReadAllText(settingsPath) : "";
-            string socialVmSource = File.Exists(socialVmPath) ? File.ReadAllText(socialVmPath) : "";
-            string subModuleSource = File.Exists(subModulePath) ? File.ReadAllText(subModulePath) : "";
-            string liveClientSource = File.Exists(liveClientPath) ? File.ReadAllText(liveClientPath) : "";
-            string diplomacyBehaviorSource = File.Exists(diplomacyBehaviorPath) ? File.ReadAllText(diplomacyBehaviorPath) : "";
+            string aiBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string settingsSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string socialVmSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string subModuleSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string liveClientSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string diplomacyBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string passiveWorldControlSource = File.Exists(passiveWorldControlPath) ? File.ReadAllText(passiveWorldControlPath) : "";
-            string initializationGateSource = File.Exists(initializationGatePath) ? File.ReadAllText(initializationGatePath) : "";
-            string campaignPreparationSource = File.Exists(campaignPreparationPath) ? File.ReadAllText(campaignPreparationPath) : "";
-            string characterInitializationSource = File.Exists(characterInitializationPath) ? File.ReadAllText(characterInitializationPath) : "";
-            string notablePopupSource = File.Exists(notablePopupPath) ? File.ReadAllText(notablePopupPath) : "";
+            string initializationGateSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string campaignPreparationSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string campaignPreparationSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignCampaignPreparationCampaignBehavior");
+            string characterInitializationSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string characterInitializationSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignCharacterEditorCampaignBehavior");
+            string notablePopupSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string notableMbtiSource = File.Exists(notableMbtiPath) ? File.ReadAllText(notableMbtiPath) : "";
             string serverProgramSource = File.Exists(serverProgramPath) ? File.ReadAllText(serverProgramPath) : "";
             string qualificationRunnerSource = File.Exists(qualificationRunnerPath) ? File.ReadAllText(qualificationRunnerPath) : "";
@@ -5046,22 +5019,23 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             string campaignBackupsSource = File.Exists(campaignBackupsPath) ? File.ReadAllText(campaignBackupsPath) : "";
             string worldDiplomacyDirectorSource = File.Exists(worldDiplomacyDirectorPath) ? File.ReadAllText(worldDiplomacyDirectorPath) : "";
             string kingdomLeaderDiplomacySource = File.Exists(kingdomLeaderDiplomacyPath) ? File.ReadAllText(kingdomLeaderDiplomacyPath) : "";
-            string saveBehaviorSource = File.Exists(saveBehaviorPath) ? File.ReadAllText(saveBehaviorPath) : "";
-            string saveCoordinatorSource = File.Exists(saveCoordinatorPath) ? File.ReadAllText(saveCoordinatorPath) : "";
-            string mainThreadSource = File.Exists(mainThreadPath) ? File.ReadAllText(mainThreadPath) : "";
-            string nativeUiCalibrationSource = File.Exists(nativeUiCalibrationPath) ? File.ReadAllText(nativeUiCalibrationPath) : "";
-            string relationshipBehaviorSource = File.Exists(relationshipBehaviorPath) ? File.ReadAllText(relationshipBehaviorPath) : "";
-            string rebellionBehaviorSource = File.Exists(rebellionBehaviorPath) ? File.ReadAllText(rebellionBehaviorPath) : "";
-            string rulerBehaviorSource = File.Exists(rulerBehaviorPath) ? File.ReadAllText(rulerBehaviorPath) : "";
-            string debugActionsSource = File.Exists(debugActionsPath) ? File.ReadAllText(debugActionsPath) : "";
-            string eventBehaviorSource = File.Exists(eventBehaviorPath) ? File.ReadAllText(eventBehaviorPath) : "";
-            string familyBehaviorSource = File.Exists(familyBehaviorPath) ? File.ReadAllText(familyBehaviorPath) : "";
+            string saveBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string saveCoordinatorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string mainThreadSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string nativeUiCalibrationSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string relationshipBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string rebellionBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string rulerBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string rulerBehaviorSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignRulerReputationCampaignBehavior");
+            string debugActionsSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string eventBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
+            string familyBehaviorSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             bool adapterParity = hostSource.Contains("ReignIndividualChatScreenVM")
                 && hostSource.Contains("ReignPartyChatScreenVM")
                 && hostSource.Contains("ReignSocialEventScreenVM")
                 && hostSource.Contains("StartLiveTestWildernessEventAsync")
                 && hostSource.Contains("SendAutomationLineAsync")
-                && !hostSource.Contains("McmTestModeEnabled");
+                && !hostSourceScoped.Contains("McmTestModeEnabled");
             add("production_adapter_parity", adapterParity, "All live adapters delegate to production controllers without an MCM test-mode dependency.");
             bool wildernessGroupFixture =
                 hostSource.Contains(
@@ -5209,7 +5183,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "Diplomatic narration is selected after the deterministic willingness roll and cannot announce the opposite outcome.");
             add("graceful_shutdown_return_code",
                 hostSource.Contains("Utilities.DoDelayedexit(0)")
-                && !hostSource.Contains("Utilities.DoDelayedexit(delayMilliseconds)")
+                && !hostSourceScoped.Contains("Utilities.DoDelayedexit(delayMilliseconds)")
                 && lifecycleCliSource.Contains("StopGame(args.Concat(new[] { \"--force\" }).ToArray())")
                 && lifecycleCliSource.Contains("force_stop_save_sync_not_ready")
                 && lifecycleCliSource.Contains("native_save_completed")
@@ -5253,7 +5227,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && serverLiveTestSource.Contains("Campaign day-one character initialization is still pending"),
                 "Qualification and the live bridge refuse to start interactions until the gated campaign-day-one background-character pass is complete.");
             add("day_one_initialization_gate",
-                !campaignPreparationSource.Contains("_mapScreenStableSeconds < 0.5f")
+                !campaignPreparationSourceScoped.Contains("_mapScreenStableSeconds < 0.5f")
                 && campaignPreparationSource.Contains("ReignCampaignPreparationStartPolicy.CanStart(")
                 && campaignPreparationSource.Contains("ReignNotableGenerationPopupManager.RequireUntilReady()")
                 && campaignPreparationSource.Contains("RunInitializationRequestAsync")
@@ -5266,7 +5240,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && campaignPreparationSource.Contains("TryCreateReleaseToken")
                 && campaignPreparationSource.Contains("TrySealAndMarkReady")
                 && campaignPreparationSource.Contains("IsCurrentCampaignSealed")
-                && !characterInitializationSource.Contains("TrySealAndMarkReady")
+                && !characterInitializationSourceScoped.Contains("TrySealAndMarkReady")
                 && notablePopupSource.Contains("public static void RequireUntilReady()")
                 && notablePopupSource.Contains("_keepOpenRequested")
                 && notablePopupSource.Contains("restoring it.")
@@ -5300,9 +5274,9 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && familyBehaviorSource.Contains("internal void PrepareInitialState()"),
                 "Calendar, relationship, family, rebellion, reputation, social-event, court, and diplomacy foundations are owned by the blocking preparation coordinator instead of racing as deferred post-release session work.");
             add("ruler_reputation_sparse_weekly_windows",
-                rulerBehaviorSource.Split(new[] { "List<IGrouping<string, JObject>> seven = groups.SelectMany" }, StringSplitOptions.None).Length == 3
-                && rulerBehaviorSource.Split(new[] { "if (seven.Count == 0) return;" }, StringSplitOptions.None).Length >= 3
-                && !rulerBehaviorSource.Contains(".GroupBy(x => g.Key).First()"),
+                rulerBehaviorSourceScoped.Split(new[] { "List<IGrouping<string, JObject>> seven = groups.SelectMany" }, StringSplitOptions.None).Length == 3
+                && rulerBehaviorSourceScoped.Split(new[] { "if (seven.Count == 0) return;" }, StringSplitOptions.None).Length >= 3
+                && !rulerBehaviorSourceScoped.Contains(".GroupBy(x => g.Key).First()"),
                 "Weekly loyalty and security reputation evaluation safely skips kingdoms whose fourteen-day settlement history has no observations in the latest seven-day window.");
             add("debug_know_everyone_native_and_reign_parity",
                 debugActionsSource.Contains("hero.IsKnownToPlayer = true;")
@@ -5513,13 +5487,16 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && qualificationRunnerSource.Contains(
                     "for (int attempt = 1; attempt <= 3; attempt++)"),
                 "Read-only target discovery waits through a complete backgrounded-game heartbeat interval and retries only a rejected stale-heartbeat lease.");
+            // Other ReignServerClient members may gate on a non-zero delta; the social-event receipt block must not.
+            string socialEventNativeReceiptSource = VerificationSourceLocator.ReadClientMemberSourceText(
+                clientSourceRoot, "ReignServerClient", "RequestSocialEventTurnAsync");
             add("zero_sum_native_relationship_acknowledgement",
                 correspondenceSource.Contains("if (subject != null && target != null && subject != target)")
-                && !correspondenceSource.Contains("subject != target && delta != 0")
+                && !correspondenceSourceScoped.Contains("subject != target && delta != 0")
                 // The game-thread block refuses only a missing participant; it never gates on the delta.
                 && socialEventClientSource.Contains("if (subject == null || target == null) return false;")
-                && !socialEventClientSource.Contains("subject != null && target != null && delta != 0")
-                && !socialEventClientSource.Contains("|| delta == 0) return false;")
+                && !socialEventNativeReceiptSource.Contains("subject != null && target != null && delta != 0")
+                && !socialEventClientSourceScoped.Contains("|| delta == 0) return false;")
                 && correspondenceSource.Contains("/relationships/conversation/native-receipt")
                 && socialEventClientSource.Contains("/relationships/conversation/native-receipt"),
                 "Opposite directional judgments that net to zero still acknowledge the atomic native hero-pair receipt without applying a redundant native relation change.");
