@@ -2020,7 +2020,9 @@ namespace ReignBetaServer
                 && faceDetectionText.Contains("Microsoft.ML.OnnxRuntime")
                 && faceDetectionText.Contains("PortraitFocusModelSha256")
                 && controlCenterSource.Contains("/portraits/derivatives/build-missing")
-				&& controlCenterSource.Contains("/portraits/derivatives/rebuild-fallback")
+				// The routes are registered in the route table (Program.PortraitsRoutes.cs), not in Program.cs text.
+				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/build-missing")?.Handler != null
+				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/rebuild-fallback")?.Handler != null
                 && controlCenterSource.Contains("Portrait Cache Derivatives");
             AddVerificationCheck(checks, "contracts.portrait_derivative_pipeline", "portraits_images", derivativeContractValid,
                 derivativeContractValid ? "Full-body portrait masters feed atomic face-focused vertical and party-wide thumbnails, high-resolution portraits, and on-demand zoom derivatives; the Control Center exposes the cache builder." : "Portrait derivative pipeline, routing, or Control Center contract is incomplete.", null);
