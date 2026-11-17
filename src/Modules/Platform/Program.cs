@@ -1973,17 +1973,11 @@ namespace ReignBetaServer
                         if (IsCampaignSchemaCachedReady(connection, campaignId, schemaKey))
                             return connection;
                         CampaignSchemaInitializingForTests?.Invoke();
-                        EnsureMemorySchema(connection);
-                        CampaignSchemaAfterMemoryForTests?.Invoke();
-                        EnsureCategorizedMemorySchema(connection);
-                        EnsureWorldHistorySchema(connection);
-                        EnsureSemanticMemorySchema(connection, providerGeneration);
-                        RunCategorizedMemoryMigration(connection, campaignId);
-                        // Repair legacy scalar memories once, outside warm reads.
-                        ExecuteSql(connection, @"DELETE FROM memories
-WHERE source='dialogue_llm'
-  AND lower(trim(summary)) IN ('0','1','true','false','null','undefined');");
+                        // Migration 1 (baseline), then the numbered campaign migrations.
+                        ApplyCampaignBaselineSchema(connection, campaignId, providerGeneration);
+                        int migrationVersion = ApplyCampaignSchemaMigrations(connection);
                         ReignPostgreSqlStorage.DeduplicateCampaignIndexes(campaignId);
+                        MarkCampaignMigrationsReady(connection, migrationVersion);
                         CampaignSchemaReady.Add(schemaKey);
                     }
                 }
@@ -2017,7 +2011,7 @@ WHERE source='dialogue_llm'
                     "SELECT value FROM schema_meta WHERE key='version' LIMIT 1;")
                     .FirstOrDefault();
                 return string.Equals(ReadString(version, "value", ""), "5",
-                    StringComparison.Ordinal) && QuerySql(connection,"SELECT value FROM schema_meta WHERE (key='memory_precision_v1' AND value='complete') OR (key IN ('explicit_accepted_commitment_bootstrap_v1','character_performance_backfill_v1','character_commitment_timeline_v1') AND value='1');").Count==4;
+                    StringComparison.Ordinal) && QuerySql(connection,"SELECT value FROM schema_meta WHERE (key='memory_precision_v1' AND value='complete') OR (key IN ('explicit_accepted_commitment_bootstrap_v1','character_performance_backfill_v1','character_commitment_timeline_v1') AND value='1') OR (key='"+CampaignMigrationVersionKey+"' AND CASE WHEN value ~ '^[0-9]{1,9}$' THEN value::integer>="+LatestCampaignMigrationVersion.ToString(CultureInfo.InvariantCulture)+" ELSE false END);").Count==5;
             }
             catch
             {
