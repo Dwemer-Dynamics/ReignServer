@@ -1,0 +1,158 @@
+name: Reign server tests
+on:
+  pull_request:
+    branches: [unstable, dev, reign]
+  push:
+    branches: [unstable]
+permissions:
+  contents: read
+concurrency:
+  group: reign-server-tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  unit-tests:
+    name: Unit tests and shared contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build shared contracts
+        run: dotnet build shared/Reign.Core.Contracts/Reign.Core.Contracts.csproj -c Release
+      - name: Relationship unit tests
+        run: dotnet test shared/Reign.Relationships.Tests/Reign.Relationships.Tests.csproj -c Release --logger "console;verbosity=normal"
+      - name: Memory accuracy evaluator tests
+        working-directory: tests/memory_accuracy
+        run: python3 -m unittest -v test_evaluate
+
+  self-tests:
+    name: Server self-tests (PostgreSQL, provider-free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres-ci
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Disposable CI-only database credentials; no secrets or paid providers are used.
+      PGPASSWORD: postgres-ci
+      REIGN_DB_HOST: 127.0.0.1
+      REIGN_DB_PORT: '5432'
+      REIGN_DB_USER: reign
+      REIGN_DB_PASSWORD: reign-ci
+      REIGN_DB_NAME: ReignValidation
+      REIGN_VALIDATION_MODE: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - name: Select paired Reign client branch
+        id: pair
+        env:
+          HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          BASE_BRANCH: ${{ github.base_ref || github.ref_name }}
+        run: |
+          ref="$BASE_BRANCH"
+          if git ls-remote --exit-code --heads https://github.com/Dwemer-Dynamics/Reign.git "refs/heads/$HEAD_BRANCH" >/dev/null; then
+            ref="$HEAD_BRANCH"
+          fi
+          echo "Paired Reign branch: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      # Paired layout: the server checkout sits inside the client checkout, matching the
+      # canonical workspace (Reign/ReignServer) so source-contract suites can read client source.
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Dwemer-Dynamics/Reign
+          ref: ${{ steps.pair.outputs.ref }}
+          path: Reign
+          lfs: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: Reign/ReignServer
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Prepare validation database role
+        run: |
+          pg_dump --version
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE reign LOGIN CREATEDB PASSWORD 'reign-ci';" \
+            -c "SELECT datname, pg_encoding_to_char(encoding), datcollate FROM pg_database;"
+      - name: Build server with verification contracts
+        id: build
+        run: dotnet build Reign/ReignServer/ReignServer.csproj -c Release
+      - name: Run provider-free self-test suites
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          out="$GITHUB_WORKSPACE/Reign/ReignServer/bin/Release"
+          reports="$RUNNER_TEMP/reign-reports"
+          mkdir -p "$reports"
+          failed=()
+          run_suite() {
+            local name="$1"; shift
+            local data="$RUNNER_TEMP/reign-data/$name"
+            mkdir -p "$data"
+            echo "::group::$name ($*)"
+            local started=$SECONDS
+            if (cd "$out" && REIGN_DATA_ROOT="$data" dotnet ReignServer.dll "$@" > "$reports/$name.json" 2> "$reports/$name.stderr.txt"); then
+              echo "$name passed in $((SECONDS - started))s"
+            else
+              echo "::error::$name failed after $((SECONDS - started))s"
+              failed+=("$name")
+            fi
+            python3 - "$reports/$name.json" <<'PY'
+          import json, sys
+          text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          start = text.find("{")
+          try:
+              data = json.loads(text[start:]) if start >= 0 else None
+          except ValueError:
+              data = None
+          if not isinstance(data, dict):
+              print(text[-4000:])
+              sys.exit(0)
+          keys = ("ok", "passed", "status", "passedCount", "failedCount", "totalCount")
+          print({k: data[k] for k in keys if k in data})
+          rows = data.get("checks") or data.get("results") or []
+          for row in rows if isinstance(rows, list) else []:
+              if isinstance(row, dict) and not (row.get("passed") or row.get("ok") or row.get("status") == "passed"):
+                  print("FAILED:", json.dumps(row)[:1500])
+          PY
+            tail -c 4000 "$reports/$name.stderr.txt" || true
+            echo "::endgroup::"
+          }
+          run_suite verification-quick --run-verification --tier quick --seed 1337 --repeat 1 --json
+          run_suite save-sync --run-save-sync-tests --json
+          run_suite relationships --run-relationship-tests --json
+          run_suite rumors --run-rumor-tests --json
+          run_suite motive-conversation --run-motive-conversation-tests --json
+          run_suite diplomacy --run-diplomacy-tests --json
+          run_suite court --run-court-tests --json
+          run_suite rebellion --run-rebellion-tests --json
+          run_suite world-test --run-world-test-tests --json
+          run_suite portrait-derivative --run-portrait-derivative-tests
+          run_suite government --run-verification --tier quick --suite government --fail-fast --json
+          run_suite spymaster --run-verification --tier quick --suite spymaster --fail-fast --json
+          run_suite interaction-architecture --run-verification --tier offline --suite interaction_architecture --seed 1337 --repeat 1 --fail-fast --json
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::Failed suites: ${failed[*]}"
+            exit 1
+          fi
+      - name: Upload self-test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: reign-server-self-test-reports
+          path: ${{ runner.temp }}/reign-reports
+          if-no-files-found: ignore
+          retention-days: 14

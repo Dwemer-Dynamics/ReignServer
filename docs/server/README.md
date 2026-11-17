@@ -16,6 +16,8 @@ Use the workspace Reign MCP `reign_get_validation_plan` and `reign_validate`
 tools. Do not invoke the project build commands directly. Deploy only artifacts
 listed by the successful authoritative validation report.
 
+GitHub Actions coverage and its limits are described in [CI.md](CI.md).
+
 The default local server address during development is:
 
 ```text
