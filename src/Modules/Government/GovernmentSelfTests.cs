@@ -503,12 +503,10 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["prefab"] = governmentPrefabPath });
             string clientRoot = Path.Combine(root, "ReignBeta");
             string governmentText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
-            // Influence changes are legitimate elsewhere in the client (court, debug tools); the Government module
-            // itself must never apply them, so this one absence check stays scoped to that module folder.
-            string governmentClientRoot = Path.Combine(clientRoot, "src", "Modules", "Government");
-            string governmentModuleText = Directory.Exists(governmentClientRoot)
-                ? string.Join("\n", Directory.GetFiles(governmentClientRoot, "*.cs", SearchOption.AllDirectories)
-                    .Select(File.ReadAllText)) : string.Empty;
+            // Influence changes are legitimate elsewhere in the client (court, debug tools); Government code itself
+            // must never apply them, so this absence check is scoped to the ReignBeta.Government namespaces, wherever
+            // their files live, and fails closed when no such file is found.
+            string governmentModuleText = VerificationSourceLocator.ReadClientNamespaceSourceText(clientRoot, "ReignBeta.Government");
             string liveHostPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignLiveInteractionTestHost.cs");
             string liveHost = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string serverLivePath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignServer"),
@@ -530,6 +528,7 @@ namespace ReignBetaServer
                 && governmentText.Contains("TryCaptureNativeDecision", StringComparison.Ordinal)
                 && governmentText.Contains("kingdom.RemoveDecision(decision)", StringComparison.Ordinal)
                 && governmentText.Contains("DiplomacyExchangePrisoners", StringComparison.Ordinal)
+                && governmentModuleText.Length > 0
                 && !governmentModuleText.Contains("ChangeClanInfluenceAction", StringComparison.Ordinal)
                 && !governmentText.Contains("ChangePublicStanding", StringComparison.Ordinal)
                 && liveHost.Contains("\"government\"", StringComparison.Ordinal)

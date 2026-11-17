@@ -1892,10 +1892,13 @@ namespace ReignBetaServer
                 liveNativeSnapshotBoundaryValid
                     ? "Live dialogue snapshots native state on the campaign thread, bounds accepted commands, reconciles correlations, and refuses force-stop before the active run is terminal."
                     : "Live dialogue native-state isolation or accepted-command recovery is incomplete.", null);
-            // The redundant campaign-match gate must stay out of the heartbeat scheduler itself; other live hosts may
-            // legitimately check campaign readiness.
+            // The redundant campaign-match gate must stay out of the heartbeat scheduling and submission members;
+            // other live hosts (the conversation clock) may legitimately check campaign readiness.
             string liveHeartbeatSchedulerText = VerificationSourceLocator.ReadClientMemberSourceText(
-                clientRoot, "ReignLiveInteractionTestHost", "ApplicationTick");
+                    clientRoot, "ReignLiveInteractionTestHost", "ApplicationTick")
+                + "\n\n"
+                + VerificationSourceLocator.ReadClientMemberSourceText(
+                    clientRoot, "ReignLiveInteractionTestHost", "HeartbeatAsync");
             bool liveHeartbeatRecoveryPlaneValid =
                 liveTestHostText.Contains("if (ReignSaveSyncCoordinator.IsAlignmentPending)")
                 && liveTestHostText.Contains("SubmitLiveTestHeartbeatAsync(")
