@@ -27860,7 +27860,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             });
         }
 
-        private static void LogOperational(string eventType, Dictionary<string, object> data)
+        internal static void LogOperational(string eventType, Dictionary<string, object> data)
         {
             try
             {

@@ -57,6 +57,7 @@ namespace ReignBetaServer
         private static readonly HashSet<string> OwnedInternalCampaigns =
             new HashSet<string>(StringComparer.Ordinal);
         private static NpgsqlConnection CampaignOwnerConnection;
+        private static bool CampaignOwnershipCapLogged;
 
         internal static CampaignCreationScope BeginCampaignCreationScope()
         {
@@ -77,7 +78,12 @@ namespace ReignBetaServer
 
         private static void RecordCampaignCreated(string campaignId)
         {
+            // A long-lived worker started during a run keeps that run's scope in its execution
+            // context after the run ends. Attribute only to a scope that is still active; a
+            // creation under ended scopes only is treated as unattributed.
             CampaignCreationScope current = CurrentCampaignCreationScope.Value;
+            while (current != null && !ActiveCampaignCreationScopes.ContainsKey(current))
+                current = current.Parent;
             if (current != null)
             {
                 current.RecordCreated(campaignId);
@@ -99,9 +105,21 @@ namespace ReignBetaServer
                 return;
             lock (CampaignOwnershipLock)
             {
-                if (OwnedInternalCampaigns.Contains(campaignId)
-                    || OwnedInternalCampaigns.Count >= MaximumOwnedInternalCampaigns)
+                if (OwnedInternalCampaigns.Contains(campaignId))
                     return;
+                if (OwnedInternalCampaigns.Count >= MaximumOwnedInternalCampaigns)
+                {
+                    if (!CampaignOwnershipCapLogged)
+                    {
+                        CampaignOwnershipCapLogged = true;
+                        Program.LogOperational("campaign.ownership_cap_reached", new Dictionary<string, object>
+                        {
+                            ["maximum"] = MaximumOwnedInternalCampaigns,
+                            ["campaignId"] = campaignId
+                        });
+                    }
+                    return;
+                }
                 try
                 {
                     if (CampaignOwnerConnection == null)
@@ -109,12 +127,71 @@ namespace ReignBetaServer
                     if (TryAcquireCampaignOwnerLock(CampaignOwnerConnection, campaignId))
                         OwnedInternalCampaigns.Add(campaignId);
                 }
-                catch
+                catch (Exception error)
                 {
-                    // Ownership is a protection against other processes' cleanup only;
-                    // without it the campaign behaves exactly as before.
-                    ResetCampaignOwnerConnection();
+                    // The session, and with it every lock, may be gone (for example after a
+                    // PostgreSQL restart). Reconnect once and re-claim everything still owned.
+                    // Ownership only protects against other processes' cleanup; without it the
+                    // campaign behaves exactly as before.
+                    ReconnectCampaignOwnerSession("claim", error,
+                        OwnedInternalCampaigns.Append(campaignId).ToList());
                 }
+            }
+        }
+
+        // Called with CampaignOwnershipLock held. Replaces the owner session and re-claims the
+        // given campaigns; any that cannot be re-claimed are no longer treated as owned.
+        private static void ReconnectCampaignOwnerSession(
+            string operation,
+            Exception error,
+            List<string> campaignIds)
+        {
+            ResetCampaignOwnerConnection();
+            int reclaimed = 0;
+            try
+            {
+                CampaignOwnerConnection = OpenCampaignOwnerSessionConnection();
+                foreach (string id in campaignIds)
+                {
+                    if (TryAcquireCampaignOwnerLock(CampaignOwnerConnection, id))
+                    {
+                        OwnedInternalCampaigns.Add(id);
+                        reclaimed++;
+                    }
+                }
+                Program.LogOperational("campaign.ownership_session_reconnected", new Dictionary<string, object>
+                {
+                    ["operation"] = operation,
+                    ["error"] = error.GetType().Name + ": " + error.Message,
+                    ["requested"] = campaignIds.Count,
+                    ["reclaimed"] = reclaimed
+                });
+            }
+            catch (Exception retryError)
+            {
+                ResetCampaignOwnerConnection();
+                Program.LogOperational("campaign.ownership_session_failed", new Dictionary<string, object>
+                {
+                    ["operation"] = operation,
+                    ["error"] = error.GetType().Name + ": " + error.Message,
+                    ["retryError"] = retryError.GetType().Name + ": " + retryError.Message,
+                    ["requested"] = campaignIds.Count,
+                    ["reclaimed"] = reclaimed
+                });
+            }
+        }
+
+        // Self-test hook: ends the owner session as a PostgreSQL restart would, leaving the
+        // process's record of owned campaigns unchanged.
+        internal static void BreakCampaignOwnerSessionForSelfTest()
+        {
+            lock (CampaignOwnershipLock)
+            {
+                try
+                {
+                    CampaignOwnerConnection?.Dispose();
+                }
+                catch { }
             }
         }
 
@@ -128,9 +205,10 @@ namespace ReignBetaServer
                 {
                     ReleaseCampaignOwnerLock(CampaignOwnerConnection, campaignId);
                 }
-                catch
+                catch (Exception error)
                 {
-                    ResetCampaignOwnerConnection();
+                    ReconnectCampaignOwnerSession("release", error,
+                        OwnedInternalCampaigns.ToList());
                 }
             }
         }
@@ -260,6 +338,7 @@ namespace ReignBetaServer
             catch { }
             CampaignOwnerConnection = null;
             OwnedInternalCampaigns.Clear();
+            CampaignOwnershipCapLogged = false;
         }
     }
 }

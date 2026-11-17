@@ -212,10 +212,19 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
                 }
                 bool registeredDuringRun = RegisteredCampaignIdsForSelfTest().IsSupersetOf(
                     new[] { runInternal, runReal, liveReal, backgroundInternal, foreignInternal });
+                // The former sweep dropped every campaign registered after the run began, which
+                // includes the other process's internal campaign; it must not be attributed now.
+                bool foreignWasFormerSweepTarget = registeredDuringRun
+                    && !preexisting.Contains(foreignInternal);
+                bool foreignUnattributed =
+                    !scope.CreatedCampaignIds.Contains(foreignInternal, StringComparer.OrdinalIgnoreCase)
+                    && !scope.UnattributedCampaignIds.Contains(foreignInternal, StringComparer.OrdinalIgnoreCase);
                 List<string> leaked = DropVerificationRunCampaigns(scope, preexisting);
                 HashSet<string> after = RegisteredCampaignIdsForSelfTest();
                 add("verification_sweep_drops_only_run_campaigns",
                     registeredDuringRun
+                    && foreignWasFormerSweepTarget
+                    && foreignUnattributed
                     && leaked.Count == 0
                     && !after.Contains(runInternal)
                     && !after.Contains(runReal)
@@ -233,6 +242,71 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
                 foreach (string id in new[] { runInternal, runReal, liveReal, backgroundInternal, foreignInternal })
                 {
                     try { ReignPostgreSqlStorage.DropCampaign(id); }
+                    catch { }
+                }
+            }
+
+            // A long-lived worker started during an earlier run keeps that run's (ended) scope in
+            // its execution context. Its later creations must reach the current run's sweep.
+            string staleInternal = "__sweep_stale_" + token;
+            using (ManualResetEventSlim proceed = new ManualResetEventSlim(false))
+            {
+                Thread worker = null;
+                Exception workerError = null;
+                try
+                {
+                    using (ExecutionContext.SuppressFlow())
+                    {
+                        Task.Run(() =>
+                        {
+                            CampaignCreationScope earlier =
+                                ReignPostgreSqlStorage.BeginCampaignCreationScope();
+                            worker = new Thread(() =>
+                            {
+                                try
+                                {
+                                    proceed.Wait(TimeSpan.FromSeconds(60));
+                                    using (ReignPostgreSqlStorage.OpenCampaignConnection(staleInternal)) { }
+                                }
+                                catch (Exception error) { workerError = error; }
+                            }) { IsBackground = true };
+                            worker.Start();
+                            ReignPostgreSqlStorage.EndCampaignCreationScope(earlier);
+                        }).Wait();
+                    }
+                    HashSet<string> preexisting = RegisteredCampaignIdsForSelfTest();
+                    CampaignCreationScope current =
+                        ReignPostgreSqlStorage.BeginCampaignCreationScope();
+                    bool finished;
+                    try
+                    {
+                        proceed.Set();
+                        finished = worker.Join(TimeSpan.FromSeconds(60));
+                    }
+                    finally
+                    {
+                        ReignPostgreSqlStorage.EndCampaignCreationScope(current);
+                    }
+                    bool unattributed = current.UnattributedCampaignIds.Contains(
+                        staleInternal, StringComparer.OrdinalIgnoreCase);
+                    List<string> leaked = DropVerificationRunCampaigns(current, preexisting);
+                    add("verification_sweep_ignores_ended_scope_of_long_lived_worker",
+                        finished
+                        && workerError == null
+                        && unattributed
+                        && leaked.Count == 0
+                        && !RegisteredCampaignIdsForSelfTest().Contains(staleInternal),
+                        "An internal campaign created by a worker that outlived an earlier run's scope is attributed to the active run and removed by its cleanup.");
+                }
+                catch (Exception ex)
+                {
+                    add("verification_sweep_stale_scope_exception", false, ex.ToString());
+                }
+                finally
+                {
+                    proceed.Set();
+                    worker?.Join(TimeSpan.FromSeconds(60));
+                    try { ReignPostgreSqlStorage.DropCampaign(staleInternal); }
                     catch { }
                 }
             }
@@ -279,6 +353,44 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
             {
                 otherProcess?.Dispose();
                 foreach (string id in new[] { liveOwned, orphaned })
+                {
+                    try { ReignPostgreSqlStorage.DropCampaign(id); }
+                    catch { }
+                }
+            }
+
+            // Losing the owner session (for example a PostgreSQL restart) drops every lock; the
+            // next claim reconnects and re-claims what the process still owns.
+            string reclaimed = "__owner_reclaim_" + token;
+            string trigger = "__owner_trigger_" + token;
+            try
+            {
+                using (ReignPostgreSqlStorage.OpenCampaignConnection(reclaimed)) { }
+                bool ownedBefore = ReignPostgreSqlStorage.OwnsInternalCampaign(reclaimed);
+                ReignPostgreSqlStorage.BreakCampaignOwnerSessionForSelfTest();
+                using (ReignPostgreSqlStorage.OpenCampaignConnection(trigger)) { }
+                bool heldElsewhere;
+                using (NpgsqlConnection probe =
+                    ReignPostgreSqlStorage.OpenCampaignOwnerSessionConnection())
+                {
+                    heldElsewhere =
+                        !ReignPostgreSqlStorage.TryAcquireCampaignOwnerLock(probe, reclaimed)
+                        && !ReignPostgreSqlStorage.TryAcquireCampaignOwnerLock(probe, trigger);
+                }
+                add("internal_campaign_ownership_survives_session_loss",
+                    ownedBefore
+                    && heldElsewhere
+                    && ReignPostgreSqlStorage.OwnsInternalCampaign(reclaimed)
+                    && ReignPostgreSqlStorage.OwnsInternalCampaign(trigger),
+                    "After the owner session is lost, the next claim reconnects and re-claims every internal campaign the process still owns.");
+            }
+            catch (Exception ex)
+            {
+                add("internal_campaign_ownership_session_exception", false, ex.ToString());
+            }
+            finally
+            {
+                foreach (string id in new[] { reclaimed, trigger })
                 {
                     try { ReignPostgreSqlStorage.DropCampaign(id); }
                     catch { }
