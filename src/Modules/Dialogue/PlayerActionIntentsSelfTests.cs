@@ -71,7 +71,7 @@ namespace ReignBetaServer
                 add("redelivery_restore_generation_resets_wait", pollHeld(12, 100, "superseded_generation") == 1
                     && ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "") == liveGeneration, null);
                 var executing = ReadDurableConversationAction(campaign, heldId); executing["status"] = "executing"; SaveDurableConversationAction(campaign, executing);
-                int executingDelivered = pollHeld(9, 500, liveGeneration);
+                int executingDelivered = pollHeld(9, 1000, liveGeneration);
                 var afterExecuting = ReadDurableConversationAction(campaign, heldId);
                 add("redelivery_keeps_later_status_and_records_delivery", executingDelivered == 1 && ReadString(afterExecuting, "status", "") == "executing"
                     && ReadLong(afterExecuting, "deliveryCount", 0) == 10 && ReadLong(afterExecuting, "deliveredTs", 0) >= now
