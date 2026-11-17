@@ -3,7 +3,7 @@
 The spymaster office of a capital court: mission memory, social intelligence, exposure, and foreign agents. Compiled
 out together with Court when `ExcludeCourt=true`.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Testing notes: [SpymasterTesting](../../../docs/server/SpymasterTesting.md).
 
 ## Main files

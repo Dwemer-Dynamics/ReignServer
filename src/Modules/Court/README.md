@@ -5,7 +5,7 @@ court-life scenes and dialogue, noble visitors, family visits and family chamber
 (own and foreign), international court referrals, intelligence operations, obligations and plots, castle chat
 prompts and scene generation. `ExcludeCourt=true` compiles this folder (and Spymaster) out.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Testing notes:
 > [CapitalAmbassadorTesting](../../../docs/server/CapitalAmbassadorTesting.md).
 

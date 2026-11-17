@@ -3,7 +3,7 @@
 The rebellion director: rebellion movements, memberships, backing requests and recognition, and the negotiated
 action drafts and approvals used by rebellion negotiations. One file, `RebellionDirector.cs`.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Testing notes: [RebellionTesting](../../../docs/server/RebellionTesting.md).
 
 ## Routes

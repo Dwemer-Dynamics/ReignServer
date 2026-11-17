@@ -3,7 +3,7 @@
 Kingdom-level politics: the world diplomacy director and its event queue, kingdom-leader diplomacy (agreements,
 treaties, incidents, war origins), political pressure, and clan accords.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction.
 
 ## Main files

@@ -144,7 +144,7 @@ database is `reign` and validation runs use `ReignValidation`.
   sets `search_path` to the campaign schema, `reign_meta`, `public`, so module SQL uses unqualified table names.
 - Save Sync snapshots: `reign_save_<hash>` schemas recorded in `reign_meta.save_sync_snapshots`, created by
   `CloneCampaignToSnapshot` and restored transactionally by `RestoreCampaignSnapshot`. Campaign JSON files, portraits
-  and vectors follow the policy in [docs/server/SAVE_SYNC.md](docs/server/SAVE_SYNC.md).
+  and vectors follow the policy in [docs/server/SAVE_SYNC.md](server/SAVE_SYNC.md).
 - Per-campaign tables are created lazily. The first `Program.OpenCampaignConnection` for a campaign runs the core
   `EnsureMemorySchema`, `EnsureCategorizedMemorySchema`, `EnsureWorldHistorySchema` and `EnsureSemanticMemorySchema`
   under the schema locks and caches the result (`CampaignSchemaReady`, checked against `schema_meta`). Every other
@@ -183,7 +183,7 @@ The shipped server contains its own test system. It is not a separate test proje
   `/world-test/tests` and `/arrests/test/contracts`.
 - `tests/ReignVerification` is a thin CLI that refuses to run outside the isolated validation environment and
   forwards to `ReignServer.dll --run-verification`. `tests/ReignLiveTest` is the live-test controller used against a
-  running game; its feature folders mirror server modules. See [docs/server/VerificationLab.md](docs/server/VerificationLab.md).
+  running game; its feature folders mirror server modules. See [docs/server/VerificationLab.md](server/VerificationLab.md).
 - Never run these directly. All builds and tests go through the canonical Reign MCP validator in the paired client
   checkout (see `AGENTS.md`).
 
@@ -221,19 +221,19 @@ dependencies on other modules.
 
 | Module | Role |
 |---|---|
-| [Platform](src/Modules/Platform/README.md) | `Program.cs` entry point and router, settings, providers, Codex runtime, diagnostics, VerificationLab |
-| [Persistence](src/Modules/Persistence/README.md) | PostgreSQL storage, `reign_meta`, campaign backups, Save Sync |
-| [Characters](src/Modules/Characters/README.md) | identity, character editor, narratives, NPC lives, notables, tavern house |
-| [Dialogue](src/Modules/Dialogue/README.md) | conversation pipeline, memory, prompts, gossip, communications, final gauntlet |
-| [Relationships](src/Modules/Relationships/README.md) | relationship director and lifecycle, MBTI, correspondence, family, rulers |
-| [Reputation](src/Modules/Reputation/README.md) | rumors, social and court reputation, public standing |
-| [Diplomacy](src/Modules/Diplomacy/README.md) | world diplomacy director, political pressure, clan accords |
-| [Government](src/Modules/Government/README.md) | government speaker, hearing and crown-decision dialogue |
-| [Court](src/Modules/Court/README.md) | court sessions, dockets, ambassadors, castle chat, family chambers |
-| [Spymaster](src/Modules/Spymaster/README.md) | spymaster office routes |
-| [Rebellion](src/Modules/Rebellion/README.md) | rebellion director and negotiations |
-| [WorldSimulation](src/Modules/WorldSimulation/README.md) | world history, world test, campaign commands, social events, arrests, live tests |
-| [Portraits](src/Modules/Portraits/README.md) | portrait generation and providers, chat view, outfits, shared portraits |
+| [Platform](../src/Modules/Platform/README.md) | `Program.cs` entry point and router, settings, providers, Codex runtime, diagnostics, VerificationLab |
+| [Persistence](../src/Modules/Persistence/README.md) | PostgreSQL storage, `reign_meta`, campaign backups, Save Sync |
+| [Characters](../src/Modules/Characters/README.md) | identity, character editor, narratives, NPC lives, notables, tavern house |
+| [Dialogue](../src/Modules/Dialogue/README.md) | conversation pipeline, memory, prompts, gossip, communications, final gauntlet |
+| [Relationships](../src/Modules/Relationships/README.md) | relationship director and lifecycle, MBTI, correspondence, family, rulers |
+| [Reputation](../src/Modules/Reputation/README.md) | rumors, social and court reputation, public standing |
+| [Diplomacy](../src/Modules/Diplomacy/README.md) | world diplomacy director, political pressure, clan accords |
+| [Government](../src/Modules/Government/README.md) | government speaker, hearing and crown-decision dialogue |
+| [Court](../src/Modules/Court/README.md) | court sessions, dockets, ambassadors, castle chat, family chambers |
+| [Spymaster](../src/Modules/Spymaster/README.md) | spymaster office routes |
+| [Rebellion](../src/Modules/Rebellion/README.md) | rebellion director and negotiations |
+| [WorldSimulation](../src/Modules/WorldSimulation/README.md) | world history, world test, campaign commands, social events, arrests, live tests |
+| [Portraits](../src/Modules/Portraits/README.md) | portrait generation and providers, chat view, outfits, shared portraits |
 
 ## Rules every change keeps
 

@@ -5,7 +5,7 @@ narratives and the profile library, traits and political beliefs, NPC lives, tow
 wanderers and the tavern house. The basic character upsert/construct routes are still handled in
 `Platform/Program.cs`.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs: [NpcLives](../../../docs/server/NpcLives.md),
 > [CharacterConstructionPolicy](../../../docs/server/CharacterConstructionPolicy.md),
 > [TraitPercentages](../../../docs/server/TraitPercentages.md).

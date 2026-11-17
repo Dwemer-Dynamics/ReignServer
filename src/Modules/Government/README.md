@@ -4,7 +4,7 @@ LLM dialogue for the client's government system: party speaker statements, heari
 decisions, with payment-ownership validation of what speakers promise. The government, party and speaker state
 arrives in each request payload; this module creates no tables of its own.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction.
 
 ## Main files

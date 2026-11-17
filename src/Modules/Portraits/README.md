@@ -6,7 +6,7 @@ chat view (conversation scene images and wardrobe), encountered-resident portrai
 house scenes and native portrait source import. Portrait registration, status, request and diagnosis routes are
 still in `Platform/Program.cs`.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs:
 > [PORTRAIT_PRODUCT_PIPELINE](../../../docs/server/PORTRAIT_PRODUCT_PIPELINE.md),
 > [PetitionerPortraitPromptLibrary](../../../docs/server/PetitionerPortraitPromptLibrary.md).

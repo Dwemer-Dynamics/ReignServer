@@ -6,7 +6,7 @@ runtime, observability, diagnostics, the priority background scheduler and the V
 holds much of the core dialogue, memory, action, character and portrait request handling that conceptually belongs
 to other modules.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction.
 
 ## Main files

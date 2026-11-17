@@ -6,7 +6,7 @@ and party conversation, drinking and intoxication, personal gossip, communicatio
 conversation gauntlet qualification system. The main turn handlers (`/dialogue/respond`, `/party-chat/respond`,
 `/memory/build_context`, `/context/*`) are still in `Platform/Program.cs` and call into this module.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs in [docs/server](../../../docs/server/README.md), for example
 > StructuredActions, ConversationGrounding, DialogueClaimValidation, MemoryPrecision, SpecialistMemory,
 > FinalConversationGauntlet.

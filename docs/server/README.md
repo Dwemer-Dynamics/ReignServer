@@ -5,7 +5,7 @@ Reign Server is the local web/API server for Bannerlord Reign. It hosts the brow
 This repo contains the server source. Runtime data, API keys, generated campaign folders, audit logs, and packaged app builds are intentionally ignored.
 
 How the server is composed (entry point, router, campaign gate, storage, verification, deployment) is described in
-[ARCHITECTURE.md](../../ARCHITECTURE.md); each folder under `src/Modules` has a README for its routes, tables and
+[ARCHITECTURE.md](../ARCHITECTURE.md); each folder under `src/Modules` has a README for its routes, tables and
 self-tests.
 
 The native world-history database and claim-verification contract are documented in the client repository at

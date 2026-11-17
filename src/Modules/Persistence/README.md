@@ -4,7 +4,7 @@ PostgreSQL storage and campaign lifecycle: database options and connections, the
 migrations, per-campaign schemas, Save Sync snapshots and restore, campaign backup export/import/delete, campaign
 retirement, and the validation archive.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction; [SAVE_SYNC.md](../../../docs/server/SAVE_SYNC.md) describes Save Sync behaviour.
 
 ## Main files

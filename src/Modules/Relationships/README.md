@@ -6,7 +6,7 @@ separation, storylines and shared relationship history, native relation projecti
 correspondence (letters, delivery, autonomous letters), player approaches, family (conception, pregnancy,
 parentage) and ruler judgment relations.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs: [Correspondence](../../../docs/server/Correspondence.md),
 > [PregnancyContext](../../../docs/server/PregnancyContext.md).
 

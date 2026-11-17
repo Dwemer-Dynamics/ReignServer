@@ -5,7 +5,7 @@ compaction), the World Test passive campaign observatory and its telemetry rollu
 LLM-judged world actions and their test harness), social events and approaches, generated wilderness variety,
 arrests and dialogue marriage actions. It also hosts the live interaction test control plane.
 
-> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../ARCHITECTURE.md) describes the whole server
+> Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. The world-history contract is documented in the client repository
 > (`ReignBeta/docs/WorldHistory.md`).
 
