@@ -5,6 +5,8 @@ root=/var/www/html/ReignServer/runtime
 data=/var/www/html/ReignServer/data
 source_root=/var/www/html/ReignServer
 pidfile=/run/reignserver/server.pid
+unit=reignserver.service
+delegate=${pidfile%/*}/lifecycle-delegate
 command=${1:-status}
 if [ "$(id -u)" != 0 ]; then exec sudo "$0" "$@"; fi
 # Public lifecycle calls must use the same service owner as Control Center.
@@ -14,10 +16,38 @@ if [ "$(id -u)" != 0 ]; then exec sudo "$0" "$@"; fi
 if [[ "$command" = start || "$command" = stop ]] && [ -z "${INVOCATION_ID:-}" ]; then
     exec /usr/bin/systemctl "$command" reignserver.service
 fi
+
+process_stamp() {
+    local stat fields
+    stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    read -r -a fields <<<"${stat##*) }"
+    printf '%s\n' "${fields[19]:-}"
+}
+
+# An activation keeps the runtime lease while it waits on the unit's own start
+# or stop job. Only those systemd callbacks may act inside that lease, and only
+# while a root-owned delegation names the live root process that still holds it.
+lease_delegated() {
+    [ -n "${INVOCATION_ID:-}" ] && [ -f "$delegate" ] && [ ! -L "$delegate" ] || return 1
+    [ "$(stat -c %u "$delegate")" = 0 ] || return 1
+    local holder stamp
+    read -r holder stamp < "$delegate" || return 1
+    [[ "$holder" =~ ^[1-9][0-9]*$ ]] && [ -n "$stamp" ] || return 1
+    [ "$(process_stamp "$holder")" = "$stamp" ] && [ "$(stat -c %u "/proc/$holder")" = 0 ] || return 1
+    [ "/proc/$holder/fd/8" -ef /run/lock/reignserver-runtime.lock ] || return 1
+    ! flock -n 9 9</run/lock/reignserver-runtime.lock
+}
+
 case "$command" in
-    prepare|configure-web|activate|start|stop|rollback|rollback-list|repair-permissions)
+    prepare|configure-web|activate|start|stop|rollback|rollback-list|repair-permissions|commit-activation|abort-activation)
         exec 8>/run/lock/reignserver-runtime.lock
-        flock -w 30 8 || { echo 'Another Reign runtime operation is running.' >&2; exit 75; }
+        if [[ "$command" = start || "$command" = stop ]] && lease_delegated; then
+            : # The waiting lease holder requested exactly this unit job.
+        elif [ "$command" = configure-web ] && [ "/proc/$$/fd/9" -ef /run/lock/reignserver-runtime.lock ] && flock -n 9; then
+            : # install-reign-control.sh lends the lease it holds on fd 9 (or this takes it there).
+        else
+            flock -w 30 8 || { echo 'Another Reign runtime operation is running.' >&2; exit 75; }
+        fi
         ;;
 esac
 
@@ -120,6 +150,281 @@ PY
     return 1
 }
 
+# Run one unit job while this process keeps the runtime lease (see lease_delegated).
+managed() {
+    local status=0
+    install -d -o root -g root -m 0755 "${pidfile%/*}" || return 1
+    [ ! -L "$delegate" ] || { echo 'Redirected Reign lifecycle delegation is not supported.' >&2; return 1; }
+    printf '%s %s\n' "$$" "$(process_stamp "$$")" > "$delegate.$$" && mv -f "$delegate.$$" "$delegate" || return 1
+    /usr/bin/systemctl "$1" "$unit" || status=$?
+    rm -f "$delegate"
+    return "$status"
+}
+
+unit_state() {
+    local fields
+    fields=$(/usr/bin/systemctl show "$unit" --property=ActiveState --property=MainPID) || return 1
+    active=$(sed -n 's/^ActiveState=//p' <<<"$fields")
+    main=$(sed -n 's/^MainPID=//p' <<<"$fields")
+    [ -n "$active" ] && [[ "$main" =~ ^[0-9]+$ ]]
+}
+
+# Reign's loopback ports may belong only to the managed server's own session
+# (owner 0: to nobody). A foreign owner is reported and never signalled.
+listeners_owned_by() {
+    local owner=$1 port lines line listener
+    for port in 5101 5102; do
+        lines=$(ss -ltnpH "sport = :$port") || { echo 'Reign listener ownership could not be inspected.' >&2; return 1; }
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            listener=$(grep -o 'pid=[0-9]*' <<<"$line" | cut -d = -f 2 | tr '\n' ' ' || true)
+            for listener in ${listener:-0}; do
+                if [ "$owner" = 0 ] || [ "$(ps -o sid= -p "$listener" 2>/dev/null | tr -d ' ' || true)" != "$owner" ]; then
+                    echo "Reign port $port is used by a process outside the managed service; it was left running." >&2
+                    return 1
+                fi
+            done
+        done <<<"$lines"
+    done
+}
+
+# running: the unit owns the recorded runtime process; stopped: nothing owns
+# the runtime or its ports. Anything else is an unknown prior state.
+service_state() {
+    local active main
+    unit_state || { echo 'Cannot inspect the managed Reign service.' >&2; return 1; }
+    if [ "$active" = active ]; then
+        running && [ "$pid" = "$main" ] || { echo 'Managed Reign service ownership could not be verified.' >&2; return 1; }
+        listeners_owned_by "$main" || return 1
+        echo running
+        return 0
+    fi
+    [[ "$active" = inactive || "$active" = failed ]] && [ "$main" = 0 ] || { echo "The managed Reign service is $active; retry after it settles." >&2; return 1; }
+    if running; then echo 'A Reign process is running outside the managed service. Use the ReignServer launcher recovery first.' >&2; return 1; fi
+    listeners_owned_by 0 || return 1
+    echo stopped
+}
+
+assert_stopped() {
+    local active main
+    unit_state && [[ "$active" = inactive || "$active" = failed ]] && [ "$main" = 0 ] || { echo 'The managed Reign service did not stop.' >&2; return 1; }
+    ! running || { echo 'A Reign process is still running; runtime files were not replaced.' >&2; return 1; }
+    listeners_owned_by 0
+}
+
+# A started runtime counts only when the unit, its PID record, the executable
+# inode and port 5101 identify one managed process that reports healthy.
+# Strict mode (activation targets) requires its identity and schema report;
+# a restored older runtime may predate them.
+verify_managed() {
+    local strict=$1 active main lines
+    unit_state && [ "$active" = active ] && [ "$main" -gt 1 ] || { echo 'The managed Reign service is not active.' >&2; return 1; }
+    running && [ "$pid" = "$main" ] || { echo 'The managed service does not own the recorded Reign process.' >&2; return 1; }
+    lines=$(ss -ltnpH 'sport = :5101') || return 1
+    grep "pid=$main," <<<"$lines" >/dev/null || { echo 'Reign port 5101 is not served by the managed process.' >&2; return 1; }
+    listeners_owned_by "$main" || return 1
+    curl -fsS --max-time 5 http://127.0.0.1:5101/health | python3 -c 'import json,sys
+r=json.load(sys.stdin); pid=int(sys.argv[1]); strict=sys.argv[2]=="1"
+reported=any(k in r for k in ("databaseSchemaVersion","requiredDatabaseSchemaVersion","databaseSchemaUpToDate"))
+v=r.get("databaseSchemaVersion")
+schema=type(v) is int and v>0 and v==r.get("requiredDatabaseSchemaVersion") and r.get("databaseSchemaUpToDate") is True
+ok=r.get("ok") is True and r.get("service")=="BannerlordReignServer" and r.get("protocolVersion")==1
+if strict: ok=ok and schema and r.get("databaseName")=="reign" and r.get("processId")==pid
+else: ok=ok and (schema or not reported) and r.get("databaseName","reign")=="reign" and r.get("processId",pid)==pid
+sys.exit(0 if ok else 1)' "$main" "$strict" || { echo 'Reign health does not identify the managed process with a current reign schema.' >&2; return 1; }
+    MAIN_PID=$main
+}
+
+database_schema() {
+    runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 -d reign -c "SELECT version FROM reign_meta.storage_version WHERE component='reign_postgresql';" 2>/dev/null || true
+}
+
+# Hash every file of a retained or staged runtime against its own manifest,
+# optionally bound to an approved manifest digest. Only real regular files and
+# directories are accepted: the whole tree is inventoried without following
+# anything, and links, FIFOs, sockets, devices, extra and missing files are
+# refused before the manifest or any other file is opened.
+verify_tree() {
+    python3 - "$1" "$2" <<'PY'
+import hashlib,json,os,stat,sys
+root=sys.argv[1]
+try:
+    mode=os.lstat(root).st_mode
+except FileNotFoundError:
+    mode=0
+if not stat.S_ISDIR(mode):
+    raise ValueError('Runtime directory is missing or redirected')
+def fail(error):
+    raise error
+actual=set()
+for parent,directories,names in os.walk(root, onerror=fail):
+    for name in directories+names:
+        path=os.path.join(parent, name)
+        mode=os.lstat(path).st_mode
+        if stat.S_ISREG(mode):
+            actual.add(os.path.relpath(path, root).replace(os.sep, '/'))
+        elif not stat.S_ISDIR(mode):
+            raise ValueError('Artifact links and special files are not supported')
+if 'reign-linux-artifact.json' not in actual:
+    raise ValueError('Artifact manifest is missing')
+actual.discard('reign-linux-artifact.json')
+# Never follow or block on an entry replaced after the inventory.
+def read(name):
+    handle=os.open(os.path.join(root, name), os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(handle, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise ValueError('Artifact entry is not a regular file')
+        return stream.read()
+raw=read('reign-linux-artifact.json')
+if sys.argv[2] and hashlib.sha256(raw).hexdigest()!=sys.argv[2]:
+    raise ValueError('Artifact manifest is not the approved deployment manifest')
+manifest=json.loads(raw)
+if manifest.get('schema')!='reign-linux-artifact-v1' or manifest.get('protocolVersion')!=1:
+    raise ValueError('Unsupported artifact manifest or protocol')
+files=manifest.get('files', {})
+if not files or set(files)!=actual or not ({'ReignServer', 'ReignBetaServer'} & set(files)):
+    raise ValueError('Artifact file inventory mismatch')
+for name,digest in files.items():
+    if hashlib.sha256(read(name)).hexdigest()!=digest:
+        raise ValueError('Artifact checksum mismatch')
+PY
+}
+
+# Return the prior runtime files and its prior running/stopped state. The player
+# database is never restored; a schema change by the candidate is reported.
+restore_prior() {
+    files_restored=0
+    managed stop || ( stop ) || true
+    /usr/bin/systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+    if ! assert_stopped; then
+        echo "Recovery stopped before changing files: the candidate could not be stopped safely. Runtime ${version:-unknown} and its logs were preserved for review." >&2
+        return 1
+    fi
+    # Errexit does not apply inside recovery; every file step is checked. The
+    # candidate is renamed aside, never over an existing current.aborted, and
+    # removed only once its bytes verify; a resumed recovery finishes the same way.
+    # A current.next is likewise removed only while it holds exactly this
+    # activation's retained candidate (a fully staged copy not yet swapped in);
+    # anything else there, including any link or partial copy, stops recovery
+    # before any runtime path changes.
+    if present "$root/current.next" && ! { [ -n "$version" ] && runtime_is "$root/current.next" "$version"; }; then
+        echo "Recovery stopped before changing files: $root/current.next is not the verified candidate runtime ${version:-unknown}; it was preserved for review." >&2
+        return 1
+    fi
+    if present "$root/current.aborted" && ! remove_staged_candidate; then
+        return 1
+    fi
+    if ! { { [ "$moved_candidate" = 0 ] || { ! present "$root/current.aborted" && mv -T "$root/current" "$root/current.aborted" && remove_staged_candidate; }; } &&
+        { [ "$moved_prior" = 0 ] || { ! present "$root/current" && mv -T "$root/current.previous" "$root/current"; }; } &&
+        { ! present "$root/current.next" || rm -rf -- "$root/current.next"; } &&
+        if [ -n "$old_version" ]; then
+            printf '%s\n' "$old_version" > "$root/current-version.next" && mv -f "$root/current-version.next" "$root/current-version"
+        else
+            rm -f "$root/current-version"
+        fi; }; then
+        echo "Recovery could not restore runtime files. Runtime ${version:-unknown}, current.previous and logs were preserved for review." >&2
+        return 1
+    fi
+    [ "$metadata_created" = 0 ] || rm -f "$root/rollback-metadata/$version.json" || true
+    files_restored=1
+    if [ "$prior_state" = running ] && ! { managed start && verify_managed 0; }; then
+        local schema_after
+        schema_after=$(database_schema)
+        echo "Prior runtime ${old_version:-none} was restored but did not start healthy. The database was not restored." >&2
+        if [ -n "$schema_before" ] && [ "$schema_after" != "$schema_before" ]; then
+            echo "The candidate changed the database schema from $schema_before to ${schema_after:-unknown}; restore requires a reviewed compatible build." >&2
+        fi
+        echo "Candidate runtime $version and logs were preserved for review." >&2
+        return 1
+    fi
+    echo "Restored Reign runtime ${old_version:-none}; service $prior_state." >&2
+}
+
+recover_activation() {
+    local status=$1
+    trap - EXIT
+    set +e
+    if [ "$phase" != done ]; then
+        echo 'Reign activation failed; restoring the prior runtime state.' >&2
+        restore_prior
+    fi
+    exit "$status"
+}
+
+# True when <tree> holds exactly the retained bytes of <version>; with link-ok a
+# legacy symlink selecting that retained version also qualifies.
+runtime_is() {
+    local sha
+    if [ -L "$1" ]; then
+        [ -n "${3:-}" ] && [ -d "$root/versions/$2" ] && [ "$(readlink -f -- "$1")" = "$(readlink -f -- "$root/versions/$2")" ]
+        return
+    fi
+    # The reference digest comes only from a real retained directory's regular
+    # manifest, opened without following or blocking on a replaced entry.
+    [ -n "$2" ] || return 1
+    sha=$(python3 - "$root/versions" "$2" 2>/dev/null <<'PY'
+import hashlib,os,stat,sys
+for path in (sys.argv[1], os.path.join(*sys.argv[1:])):
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise ValueError('Retained runtime directory is redirected')
+handle=os.open(os.path.join(*sys.argv[1:], 'reign-linux-artifact.json'), os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+with os.fdopen(handle, 'rb') as stream:
+    if not stat.S_ISREG(os.fstat(handle).st_mode):
+        raise ValueError('Retained manifest is not a regular file')
+    print(hashlib.sha256(stream.read()).hexdigest())
+PY
+) || return 1
+    verify_tree "$1" "$sha" 2>/dev/null
+}
+
+# Any entry at the path, including a dangling link.
+present() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+# current.aborted is removed only while it holds exactly the retained candidate
+# bytes; anything else there, including any link, is left untouched for review.
+remove_staged_candidate() {
+    if [ -n "$version" ] && runtime_is "$root/current.aborted" "$version"; then
+        rm -rf -- "$root/current.aborted" && return 0
+        echo "Recovery could not finish removing the verified candidate at $root/current.aborted; the remainder was preserved for review." >&2
+        return 1
+    fi
+    echo "Recovery stopped: $root/current.aborted is not the verified candidate runtime ${version:-unknown}; it was preserved for review." >&2
+    return 1
+}
+
+# Abort may resume after any interrupted step. What current holds is decided
+# from its verified bytes, never from current-version or the marker: while
+# current.previous exists only the verified candidate is removed; once it is
+# gone, current may already be the restored prior. Anything else is preserved.
+abort_activation() {
+    moved_prior=0 moved_candidate=0 files_restored=0
+    if present "$root/current.previous"; then moved_prior=1; fi
+    if present "$root/current"; then
+        if [ "$moved_prior" = 0 ] && [ -n "$old_version" ] && runtime_is "$root/current" "$old_version" link-ok; then
+            echo "Resuming an interrupted abort of $version: prior runtime $old_version is already selected." >&2
+        elif runtime_is "$root/current" "$version"; then
+            moved_candidate=1
+        else
+            echo "The selected Reign runtime is neither candidate $version nor prior ${old_version:-none}; nothing was changed and the pending activation was preserved for review." >&2
+            return 1
+        fi
+    elif present "$root/current.aborted"; then
+        echo "Resuming an interrupted abort of $version: verifying the staged candidate runtime before removal." >&2
+    fi
+    local status=0
+    restore_prior || status=1
+    # Keep the decision marker only while runtime files still need review.
+    [ "$files_restored" = 0 ] || rm -f "$root/activation-pending"
+    return "$status"
+}
+
+activation_receipt() {
+    printf '{"schema":"reign-activation-v1","version":"%s","previousVersion":"%s","manifestSha256":"%s","state":"%s","mainPid":%s,"awaitingCommit":%s}\n' \
+        "$version" "$old_version" "$manifest_sha" "$1" "$2" "$3"
+}
+
 case "$command" in
     configure-web)
         a2enmod proxy proxy_http cgid headers >/dev/null
@@ -150,6 +455,8 @@ EOF
     ErrorDocument 504 /reign-control/offline
     # Match the client's fifteen-minute interactive window, including provider retries.
     # An earlier proxy deadline replaces a valid pending response with the offline HTML page.
+    # Always add the proxy's own X-Forwarded-* marker, even when a caller nominates peer headers in Connection.
+    ProxyAddHeaders On
     # Global key mutations trust only these: always overwritten here, so a client can never supply its own peer or host.
     RequestHeader set X-Reign-Peer "expr=%{REMOTE_ADDR}"
     RequestHeader set X-Reign-Host "expr=%{HTTP_HOST}"
@@ -200,13 +507,23 @@ EOF
         "$python_root/bin/python" "$scripts/Prepare-LinuxRuntime.py" --model-directory "$model_root"
         ;;
     activate|rollback)
-        leave_stopped=0
-        case "${3:-}" in
-            '') ;;
-            --leave-stopped) leave_stopped=1 ;;
-            *) echo 'Unknown activation option.' >&2; exit 64 ;;
-        esac
-        [ "$#" -le 3 ] || exit 64
+        # Start policy: --start (reviewed deployment) ends with the verified
+        # candidate running; --leave-stopped (tester installation) never starts
+        # it. With neither, as direct operator calls always did, the candidate is
+        # health checked and the unit returns to its prior running/stopped state.
+        # --await-commit keeps the prior runtime until the caller runs
+        # commit-activation or abort-activation for this version.
+        start_policy=prior await_commit=0 expected_manifest=
+        for option in "${@:3}"; do
+            case "$option" in
+                --start) [ "$start_policy" = prior ] || exit 64; start_policy=running ;;
+                --leave-stopped) [ "$start_policy" = prior ] || exit 64; start_policy=stopped ;;
+                --await-commit) await_commit=1 ;;
+                --manifest-sha256=*) expected_manifest=${option#*=}; [[ "$expected_manifest" =~ ^[0-9a-f]{64}$ ]] || exit 64 ;;
+                *) echo 'Unknown activation option.' >&2; exit 64 ;;
+            esac
+        done
+        [ "$#" -le 5 ] || exit 64
         if [ "$command" = rollback ]; then
             target=${2:?Supply a retained version ID}
             python3 /usr/local/bin/reign_versions.py check "$target"
@@ -217,28 +534,25 @@ EOF
         executable=ReignServer
         [ -f "$package/$executable" ] || executable=ReignBetaServer
         [ "${package:0:1}" = / ] && [ -f "$package/$executable" ] && [ -f "$package/reign-linux-artifact.json" ] || exit 64
-        python3 - "$package" <<'PY'
-import hashlib,json,pathlib,sys
-root=pathlib.Path(sys.argv[1]).resolve()
-manifest=json.loads((root/'reign-linux-artifact.json').read_text())
-if manifest.get('schema')!='reign-linux-artifact-v1' or manifest.get('protocolVersion')!=1:
-    raise ValueError('Unsupported artifact manifest or protocol')
-files=manifest.get('files', {})
-actual={p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file() and p.relative_to(root).as_posix()!='reign-linux-artifact.json'}
-if not files or set(files)!=actual or not ({'ReignServer', 'ReignBetaServer'} & set(files)):
-    raise ValueError('Artifact file inventory mismatch')
-if any(p.is_symlink() for p in root.rglob('*')):
-    raise ValueError('Artifact symlinks are not supported')
-for name,digest in manifest['files'].items():
-    path=(root/name).resolve()
-    if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
-        raise ValueError('Artifact checksum mismatch')
-PY
+        # Review interrupted or uncommitted activations before changing anything.
+        for leftover in current.next current.previous current.aborted activation-pending; do
+            [ ! -e "$root/$leftover" ] && [ ! -L "$root/$leftover" ] || { echo "A previous Reign activation needs review ($leftover)." >&2; exit 1; }
+        done
+        old_version=$(cat "$root/current-version" 2>/dev/null || true)
+        if [ -z "$old_version" ] && [ -L "$root/current" ]; then
+            old_version=$(basename "$(readlink "$root/current")")
+        fi
+        [ -z "$old_version" ] || [[ "$old_version" =~ ^[0-9]{14}-[0-9]+$ ]] || exit 1
+        prior_state=$(service_state) || exit 1
+        schema_before=$(database_schema)
         python3 /usr/local/bin/reign_versions.py record
+        fresh_copy=0
         if [ "$command" = rollback ]; then
             version=$target
         else
             version=$(date -u +%Y%m%d%H%M%S)-$$
+            [ ! -e "$root/versions/$version" ] || exit 1
+            fresh_copy=1
             install -d "$root/versions/$version"
             cp -a "$package/." "$root/versions/$version/"
         fi
@@ -247,47 +561,89 @@ PY
         find -P "$root/versions/$version" -xdev -type d -exec chmod 0755 {} +
         find -P "$root/versions/$version" -xdev -type f -exec chmod 0644 {} +
         chmod 0755 "$root/versions/$version/$executable"
-        old_version=$(cat "$root/current-version" 2>/dev/null || true)
-        if [ -z "$old_version" ] && [ -L "$root/current" ]; then
-            old_version=$(basename "$(readlink "$root/current")")
-        fi
-        [ -z "$old_version" ] || [[ "$old_version" =~ ^[0-9]{14}-[0-9]+$ ]] || exit 1
-        [ ! -e "$root/current.next" ] && [ ! -L "$root/current.next" ] || { echo 'A previous Reign activation needs review.' >&2; exit 1; }
-        [ ! -e "$root/current.previous" ] && [ ! -L "$root/current.previous" ] || { echo 'A previous Reign activation backup needs review.' >&2; exit 1; }
-        install -d "$root/current.next"
-        cp -a "$root/versions/$version/." "$root/current.next/"
-        was_running=0
-        if running; then was_running=1; fi
-        stop
-        if [ -e "$root/current" ] || [ -L "$root/current" ]; then
-            mv -T "$root/current" "$root/current.previous"
-        fi
-        mv -T "$root/current.next" "$root/current"
-        printf '%s\n' "$version" > "$root/current-version.next"
-        mv -f "$root/current-version.next" "$root/current-version"
-        if [ "$leave_stopped" = 0 ] && ! start; then
-            rm -rf -- "$root/current"
-            if [ -e "$root/current.previous" ] || [ -L "$root/current.previous" ]; then
-                mv -T "$root/current.previous" "$root/current"
-            fi
-            if [ -n "$old_version" ]; then
-                printf '%s\n' "$old_version" > "$root/current-version.next"
-                mv -f "$root/current-version.next" "$root/current-version"
-                [ "$was_running" = 0 ] || start
-            else
-                rm -f "$root/current-version"
-            fi
+        # Verify the retained bytes themselves, bound to the approved manifest when supplied.
+        if ! verify_tree "$root/versions/$version" "$expected_manifest"; then
+            [ "$fresh_copy" = 0 ] || rm -rf -- "$root/versions/$version"
+            echo 'The retained Reign artifact failed verification; nothing was activated.' >&2
             exit 1
         fi
-        python3 /usr/local/bin/reign_versions.py record || echo 'Could not record rollback compatibility for this build.' >&2
-        [ "$was_running" = 1 ] || stop
-        if [ -e "$root/current.previous" ] || [ -L "$root/current.previous" ]; then
+        manifest_sha=$(sha256sum "$root/versions/$version/reign-linux-artifact.json" | cut -d ' ' -f 1)
+        metadata_created=0
+        [ -e "$root/rollback-metadata/$version.json" ] || metadata_created=1
+        install -d "$root/current.next"
+        cp -a "$root/versions/$version/." "$root/current.next/"
+        if ! verify_tree "$root/current.next" "$manifest_sha"; then
+            rm -rf -- "$root/current.next"
+            echo 'The staged Reign runtime failed verification; nothing was activated.' >&2
+            exit 1
+        fi
+        moved_prior=0 moved_candidate=0 phase=stopping
+        trap 'recover_activation $?' EXIT
+        if [ "$prior_state" = running ]; then managed stop; fi
+        assert_stopped
+        phase=swapping
+        if [ -e "$root/current" ] || [ -L "$root/current" ]; then
+            mv -T "$root/current" "$root/current.previous"
+            moved_prior=1
+        fi
+        mv -T "$root/current.next" "$root/current"
+        moved_candidate=1
+        printf '%s\n' "$version" > "$root/current-version.next"
+        mv -f "$root/current-version.next" "$root/current-version"
+        phase=starting
+        final_state=stopped MAIN_PID=0
+        if [ "$start_policy" != stopped ]; then
+            managed start || { echo 'The managed Reign service did not start the candidate.' >&2; exit 1; }
+            verify_managed 1
+            python3 /usr/local/bin/reign_versions.py record || echo 'Could not record rollback compatibility for this build.' >&2
+            final_state=running
+            # A failed return to stopped is recovered like any other failure.
+            if [ "$start_policy" = prior ] && [ "$prior_state" = stopped ]; then
+                managed stop
+                assert_stopped
+                final_state=stopped MAIN_PID=0
+            fi
+        fi
+        if [ "$await_commit" = 1 ]; then
+            printf '%s %s %s %s %s\n' "$version" "${old_version:--}" "$prior_state" "$metadata_created" "${schema_before:--}" > "$root/activation-pending.next"
+            mv -f "$root/activation-pending.next" "$root/activation-pending"
+        elif [ "$moved_prior" = 1 ]; then
             rm -rf -- "$root/current.previous"
         fi
-        if [ "$leave_stopped" = 1 ]; then
+        phase=done
+        trap - EXIT
+        if [ "$start_policy" = stopped ]; then
             echo 'Reign runtime activated; service left stopped; prior version retained.'
+        elif [ "$final_state" = stopped ]; then
+            echo 'Reign runtime activated and health checked; service returned to stopped; prior version retained.'
         else
-            echo 'Reign runtime activated and health checked; prior version retained.'
+            echo 'Reign runtime activated and health checked under the managed service; prior version retained.'
+        fi
+        activation_receipt "$final_state" "$MAIN_PID" "$([ "$await_commit" = 1 ] && echo true || echo false)"
+        ;;
+    commit-activation|abort-activation)
+        [ "$#" = 2 ] && [[ "$2" =~ ^[0-9]{14}-[0-9]+$ ]] || exit 64
+        marker="$root/activation-pending"
+        [ -f "$marker" ] && [ ! -L "$marker" ] || { echo 'No Reign activation is awaiting a decision.' >&2; exit 1; }
+        read -r version old_version prior_state metadata_created schema_before < "$marker" || exit 1
+        [ "$old_version" != - ] || old_version=
+        [ "$schema_before" != - ] || schema_before=
+        selected=$(cat "$root/current-version" 2>/dev/null || true)
+        [ "$version" = "$2" ] && { [ "$selected" = "$version" ] || { [ "$command" = abort-activation ] && [ "$selected" = "$old_version" ]; }; } &&
+            { [ -z "$old_version" ] || [[ "$old_version" =~ ^[0-9]{14}-[0-9]+$ ]]; } &&
+            [[ "$prior_state" =~ ^(running|stopped)$ && "$metadata_created" =~ ^[01]$ ]] ||
+            { echo 'The pending Reign activation does not match this request; it was preserved.' >&2; exit 1; }
+        if [ "$command" = commit-activation ]; then
+            # An interrupted abort may already have removed or replaced the candidate.
+            ! present "$root/current.aborted" && runtime_is "$root/current" "$version" ||
+                { echo "Runtime $version is no longer the selected candidate (interrupted abort?); nothing was committed. Retry abort-activation $version." >&2; exit 1; }
+            rm -rf -- "$root/current.previous"
+            rm -f "$marker"
+            echo "Reign activation $version committed."
+        else
+            status=0
+            abort_activation || status=1
+            exit "$status"
         fi
         ;;
     global-keys-enroll)
@@ -342,5 +698,5 @@ finally:
 print("Global API Keys enrollment saved.")
 '
         ;;
-    *) echo 'Usage: reignctl prepare|activate <validated-package>|rollback-list|rollback <version-id>|repair-permissions|start|stop|status|global-keys-enroll' >&2; exit 64 ;;
+    *) echo 'Usage: reignctl prepare|activate <validated-package> [--start|--leave-stopped] [--await-commit] [--manifest-sha256=<sha>]|commit-activation <version-id>|abort-activation <version-id>|rollback-list|rollback <version-id> [options]|repair-permissions|start|stop|status|global-keys-enroll' >&2; exit 64 ;;
 esac

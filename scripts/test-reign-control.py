@@ -1,4 +1,5 @@
 """Provider-free contracts. Service calls and health probes are always injected fakes."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -26,9 +27,11 @@ class StartupPrerequisiteTests(unittest.TestCase):
     def lifecycle_functions():
         return (SOURCE / 'reignctl').read_text().split('case "$command" in\n    configure-web)', 1)[0]
 
-    def run_lifecycle(self, directory, body):
+    def run_lifecycle(self, directory, body, systemctl=None):
         fixture = Path(directory)
         prefix = self.lifecycle_functions()
+        if systemctl:
+            prefix = prefix.replace('/usr/bin/systemctl', systemctl)
         script = prefix + '\nroot="$1/runtime"; data="$1/data"; pidfile="$1/pids/server.pid"\n' + body
         return subprocess.run(['bash', '-c', script, 'fixture', str(fixture)], capture_output=True, text=True, timeout=10)
 
@@ -62,6 +65,177 @@ class StartupPrerequisiteTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, 'callback')
                 self.assertTrue((fixture / 'runtime.lock').exists())
+
+    def test_unit_callbacks_join_only_a_live_delegating_lease_holder(self):
+        self.assertEqual(os.geteuid(), 0, 'Lease delegation is a root-only contract.')
+        with tempfile.TemporaryDirectory(prefix='reign-delegation-') as directory:
+            fixture = Path(directory)
+            lock = fixture / 'runtime.lock'
+            probe = self.lifecycle_functions().replace('/run/lock/reignserver-runtime.lock', str(lock)).replace(
+                'pidfile=/run/reignserver/server.pid', f'pidfile={fixture}/server.pid') + '\nlease_delegated && echo delegated || echo refused\n'
+            stamp = lambda pid: Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+            holder = subprocess.Popen(['bash', '-c', 'exec 8>"$1"; flock 8; echo locked; exec sleep 30', 'holder', str(lock)],
+                                      stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(holder.stdout.readline().strip(), 'locked')
+                env = dict(os.environ, INVOCATION_ID='isolated-systemd-invocation')
+                # Only the live holder of the lease qualifies: not a reused PID, nor a root process without the lease.
+                for content, expected in ((f'{holder.pid} {stamp(holder.pid)}', 'delegated'), (f'{holder.pid} 1', 'refused'),
+                                          (f'{os.getpid()} {stamp(os.getpid())}', 'refused')):
+                    with self.subTest(content=content):
+                        (fixture / 'lifecycle-delegate').write_text(content + '\n')
+                        result = subprocess.run(['bash', '-c', probe, 'fixture', 'status'], env=env, capture_output=True, text=True, timeout=5)
+                        self.assertEqual(result.stdout.strip(), expected, result.stderr)
+            finally:
+                holder.kill()
+                holder.wait()
+
+    def test_reign_ports_accept_only_the_managed_session(self):
+        stubs = '''ss() { case "$*" in *5101*) echo 'LISTEN 0 1 127.0.0.1:5101 0.0.0.0:* users:(("ReignServer",pid=77,fd=9))';; esac; }
+ps() { echo "$SID"; }
+'''
+        for owner, sid, accepted in (('77', '77', True), ('77', '88', False), ('0', '77', False)):
+            with self.subTest(owner=owner, sid=sid), tempfile.TemporaryDirectory(prefix='reign-listeners-') as directory:
+                result = self.run_lifecycle(directory, stubs + f'SID={sid}\nlisteners_owned_by {owner}\n')
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
+    def test_runtime_tree_is_bound_to_the_approved_manifest(self):
+        with tempfile.TemporaryDirectory(prefix='reign-runtime-tree-') as directory:
+            tree = Path(directory) / 'tree'
+            tree.mkdir()
+            (tree / 'ReignServer').write_bytes(b'server')
+            manifest = json.dumps({'schema': 'reign-linux-artifact-v1', 'protocolVersion': 1,
+                                   'files': {'ReignServer': hashlib.sha256(b'server').hexdigest()}}).encode()
+            (tree / 'reign-linux-artifact.json').write_bytes(manifest)
+            approved = hashlib.sha256(manifest).hexdigest()
+            for expected, accepted in ((approved, True), ('', True), ('0' * 64, False)):
+                with self.subTest(expected=expected):
+                    result = self.run_lifecycle(directory, f'verify_tree "$1/tree" "{expected}"\n')
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+            (tree / 'extra').write_bytes(b'unlisted')
+            self.assertNotEqual(self.run_lifecycle(directory, f'verify_tree "$1/tree" "{approved}"\n').returncode, 0)
+            (tree / 'extra').unlink()
+            # FIFOs are refused without being opened: an unlisted entry, a retained reference manifest or the manifest itself.
+            os.mkfifo(tree / 'pipe')
+            self.assertNotEqual(self.run_lifecycle(directory, 'verify_tree "$1/tree" ""\n').returncode, 0)
+            (tree / 'pipe').unlink()
+            retained = Path(directory) / 'runtime' / 'versions' / '20261115000002-2'
+            retained.mkdir(parents=True)
+            os.mkfifo(retained / 'reign-linux-artifact.json')
+            self.assertNotEqual(self.run_lifecycle(directory, 'runtime_is "$1/tree" 20261115000002-2\n').returncode, 0)
+            (tree / 'reign-linux-artifact.json').unlink()
+            os.mkfifo(tree / 'reign-linux-artifact.json')
+            self.assertNotEqual(self.run_lifecycle(directory, 'verify_tree "$1/tree" ""\n').returncode, 0)
+
+    def test_resumed_abort_preserves_a_prior_runtime_already_restored(self):
+        prior, candidate = '20261115000001-1', '20261115000002-2'
+        def tree(path, body):
+            path.mkdir(parents=True)
+            (path / 'ReignServer').write_bytes(body)
+            (path / 'reign-linux-artifact.json').write_text(json.dumps({'schema': 'reign-linux-artifact-v1', 'protocolVersion': 1,
+                                                                         'files': {'ReignServer': hashlib.sha256(body).hexdigest()}}))
+        # Lifecycle jobs and systemctl are fixture functions; no installed unit or systemctl is reached.
+        body = ('fixture_systemctl() { return 0; }\nmanaged() { return 0; }\nassert_stopped() { return 0; }\nunit=reign-abort-fixture.service\n'
+                f'version={candidate} old_version={prior} prior_state=stopped metadata_created=0 schema_before=\nabort_activation\n')
+        run = lambda directory: self.run_lifecycle(directory, body, systemctl='fixture_systemctl')
+        failures = ('conflicting-current', 'unexpected-staged', 'dangling-staged', 'unexpected-next', 'linked-next')
+        for case in failures + ('interrupted-staged', 'candidate-selected'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory(prefix='reign-abort-') as directory:
+                runtime = Path(directory) / 'runtime'
+                staged = runtime / 'current.aborted'
+                staging = runtime / 'current.next'
+                tree(runtime / 'versions' / prior, b'prior')
+                tree(runtime / 'versions' / candidate, b'candidate')
+                tree(runtime / 'current.previous', b'prior')
+                if case == 'interrupted-staged':
+                    # An abort stopped after renaming the candidate aside.
+                    tree(staged, b'candidate')
+                else:
+                    tree(runtime / 'current', b'unexpected' if case == 'conflicting-current' else b'candidate')
+                if case == 'unexpected-staged':
+                    tree(staged, b'unexpected')
+                elif case == 'dangling-staged':
+                    staged.symlink_to(runtime / 'missing', target_is_directory=True)
+                elif case == 'unexpected-next':
+                    # A partial staging copy left beside an explicit abort retry.
+                    staging.mkdir()
+                    (staging / 'ReignServer').write_bytes(b'partial')
+                elif case == 'linked-next':
+                    staging.symlink_to(runtime / 'versions' / candidate, target_is_directory=True)
+                (runtime / 'current-version').write_text(candidate + '\n')
+                (runtime / 'activation-pending').write_text(f'{candidate} {prior} stopped 0 -\n')
+                if case in failures:
+                    # Neither verified candidate nor prior bytes: nothing is removed or moved.
+                    result = run(directory)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual((runtime / 'current' / 'ReignServer').read_bytes(),
+                                     b'unexpected' if case == 'conflicting-current' else b'candidate')
+                    self.assertTrue((runtime / 'current.previous').is_dir() and (runtime / 'activation-pending').exists())
+                    if case in ('unexpected-staged', 'dangling-staged'):
+                        self.assertTrue(staged.is_symlink() if case == 'dangling-staged' else (staged / 'ReignServer').read_bytes() == b'unexpected')
+                        self.assertIn(str(staged), result.stderr)
+                    elif case != 'conflicting-current':
+                        self.assertTrue(staging.is_symlink() if case == 'linked-next' else (staging / 'ReignServer').read_bytes() == b'partial')
+                        self.assertTrue((runtime / 'versions' / candidate / 'ReignServer').is_file())
+                        self.assertIn(str(staging), result.stderr)
+                    continue
+                if case == 'candidate-selected':
+                    # The prior runtime is moved back, then its version record cannot be written.
+                    (runtime / 'current-version.next').mkdir()
+                    self.assertNotEqual(run(directory).returncode, 0)
+                    self.assertEqual((runtime / 'current' / 'ReignServer').read_bytes(), b'prior')
+                    self.assertTrue((runtime / 'activation-pending').exists())
+                    (runtime / 'current-version.next').rmdir()
+                result = run(directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((runtime / 'current' / 'ReignServer').read_bytes(), b'prior')
+                self.assertEqual((runtime / 'current-version').read_text(), prior + '\n')
+                self.assertFalse((runtime / 'activation-pending').exists() or (runtime / 'current.aborted').exists())
+        with tempfile.TemporaryDirectory(prefix='reign-abort-') as directory:
+            # Activation failed after staging but before the swap: only the verified staged copy is removed.
+            runtime = Path(directory) / 'runtime'
+            tree(runtime / 'versions' / prior, b'prior')
+            tree(runtime / 'versions' / candidate, b'candidate')
+            tree(runtime / 'current', b'prior')
+            tree(runtime / 'current.next', b'candidate')
+            (runtime / 'current-version').write_text(prior + '\n')
+            result = self.run_lifecycle(directory, body.replace('abort_activation', 'moved_prior=0 moved_candidate=0\nrestore_prior'),
+                                        systemctl='fixture_systemctl')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((runtime / 'current.next').exists())
+            self.assertEqual((runtime / 'current' / 'ReignServer').read_bytes(), b'prior')
+            self.assertEqual((runtime / 'current-version').read_text(), prior + '\n')
+            self.assertTrue((runtime / 'versions' / candidate / 'ReignServer').is_file())
+
+    def test_resumed_control_restore_still_reloads_the_restored_unit(self):
+        self.assertEqual(os.geteuid(), 0, 'Control recovery evidence requires a private root store.')
+        code = (SOURCE / 'install-reign-control.sh').read_text().split("<<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
+        with tempfile.TemporaryDirectory(prefix='reign-control-restore-') as directory:
+            # Every recorded control path is relocated into the fixture; only systemctl/apache2ctl are injected.
+            for prefix in ("'/etc/", "'/usr/local/", "'/var/lib/apache2"):
+                code = code.replace(prefix, f"'{directory}{prefix[1:]}")
+            unit = Path(directory) / 'etc/systemd/system/reignserver.service'
+            unit.parent.mkdir(parents=True)
+            unit.write_bytes(b'prior unit\n')
+            handle = Path(directory) / 'store' / 'fixture-restore-1'
+            def recovery(action, reload_fails=False):
+                calls = []
+                def run(argv, **kwargs):
+                    calls.append(list(argv))
+                    return SimpleNamespace(returncode=int(reload_fails and 'daemon-reload' in argv), stdout='inactive\n' if 'show' in argv else '')
+                with patch('subprocess.run', run), patch('sys.argv', ['-', action, str(handle)]):
+                    exec(compile(code, 'install-reign-control recovery', 'exec'), {'__name__': '__main__'})
+                return calls
+            recovery('begin')
+            unit.write_bytes(b'candidate unit\n')
+            recovery('seal')
+            with self.assertRaises(SystemExit) as failure:
+                recovery('restore', reload_fails=True)
+            self.assertIn('systemd could not reload', str(failure.exception))
+            self.assertEqual(unit.read_bytes(), b'prior unit\n')
+            # The files are already back, yet the candidate unit may still be loaded.
+            self.assertIn(['systemctl', 'daemon-reload'], recovery('restore'))
+            self.assertFalse(handle.exists())
 
     def test_root_owned_stale_pid_can_be_replaced_while_server_stays_unprivileged(self):
         self.assertEqual(os.geteuid(), 0, 'PID access contract requires the dedicated root test adapter.')
