@@ -318,6 +318,227 @@ namespace ReignBetaServer
                     && !allowed(with(apache, r => r.ProxyHost = "evil.invalid"))
                     && !allowed(with(apache, r => r.Origin = "http://127.0.0.1:5101")));
 
+                // Central ingress policy: real loopback socket, Apache claims only together and canonical, exact local
+                // authority; Origin/Sec-Fetch-Site only ever refuse. No protocol header or Origin absence grants access.
+                Func<HttpRequest, string> refusal = r => IngressAccessRefusal(r, peers, 5101);
+                var native = new HttpRequest { Method = "POST", Path = "/llm/chat", RemoteAddress = "127.0.0.1", Host = "127.0.0.1:5101" };
+                var nativeApache = with(native, r => { r.ProxyPeer = "172.20.0.1"; r.ProxyHost = "127.0.0.1:8089"; });
+                var panel = with(nativeApache, r => r.Origin = "http://127.0.0.1:8089");
+                var panelGet = with(nativeApache, r => { r.Method = "GET"; r.Path = "/api/settings"; r.FetchSite = "same-origin"; });
+                check("ingress_allows_native_apache_and_same_origin", refusal(native) == null && refusal(nativeApache) == null
+                    && refusal(panel) == null && refusal(panelGet) == null
+                    && refusal(with(native, r => r.Host = "localhost:5101")) == null
+                    && refusal(with(panel, r => { r.ProxyHost = "localhost:8089"; r.Origin = "http://localhost:8089"; })) == null
+                    && refusal(with(panelGet, r => r.FetchSite = "none")) == null);
+                check("ingress_refuses_cross_site_browser", refusal(with(panel, r => r.Origin = "https://evil.invalid")) == "origin"
+                    && refusal(with(panel, r => r.Origin = "null")) == "origin"
+                    && refusal(with(panel, r => r.Origin = "http://127.0.0.1:5101")) == "origin"
+                    && refusal(with(nativeApache, r => r.FetchSite = "cross-site")) == "fetch_site"
+                    && refusal(with(nativeApache, r => r.FetchSite = "same-site")) == "fetch_site"
+                    && refusal(with(nativeApache, r => r.FetchSite = "none")) == "fetch_site");
+                check("ingress_refuses_untrusted_transport", refusal(with(native, r => r.RemoteAddress = "192.168.1.5")) == "socket_peer"
+                    && refusal(with(native, r => r.RemoteAddress = "")) == "socket_peer"
+                    && refusal(with(native, r => r.Host = "evil.invalid:5101")) == "host"
+                    && refusal(with(native, r => r.Host = null)) == "host"
+                    && refusal(with(native, r => r.Host = "127.0.0.1:8089")) == "host"
+                    && refusal(with(nativeApache, r => r.ProxyPeer = "192.168.1.5")) == "proxy_peer"
+                    && refusal(with(nativeApache, r => r.ProxyPeer = "127.1")) == "proxy_peer"
+                    && refusal(with(nativeApache, r => r.ProxyPeer = "")) == "proxy_peer"
+                    && refusal(with(nativeApache, r => r.ProxyHost = "rebind.invalid:8089")) == "proxy_host"
+                    && refusal(with(nativeApache, r => r.ProxyHost = null)) == "proxy_incomplete"
+                    && refusal(with(native, r => r.ProxyHost = "127.0.0.1:8089")) == "proxy_incomplete"
+                    && refusal(with(native, r => { r.RemoteAddress = "192.168.1.5"; r.ReignProtocol = "1"; })) == "socket_peer"
+                    && refusal(with(native, r => { r.Path = "/health"; r.RemoteAddress = "192.168.1.5"; })) == "socket_peer"
+                    && refusal(with(native, r => { r.Method = "GET"; r.Path = "/health"; r.RemoteAddress = "192.0.2.7"; })) == "socket_peer");
+                // X-Forwarded-For presence (ProxyAddHeaders On) marks an Apache hop even when Connection stripped the custom
+                // fields; the marker never authorizes, so the overwritten pair and its peer/host checks still decide.
+                check("ingress_proxy_marker_requires_overwritten_pair", refusal(with(native, r => r.ProxyForwarded = true)) == "proxy_incomplete"
+                    && refusal(with(nativeApache, r => { r.ProxyForwarded = true; r.ProxyPeer = null; })) == "proxy_incomplete"
+                    && refusal(with(nativeApache, r => { r.ProxyForwarded = true; r.ProxyHost = null; })) == "proxy_incomplete"
+                    && refusal(with(nativeApache, r => { r.ProxyForwarded = true; r.ProxyPeer = "192.168.1.5"; })) == "proxy_peer"
+                    && refusal(with(nativeApache, r => { r.ProxyForwarded = true; r.RemoteAddress = "192.168.1.5"; })) == "socket_peer"
+                    && refusal(with(nativeApache, r => { r.ProxyForwarded = true; r.Host = "127.0.0.1:8089"; })) == "host"
+                    && refusal(with(nativeApache, r => r.ProxyForwarded = true)) == null
+                    && refusal(with(panel, r => r.ProxyForwarded = true)) == null
+                    && refusal(native) == null);
+
+                // Framing and limits are decided from the headers alone: a 403/413 below arrives with no body sent at all.
+                Func<string, string, object> ingressFrom = (remote, raw) =>
+                {
+                    try { return ReadRequest(new MemoryStream(System.Text.Encoding.Latin1.GetBytes(raw)), remote, peers, 5101); }
+                    catch (HttpIngressException ex) { return ex.Status + ":" + ex.Reason; }
+                };
+                Func<string, object> ingress = raw =>
+                {
+                    object result = ingressFrom("127.0.0.1", raw);
+                    return result is string failure ? int.Parse(failure.Substring(0, failure.IndexOf(':')), System.Globalization.CultureInfo.InvariantCulture) : result;
+                };
+                const string line = "POST /api/settings HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n";
+                var parsed = ingress(line + "Content-Length: 7\r\n\r\n{\"a\":1}") as HttpRequest;
+                bool parsedHeldBudget = parsed != null && parsed.ReservedJsonBytes == 7;
+                ReleaseIngressReservations(parsed);
+                check("ingress_parses_bounded_json", parsed != null && ReadInt(parsed.JsonBody, "a", 0) == 1 && parsed.Origin == null
+                    && parsedHeldBudget && parsed.ReservedJsonBytes == 0
+                    && ingress("") == null && ingress(line + "\r\n") is HttpRequest);
+                check("ingress_rejects_malformed_framing", object.Equals(ingress(line + "Content-Length: 1\r\nContent-Length: 1\r\n\r\n{"), 400)
+                    && object.Equals(ingress(line + "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n"), 411)
+                    && object.Equals(ingress(line + "Transfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\n{}"), 400)
+                    && object.Equals(ingress(line + "Content-Length: -1\r\n\r\n"), 400)
+                    && object.Equals(ingress(line + "Content-Length: +2\r\n\r\n{}"), 400)
+                    && object.Equals(ingress(line + "Content-Length: 1,1\r\n\r\n{"), 400)
+                    && object.Equals(ingress(line + "Content-Length: 10\r\n\r\n{\"a\""), 400)
+                    && object.Equals(ingress(line + "Content-Length: 5\r\n\r\n{bad}"), 400)
+                    && object.Equals(ingress(line + "X-Long: a\r\n b\r\n\r\n"), 400)
+                    && object.Equals(ingress("POST /api/settings\r\nHost: 127.0.0.1:5101\r\n\r\n"), 400)
+                    && object.Equals(ingress(line + "Content-Length: 0\r\n"), 400)
+                    && object.Equals(ingress(line + "Host: 127.0.0.1:5101\r\n\r\n"), 400)
+                    && object.Equals(ingress(line + "X-Reign-Peer: 127.0.0.1\r\nX-Reign-Peer: 127.0.0.1\r\n\r\n"), 400)
+                    && object.Equals(ingress("POST /api/settings HTTP/1.1\r\nHost: " + new string('a', 300) + "\r\n\r\n"), 400)
+                    && object.Equals(ingress(line + "X-Pad: " + new string('a', 70 * 1024) + "\r\n\r\n"), 431));
+                check("ingress_policy_and_limits_before_body", object.Equals(ingress(line + "Origin: https://evil.invalid\r\nContent-Length: 100\r\n\r\n"), 403)
+                    && object.Equals(ingress("POST /api/campaigns/import HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nSec-Fetch-Site: cross-site\r\nContent-Length: 100\r\n\r\n"), 403)
+                    && object.Equals(ingress(line + "Content-Length: " + (64L * 1024 * 1024 + 1) + "\r\n\r\n"), 413)
+                    && object.Equals(ingress("POST /api/support-bundle HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nContent-Length: " + (8L * 1024 * 1024 + 1) + "\r\n\r\n"), 413)
+                    && object.Equals(ingress("POST /api/campaigns/import HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nContent-Type: application/zip\r\nContent-Length: "
+                        + (IngressMaxCampaignUploadBytes + 1) + "\r\n\r\n"), 413)
+                    && object.Equals(ingress("GET /api/settings HTTP/1.1\r\nHost: 127.0.0.1:5101\r\nX-Reign-Peer: 192.168.1.5\r\nX-Reign-Host: 127.0.0.1:8089\r\n\r\n"), 403)
+                    && ingress("GET /health HTTP/1.1\r\n\r\n") is HttpRequest);
+
+                // Post-Apache wire shapes: loopback socket, rewritten loopback Host, X-Forwarded-For appended by mod_proxy.
+                const string proxied = "GET /api/settings HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n";
+                var proxiedPair = ingressFrom("127.0.0.1", proxied + "X-Reign-Peer: 172.20.0.1\r\nX-Reign-Host: 127.0.0.1:8089\r\n"
+                    + "X-Forwarded-For: 192.168.1.5\r\nSec-Fetch-Site: same-origin\r\n\r\n") as HttpRequest;
+                check("ingress_proxy_marker_wire_shapes", (ingressFrom("127.0.0.1", proxied + "X-Forwarded-For: 192.168.1.5\r\n\r\n") as string) == "403:proxy_incomplete"
+                    && (ingressFrom("127.0.0.1", proxied + "X-Forwarded-For: 127.0.0.1\r\n\r\n") as string) == "403:proxy_incomplete"
+                    && (ingressFrom("127.0.0.1", proxied + "X-Reign-Host: 127.0.0.1:8089\r\nX-Forwarded-For: 192.168.1.5\r\n\r\n") as string) == "403:proxy_incomplete"
+                    && (ingressFrom("127.0.0.1", proxied + "X-Reign-Peer: 192.168.1.5\r\nX-Reign-Host: 127.0.0.1:8089\r\nX-Forwarded-For: 172.20.0.1\r\n\r\n") as string) == "403:proxy_peer"
+                    && proxiedPair != null && proxiedPair.ProxyForwarded
+                    && ingressFrom("127.0.0.1", proxied + "\r\n") is HttpRequest
+                    && ingressFrom("192.0.2.7", "GET /health HTTP/1.1\r\nX-Forwarded-For: 192.0.2.7\r\n\r\n") is HttpRequest);
+
+                // Public routes: exact raw "GET" plus exact raw path, from any transport, with no body. A declared body is
+                // refused from the headers ("public_body", never body_eof: no body bytes are sent here); every alias, case
+                // or method variant is an ordinary route and meets the transport policy (socket_peer from this address).
+                Func<string, string> publicOutcome = raw => ingressFrom("192.0.2.7", raw) is string failure ? failure : "ok";
+                check("ingress_public_get_exact_and_bodiless", new[] { "GET /health HTTP/1.1\r\n\r\n", "GET / HTTP/1.1\r\n\r\n",
+                        "GET /index.html?v=1 HTTP/1.1\r\n\r\n", "GET /assets/ReignLogo.png HTTP/1.0\r\n\r\n",
+                        "GET /assets/reign-icon.webp HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }.All(raw => publicOutcome(raw) == "ok")
+                    && new[] { "GET /health HTTP/1.1\r\nContent-Length: 5\r\n\r\n", "GET / HTTP/1.1\r\nContent-Length: 1\r\n\r\n",
+                        "GET /health HTTP/1.1\r\nContent-Length: 999999999999999999\r\n\r\n" }.All(raw => publicOutcome(raw) == "400:public_body")
+                    && new[] { "get /health", "Get /health", "HEAD /health", "POST /health", "GET /HEALTH", "GET /health/", "GET //health",
+                        "GET /./health", "GET /assets/../health", "GET /%68ealth", "GET /Index.html", "GET /assets/reignlogo.png" }
+                        .All(start => publicOutcome(start + " HTTP/1.1\r\nContent-Length: 5\r\n\r\n") == "403:socket_peer"));
+
+                // Shared JSON input budget. Exact accounting under contention on a private counter, then the real ingress path
+                // with a synthetic reservation that leaves only ten bytes of the shared budget free (no large buffers).
+                long localActive = 0; int granted = 0;
+                System.Threading.Tasks.Parallel.For(0, 1000, _ =>
+                {
+                    if (TryReserveIngressBytes(ref localActive, 3, 300)) System.Threading.Interlocked.Increment(ref granted);
+                });
+                check("ingress_json_budget_exact_under_concurrency", granted == 100 && System.Threading.Interlocked.Read(ref localActive) == 300
+                    && !TryReserveIngressBytes(ref localActive, 1, 300) && TryReserveIngressBytes(ref localActive, 0, 300));
+                // The synthetic process-wide reservation and exclusive upload slot below would refuse real traffic, so they run
+                // only in non-listening verification (RunTestSuiteApi can reach this suite while the server is listening).
+                if (ActiveServerPort <= 0)
+                {
+                    long synthetic = IngressMaxActiveJsonBytes - 10;
+                    bool syntheticHeld = TryReserveIngressBytes(ref ActiveIngressJsonBytes, synthetic, IngressMaxActiveJsonBytes);
+                    bool budgetHonoured = false;
+                    try
+                    {
+                        Func<string, object> json = body => ingressFrom("127.0.0.1", line + "Content-Length: " + body.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\r\n\r\n" + body);
+                        bool exhaustedBeforeRead = (ingressFrom("127.0.0.1", line + "Content-Length: 11\r\n\r\n") as string) == "429:json_budget";
+                        bool parseErrorReleased = (json("{bad json}") as string) == "400:json";
+                        bool disconnectReleased = (ingressFrom("127.0.0.1", line + "Content-Length: 10\r\n\r\n{\"a") as string) == "400:body_eof";
+                        var held = json("{\"a\":1234}") as HttpRequest;
+                        bool heldBlocksOthers = held != null && held.ReservedJsonBytes == 10 && (json(" ") as string) == "429:json_budget";
+                        ReleaseIngressReservations(held);
+                        ReleaseIngressReservations(held);
+                        var afterRelease = json(" ") as HttpRequest;
+                        bool releasedOnce = afterRelease != null && afterRelease.ReservedJsonBytes == 1
+                            && (json("{\"a\":1234}") as string) == "429:json_budget";
+                        ReleaseIngressReservations(afterRelease);
+                        budgetHonoured = exhaustedBeforeRead && parseErrorReleased && disconnectReleased && heldBlocksOthers && releasedOnce;
+                    }
+                    finally
+                    {
+                        if (syntheticHeld) System.Threading.Interlocked.Add(ref ActiveIngressJsonBytes, -synthetic);
+                    }
+                    check("ingress_json_budget_shared_and_released", syntheticHeld && budgetHonoured);
+
+                    // One staged campaign upload at a time: a second is refused before any staging file exists, and the slot
+                    // returns with the holder's release.
+                    bool slotTaken = System.Threading.Interlocked.CompareExchange(ref ActiveCampaignUploads, 1, 0) == 0;
+                    var uploadHolder = new HttpRequest { HoldsUploadSlot = slotTaken ? 1 : 0 };
+                    string secondUpload;
+                    try
+                    {
+                        secondUpload = ingressFrom("127.0.0.1", "POST /api/campaigns/import HTTP/1.1\r\nHost: 127.0.0.1:5101\r\n"
+                            + "Content-Type: application/zip\r\nContent-Length: 5\r\n\r\n") as string;
+                    }
+                    finally { ReleaseIngressReservations(uploadHolder); }
+                    check("ingress_single_staged_upload", slotTaken && secondUpload == "429:upload_busy" && uploadHolder.HoldsUploadSlot == 0
+                        && System.Threading.Volatile.Read(ref ActiveCampaignUploads) == 0);
+                }
+
+                // A stored custom or named-chat key follows only its configured origin; a payload key goes where it is sent.
+                var storedCustom = TestDict("llmProvider", "openai_compatible", "apiUrl", "https://custom.invalid/v1/chat/completions",
+                    "apiKey", "stored-custom", "openRouterApiKey", "stored-router");
+                Func<Dictionary<string, object>, string> customKey = payload => ResolveLlmRequestApiKey(storedCustom, payload, out _, ReadString(payload, "apiUrl", null));
+                calls.Clear();
+                check("stored_key_withheld_from_foreign_origin", customKey(TestDict("apiUrl", "https://attacker.invalid/v1/chat/completions")) == ""
+                    && customKey(TestDict("apiUrl", "http://custom.invalid/v1/chat/completions")) == ""
+                    && customKey(TestDict("apiUrl", "https://custom.invalid:8443/v1")) == ""
+                    && customKey(TestDict("apiUrl", "https://user@custom.invalid/v1")) == ""
+                    && customKey(TestDict("apiUrl", "file:///var/www/html/ReignServer/data/settings.json")) == ""
+                    && ProviderSecret(storedCustom, "openRouterApiKey", "https://openrouter.ai.attacker.invalid/v1") == ""
+                    && ProviderSecret(storedCustom, "apiKey") == "" && calls.Count == 0);
+                check("stored_key_kept_for_same_origin_and_explicit_key", customKey(TestDict("apiUrl", "https://CUSTOM.invalid/v2/other")) == "stored-custom"
+                    && customKey(null) == "stored-custom" && LlmApiKey(storedCustom) == "stored-custom"
+                    && customKey(TestDict("apiUrl", "https://elsewhere.invalid/v1", "apiKey", "one-off")) == "one-off"
+                    && ProviderSecret(storedCustom, "openRouterApiKey", OpenRouterChatUrl) == "stored-router" && calls.Count == 0);
+                var unsafeUrl = ChatWithLlm(TestDict("apiUrl", "file:///tmp/reign-provider", "apiKey", "one-off", "singleProviderAttempt", true), null, null, storedCustom);
+                check("unsafe_provider_url_refused_before_dispatch", ReadString(unsafeUrl, "errorCode", "") == "provider_url_invalid"
+                    && ReadInt(unsafeUrl, "providerCallCount", -1) == 0
+                    && IsDispatchableProviderUrl("http://192.168.1.20:8000/v1/chat/completions") && IsDispatchableProviderUrl("http://localhost:11434/v1")
+                    && !new[] { "file:///etc/passwd", "ftp://host/x", "https://u:p@host/x", "/v1/chat", "" }.Any(IsDispatchableProviderUrl));
+
+                // An implicit saved key aimed at another origin is refused by ChatWithLlm itself (complete and streaming), never
+                // sent keyless; a bound key keeps global_key_unavailable. Neither reaches the store, a provider or the stream.
+                int streamedFragments = 0;
+                Func<Dictionary<string, object>, Action<string>, Dictionary<string, object>> chat = (settingsFixture, delta) =>
+                    ChatWithLlm(new Dictionary<string, object> { ["apiUrl"] = "https://attacker.invalid/v1/chat/completions", ["singleProviderAttempt"] = true },
+                        delta, delta == null ? null : (Func<bool>)(() => false), settingsFixture);
+                Action<string> countFragments = _ => streamedFragments++;
+                calls.Clear();
+                var storedForeign = new[] { chat(storedCustom, null), chat(storedCustom, countFragments) };
+                var boundForeign = new[] { chat(customBound, null), chat(customBound, countFragments) };
+                check("stored_key_foreign_origin_refused_before_dispatch",
+                    storedForeign.All(r => ReadString(r, "errorCode", "") == "stored_key_origin_mismatch" && ReadInt(r, "providerCallCount", -1) == 0 && !ReadBool(r, "ok", true))
+                    && boundForeign.All(r => ReadString(r, "errorCode", "") == "global_key_unavailable" && ReadInt(r, "providerCallCount", -1) == 0)
+                    && streamedFragments == 0 && calls.Count == 0);
+                var keyless = TestDict("llmProvider", "openai_compatible", "apiUrl", "http://127.0.0.1:8000/v1/chat/completions", "apiKey", "");
+                check("stored_key_rule_scope", !StoredKeyForeignDestination(storedCustom, TestDict("apiKey", "one-off"), "https://attacker.invalid/v1")
+                    && !StoredKeyForeignDestination(storedCustom, null, "https://CUSTOM.invalid/v2/other")
+                    && !StoredKeyForeignDestination(keyless, null, "http://192.168.1.20:8000/v1/chat/completions")
+                    && !StoredKeyForeignDestination(customBound, null, "https://attacker.invalid/v1")
+                    && !StoredKeyForeignDestination(TestDict("llmProvider", OpenRouterProvider, "openRouterApiKey", "stored-router"), null, OpenRouterChatUrl)
+                    && StoredKeyForeignDestination(storedCustom, TestDict("apiUrl", "x"), "http://custom.invalid/v1/chat/completions"));
+
+                // Process-selecting settings: HTTP saves keep the stored value or return to the official default only.
+                var operatorOwned = TestDict("codexExecutable", "/opt/codex/bin/codex", "codexHome", "/srv/codex-home", "portraitNativeSourceGeneratorPath", "");
+                check("process_settings_operator_owned", OperatorOwnedProcessSettingRefusal(operatorOwned,
+                        TestDict("codexExecutable", " /opt/codex/bin/codex ", "codexHome", "/srv/codex-home", "portraitNativeSourceGeneratorPath", "")) == null
+                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "codex", "codexHome", "")) == null
+                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "")) == null
+                    && OperatorOwnedProcessSettingRefusal(TestDict(), TestDict("codexExecutable", "", "codexHome", "")) == null
+                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("apiUrl", "https://x.invalid")) == null
+                    && (OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", "/tmp/evil")) ?? "").Contains("codexExecutable")
+                    && (OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexHome", "/tmp/home")) ?? "").Contains("codexHome")
+                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("portraitNativeSourceGeneratorPath", "/mnt/c/x/Generator.exe")) != null
+                    && OperatorOwnedProcessSettingRefusal(operatorOwned, TestDict("codexExecutable", TestDict("path", "/tmp/evil"))) != null);
+
                 // struct stat offsets on Linux x64 against disposable paths; other platforms must report nothing.
                 if (OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64)
                 {

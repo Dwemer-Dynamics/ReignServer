@@ -130,13 +130,34 @@ namespace ReignBetaServer
                 : provider == NanoGptProvider ? "nanoGptApiKey" : "apiKey";
         }
 
-        // The key for one outbound request. Unbound slots keep their legacy local value; a bound slot requires every
-        // destination to share the bound origin and resolves the current global value, with no fallback of any kind.
-        // Callers must check ProviderKeyUnavailable before dispatch: "" for a bound slot is a refusal, never "no auth".
+        // Chat slots whose unbound local key is confined to the slot's own origin, exactly like a binding: the saved custom
+        // endpoint for apiKey, the fixed provider origin for the named slots. Portrait slots keep their legacy behaviour.
+        private static readonly HashSet<string> OriginBoundLocalKeySlots = new HashSet<string>(StringComparer.Ordinal)
+            { "apiKey", "openRouterApiKey", "ollamaCloudApiKey", "nanoGptApiKey" };
+
+        private static bool LocalKeyDestinationAllowed(Dictionary<string, object> settings, string slot, string[] destinations)
+        {
+            if (!OriginBoundLocalKeySlots.Contains(slot)) return true;
+            string expected = GlobalKeyTarget(settings, slot).Origin;
+            return expected != null && destinations != null && destinations.Length > 0
+                && destinations.All(url => NormalizedOrigin(url) == expected);
+        }
+
+        // The key for one outbound request. Unbound slots keep their legacy local value, but a chat slot's local value is
+        // withheld ("" = no credential sent) from any destination outside its configured origin, including a malformed
+        // one. A bound slot requires every destination to share the bound origin and resolves the current global value,
+        // with no fallback of any kind. Callers must check ProviderKeyUnavailable before dispatch: "" for a bound slot is
+        // a refusal, never "no auth".
         private static string ProviderSecret(Dictionary<string, object> settings, string slot, params string[] destinations)
         {
             var binding = GlobalKeyBinding(settings, slot);
-            if (!HasGlobalKeyBindingEntry(settings, slot)) return ReadString(settings, slot, "");
+            if (!HasGlobalKeyBindingEntry(settings, slot))
+            {
+                string local = ReadString(settings, slot, "");
+                if (local.Length == 0 || LocalKeyDestinationAllowed(settings, slot, destinations)) return local;
+                LogOperational("provider_key.withheld", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = "origin_mismatch" });
+                return "";
+            }
             if (binding == null) return "";
             if (slot != "apiKey")
             {

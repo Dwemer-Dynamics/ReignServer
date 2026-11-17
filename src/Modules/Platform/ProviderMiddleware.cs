@@ -124,25 +124,27 @@ namespace ReignBetaServer
 
         // Streaming uses the same provider slots, circuit, diagnostics and credentials
         // as complete responses. Endpoints returning ordinary JSON fall back in-place,
-        // with no second paid request. Reasoning deltas never enter the spoken stream.
+        // with no second paid request. Reasoning deltas never enter the spoken stream. Destination validation and the
+        // no-credentialed-redirect rule are shared with PostJsonToLlm (CreateProviderRequest / ProviderRedirectError), so
+        // a 3xx is a failure here too and can never become the JSON fallback reply.
         private static string PostStreamingProviderJson(string url, string key, string json, Dictionary<string, object> settings,
             Action<string> delta, Func<bool> canceled)
         {
+            var request = CreateProviderRequest(url, key, settings, "text/event-stream, application/json");
             ProviderTestGuard.BeforeDispatch("streaming_text");
             using var attempt = BeginDiagnosticAttempt(url, json, key);
-            var request = (HttpWebRequest)WebRequest.Create(url);
-            request.Method = "POST"; request.ContentType = "application/json"; request.Accept = "text/event-stream, application/json";
-            request.Timeout = request.ReadWriteTimeout = Math.Clamp(ReadInt(settings, "providerRequestTimeoutMs", 120000), 15000, 600000);
-            if (!string.IsNullOrWhiteSpace(key)) request.Headers["Authorization"] = "Bearer " + key;
-            string site = ReadString(settings, "siteUrl", ""), title = ReadString(settings, "appTitle", "ReignBeta");
-            if (site.Length > 0) { request.Headers["HTTP-Referer"] = site; request.Headers["Referer"] = site; }
-            if (title.Length > 0) { request.Headers["X-Title"] = title; if (IsOpenRouterApiUrl(url)) request.Headers["X-OpenRouter-Title"] = title; }
             using var cancelTimer = new Timer(_ => { if (canceled?.Invoke() == true) request.Abort(); }, null, 200, 200);
             try
             {
                 byte[] bytes = Encoding.UTF8.GetBytes(json); request.ContentLength = bytes.Length;
                 using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length);
                 using var response = (HttpWebResponse)request.GetResponse();
+                string redirectError = ProviderRedirectError(response);
+                if (redirectError != null)
+                {
+                    attempt.End("failed", redirectError, TestDict("httpStatus", (int)response.StatusCode, "error", redirectError));
+                    throw new InvalidOperationException(redirectError);
+                }
                 using var reader = new StreamReader(response.GetResponseStream() ?? Stream.Null, Encoding.UTF8);
                 if ((response.ContentType ?? "").IndexOf("text/event-stream", StringComparison.OrdinalIgnoreCase) < 0)
                 {
@@ -178,6 +180,14 @@ namespace ReignBetaServer
             catch (WebException ex)
             {
                 if (canceled?.Invoke() == true) throw new OperationCanceledException("Banter was interrupted.", ex);
+                string redirectError = ProviderRedirectError(ex.Response);
+                if (redirectError != null)
+                {
+                    attempt.End("failed", redirectError, TestDict("httpStatus", (int)((HttpWebResponse)ex.Response).StatusCode,
+                        "error", redirectError, "transportStatus", ex.Status.ToString()));
+                    ex.Response.Dispose();
+                    throw new InvalidOperationException(redirectError, ex);
+                }
                 string body = ""; if (ex.Response != null) { using var reader = new StreamReader(ex.Response.GetResponseStream() ?? Stream.Null); body = reader.ReadToEnd(); }
                 attempt.End("failed", ex.Message, TestDict("responseBody", body, "transportStatus", ex.Status.ToString()));
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(body) ? ex.Message : body, ex);
