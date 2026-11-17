@@ -366,6 +366,8 @@ try {
   for (let i = 0; i < 100 && !globalSaves.length; i++) await page.waitForTimeout(20);
   assert.deepEqual(globalSaves[0],{body:{slot:'openRouterApiKey',mode:'create',label:'',secret:'fixture-global',expectedKeyId:''},header:'1'});
   await page.waitForFunction(() => document.getElementById('openRouterApiKey').value === '');
+  // The field is cleared before the row refresh completes; wait for the refreshed row before asserting it.
+  await page.waitForFunction(() => document.querySelector('#openRouterApiKeyGlobalRow select')?.value === '99999999-2222-4333-8444-555555555555');
   assert.equal(await page.inputValue('#openRouterApiKeyGlobalRow select'),'99999999-2222-4333-8444-555555555555','The created key is selected for the row');
   assert.match(await page.textContent('#openRouterApiKeyKeySourceRow [data-key-source]'),/^Using global key/,'Creating a global key replaces the Reign-only key');
   // Saving one key refreshes only its row: other unsaved settings and key inputs survive, and settings are not reloaded.
