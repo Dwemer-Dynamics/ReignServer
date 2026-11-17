@@ -1105,7 +1105,10 @@ namespace ReignBetaServer
                             ["managedBy"] = "ReignServer",
                             // Exact additive capability: the route, preflight and legacy guards are wired.
                             [Reign.Core.Contracts.Actions.TerminalActionReportProtocol.HealthCapabilityField] =
-                                Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema
+                                Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema,
+                            // Additive: verified-load recovery, load proofs and admission-bound acks are wired.
+                            [Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoveryHealthCapabilityField] =
+                                Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoverySchema
                         };
                     }
                     else if (request.Method == "POST" && request.Path.StartsWith("/chat-view/", StringComparison.Ordinal))

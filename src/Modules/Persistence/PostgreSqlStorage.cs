@@ -696,6 +696,27 @@ ORDER BY created_utc,save_point_id;", connection))
                 if (!SchemaExists(connection, transaction, campaignSchema))
                     throw new InvalidDataException(
                         "The PostgreSQL archive does not contain the expected campaign schema.");
+                // An imported history is never the one a live load proved. Stamp (never delete:
+                // the row also gates restored-source memory membership) the restored context so
+                // every earlier terminal-report load proof fails until a fresh verified load.
+                // Archives from older servers may lack the table or its new columns.
+                string restoreContext = QuoteIdentifier(campaignSchema) + ".memory_restored_source_context";
+                bool hasRestoreContext;
+                using (NpgsqlCommand probe = new NpgsqlCommand(
+                    "SELECT to_regclass(@name) IS NOT NULL;", connection, transaction))
+                {
+                    probe.Parameters.AddWithValue("name", restoreContext);
+                    hasRestoreContext = Convert.ToBoolean(probe.ExecuteScalar(), CultureInfo.InvariantCulture);
+                }
+                if (hasRestoreContext)
+                    ExecuteNonQuery(connection, transaction,
+                        "ALTER TABLE " + restoreContext + " ADD COLUMN IF NOT EXISTS load_session_id TEXT NOT NULL DEFAULT '';"
+                        + " ALTER TABLE " + restoreContext + " ADD COLUMN IF NOT EXISTS source_generation TEXT NOT NULL DEFAULT '';"
+                        + " UPDATE " + restoreContext + " SET load_session_id=@imported;",
+                        new Dictionary<string, object>
+                        {
+                            ["imported"] = Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ImportedLoadSession
+                        });
                 ExecuteNonQuery(connection, transaction, @"
 INSERT INTO reign_meta.campaign_registry(
     campaign_id,schema_name,created_utc,updated_utc,migration_state)

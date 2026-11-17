@@ -156,16 +156,38 @@ namespace ReignBetaServer
                 // Initialize only from this identity-verified native save. Every
                 // source is compared with its snapshot row; the no-op marker is
                 // not permission to include arbitrary current/foreign history.
+                bool memorySourcesInitialized = false;
                 using (var memoryConnection = OpenCampaignConnection(campaignId))
                 {
                     var memoryContext = RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
                     if (ReadString(memoryContext, "save_point_id", "") != savePointId
                         || ReadString(memoryContext, "legacy_recovery_version", "") != LegacyMemoryRecoveryVersion)
                     {
-                        InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId);
+                        InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId, loadSessionId);
                         result["memorySourceAccess"] = "verified_snapshot_membership_initialized";
+                        memorySourcesInitialized = true;
                     }
                 }
+                // Bind this load session to the unchanged context. Every campaign SQL write marks
+                // the active state dirty, which would turn the next load of this same save into a
+                // full rollback; the bind changes no campaign content (CampaignDataGate write lock
+                // held, calendar unchanged), so the verified clean marker is restored.
+                // A failed bind only leaves the load unproven (no restoreGeneration echo).
+                if (!memorySourcesInitialized && !string.IsNullOrWhiteSpace(loadSessionId))
+                {
+                    try
+                    {
+                        BindVerifiedNoOpLoadSession(campaignId, savePointId, postgresSnapshotPointId, loadSessionId);
+                        MarkSaveSyncActiveStateClean(campaignId, point);
+                    }
+                    catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))
+                    {
+                        LogOperational("save_sync.load_proof_bind_failed", TestDict("campaignId", campaignId,
+                            "savePointId", savePointId, "error", ex.GetType().Name));
+                    }
+                }
+                string noOpProofGeneration = TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
+                if (noOpProofGeneration.Length > 0) result["restoreGeneration"] = noOpProofGeneration;
                 timer.Stop();
                 result["durationMs"] = timer.ElapsedMilliseconds;
                 StoreSaveSyncLoadReceipt(
@@ -238,8 +260,11 @@ namespace ReignBetaServer
                         "Injected Save Sync failure after installing campaign assets.");
 
                 ClearSaveSyncCaches(campaignId);
-                AdvanceMemoryRestoreGeneration(campaignId, point);
+                AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
                 MarkSaveSyncActiveStateClean(campaignId, point);
+                // Echoed only when the context is bound to this exact load; never fails the load.
+                string rollbackProofGeneration = TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
+                if (rollbackProofGeneration.Length > 0) result["restoreGeneration"] = rollbackProofGeneration;
                 timer.Stop();
                 result["result"] = "rolled_back";
                 result["noOp"] = false;

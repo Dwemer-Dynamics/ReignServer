@@ -92,28 +92,50 @@ CREATE INDEX IF NOT EXISTS idx_shared_contact_owner ON shared_travel_contact(tim
         private static void RecordSharedActionReceipt(string campaign, Dictionary<string, object> report,
             Dictionary<string, object> acceptedRecord, string status)
         {
-            if (status is not ("completed" or "failed" or "rejected" or "expired")) return;
+            var item = SharedActionReceiptItem(report, acceptedRecord, status);
+            if (item == null) return;
+            using var connection = OpenCampaignConnection(campaign);
+            EnsureSharedActivityMemorySchema(connection);
+            if (!SharedActivityGenerationMatches(connection, report)) return;
+            ProjectSharedActivity(connection, ReadString(report, "timelineId", ""), item);
+        }
+
+        // Terminal report projection: inside the caller's locked transaction, bound to the
+        // verified live generation instead of the report's own sharedActivityGeneration (which
+        // names the original generation of a recovered report). False only when that verified
+        // generation is not the campaign's current one; an inapplicable report, or one the
+        // idempotent projector declines, is settled exactly as the legacy path settles it.
+        private static bool RecordSharedActionReceipt(ReignDbConnection connection, Dictionary<string, object> report,
+            Dictionary<string, object> acceptedRecord, string status, string verifiedGeneration)
+        {
+            var item = SharedActionReceiptItem(report, acceptedRecord, status);
+            if (item == null) return true;
+            if (string.IsNullOrEmpty(verifiedGeneration) || verifiedGeneration != SharedActivityGeneration(connection)) return false;
+            ProjectSharedActivity(connection, ReadString(report, "timelineId", ""), item);
+            return true;
+        }
+
+        private static Dictionary<string, object> SharedActionReceiptItem(Dictionary<string, object> report,
+            Dictionary<string, object> acceptedRecord, string status)
+        {
+            if (status is not ("completed" or "failed" or "rejected" or "expired")) return null;
             string player = ReadString(report, "playerHeroStringId", "");
             string timeline = ReadString(report, "timelineId", "");
             string actor = ReadFirstString(acceptedRecord, "actorHeroStringId"), target = ReadFirstString(acceptedRecord, "targetHeroStringId");
-            if (actor != ReadString(report, "actorHeroStringId", "") || target != ReadString(report, "targetHeroStringId", "")) return;
-            if (player.Length == 0 || timeline.Length == 0 || (player != actor && player != target)) return;
+            if (actor != ReadString(report, "actorHeroStringId", "") || target != ReadString(report, "targetHeroStringId", "")) return null;
+            if (player.Length == 0 || timeline.Length == 0 || (player != actor && player != target)) return null;
             string actionId = ReadFirstString(report, "actionId", "serverActionId");
-            if (actionId.Length == 0) return;
+            if (actionId.Length == 0) return null;
             var entities = new[] { actor, target }.Where(id => id.Length > 0).Distinct().Select(id =>
                 ActivityFields("entityId", id, "entityType", "hero", "role", id == actor ? "action actor" : "action target",
                     "isPlayer", id == player)).ToList();
-            var item = ActivityFields("eventId", "action_receipt_" + PromptHash(timeline + "|" + actionId + "|" + status).Substring(0, 32),
+            return ActivityFields("eventId", "action_receipt_" + PromptHash(timeline + "|" + actionId + "|" + status).Substring(0, 32),
                 "worldDay", ReadDouble(report, "worldDay", 0d), "eventType", "native_action_result", "phase", "completed",
                 "source", "verified_native_receipt", "correlationId", actionId,
                 "locationId", ReadString(report, "targetSettlementStringId", ""),
                 "summary", ReadString(report, "type", "Action") + ": " + status + ". " + LimitText(ReadString(report, "message", ""), 1200),
                 "entities", entities, "payload", ActivityFields("playerHeroId", player, "actionId", actionId, "status", status,
                     "actionType", ReadString(report, "type", ""), "receipt", ReadDictionary(report, "result") ?? ActivityFields()));
-            using var connection = OpenCampaignConnection(campaign);
-            EnsureSharedActivityMemorySchema(connection);
-            if (!SharedActivityGenerationMatches(connection, report)) return;
-            ProjectSharedActivity(connection, timeline, item);
         }
 
         private static string SharedActivityObserverRole(string type, Dictionary<string, object> entity)
