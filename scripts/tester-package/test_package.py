@@ -45,6 +45,16 @@ class PackageContracts(unittest.TestCase):
                 source=root/name;source.write_bytes(b'fixture')
                 with self.assertRaises(ValueError):a.copy(source,'payload/'+name)
 
+    def test_client_dll_selection(self):
+        lock={'schema':'reign-external-dependencies-v1','artifacts':[{'id':'Bannerlord.ButterLib','role':'bannerlord-module'}]}
+        required=sorted(module.CLIENT_DLLS)
+        self.assertEqual(module.select_client_dlls(required,lock),module.CLIENT_DLLS)
+        self.assertEqual(module.select_client_dlls(required+['Bannerlord.ButterLib.dll'],lock),module.CLIENT_DLLS)
+        for extra in ('bannerlord.butterlib.dll','reignbeta.dll','Bannerlord.UIExtenderEx.dll','Unknown.dll','TaleWorlds.Core.dll'):
+            with self.subTest(extra=extra),self.assertRaises(ValueError):module.select_client_dlls(required+[extra],lock)
+        with self.assertRaises(ValueError):module.select_client_dlls(required+['Bannerlord.ButterLib.dll'],dict(lock,artifacts=[]))
+        with self.assertRaises(ValueError):module.select_client_dlls(required[1:]+['Bannerlord.ButterLib.dll'],lock)
+
     def test_inventory_detects_missing_extra_and_pointer(self):
         with tempfile.TemporaryDirectory(prefix='reign-package-contract-') as raw:
             root=Path(raw);p=root/'portrait.png';p.write_bytes(b'actual image fixture')
