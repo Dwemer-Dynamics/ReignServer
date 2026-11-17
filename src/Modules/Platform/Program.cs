@@ -21524,9 +21524,13 @@ The previous attempt did not complete a JSON object within its output budget.
                     row["deliveredTs"] = nowTs;
                     if (durable)
                     {
-                        long deliveryCount = ReadLong(row, "deliveryCount", 0) + 1;
+                        // A new client session (restore generation or verified load) restarts the
+                        // backoff so its first redeliveries use the base cadence again.
+                        string currentGeneration = generation();
+                        long priorCount = ReadString(row, "deliveryGeneration", "") == currentGeneration ? ReadLong(row, "deliveryCount", 0) : 0;
+                        long deliveryCount = priorCount + 1;
                         row["deliveryCount"] = deliveryCount;
-                        row["deliveryGeneration"] = generation();
+                        row["deliveryGeneration"] = currentGeneration;
                         if (deliveryCount == ActionRedeliveryFreeDeliveries + 1)
                         {
                             enteredBackoff.Add(row);

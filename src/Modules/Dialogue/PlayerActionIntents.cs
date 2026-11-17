@@ -326,27 +326,55 @@ namespace ReignBetaServer
             return Math.Min(ActionRedeliveryCapSeconds, ActionRedeliveryBaseSeconds << shift);
         }
 
-        // A loaded or imported campaign advances the restore generation; a row last delivered under
-        // another generation is due again at the base cadence so a reloaded client receives it promptly.
+        // The client session a delivery belongs to: the campaign restore generation plus the
+        // verified load session. Rollback loads and imports advance the generation; every verified
+        // load (including a no-op or non-rollback load) binds load_session_id, and archive imports
+        // stamp "imported:". A row last delivered under another key is due again immediately and
+        // restarts at the base cadence, so a reloaded client receives it promptly.
         private static string ActionDeliveryGeneration(string campaign)
         {
             try
             {
                 using (var connection = OpenCampaignConnection(campaign))
                 {
-                    if (!TableExists(connection, "memory_precision_state")) return "";
-                    var state = QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault();
-                    return ReadString(state, "restore_generation", "");
+                    string generation = "";
+                    if (TableExists(connection, "memory_precision_state"))
+                        generation = ReadString(QuerySql(connection,
+                            "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
+                    string session = "";
+                    if (TableExists(connection, "memory_restored_source_context"))
+                        session = ReadString(QuerySql(connection,
+                            "SELECT to_jsonb(c)->>'load_session_id' AS load_session_id FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault(),
+                            "load_session_id", "");
+                    return generation + "|" + session;
                 }
             }
-            catch { return ""; }
+            catch (Exception ex)
+            {
+                if (System.Threading.Interlocked.Exchange(ref _actionDeliveryGenerationFailureLogged, 1) == 0)
+                    LogOperational("action.redelivery_generation_unavailable", TestDict("campaignId", campaign ?? "", "error", ex.GetType().Name));
+                return "";
+            }
+        }
+        private static int _actionDeliveryGenerationFailureLogged;
+
+        // Rows delivered before this server process started are due again: a restart must not leave
+        // a lost one-shot report waiting out a long backoff. The override is a self-test seam.
+        private static readonly long ActionRedeliveryProcessStartTs = CurrentProcessStartUnixSeconds();
+        [ThreadStatic] private static long? _actionRedeliveryProcessStartOverride;
+        private static long CurrentProcessStartUnixSeconds()
+        {
+            try { return new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).ToUnixTimeSeconds(); }
+            catch { return DateTimeOffset.UtcNow.ToUnixTimeSeconds(); }
         }
 
         private static bool DurableRedeliveryDue(Dictionary<string, object> row, long nowTs, Func<string> generation)
         {
-            long elapsed = nowTs - ReadLong(row, "deliveredTs", 0);
+            long deliveredTs = ReadLong(row, "deliveredTs", 0);
+            long elapsed = nowTs - deliveredTs;
             if (elapsed < ActionRedeliveryBaseSeconds) return false;
             if (elapsed >= ActionRedeliveryDelaySeconds(ReadLong(row, "deliveryCount", 0))) return true;
+            if (deliveredTs < (_actionRedeliveryProcessStartOverride ?? ActionRedeliveryProcessStartTs)) return true;
             return ReadString(row, "deliveryGeneration", "") != generation();
         }
 
@@ -359,7 +387,8 @@ namespace ReignBetaServer
                 "backoffAfterDeliveries", ActionRedeliveryFreeDeliveries);
             try
             {
-                // Diagnostics never create a campaign directory or schema as a side effect.
+                // Never creates a campaign directory; an existing campaign is read through
+                // OpenCampaignConnection exactly as an action poll would.
                 if (string.IsNullOrWhiteSpace(campaign) || !System.IO.Directory.Exists(CampaignDirectory(campaign)))
                 {
                     summary["ok"] = true; summary["unresolvedCount"] = 0; summary["backedOffCount"] = 0;
@@ -375,8 +404,13 @@ namespace ReignBetaServer
                 summary["ok"] = true;
                 summary["unresolvedCount"] = unresolved.Count;
                 summary["backedOffCount"] = backedOff.Count;
-                summary["byStatus"] = unresolved.GroupBy(r => ReadString(r, "status", "unknown"), StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(g => g.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => (object)g.Count());
+                // Bounded: at most 16 status groups, the rest folded into "other".
+                var groups = unresolved.GroupBy(r => ReadString(r, "status", "unknown"), StringComparer.OrdinalIgnoreCase)
+                    .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).ToList();
+                var byStatus = groups.Take(16).ToDictionary(g => g.Key, g => (object)g.Count());
+                if (groups.Count > 16)
+                    byStatus["other"] = groups.Skip(16).Sum(g => g.Count()) + (byStatus.TryGetValue("other", out object existingOther) ? Convert.ToInt32(existingOther) : 0);
+                summary["byStatus"] = byStatus;
                 summary["oldestAgeSeconds"] = unresolved.Count == 0 ? 0L
                     : Math.Max(0L, nowTs - unresolved.Min(r => ReadLong(r, "ts", nowTs)));
                 summary["maxDeliveryCount"] = unresolved.Count == 0 ? 0L : unresolved.Max(r => ReadLong(r, "deliveryCount", 0));
