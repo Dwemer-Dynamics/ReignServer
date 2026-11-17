@@ -802,7 +802,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     // A verified load bound to this generation whose snapshot came from the report's own generation.
                     setContext("load_session_id", "stage3_l2");
                     setContext("source_generation", protocolGeneration);
-                    string giftRowBefore = giftRow(), protocolMarkerBefore = Json.Serialize(markerOf(protocolId));
+                    string giftRowBefore = giftRow(), protocolMarkerBefore = Json.Serialize(markerOf(protocolId)), protocolAdmissionBefore = Json.Serialize(ReadDictionary(markerOf(protocolId), "admission"));
                     add("terminal_report_recovery_second_fixture_row_is_eligible", giftId.StartsWith("pa_", StringComparison.Ordinal) && giftIneligible.Length == 0
                         && TerminalReportExpectedType(giftRecord) == "RegularTransferGold" && giftUntouched()
                         && ReadString(restoreContext(), "timeline_id", "") == "player_actions_timeline", TestDict("id", giftId, "ineligible", giftIneligible));
@@ -863,7 +863,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                             && ReadString(r, "reason", "") == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoveryUnprovenPrefix + "timeline")
                         && ReadString(reboundAdmitted, "disposition", "") == "accepted" && ReadString(reboundAdmitted, "reason", "") == "recovery_replay"
                         && giftUntouched() && giftRow() == giftRowBefore
-                        && Json.Serialize(ReadDictionary(markerOf(protocolId), "admission")) == Json.Serialize(ReadDictionary(TryParseJsonObject(protocolMarkerBefore), "admission")),
+                        && Json.Serialize(ReadDictionary(markerOf(protocolId), "admission")) == protocolAdmissionBefore,
                         TestDict("reboundTo", reboundTo, "adopt", reboundAdopt, "first", reboundFirst, "admitted", reboundAdmitted));
 
                     // projectedTs-only marker (written before projectedShared existed, its shared row
