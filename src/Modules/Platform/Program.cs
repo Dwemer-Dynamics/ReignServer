@@ -1034,7 +1034,7 @@ namespace ReignBetaServer
         private static void HandleClient(TcpClient client)
         {
             CampaignRequestAccess campaignAccess = CampaignRequestAccess.None;
-            bool deleteAllResponsePending = false;
+            RouteContext routeContext = new RouteContext();
             using (client)
             using (NetworkStream stream = client.GetStream())
             {
@@ -1059,32 +1059,10 @@ namespace ReignBetaServer
                     object response;
                     int status = 200;
 
-                    if (request.Method == "GET" && (request.Path == "/" || request.Path == "/index.html"))
+                    routeContext.Stream = stream;
+                    if (TryDispatchRegisteredRoute(request, routeContext, out response))
                     {
-                        WriteHtml(stream, ControlCenterHtml());
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "GET" && request.Path == "/assets/reign-icon.webp")
-                    {
-                        WriteFile(stream, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "assets", "reign-icon.webp"), "image/webp");
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "GET" && request.Path == "/assets/ReignLogo.png")
-                    {
-                        WriteFile(stream, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui", "assets", "ReignLogo.png"), "image/png");
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "GET" && request.Path == "/character-editor/portrait")
-                    {
-                        string campaignId = request.Query.ContainsKey("campaignId") ? request.Query["campaignId"] : LatestCampaignId();
-                        string heroId = request.Query.ContainsKey("heroStringId") ? request.Query["heroStringId"] : "";
-                        string variant = request.Query.ContainsKey("variant") ? SafePathSegment(request.Query["variant"], "active") : "active";
-                        WriteFile(stream, ResolveCharacterEditorPortraitPath(campaignId, heroId, variant), "image/png");
-                        LogRequest(request, 200);
-                        return;
+                        if (ReferenceEquals(response, RouteResponseWritten)) return;
                     }
                     else if (request.Method == "GET" && request.Path == "/health")
                     {
@@ -1111,78 +1089,9 @@ namespace ReignBetaServer
                                 Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoverySchema
                         };
                     }
-                    else if (request.Method == "POST" && request.Path.StartsWith("/chat-view/", StringComparison.Ordinal))
-                    {
-                        response = ChatViewApi(request.JsonBody, request.Path.Substring("/chat-view/".Length));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/activate")
-                    {
-                        response = ActivateRunningServer(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/settings")
-                    {
-                        response = SettingsForUi(LoadSettings());
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/gameplay-options")
-                    {
-                        response = ReignXpOptionsForClient();
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/global-keys")
-                    {
-                        response = GlobalKeysStatus(request.Query.TryGetValue("slot", out string onlySlot) && GlobalKeySlots.Contains(onlySlot) ? onlySlot : null);
-                    }
-                    else if (request.Method == "POST" && (request.Path == "/api/global-keys/save" || request.Path == "/api/global-keys/unbind"))
-                    {
-                        response = !GlobalKeyRequestAllowed(request) ? GlobalKeyFail("forbidden")
-                            : request.Path.EndsWith("/save", StringComparison.Ordinal) ? SaveGlobalKey(request.JsonBody) : UnbindGlobalKey(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/settings")
-                    {
-                        response = SaveSettings(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/shutdown")
-                    {
-                        response = RequestServerShutdown();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/settings/clear-key")
-                    {
-                        response = ClearSettingsKey(request.JsonBody, request);
-                    }
                     else if (request.Method == "GET" && request.Path == "/api/diagnostics")
                     {
                         response = ServerDiagnostics();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/diagnostics/test-llm")
-                    {
-                        response = TestLlmKey(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/codex/status")
-                    {
-                        response = CodexStatusApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/codex/start")
-                    {
-                        response = StartCodexAppServerApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/codex/stop")
-                    {
-                        response = StopCodexAppServerApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/codex/login/start")
-                    {
-                        response = StartCodexLoginApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/codex/logout")
-                    {
-                        response = CodexLogoutApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/codex/models/refresh")
-                    {
-                        response = RefreshCodexModelsApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/codex/models/verify")
-                    {
-                        response = CodexVerifyModelApi(request.JsonBody);
                     }
                     else if (request.Method == "GET" && request.Path == "/api/telemetry/status")
                     {
@@ -1204,10 +1113,6 @@ namespace ReignBetaServer
                     {
                         response = PromptCacheStatusApi();
                     }
-                    else if (request.Method == "POST" && request.Path == "/llm/prompt-cache/probe")
-                    {
-                        response = PromptCacheProbeApi(request.JsonBody);
-                    }
                     else if (request.Method == "GET" && request.Path == "/api/prompts")
                     {
                         response = ReadPromptTemplatesApi();
@@ -1216,126 +1121,17 @@ namespace ReignBetaServer
                     {
                         response = SavePromptTemplatesApi(request.JsonBody);
                     }
-                    else if (request.Method == "POST" && request.Path == "/api/castle-chat/prompts")
-                    {
-                        response = CastleChatPromptsApi(request.JsonBody);
-                    }
                     else if (request.Method == "GET" && request.Path == "/api/logs")
                     {
                         response = ReadLogApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/campaigns")
-                    {
-                        response = ListCampaigns();
                     }
                     else if (request.Method == "GET" && request.Path == "/api/campaigns/storage-audit")
                     {
                         response = CampaignStorageAuditApi();
                     }
-                    else if (request.Method == "GET" && request.Path == "/api/campaigns/export")
-                    {
-                        WriteCampaignBackupDownload(stream, request.Query);
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/campaigns/import")
-                    {
-                        response = ImportCampaignBackup(request.UploadFilePath, request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/campaigns/delete")
-                    {
-                        response = DeleteCampaignBackupData(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/campaigns/delete-all")
-                    {
-                        // Only the request that published the pending owner signals its response.
-                        response = DeleteAllCampaignBackupData(request.JsonBody, out deleteAllResponsePending);
-                    }
                     else if (request.Method == "POST" && request.Path == "/api/campaigns/cleanup-zero-save")
                     {
                         response = CleanupZeroSaveCampaignsApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/save-sync/register")
-                    {
-                        response = SaveSyncRegisterApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/save-sync/finalize")
-                    {
-                        response = SaveSyncFinalizeApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/save-sync/delete-native-save")
-                    {
-                        response = SaveSyncDeleteNativeSaveApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/save-sync/campaign-unloaded")
-                    {
-                        response = CampaignUnloadedApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/save-sync/load")
-                    {
-                        response = SaveSyncLoadApi(request.JsonBody, false);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/save-sync/preview")
-                    {
-                        response = SaveSyncLoadApi(request.JsonBody, true);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/save-sync/status")
-                    {
-                        response = SaveSyncStatusApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/diagnostics/conversations")
-                    {
-                        response = ConversationDiagnosticsListApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/diagnostics/conversations/trace")
-                    {
-                        response = ConversationDiagnosticsTraceApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/diagnostics/conversations/payload")
-                    {
-                        response = ConversationDiagnosticsPayloadApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/diagnostics/conversations/capture")
-                    {
-                        response = ConversationDiagnosticsCaptureApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/diagnostics/conversations/capture")
-                    {
-                        response = ConversationDiagnosticsCaptureApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/diagnostics/conversations/clear")
-                    {
-                        response = ConversationDiagnosticsClearApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/diagnostics/conversations/export")
-                    {
-                        WriteConversationDiagnosticsExport(stream, request.Query);
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/logs/clear")
-                    {
-                        response = ClearLogs(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/api/logs/export")
-                    {
-                        WriteLogExport(stream, request.Query);
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "POST" && request.Path == "/api/support-bundle")
-                    {
-                        WriteSupportBundle(stream, request.JsonBody);
-                        LogRequest(request, 200);
-                        return;
-                    }
-                    else if (request.Method == "POST" && request.Path == "/audit/ingest")
-                    {
-                        response = AuditIngest(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/audit/prompt")
-                    {
-                        response = ReadPromptEvidenceApi(request.Query);
                     }
                     else if (request.Method == "GET" && request.Path == "/audit/query")
                     {
@@ -1706,30 +1502,6 @@ namespace ReignBetaServer
                     {
                         response = ReplayVerificationApi(request.JsonBody);
                     }
-                    else if (request.Method == "POST" && request.Path == "/events/ingest")
-                    {
-                        response = IngestEvent(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/world-history/ingest-batch")
-                    {
-                        response = WorldHistoryIngestBatchApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/world-history/timeline/open")
-                    {
-                        response = WorldHistoryOpenTimelineApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/initialization/readiness/seal")
-                    {
-                        response = InitializationReadinessSealApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/initialization/readiness/status")
-                    {
-                        response = InitializationReadinessStatusApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/initialization/readiness/retry")
-                    {
-                        response = InitializationReadinessRetryApi(request.JsonBody);
-                    }
                     else if (request.Method == "GET" && request.Path == "/world-history/query")
                     {
                         response = WorldHistoryQueryApi(request.Query);
@@ -1742,82 +1514,13 @@ namespace ReignBetaServer
                     {
                         response = WorldHistoryCorrelationApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/correlation/".Length)));
                     }
-                    else if (request.Method == "POST" && request.Path == "/world-history/verify")
-                    {
-                        response = WorldHistoryVerifyApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/world-history/lie-check")
-                    {
-                        response = WorldHistoryLieCheckApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/world-history/lie-checks")
-                    {
-                        response = WorldHistoryLieChecksApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/world-history/export")
-                    {
-                        Dictionary<string, string> exportQuery = new Dictionary<string, string>(request.Query, StringComparer.OrdinalIgnoreCase) { ["limit"] = "500" };
-                        response = WorldHistoryQueryApi(exportQuery);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/world-history/tests")
-                    {
-                        response = RunWorldHistorySelfTests();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/diplomacy/director/evaluate")
-                    {
-                        response = EvaluateWorldDiplomacy(request.JsonBody);
-                    }
                     else if (request.Method == "POST" && request.Path == "/diplomacy/debug/random-event")
                     {
                         response = QueueRandomDiplomacyDebugEvent(request.JsonBody);
                     }
-                    else if (request.Method == "GET" && request.Path == "/political-pressure/notices")
-                    {
-                        response = NextPoliticalPressureNotices(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/political-pressure/evaluate")
-                    {
-                        response = EvaluatePoliticalIncidentsCombined(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/political-pressure/acknowledge")
-                    {
-                        response = AcknowledgePoliticalPressureNotice(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/clan-conflicts/notices")
-                    {
-                        response = NextClanConflictNotices(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/clan-conflicts/acknowledge")
-                    {
-                        response = AcknowledgeClanConflictNotice(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/rebellions/evaluate")
-                    {
-                        response = EvaluateRebellions(request.JsonBody);
-                    }
                     else if (request.Method == "GET" && request.Path == "/rebellions/query")
                     {
                         response = RebellionQueryApi(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/negotiations/draft")
-                    {
-                        response = NegotiationDraftApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/negotiations/respond")
-                    {
-                        response = NegotiationRespondApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/negotiations/query")
-                    {
-                        response = NegotiationQueryApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/rebellions/tests")
-                    {
-                        response = RunRebellionSelfTests();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/world-test/heartbeat")
-                    {
-                        response = WorldTestHeartbeatApi(request.JsonBody);
                     }
                     else if (request.Method == "GET" && request.Path == "/world-test/campaigns")
                     {
@@ -1831,182 +1534,14 @@ namespace ReignBetaServer
                     {
                         response = WorldTestDetailsApi(request.Query);
                     }
-                    else if (request.Method == "GET" && request.Path == "/world-test/checkpoints")
-                    {
-                        response = WorldTestCheckpointsApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/world-test/comparison")
-                    {
-                        response = WorldTestComparisonApi(request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/world-test/tests")
-                    {
-                        response = RunWorldTestSelfTests();
-                    }
 #if !REIGN_EXCLUDE_COURT
-                    else if (request.Method == "POST" && request.Path == "/court/session/open")
-                    {
-                        response = CourtSessionOpenApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/session/tick")
-                    {
-                        response = CourtSessionTickApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/session/close")
-                    {
-                        response = CourtSessionCloseApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/agenda/build")
-                    {
-                        response = CourtAgendaBuildApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/home")
-                    {
-                        response = CourtHomeApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/view")
-                    {
-                        response = CourtViewApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/matter/start")
-                    {
-                        response = CourtMatterStartApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/matter/respond")
-                    {
-                        response = CourtMatterRespondApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/matter/resolve")
-                    {
-                        response = CourtMatterResolveApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/offices/assign")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtOfficeAssignApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/offices/dismiss")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtOfficeDismissApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/royal-council/respond")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => RoyalCouncilRespond(body)));
-                    }
                     else if (request.Method == "POST" && request.Path == "/court/ruler-petition/respond")
                     {
                         response = CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => RulerPetitionRespond(body)));
                     }
-                    else if (request.Method == "POST" && request.Path == "/court/life/scene")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtLifeScene(body)));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/life/respond")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtLifeRespond(body)));
-                    }
-                    else if (request.Method == "GET" && request.Path == "/court/patronage/public-history")
-                    {
-                        response = PatronagePublicHistoryApi(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/life/interpret")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => CourtLifeInterpret(body)));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/life/family")
-                    {
-                        response = FamilyVisitDispatch(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/life/international/pending")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, InternationalCourtPendingApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/life/international/resolve")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, InternationalCourtResolutionApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/life/international/refer")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, InternationalCourtReferralApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/government/meeting/speaker-statement")
-                    {
-                        response = RunInteractiveRequest(() => GovernmentSpeakerStatement(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/government/hearing/discussion")
-                    {
-                        response = RunInteractiveRequest(() => GovernmentHearingDiscussion(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/government/political-profiles/sync")
-                    {
-                        response = PoliticalProfilesSync(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/government/crown/decision")
-                    {
-                        response = RunInteractiveRequest(() => GovernmentCrownDecision(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/clan-accords/sync")
-                    {
-                        response = ClanAccordsSyncApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/regent/assign")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtRegentAssignApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/regent/dismiss")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtRegentDismissApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/ambassadors/assign")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtAmbassadorAssignApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/ambassadors/mission")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtAmbassadorMissionApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/ambassadors/recall")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtAmbassadorRecallApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/establish")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, ForeignAmbassadorEstablishApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/dismiss")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, ForeignAmbassadorDismissApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/end")
-                    {
-                        response = ForeignAmbassadorEndApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/location")
-                    {
-                        response = ForeignAmbassadorLocationApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/authority")
-                    {
-                        response = ForeignAmbassadorAuthorityApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/tick")
-                    {
-                        response = ForeignAmbassadorTickApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/referrals/respond")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, ForeignAmbassadorReferralRespondApi);
-                    }
                     else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/test")
                     {
                         response = CapitalAmbassadorTestApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/intelligence/start")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtIntelligenceStartApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/intelligence/cancel")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtIntelligenceCancelApi);
                     }
                     else if (TryHandleSpymasterRoute(request, out response))
                     {
@@ -2014,605 +1549,25 @@ namespace ReignBetaServer
                     else if (TryHandleArrestRoute(request, out response))
                     {
                     }
-                    else if (request.Method == "POST" && request.Path == "/court/obligations/query")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtObligationsQueryApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/obligations/upsert")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtObligationUpsertApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/obligations/resolve")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtObligationResolveApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/plots/query")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtPlotsQueryApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/plots/upsert")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtPlotUpsertApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/world-action/validate")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtWorldActionValidateApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/diplomacy/propose")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtDiplomacyProposeApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/supply/validate")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtSupplyValidateApi);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/court/native/validate")
-                    {
-                        response = CapitalCourtApi(request.JsonBody, CourtNativeActionValidateApi);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/court/tests")
-                    {
-                        response = RunCourtSelfTests();
-                    }
 #endif
-                    else if (request.Method == "GET" && request.Path == "/diplomacy/events/next")
-                    {
-                        response = NextDiplomaticEvents(request.JsonBody, request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/diplomacy/events/acknowledge")
-                    {
-                        response = AcknowledgeDiplomaticEvent(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/event")
-                    {
-                        response = MemoryEventApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/conversation/start")
-                    {
-                        response = ConversationStartApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/conversation/finish")
-                    {
-                        response = ConversationFinishApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/conversation/recover")
-                    {
-                        response = ConversationRecoverApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/conversation_finished")
-                    {
-                        response = string.IsNullOrWhiteSpace(ReadFirstString(request.JsonBody, "sessionId", "conversationSessionId", "conversationId"))
-                            ? MemoryConversationFinishedApi(request.JsonBody)
-                            : ConversationFinishApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/action_result")
-                    {
-                        response = MemoryActionResultApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/build_context")
-                    {
-                        response = MemoryBuildContextApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/consolidate")
-                    {
-                        response = MemoryConsolidateApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/memory/embeddings/status")
-                    {
-                        response = SemanticMemoryStatusApi(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/embeddings/reindex")
-                    {
-                        response = SemanticMemoryReindexApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/memory/embeddings/retry-failed")
-                    {
-                        response = SemanticMemoryRetryFailedApi(request.JsonBody);
-                    }
                     else if (TryHandleReputationRoute(request, out response))
                     {
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/evaluate")
-                    {
-                        response = RelationshipEvaluateApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/conversation/evaluate")
-                    {
-                        response = ConversationRelationshipEvaluateApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/conversation/native-receipt")
-                    {
-                        response = ConversationRelationshipNativeReceiptApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/relationships/conversation/recent")
-                    {
-                        response = ConversationRelationshipRecentApi(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/context")
-                    {
-                        response = RelationshipContextApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/effective/batch")
-                    {
-                        response = EffectiveAttitudeBatchApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/history/ensure")
-                    {
-                        response = SharedRelationshipHistoryEnsureApi(request.JsonBody);
-                    }
-                    else if ((request.Method == "GET" || request.Method == "POST")
-                        && request.Path == "/relationships/history/query")
-                    {
-                        response = SharedRelationshipHistoryQueryApi(
-                            request.Method == "POST"
-                                ? request.JsonBody
-                                : request.Query.ToDictionary(
-                                    pair => pair.Key, pair => (object)pair.Value,
-                                    StringComparer.OrdinalIgnoreCase));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/developments/poll")
-                    {
-                        response = RetiredRelationshipMechanicResult("relationship_developments");
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/developments/resolve")
-                    {
-                        response = RetiredRelationshipMechanicResult("relationship_developments");
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/director/snapshot")
-                    {
-                        response = RelationshipDirectorSnapshotApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/director/run")
-                    {
-                        response = RelationshipDirectorRunApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/director/poll_actions")
-                    {
-                        response = RelationshipDirectorPollActionsApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/director/report_action")
-                    {
-                        response = RelationshipDirectorReportActionApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/director/report_actions")
-                    {
-                        response = RelationshipDirectorReportActionsApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/director/status")
-                    {
-                        response = RelationshipDirectorStatusApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/ambient/snapshot")
-                    {
-                        response = MbtiRelationshipSnapshotApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/initialization/seed")
-                    {
-                        response = CampaignOpeningRelationshipSeedApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/ambient/native_sync/report")
-                    {
-                        response = RelationshipNativeSyncReportApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/ambient/native_sync/pull")
-                    {
-                        response = RelationshipNativeTargetPullApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/ambient/native_sync/receipts")
-                    {
-                        response = RelationshipNativeTargetReceiptsApi(request.JsonBody);
                     }
                     else if ((request.Method == "GET" || request.Method == "POST") && request.Path == "/relationships/ambient/status")
                     {
                         response = MbtiRelationshipStatusApi(RelationshipStatusPayload(request));
                     }
-                    else if (request.Method == "POST" && request.Path == "/relationships/simulation/census/status")
-                    {
-                        response = RetiredRelationshipMechanicResult("legacy_relationship_simulation");
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/simulation/start")
-                    {
-                        response = RetiredRelationshipMechanicResult("legacy_relationship_simulation");
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/simulation/stop")
-                    {
-                        response = RetiredRelationshipMechanicResult("legacy_relationship_simulation");
-                    }
-                    else if (request.Method == "POST" && request.Path == "/relationships/simulation/status")
-                    {
-                        response = RetiredRelationshipMechanicResult("legacy_relationship_simulation");
-                    }
                     else if (request.Method == "POST" && request.Path == "/identity/synchronize")
                     {
                         response = IdentitySynchronizeWithPortraitRosterUpgradeApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/identity/encounter")
-                    {
-                        response = IdentityEncounterApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/identity/introduction")
-                    {
-                        response = IdentityIntroductionApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/identity/query")
-                    {
-                        response = IdentityQueryApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/identity/reset")
-                    {
-                        response = IdentityResetApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/identity/debug/know-everyone")
-                    {
-                        response = IdentityDebugKnowEveryoneApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/family/verify_conception_attempt")
-                    {
-                        response = VerifyPlayerConceptionAttemptApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/family/pregnancy/sync")
-                    {
-                        response = FamilyPregnancySyncApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/family/conception/report")
-                    {
-                        response = FamilyConceptionReportApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/family/parentage/reveal")
-                    {
-                        response = FamilyParentageRevealApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/correspondence/threads")
-                    {
-                        response = CorrespondenceThreadsApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/correspondence/send")
-                    {
-                        response = CorrespondenceSendApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/correspondence/tick")
-                    {
-                        response = CorrespondenceTickApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/approaches/evaluate")
-                    {
-                        response = PlayerApproachEvaluateApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/approaches/decision")
-                    {
-                        response = PlayerApproachDecisionApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/correspondence/autonomous/candidates")
-                    {
-                        response = AutonomousCorrespondenceCandidatesApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/correspondence/autonomous/evaluate")
-                    {
-                        response = AutonomousCorrespondenceEvaluateApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/correspondence/read")
-                    {
-                        response = CorrespondenceReadApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/context/build")
-                    {
-                        response = BuildContext(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/context/select")
-                    {
-                        response = SelectContextPulls(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/actions/route")
-                    {
-                        response = RouteActionsApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/actions/plan")
-                    {
-                        response = PlanActionsApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/upsert")
-                    {
-                        response = UpsertCharacter(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/upsert-batch")
-                    {
-                        response = UpsertCharacterBatch(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portrait-roster/upsert-batch")
-                    {
-                        response = UpsertPortraitRoster(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/construct")
-                    {
-                        response = ConstructCharacter(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/construct-batch")
-                    {
-                        response = ConstructCharacterBatch(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/retry-failed")
-                    {
-                        response = RetryFailedCharacters(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/characters/profile-library/status")
-                    {
-                        response = CharacterProfileLibraryStatusApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/profile-library/action")
-                    {
-                        response = CharacterProfileLibraryActionApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/characters/schema")
-                    {
-                        response = CharacterSchemaApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/characters/diagnose")
-                    {
-                        response = CharacterStructureDiagnostics(request.JsonBody);
                     }
                     else if (request.Method == "POST" && request.Path == "/character-editor/list")
                     {
                         response = CharacterEditorListApi(request.JsonBody);
                     }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/load")
-                    {
-                        response = CharacterEditorLoadApi(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/characters/narrative")
-                    {
-                        response = InspectCharacterNarrative(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/construct")
-                    {
-                        response = CharacterEditorConstructApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/social/rumor/add")
-                    {
-                        response = CharacterEditorSocialRumorAddApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/social/reputation/add")
-                    {
-                        response = CharacterEditorSocialReputationAddApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/social/reputation/retry-reason")
-                    {
-                        response = CharacterEditorSocialReasonRetryApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/save")
-                    {
-                        response = CharacterEditorSaveApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/rollback")
-                    {
-                        response = CharacterEditorRollbackApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/portrait/upload")
-                    {
-                        response = CharacterEditorPortraitUploadApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/portrait/select")
-                    {
-                        response = CharacterEditorPortraitSelectApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/native/poll")
-                    {
-                        response = CharacterEditorNativePollApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/character-editor/native/report")
-                    {
-                        response = CharacterEditorNativeReportApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/notables/mbti/initialize")
-                    {
-                        response = NotableMbtiInitializeApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/notables/profiles/prewarm")
-                    {
-                        response = PrewarmTownNotableProfiles(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/notables/mbti/confirm-batch")
-                    {
-                        response = NotableMbtiConfirmBatchApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/dialogue/history")
-                    {
-                        response = DialogueHistory(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/dialogue/respond")
-                    {
-                        response = RunInteractiveRequest(() => DialogueRespond(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/conversation-scene/hourly-tick")
-                    {
-                        response = ConversationSceneHourlyTickApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/gossip/test")
-                    {
-                        response = PersonalGossipTestApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/gossip/tick")
-                    {
-                        response = PersonalGossipTickApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path.StartsWith("/communications/", StringComparison.Ordinal))
-                    {
-                        response = CommunicationApi(request.Path.Substring("/communications/".Length), request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/communications/status")
-                    {
-                        response = CommunicationApi("status", request.Query.ToDictionary(pair => pair.Key, pair => (object)pair.Value));
-                    }
-                    else if (request.Method == "GET" && request.Path == "/gossip/status")
-                    {
-                        response = PersonalGossipStatusApi(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/conversation-scene/formal-outfits/scan")
-                    {
-                        response = RunInteractiveRequest(() => ScanFormalOutfitsApi(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path.StartsWith("/rulers/", StringComparison.Ordinal))
-                    {
-                        response = RulerRelationsApi(request.Path.Substring("/rulers/".Length), request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path.StartsWith("/npc-lives/", StringComparison.Ordinal))
-                    {
-                        response = NpcLivesApi(request.Path.Substring("/npc-lives/".Length), request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path.StartsWith("/party-banter/", StringComparison.Ordinal))
-                    {
-                        response = PartyBanterApi(request.Path.Substring("/party-banter/".Length), request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/party-chat/turn-plan")
-                    {
-                        response = RunInteractiveRequest(() => GroupConversationFloorApi(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/party-chat/respond")
-                    {
-                        response = RunInteractiveRequest(() => PartyChatRespond(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/party-chat/history")
-                    {
-                        response = PartyChatHistory(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/tavern-house/respond")
-                    {
-                        response = RunInteractiveRequest(() => TavernHouseRespond(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/tavern-house/turn-plan")
-                    {
-                        response = RunInteractiveRequest(() => TavernHouseTurnPlanApi(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/tavern-house/confirm")
-                    {
-                        response = TavernHouseConfirmVisit(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/tavern-house/scene")
-                    {
-                        response = RunInteractiveRequest(() => TavernHouseGenerateScene(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/tavern-house/close")
-                    {
-                        response = TavernHouseCloseVisit(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/social/start")
-                    {
-                        response = SocialEventStart(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/social/approaches/roll")
-                    {
-                        response = SocialEventApproachRollApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/social/respond")
-                    {
-                        response = RunInteractiveRequest(() => SocialEventRespond(request.JsonBody));
-                    }
                     else if (request.Method == "POST" && request.Path == "/events/social/turn")
                     {
                         response = RunInteractiveRequest(() => SocialEventTurnApi(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/social/turn-plan")
-                    {
-                        response = RunInteractiveRequest(() => SocialEventTurnPlanApi(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/social/resolve")
-                    {
-                        response = SocialEventResolve(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/social/history")
-                    {
-                        response = SocialEventHistory(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/events/generated-wilderness/plan")
-                    {
-                        response = GeneratedWildernessPlan(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/register")
-                    {
-                        response = PortraitRegister(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/portraits/vision/models")
-                    {
-                        response = PortraitVisionModelCatalog(request.Query.TryGetValue("provider", out string visionProvider) ? visionProvider : "Codex");
-                    }
-                    else if (request.Method == "GET" && request.Path == "/portraits/status")
-                    {
-                        response = PortraitStatus(request.JsonBody, request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/status")
-                    {
-                        response = PortraitStatus(request.JsonBody, request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/request")
-                    {
-                        response = PortraitRequest(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path.StartsWith("/portraits/outfit/", StringComparison.Ordinal))
-                    {
-                        response = OutfitChangeApi(request.JsonBody, request.Path.Substring("/portraits/outfit/".Length));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/generate")
-                    {
-                        response = PortraitGenerate(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/generate/status")
-                    {
-                        response = PortraitGenerationStatus(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/castle-chat/scene/generate")
-                    {
-                        response = RunInteractiveRequest(() => CastleSceneGenerate(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/family-chambers/scene/generate")
-                    {
-                        response = RunInteractiveRequest(() => FamilyChambersSceneGenerate(request.JsonBody));
-                    }
-                    else if (request.Method == "POST" && request.Path == "/family-chambers/childhood/mature")
-                    {
-                        response = FamilyChambersMatureChildhood(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/portraits/shared-generation/catalog")
-                    {
-                        response = SharedPortraitCatalogApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/shared-generation/open-folder")
-                    {
-                        response = OpenSharedPortraitCacheFolderApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/shared-generation/generate-one")
-                    {
-                        response = GenerateOneSharedPortraitApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/shared-generation/delete-one")
-                    {
-                        response = DeleteOneSharedPortraitApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/shared-generation/build-missing")
-                    {
-                        response = StartMissingSharedPortraitBuildApi();
-                    }
-                    else if (request.Method == "GET" && request.Path == "/portraits/shared-generation/status")
-                    {
-                        response = SharedPortraitGenerationStatusApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/shared-generation/cancel")
-                    {
-                        response = CancelSharedPortraitGenerationApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/diagnose")
-                    {
-                        response = PortraitDiagnose(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/derivatives/build-missing")
-                    {
-                        response = StartPortraitDerivativeBuildApi();
-                    }
-                    else if (request.Method == "POST" && request.Path == "/portraits/derivatives/rebuild-fallback")
-                    {
-                        response = StartPortraitDerivativeFallbackRepairApi();
-                    }
-                    else if (request.Method == "GET" && request.Path == "/portraits/derivatives/status")
-                    {
-                        response = PortraitDerivativeBuildStatusApi();
                     }
                     else if (request.Method == "GET" && request.Path == "/actions/catalog")
                     {
@@ -2621,50 +1576,6 @@ namespace ReignBetaServer
                     else if (request.Method == "GET" && request.Path == "/actions/failures")
                     {
                         response = ActionFailures(request.JsonBody, request.Query);
-                    }
-                    else if (request.Method == "GET" && request.Path == "/actions/next")
-                    {
-                        response = NextActions(request.JsonBody, request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/actions/next")
-                    {
-                        response = NextActions(request.JsonBody, request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/actions/propose")
-                    {
-                        response = ProposeAction(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/actions/decide")
-                    {
-                        response = DecideActions(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/actions/report")
-                    {
-                        response = ReportAction(request.JsonBody);
-                    }
-                    else if (request.Method == "GET" && request.Path == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute)
-                    {
-                        response = TerminalActionReportPreflightApi(request.Query);
-                    }
-                    else if (request.Method == "POST" && request.Path == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute)
-                    {
-                        response = TerminalActionReportApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == IndividualViewInsertionRoute)
-                    {
-                        response = IndividualViewInsertionApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/campaign-commands/report")
-                    {
-                        response = CampaignCommandReportApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/campaign-commands/judge")
-                    {
-                        response = CampaignCommandJudgeApi(request.JsonBody);
-                    }
-                    else if (request.Method == "POST" && request.Path == "/llm/chat")
-                    {
-                        response = ChatWithLlm(request.JsonBody);
                     }
                     else
                     {
@@ -2675,7 +1586,7 @@ namespace ReignBetaServer
                     WriteJson(stream, status, response, request.Method, request.Path);
                     diagnosticRequest?.Delivered(status);
                     LogRequest(request, status);
-                    if (deleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
+                    if (routeContext.DeleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
                 }
                 catch (HttpIngressException ex)
                 {
@@ -2719,7 +1630,7 @@ namespace ReignBetaServer
                             ["duringErrorResponse"] = true
                         });
                     }
-                    if (deleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
+                    if (routeContext.DeleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
                 }
                 catch (IOException ex)
                 {
@@ -2729,7 +1640,7 @@ namespace ReignBetaServer
                         ["path"] = request?.Path ?? string.Empty,
                         ["exceptionType"] = ex.GetType().Name
                     });
-                    if (deleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
+                    if (routeContext.DeleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
                 }
                 catch (SocketException ex)
                 {
@@ -2739,7 +1650,7 @@ namespace ReignBetaServer
                         ["path"] = request?.Path ?? string.Empty,
                         ["exceptionType"] = ex.GetType().Name
                     });
-                    if (deleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
+                    if (routeContext.DeleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
                 }
                 catch (Exception ex)
                 {
@@ -2758,7 +1669,7 @@ namespace ReignBetaServer
                             ["duringErrorResponse"] = true
                         });
                     }
-                    if (deleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
+                    if (routeContext.DeleteAllResponsePending) DeleteAllCampaignResponseSent.Set();
                 }
                 finally
                 {
@@ -2775,28 +1686,9 @@ namespace ReignBetaServer
         private static CampaignRequestAccess EnterCampaignRequestAccess(string path)
         {
             path = path ?? string.Empty;
-            // These routes read no campaign state. A Save Sync replacement must
-            // not hide service health or the static Control Center shell from
-            // systemd and the launcher while campaign requests remain gated.
-            if (path == "/health" || path == "/" || path == "/index.html"
-                || path == "/assets/reign-icon.webp" || path == "/assets/ReignLogo.png")
-                return CampaignRequestAccess.None;
-            // Stop reads no campaign state and may synchronously settle never-started background
-            // releases, so it must run without campaign ownership. Access policy is unchanged.
-            if (path == "/api/shutdown")
-                return CampaignRequestAccess.None;
-            bool isLiveTestPath = path.Equals("/tests/live", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith("/tests/live/", StringComparison.OrdinalIgnoreCase);
-            if (path.StartsWith("/save-sync/", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith("/api/save-sync/", StringComparison.OrdinalIgnoreCase)
-                || path == "/api/campaigns/export"
-                || path == "/api/campaigns/import"
-                || path == "/api/campaigns/delete"
-                || path == "/api/campaigns/delete-all"
-                || path == "/api/campaigns/cleanup-zero-save"
-                || (path.StartsWith("/tests/", StringComparison.OrdinalIgnoreCase)
-                    && !isLiveTestPath)
-                || path.StartsWith("/verification/", StringComparison.OrdinalIgnoreCase))
+            // Exemptions are declared on the routes (WithoutCampaignGate) and as exempt areas in each module's
+            // Program.<Module>Routes.cs. They apply to the path for every method, registered or not.
+            if (IsCampaignGateExemptPath(path))
                 return CampaignRequestAccess.None;
 
             CampaignDataGate.EnterReadLock();
