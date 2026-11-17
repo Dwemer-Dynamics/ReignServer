@@ -483,6 +483,112 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 try { Publish(single); } catch (InvalidOperationException) { singleConflict = true; }
                 Check("single_pass_cannot_replace_accepted_speech", singleConflict);
                 single.Reply = originalSingleReply;
+
+                Check("view_insertion_opt_in_requires_exact_schema", IndividualViewInsertionRequested(
+                    TestDict(IndividualViewInsertionOptInField, IndividualViewInsertionSchema))
+                    && !IndividualViewInsertionRequested(TestDict(IndividualViewInsertionOptInField, "reign-individual-view-insertion-v2"))
+                    && !IndividualViewInsertionRequested(TestDict()));
+                var view = Unit("view_insertion"); view.ViewInsertionRequested = true;
+                AdmitConversationInput(campaign, view.Payload, generation, "npc");
+                var viewDescriptor = ReadDictionary(ReadDictionary(Publish(view), "acceptedUnit"), "viewInsertion");
+                var viewReplay = ReadDictionary(ReadDictionary(ReadDictionary(ReadConversationInputReplay(campaign, view.Payload, "npc"),
+                    "conversationExchange"), "acceptedUnit"), "viewInsertion");
+                Check("view_insertion_descriptor_binds_exact_npc_source", viewDescriptor != null
+                    && ReadString(viewDescriptor, "schema", "") == IndividualViewInsertionSchema
+                    && ReadString(viewDescriptor, "sourceTurnId", "") == view.EventId + "_npc"
+                    && ReadString(viewDescriptor, "speakerHeroStringId", "") == "npc" && ReadString(viewDescriptor, "playerHeroStringId", "") == "player"
+                    && ReadString(viewDescriptor, "sessionId", "") == "accepted_unit_session" && ReadString(viewDescriptor, "timelineId", "") == "agency_timeline"
+                    && ReadString(viewDescriptor, "restoreGeneration", "") == generation
+                    && ReadString(viewDescriptor, "textSha256", "") == ConversationExactTextHash(view.Reply)
+                    && viewReplay != null && Json.Serialize(viewReplay) == Json.Serialize(viewDescriptor), viewDescriptor);
+                Dictionary<string, object> Ack(Dictionary<string, object> descriptor, string field = null, string value = null)
+                {
+                    var body = TestDict("schema", IndividualViewInsertionAckSchema);
+                    foreach (string key in IndividualViewInsertionIdentityFields) body[key] = ReadString(descriptor, key, "");
+                    if (field != null) body[field] = value;
+                    return IndividualViewInsertionApi(body);
+                }
+                string StoredReceipt(string unitId)
+                {
+                    using var connection = OpenCampaignConnection(campaign);
+                    return ReadString(QuerySql(connection, "SELECT receipt_json FROM conversation_accepted_units WHERE unit_id=$unit;",
+                        TestDict("unit", unitId)).Single(), "receipt_json", "");
+                }
+                string beforeAck = StoredReceipt(view.EventId);
+                foreach (var (field, value, disposition) in new[] {
+                    ("textSha256", ConversationExactTextHash(view.Reply + " "), "conflict"),
+                    ("sourceTurnId", view.EventId + "_player", "conflict"),
+                    ("speakerHeroStringId", "listener", "conflict"),
+                    ("playerHeroStringId", "listener", "conflict"),
+                    ("sessionId", "other_session", "conflict"),
+                    ("restoreGeneration", "old_generation", "conflict"),
+                    ("role", "player", "invalid"),
+                    ("textSha256", ConversationExactTextHash(view.Reply).ToUpperInvariant(), "invalid") })
+                    Check("view_insertion_rejects_wrong_" + field + "_" + disposition, ReadString(Ack(viewDescriptor, field, value), "disposition", "") == disposition
+                        && StoredReceipt(view.EventId) == beforeAck);
+                string missingCampaign = "view_insertion_missing_" + Guid.NewGuid().ToString("N");
+                Check("view_insertion_unknown_campaign_is_not_created", ReadString(Ack(viewDescriptor, "campaignId", missingCampaign), "reason", "") == "unknown_campaign"
+                    && !ReignPostgreSqlStorage.CampaignExists(missingCampaign));
+                // Low-level registration only: a known schema with no campaign initialization.
+                string coldCampaign = "view_insertion_cold_" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    using (ReignPostgreSqlStorage.OpenCampaignConnection(coldCampaign)) { }
+                    int ColdTables()
+                    {
+                        using var metadata = ReignPostgreSqlStorage.OpenMetadataConnection();
+                        return ReadInt(QuerySql(metadata, "SELECT COUNT(*) AS n FROM pg_tables WHERE schemaname=$schema;",
+                            TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(coldCampaign))).Single(), "n", -1);
+                    }
+                    int coldBefore = ColdTables();
+                    var coldAck = Ack(viewDescriptor, "campaignId", coldCampaign);
+                    Check("view_insertion_cold_registered_campaign_is_not_initialized", ReignPostgreSqlStorage.CampaignExists(coldCampaign)
+                        && coldBefore == 0 && ColdTables() == 0 && ReadString(coldAck, "disposition", "") == "unknown"
+                        && ReadString(coldAck, "reason", "") == "no_view_insertion_descriptor", coldAck);
+                }
+                finally { ReignPostgreSqlStorage.DropCampaign(coldCampaign); }
+                var extra = TestDict("schema", IndividualViewInsertionAckSchema, "acknowledgedTs", "1");
+                foreach (string key in IndividualViewInsertionIdentityFields) extra[key] = ReadString(viewDescriptor, key, "");
+                Check("view_insertion_rejects_extra_or_app_time_fields", ReadString(IndividualViewInsertionApi(extra), "disposition", "") == "invalid"
+                    && StoredReceipt(view.EventId) == beforeAck);
+                var firstAck = Ack(viewDescriptor);
+                string afterAck = StoredReceipt(view.EventId);
+                var storedInsertion = ReadDictionary(ReadDictionary(TryParseJsonObject(afterAck), "viewInsertion"), "insertion");
+                Check("view_insertion_exact_ack_records_once", ReadString(firstAck, "disposition", "") == "inserted"
+                    && ReadString(firstAck, "reason", "") == "recorded" && ReadLong(firstAck, "acknowledgedTs", 0) > 0
+                    && ReadLong(storedInsertion, "acknowledgedTs", 0) == ReadLong(firstAck, "acknowledgedTs", 0)
+                    && ReadString(ReadDictionary(TryParseJsonObject(afterAck), "viewInsertion"), "textSha256", "") == ReadString(viewDescriptor, "textSha256", ""), firstAck);
+                var duplicateAck = Ack(viewDescriptor);
+                Check("view_insertion_duplicate_ack_is_idempotent_without_overwrite", ReadString(duplicateAck, "disposition", "") == "inserted"
+                    && ReadString(duplicateAck, "reason", "") == "exact_replay"
+                    && ReadLong(duplicateAck, "acknowledgedTs", -1) == ReadLong(firstAck, "acknowledgedTs", -2)
+                    && StoredReceipt(view.EventId) == afterAck);
+                Check("view_insertion_does_not_change_source_acceptance", ReadBool(ReadDictionary(Publish(view), "acceptedUnit"), "idempotentReplay", false)
+                    && Count("conversation_accepted_units", "unit_id", view.EventId) == 1);
+
+                var noOptIn = Unit("view_insertion_without_opt_in");
+                var noOptInReceipt = ReadDictionary(Publish(noOptIn), "acceptedUnit");
+                var borrowed = CloneDictionary(viewDescriptor); borrowed["unitId"] = noOptIn.EventId;
+                Check("view_insertion_without_descriptor_or_old_receipt_is_unknown", ReadDictionary(noOptInReceipt, "viewInsertion") == null
+                    && ReadString(Ack(borrowed), "reason", "") == "no_view_insertion_descriptor"
+                    && ReadString(Ack(viewDescriptor, "unitId", unit.EventId), "reason", "") == "no_view_insertion_descriptor"
+                    && ReadString(Ack(viewDescriptor, "unitId", "accepted_missing_unit"), "reason", "") == "unknown_unit");
+                var groupView = Unit("view_insertion_group", group: true); groupView.ViewInsertionRequested = true;
+                var silentView = Unit("view_insertion_silence"); silentView.ViewInsertionRequested = true;
+                silentView.Reply = ""; silentView.Parsed["reply"] = ""; silentView.Parsed["participation"] = "quiet";
+                silentView.EventType = "social_event_turn";
+                AdmitConversationInput(campaign, silentView.Payload, generation, "npc");
+                Check("view_insertion_skips_group_and_silence", ReadDictionary(ReadDictionary(Publish(groupView), "acceptedUnit"), "viewInsertion") == null
+                    && ReadDictionary(ReadDictionary(Publish(silentView), "acceptedUnit"), "viewInsertion") == null);
+
+                var staleView = Unit("view_insertion_before_restore"); staleView.ViewInsertionRequested = true;
+                var staleDescriptor = ReadDictionary(ReadDictionary(Publish(staleView), "acceptedUnit"), "viewInsertion");
+                string beforeRestore = StoredReceipt(staleView.EventId);
+                AdvanceMemoryRestoreGeneration(campaign);
+                Check("view_insertion_old_restore_generation_never_writes", staleDescriptor != null
+                    && ReadString(Ack(staleDescriptor), "disposition", "") == "stale" && StoredReceipt(staleView.EventId) == beforeRestore);
+                using (var connection = OpenCampaignConnection(campaign))
+                    generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var stale = Unit("pre_restore");
                 GenerateSinglePassConversation(TestDict(), stale.Payload, "dialogue", responder: _ =>
                     TestDict("ok", true, "content", Json.Serialize(stale.Parsed)));
@@ -491,6 +597,26 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 try { Publish(stale); } catch (InvalidOperationException) { restoreRejected = true; }
                 Check("restore_rejects_entire_pending_unit", restoreRejected && Count("conversation_turns", "event_id", stale.EventId) == 0
                     && Count("events", "event_id", stale.EventId) == 0 && Count("conversation_accepted_units", "unit_id", stale.EventId) == 0);
+                using (var connection = OpenCampaignConnection(campaign))
+                    generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                var edited = Unit("view_insertion_edited_source"); edited.ViewInsertionRequested = true;
+                var editedDescriptor = ReadDictionary(ReadDictionary(Publish(edited), "acceptedUnit"), "viewInsertion");
+                string beforeEdit = StoredReceipt(edited.EventId);
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    // The real editor statements; every active npc-session row is listed so only the target text changes.
+                    var rows = QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
+WHERE s.npc_id='npc' AND t.status='active';").Select(row => TestDict("id", ReadString(row, "turn_id", ""),
+                        "text", ReadString(row, "turn_id", "") == ReadString(editedDescriptor, "sourceTurnId", "")
+                            ? ReadString(row, "text", "") + " Edited." : ReadString(row, "text", ""),
+                        "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""),
+                        "worldDay", ReadDouble(row, "world_day", 0d))).ToList();
+                    SyncEditorConversationTurns(connection, "npc", rows);
+                }
+                var editedAck = editedDescriptor == null ? null : Ack(editedDescriptor);
+                Check("view_insertion_edited_source_rejects_matching_descriptor_without_mutation", editedDescriptor != null
+                    && ReadString(editedAck, "disposition", "") == "conflict" && ReadString(editedAck, "reason", "") == "source_mismatch"
+                    && StoredReceipt(edited.EventId) == beforeEdit, editedAck);
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;

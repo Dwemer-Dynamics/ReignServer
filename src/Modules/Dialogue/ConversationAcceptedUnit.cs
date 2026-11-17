@@ -15,6 +15,8 @@ namespace ReignBetaServer
             internal long Timestamp;
             internal bool CommitEffects = true, RetrievalEligible = true, GroupConversation, PrivateWhisper;
             internal bool PublishScene, PublishSocial, PublishIntroductions;
+            // Only ordinary individual /dialogue/respond sets this, from an exact client opt-in.
+            internal bool ViewInsertionRequested;
             internal string SceneMode;
             internal Dictionary<string, object> ConceptionGate;
             internal string PlayerName, HeroName;
@@ -167,6 +169,11 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                             "intoxicationReceipt", ReadDictionary(effectPayload, "intoxicationReceipt")));
                     boundary?.Invoke("before_unit_receipt");
                     receipt["politicalReflection"] = AcceptedPoliticalReflection(unit, suppressReplyEffects);
+                    // Optional, non-gating: binds the one exact displayed NPC source row.
+                    var viewInsertion = unit.ViewInsertionRequested && !suppressReplyEffects && !unit.GroupConversation
+                        && !unit.PrivateWhisper && unit.EventType == "dialogue_turn"
+                        ? IndividualViewInsertionDescriptor(unit, session, generation, sourceRows) : null;
+                    if (viewInsertion != null) receipt["viewInsertion"] = viewInsertion;
                     ExecuteSql(connection, @"INSERT INTO conversation_accepted_units(unit_id,response_hash,restore_generation,receipt_json,created_ts)
 VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "hash", hash,
                         "generation", generation, "receipt", Json.Serialize(receipt), "ts", unit.Timestamp));
@@ -214,6 +221,128 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             return TestDict("ok", true, "sessionId", session, "exchangeId", exchange, "turnIds",
                 new[] { playerTurn, npcTurn }.Where(id => QuerySql(connection,
                     "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count > 0).ToArray());
+        }
+
+        // ---- Individual chat view-insertion receipt v1. ----
+        // Attests only that the client inserted the accepted NPC line into the matching
+        // current individual chat view. It never attests render, audio or observation,
+        // and never gates source acceptance or domain effects.
+        private const string IndividualViewInsertionSchema = "reign-individual-view-insertion-v1";
+        private const string IndividualViewInsertionAckSchema = "reign-individual-view-insertion-ack-v1";
+        private const string IndividualViewInsertionResultSchema = "reign-individual-view-insertion-result-v1";
+        private const string IndividualViewInsertionRoute = "/conversation/view-insertion";
+        private const string IndividualViewInsertionOptInField = "viewInsertionReceipt";
+        private static readonly string[] IndividualViewInsertionIdentityFields = { "campaignId", "timelineId", "unitId",
+            "sessionId", "sourceTurnId", "role", "speakerHeroStringId", "playerHeroStringId", "restoreGeneration", "textSha256" };
+
+        private static bool IndividualViewInsertionRequested(Dictionary<string, object> payload) =>
+            payload != null && payload.TryGetValue(IndividualViewInsertionOptInField, out object value)
+            && value is string text && text == IndividualViewInsertionSchema;
+
+        private static bool ViewInsertionIdentifier(string value) =>
+            Reign.Core.Contracts.Actions.TerminalActionReportProtocol.IsTrustedIdentifier(value);
+
+        // Uses rows already read by the publication transaction; unknown is null, never a guess.
+        private static Dictionary<string, object> IndividualViewInsertionDescriptor(AcceptedConversationUnit unit,
+            string session, string generation, List<Dictionary<string, object>> sourceRows)
+        {
+            string reply = unit.Reply ?? "", timeline = ContinuityTimeline(unit.Payload);
+            if (reply.Length == 0 || IsTechnicalConversationNotice(reply)) return null;
+            var matches = (sourceRows ?? new List<Dictionary<string, object>>()).Where(row => ReadString(row, "role", "") == "npc"
+                && ReadString(row, "speaker_id", "") == unit.Hero).ToList();
+            if (matches.Count != 1) return null;
+            var row = matches[0];
+            var audience = TextListFromJson(ReadString(row, "participants_json", "[]"));
+            string turn = ReadString(row, "turn_id", "");
+            if (ReadString(row, "text", "") != reply || ReadString(row, "status", "") != "active"
+                || ReadString(row, "session_id", "") != session || ReadString(row, "event_id", "") != unit.EventId
+                || ReadString(row, "channel", "") == "private_whisper"
+                || ContinuityTimeline(TryParseJsonObject(ReadString(row, "payload_json", "{}"))) != timeline
+                || !audience.Contains(unit.Hero, StringComparer.Ordinal) || !audience.Contains(unit.Player, StringComparer.Ordinal)
+                || !new[] { unit.Campaign, timeline, unit.EventId, session, turn, unit.Hero, unit.Player, generation }.All(ViewInsertionIdentifier))
+                return null;
+            return TestDict("schema", IndividualViewInsertionSchema, "status", "eligible",
+                "campaignId", unit.Campaign, "timelineId", timeline, "unitId", unit.EventId, "sessionId", session,
+                "sourceTurnId", turn, "role", "npc", "speakerHeroStringId", unit.Hero, "playerHeroStringId", unit.Player,
+                "audience", audience, "restoreGeneration", generation, "textSha256", ConversationExactTextHash(reply));
+        }
+
+        // POST /conversation/view-insertion. Records evidence on the existing accepted
+        // unit receipt only; publishes no effects and never regenerates or replays a reply.
+        private static Dictionary<string, object> IndividualViewInsertionApi(Dictionary<string, object> payload)
+        {
+            payload = payload ?? new Dictionary<string, object>();
+            string Exact(string key) => payload.TryGetValue(key, out object value) && value is string text ? text : "";
+            var ack = IndividualViewInsertionIdentityFields.ToDictionary(field => field, Exact, StringComparer.Ordinal);
+            Dictionary<string, object> Reply(string disposition, string reason, Dictionary<string, object> insertion = null) =>
+                TestDict("ok", true, "schema", IndividualViewInsertionResultSchema, "disposition", disposition, "reason", reason,
+                    "campaignId", ack["campaignId"], "unitId", ack["unitId"], "sourceTurnId", ack["sourceTurnId"],
+                    "restoreGeneration", ack["restoreGeneration"], "textSha256", ack["textSha256"],
+                    "acknowledgedTs", insertion == null ? 0L : ReadLong(insertion, "acknowledgedTs", 0));
+            if (Exact("schema") != IndividualViewInsertionAckSchema || payload.Count != IndividualViewInsertionIdentityFields.Length + 1
+                || !payload.Keys.All(key => key == "schema" || IndividualViewInsertionIdentityFields.Contains(key))
+                || ack["role"] != "npc" || !Reign.Core.Contracts.Actions.TerminalActionReportProtocol.IsSha256Hex(ack["textSha256"])
+                || !ack.Where(pair => pair.Key != "role" && pair.Key != "textSha256").All(pair => ViewInsertionIdentifier(pair.Value)))
+                return TestDict("ok", false, "schema", IndividualViewInsertionResultSchema, "disposition", "invalid",
+                    "error", "The view insertion acknowledgment is invalid.");
+            string campaign = ack["campaignId"];
+            // Never uses OpenCampaignConnection: that helper creates directories and runs cold
+            // campaign initialization/migration. The registry answers unknown campaigns; a known
+            // schema is read through a metadata connection with a transaction-local search_path.
+            // No table or schema is created; the only write is the validated receipt update.
+            if (!ReignPostgreSqlStorage.CampaignExists(campaign)) return Reply("unknown", "unknown_campaign");
+            string schema = ReignPostgreSqlStorage.CampaignSchemaName(campaign);
+            using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
+            using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
+            // First statement of the transaction; disposal rolls back and restores search_path.
+            QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
+            // Absent prerequisites mean no descriptor can exist; an acknowledgment never creates them.
+            if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => TableExists(connection, table)))
+                return Reply("unknown", "no_view_insertion_descriptor");
+            // A publisher takes this session lock first, and its duplicate insert-or-ignore can
+            // still bump the restore fence by statement trigger before it rewrites existing source
+            // rows, so it may hold the fence while waiting on this turn. Taking the same session
+            // lock first serializes with it; the exact-replay shortcut runs only after both row
+            // locks, so it cannot avoid the inversion. Then source turn before fence, as the
+            // direct editor update trigger orders them; the share lock is held through commit.
+            LockConversationSourceSession(connection, ack["sessionId"]);
+            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session FOR SHARE;",
+                TestDict("id", ack["sourceTurnId"], "session", ack["sessionId"])).FirstOrDefault();
+            string current = ReadString(QuerySql(connection,
+                "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
+            var stored = QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
+                TestDict("unit", ack["unitId"])).FirstOrDefault();
+            if (stored == null) return Reply("unknown", "unknown_unit");
+            var receipt = TryParseJsonObject(ReadString(stored, "receipt_json", "{}"));
+            var descriptor = ReadDictionary(receipt, "viewInsertion");
+            // Old receipts, other routes and ineligible replies carry no positive evidence.
+            if (descriptor == null || ReadString(descriptor, "schema", "") != IndividualViewInsertionSchema)
+                return Reply("unknown", "no_view_insertion_descriptor");
+            if (IndividualViewInsertionIdentityFields.Any(field => ReadString(descriptor, field, "") != ack[field])
+                || ReadString(stored, "restore_generation", "") != ack["restoreGeneration"]
+                || ReadString(receipt, "restoreGeneration", "") != ack["restoreGeneration"])
+                return Reply("conflict", "identity_mismatch");
+            if (current != ack["restoreGeneration"]) return Reply("stale", "restore_generation_changed");
+            var audience = TextListFromJson(ReadString(source, "participants_json", "[]"));
+            if (source == null || ReadString(source, "role", "") != "npc" || ReadString(source, "status", "") != "active"
+                || ReadString(source, "speaker_id", "") != ack["speakerHeroStringId"]
+                || ReadString(source, "session_id", "") != ack["sessionId"] || ReadString(source, "event_id", "") != ack["unitId"]
+                || ReadString(source, "channel", "") == "private_whisper"
+                || ConversationExactTextHash(ReadString(source, "text", "")) != ack["textSha256"]
+                || ContinuityTimeline(TryParseJsonObject(ReadString(source, "payload_json", "{}"))) != ack["timelineId"]
+                || !new HashSet<string>(audience, StringComparer.Ordinal).SetEquals(ReadStringList(descriptor, "audience"))
+                || !audience.Contains(ack["playerHeroStringId"], StringComparer.Ordinal))
+                return Reply("conflict", "source_mismatch");
+            // Exact repeat is a read: the first timestamp is never overwritten.
+            if (ReadDictionary(descriptor, "insertion") is { } prior) return Reply("inserted", "exact_replay", prior);
+            var insertion = TestDict("status", "inserted_into_current_view", "scope", "individual_view_insertion_only",
+                "acknowledgedTs", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            descriptor["insertion"] = insertion;
+            receipt["viewInsertion"] = descriptor;
+            ExecuteSql(connection, "UPDATE conversation_accepted_units SET receipt_json=$receipt WHERE unit_id=$unit AND restore_generation=$generation;",
+                TestDict("receipt", Json.Serialize(receipt), "unit", ack["unitId"], "generation", ack["restoreGeneration"]));
+            transaction.Commit();
+            return Reply("inserted", "recorded", insertion);
         }
     }
 }
