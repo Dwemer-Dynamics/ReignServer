@@ -187,6 +187,22 @@ AND table_name IN ('player_attention_events','player_approach_state');")
 
                 using (ReignDbConnection connection = OpenCampaignConnection(campaign))
                 {
+                    // With the ready marker set, the migration-owned Ensure method must not run DDL.
+                    ExecuteSql(connection, "DROP TABLE IF EXISTS player_attention_events;");
+                    ExecuteSql(connection, "DROP TABLE IF EXISTS player_approach_state;");
+                    EnsurePlayerApproachSchema(connection);
+                    bool skipped = !ApproachTables(connection);
+                    InvalidateCampaignSchemaCaches(campaign);
+                    bool cleared = !IsCampaignMigrationReady(connection, PlayerApproachSchemaMigrationVersion);
+                    EnsurePlayerApproachSchema(connection);
+                    add("campaign_migration_marker_skips_ensure_ddl", skipped,
+                        "While the migration-ready marker is set, EnsurePlayerApproachSchema issues no DDL.");
+                    add("campaign_migration_invalidate_clears_marker", cleared && ApproachTables(connection),
+                        "InvalidateCampaignSchemaCaches clears the migration-ready marker, after which EnsurePlayerApproachSchema applies its DDL again.");
+                }
+
+                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                {
                     var applied = new List<int>();
                     int repeated = ApplyCampaignSchemaMigrations(connection, applied);
                     add("campaign_migration_repeat_noop",

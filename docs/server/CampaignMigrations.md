@@ -81,7 +81,13 @@ Ordering rules:
   same migration.
 - Keep each migration database-only: no settings reads, file I/O, HTTP, LLM or other
   external work inside the transaction, and no second connection (it would wait on the
-  locks the migration holds).
+  locks the migration holds). The one accepted, pre-existing exception: every `ExecuteSql`
+  call marks the campaign's Save Sync active state dirty (`MarkSaveSyncActiveStateDirty`,
+  a state file written under `SaveSyncActiveStateLock`). A rolled-back migration attempt
+  therefore still marks the campaign dirty, which is harmless.
+- A failing migration makes `OpenCampaignConnection` throw, which blocks opening the
+  campaign until it succeeds. Keep every migration idempotent and short, and keep data
+  backfills out of the runner.
 - Do not add new DDL to the baseline. Everything new is a numbered migration.
 - Large data backfills that cannot run in one short transaction stay outside the runner,
   guarded by their own `schema_meta` markers as today.
