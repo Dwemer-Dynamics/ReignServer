@@ -671,12 +671,35 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 var protocolBase = protocolEnvelope(protocolActor, protocolJson);
                 var stage3Point = TestDict("savePointId", "stage3_point", "timelineId", "player_actions_timeline");
                 string beforeRollback = liveGeneration();
+                // Snapshot taken before the rollback, so its own generation (beforeRollback) differs from the live one.
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "stage3_noop_snapshot");
                 AdvanceMemoryRestoreGeneration(campaign, stage3Point, "", "stage3_l1");
                 string g2 = liveGeneration();
                 var context = restoreContext();
                 add("terminal_report_rollback_context_binds_load_session", ReadString(context, "load_session_id", "") == "stage3_l1"
                     && ReadString(context, "source_generation", "") == beforeRollback && ReadString(context, "restore_generation", "") == g2
                     && ReadString(context, "save_point_id", "") == "stage3_point" && g2 != beforeRollback, context);
+                // A verified no-op load always takes source_generation from the snapshot itself, so a
+                // value left stale by an older server build cannot survive; other save points are untouched.
+                try
+                {
+                    setContext("source_generation", "stale_downgrade_generation");
+                    BindVerifiedNoOpLoadSession(campaign, "stage3_other_point", "stage3_noop_snapshot", "stage3_noop_other");
+                    var otherPoint = restoreContext();
+                    BindVerifiedNoOpLoadSession(campaign, "stage3_point", "stage3_noop_snapshot", "stage3_noop");
+                    var noOpBound = restoreContext();
+                    add("terminal_report_noop_bind_rewrites_stale_source_generation", ReadString(otherPoint, "source_generation", "") == "stale_downgrade_generation"
+                        && ReadString(otherPoint, "load_session_id", "") == "stage3_l1"
+                        && ReadString(noOpBound, "source_generation", "") == beforeRollback && ReadString(noOpBound, "load_session_id", "") == "stage3_noop"
+                        && ReadString(noOpBound, "save_point_id", "") == "stage3_point" && ReadString(noOpBound, "restore_generation", "") == g2,
+                        TestDict("otherPoint", otherPoint, "bound", noOpBound));
+                }
+                finally
+                {
+                    setContext("source_generation", beforeRollback);
+                    setContext("load_session_id", "stage3_l1");
+                    ReignPostgreSqlStorage.DropSnapshot(campaign, "stage3_noop_snapshot");
+                }
                 string markerBefore = Json.Serialize(markerOf(protocolId));
                 var wrongSource = TerminalActionReportApi(recover(protocolBase, g2, "stage3_l1", "stage3_point"));
                 var wrongSourceFirst = TerminalActionReportApi(recover(jobEnvelope, g2, "stage3_l1", "stage3_point"));
