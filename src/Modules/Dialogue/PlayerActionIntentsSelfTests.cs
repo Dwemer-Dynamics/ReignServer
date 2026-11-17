@@ -42,8 +42,52 @@ namespace ReignBetaServer
                 add("lost_delivery_ack_reuses_id", ReadDictionaryList(poll, "actions").Count == 1
                     && ReadDictionaryList(retry, "actions").Count == 1
                     && ReadString(ReadDictionaryList(retry, "actions").FirstOrDefault(), "serverActionId", "") == ReadString(first, "id", ""), retry);
+                // SF5: a row the client keeps holding backs off (capped) but is never expired or dropped.
+                string heldId = ReadString(first, "id", "");
+                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                var delays = Enumerable.Range(0, 64).Select(n => ActionRedeliveryDelaySeconds(n)).ToList();
+                add("redelivery_cadence_bounded_backoff", delays.Take(5).All(d => d == 30) && delays[5] == 60 && delays[8] == 480
+                    && delays.Zip(delays.Skip(1), (a, b) => b >= a).All(x => x) && delays.Max() == 1800 && delays[63] == 1800
+                    && ActionRedeliveryDelaySeconds(long.MaxValue) == 1800, delays);
+                Func<long, long, string, int> pollHeld = (count, sinceDelivery, rowGeneration) =>
+                {
+                    var held = ReadDurableConversationAction(campaign, heldId);
+                    held["ts"] = 1L; held["deliveryCount"] = count; held["deliveredTs"] = now - sinceDelivery;
+                    held["deliveryGeneration"] = rowGeneration; SaveDurableConversationAction(campaign, held);
+                    return ReadDictionaryList(NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
+                        .Count(a => ReadString(a, "serverActionId", "") == heldId);
+                };
+                string liveGeneration = ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "");
+                int backedOff = pollHeld(8, 100, liveGeneration);
+                var afterBackedOff = ReadDurableConversationAction(campaign, heldId);
+                add("redelivery_backed_off_row_waits_without_write", backedOff == 0 && ReadLong(afterBackedOff, "deliveryCount", 0) == 8
+                    && ReadLong(afterBackedOff, "deliveredTs", 0) == now - 100 && ReadString(afterBackedOff, "status", "") == "delivered", afterBackedOff);
+                int dueHeld = pollHeld(8, 500, liveGeneration);
+                var afterDue = ReadDurableConversationAction(campaign, heldId);
+                add("redelivery_backed_off_row_delivered_when_due_never_expired", dueHeld == 1 && ReadLong(afterDue, "deliveryCount", 0) == 9
+                    && ReadLong(afterDue, "deliveredTs", 0) >= now && ReadString(afterDue, "status", "") == "delivered"
+                    && !afterDue.ContainsKey("expiredTs"), afterDue);
+                add("redelivery_capped_row_still_delivered", pollHeld(40, 1800, liveGeneration) == 1 && pollHeld(41, 1799, liveGeneration) == 0, null);
+                add("redelivery_restore_generation_resets_wait", pollHeld(12, 100, "superseded_generation") == 1
+                    && ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "") == liveGeneration, null);
+                var executing = ReadDurableConversationAction(campaign, heldId); executing["status"] = "executing"; SaveDurableConversationAction(campaign, executing);
+                int executingDelivered = pollHeld(9, 500, liveGeneration);
+                var afterExecuting = ReadDurableConversationAction(campaign, heldId);
+                add("redelivery_keeps_later_status_and_records_delivery", executingDelivered == 1 && ReadString(afterExecuting, "status", "") == "executing"
+                    && ReadLong(afterExecuting, "deliveryCount", 0) == 10 && ReadLong(afterExecuting, "deliveredTs", 0) >= now
+                    && pollHeld(10, 100, liveGeneration) == 0, afterExecuting);
+                var holdSummary = UnresolvedActionDeliverySummary(campaign);
+                var holdSample = ReadDictionaryList(holdSummary, "samples").FirstOrDefault(s => ReadString(s, "actionId", "") == heldId);
+                add("redelivery_diagnostic_reports_backed_off_row", ReadBool(holdSummary, "ok", false) && ReadInt(holdSummary, "unresolvedCount", 0) == 1
+                    && ReadInt(holdSummary, "backedOffCount", 0) == 1 && ReadInt(ReadDictionary(holdSummary, "byStatus"), "executing", 0) == 1
+                    && ReadLong(holdSummary, "oldestAgeSeconds", 0) >= now - 1 && holdSample != null && ReadLong(holdSample, "deliveryCount", 0) == 10
+                    && ReadString(holdSample, "command", "").Length > 0
+                    && ReadInt(ReadDictionary(ActionFailures(TestDict("campaignId", campaign), new Dictionary<string, string>()), "unresolvedDeliveries"), "backedOffCount", 0) == 1, holdSummary);
                 ReportAction(TestDict("campaignId", campaign, "actionId", ReadString(first, "id", ""), "serverActionId", ReadString(first, "id", ""), "status", "completed", "message", "Verified fixture transfer."));
                 add("terminal_report_stops_delivery", ReadDictionaryList(NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions").Count == 0, null);
+                var resolvedSummary = UnresolvedActionDeliverySummary(campaign);
+                add("redelivery_backed_off_row_accepts_terminal_report", ReadString(ReadDurableConversationAction(campaign, heldId), "status", "") == "completed"
+                    && ReadBool(resolvedSummary, "ok", false) && ReadInt(resolvedSummary, "unresolvedCount", -1) == 0, resolvedSummary);
                 var stale = CloneDictionary(first); stale["status"] = "rejected";
                 SaveDurableConversationAction(campaign, stale);
                 add("late_reply_cannot_overwrite_applied_receipt", ReadString(stale, "status", "") == "completed"
