@@ -1147,7 +1147,9 @@ namespace ReignBetaServer
                 && castleTranscriptGeometryValid
                 && castleTranscriptBehaviorValid;
             bool castleChatProgressValid = castleChatVmSource.Contains("CastleOpeningProgressText")
-                && castleChatVmSource.Contains("speakerIndex + 1, orderedSpeakers.Count")
+                // The 1-based position is captured once per speaker and shown inside the game-thread capture.
+                && castleChatVmSource.Contains("int speakerPosition = speakerIndex + 1;")
+                && castleChatVmSource.Contains("CastleOpeningProgressText(snapshot.Name, speakerPosition, orderedSpeakers.Count)")
                 && castleChatVmSource.Contains("Reviewing the opening conversation...")
                 && castleChatVmSource.Contains("AddChatLine(speakerName, clean, \"npc\")");
                 AddVerificationCheck(checks, "contracts.castle_chat_layout_and_transcript", "ui_contracts",
@@ -1682,7 +1684,8 @@ namespace ReignBetaServer
             string socialEventServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
             string socialEventServerText = File.Exists(socialEventServerPath) ? File.ReadAllText(socialEventServerPath) : "";
             bool approachOpeningValid = socialEventVmText.Contains("public async void ExecuteWaitApproach()")
-                && socialEventVmText.Contains("RequestRepliesAsync(heroes, string.Empty, true)")
+                // The approach opening keeps its empty player line and opening flag, now under the screen's load owner.
+                && socialEventVmText.Contains("RequestRepliesAsync(heroes, string.Empty, true, owner)")
                 && socialEventServerText.Contains("npc_approach_opening")
                 && socialEventServerText.Contains("suppressPlayerTranscript");
             AddVerificationCheck(checks, "contracts.social_event_approach_dialogue", "conversation_modes", approachOpeningValid,

@@ -5079,7 +5079,8 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             bool typedInjectedParity = socialVmSource.Contains("await SendLineAsync(InputText, string.Empty, ActionDraft == null ? null : ReignBeta.Actions.ReignActionService.Copy(ActionDraft));")
                 && socialVmSource.Contains("SendAutomationLineAsync(string text, string correlationId) => SendLineAsync(text, correlationId, null);")
                 && socialVmSource.Contains("SendLineAsync(string text, string correlationId, Reign.Core.Contracts.Actions.ActionAgreement actionDraft)")
-                && socialVmSource.Contains("return await RequestGroupTurnAsync(activeHeroes, text, correlationId, actionDraft)");
+                // The send keeps its copied draft and now also carries the screen's load ownership token.
+                && socialVmSource.Contains("return await RequestGroupTurnAsync(activeHeroes, text, correlationId, actionDraft, owner)");
             add("typed_injected_parity", typedInjectedParity, "Typed and injected social-event input share the production send pipeline; typed input preserves its copied action draft and ordinary injected input supplies none.");
             bool adultEligibility = eligibilitySource.Contains("HeroComesOfAge")
                 && eligibilitySource.Contains("!hero.IsChild")
@@ -5515,8 +5516,10 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             add("zero_sum_native_relationship_acknowledgement",
                 correspondenceSource.Contains("if (subject != null && target != null && subject != target)")
                 && !correspondenceSource.Contains("subject != target && delta != 0")
-                && socialEventClientSource.Contains("if (subject != null && target != null)")
+                // The game-thread block refuses only a missing participant; it never gates on the delta.
+                && socialEventClientSource.Contains("if (subject == null || target == null) return false;")
                 && !socialEventClientSource.Contains("subject != null && target != null && delta != 0")
+                && !socialEventClientSource.Contains("|| delta == 0) return false;")
                 && correspondenceSource.Contains("/relationships/conversation/native-receipt")
                 && socialEventClientSource.Contains("/relationships/conversation/native-receipt"),
                 "Opposite directional judgments that net to zero still acknowledge the atomic native hero-pair receipt without applying a redundant native relation change.");
