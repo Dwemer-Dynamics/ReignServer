@@ -29,6 +29,10 @@ source_table TEXT NOT NULL, source_id TEXT NOT NULL, restore_generation TEXT NOT
 PRIMARY KEY(source_table,source_id,restore_generation));
 CREATE INDEX IF NOT EXISTS idx_memory_restored_sources_generation ON memory_restored_sources(restore_generation);");
             EnsureDatabaseColumn(connection, "memory_restored_source_context", "legacy_recovery_version", "TEXT NOT NULL DEFAULT ''");
+            // Terminal report recovery authority: the restored snapshot's own generation and the
+            // Save Sync load session that bound this context. '' is always unproven.
+            EnsureDatabaseColumn(connection, "memory_restored_source_context", "source_generation", "TEXT NOT NULL DEFAULT ''");
+            EnsureDatabaseColumn(connection, "memory_restored_source_context", "load_session_id", "TEXT NOT NULL DEFAULT ''");
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_continuity_branches (
 timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,source_record_id TEXT NOT NULL,record_id TEXT NOT NULL,
 PRIMARY KEY(timeline_id,owner_id,source_record_id));
@@ -80,8 +84,10 @@ CREATE INDEX IF NOT EXISTS idx_memory_continuity_branch_record ON memory_continu
         // or by an identity-verified no-op load using the actual snapshot schema.
         // A no-op compares each entire source row; a clean-state marker alone is
         // insufficient. Old, unproven foreign branches remain excluded.
+        // loadSessionId binds the context to the Save Sync load that wrote it; every other
+        // caller passes "" and leaves the context unproven for terminal report recovery.
         private static void CaptureRestoredMemorySources(ReignDbConnection connection, Dictionary<string, object> point,
-            string newGeneration, string snapshotSchema = "")
+            string newGeneration, string snapshotSchema = "", string loadSessionId = "")
         {
             EnsureMemorySnapshotSourceSchema(connection);
             if (point == null || ReadString(point, "savePointId", "").Length == 0 || ReadString(point, "timelineId", "").Length == 0)
@@ -95,9 +101,13 @@ CREATE INDEX IF NOT EXISTS idx_memory_continuity_branch_record ON memory_continu
             string prefix = snapshotSchema.Length == 0 ? "" : snapshotSchema + ".";
             bool priorProof = snapshotSchema.Length == 0 || ReadString(QuerySql(connection,
                 "SELECT to_regclass($name)::text AS name;", TestDict("name", prefix + "memory_restored_source_context")).Single(), "name", "").Length > 0;
+            // Read before the caller overwrites restore_generation: for an exact restore the active
+            // schema is the snapshot itself; for a no-op it is the named snapshot schema.
+            string sourceGeneration = SnapshotRestoreGeneration(connection, snapshotSchema);
             var parameters = TestDict("generation", newGeneration, "timeline", ReadString(point, "timelineId", ""),
                 "point", ReadString(point, "savePointId", ""), "day", ReadDouble(point, "campaignTimeDays", 0d),
-                "sequence", ReadLong(point, "worldHistorySequence", 0), "head", ReadString(point, "worldHistoryHeadEventId", ""));
+                "sequence", ReadLong(point, "worldHistorySequence", 0), "head", ReadString(point, "worldHistoryHeadEventId", ""),
+                "source", sourceGeneration, "session", loadSessionId ?? "");
             foreach (var entry in SnapshotMemoryKeys)
             {
                 if (!TableExists(connection, entry.Key)) continue;
@@ -114,11 +124,43 @@ CREATE INDEX IF NOT EXISTS idx_memory_continuity_branch_record ON memory_continu
                     + " ON CONFLICT(source_table,source_id,restore_generation) DO UPDATE SET content_hash=excluded.content_hash;", parameters);
             }
             ExecuteSql(connection, @"INSERT INTO memory_restored_source_context
-(state_id,restore_generation,timeline_id,save_point_id,world_day,head_sequence,head_event_id)
-VALUES('current',$generation,$timeline,$point,$day,$sequence,$head)
+(state_id,restore_generation,timeline_id,save_point_id,world_day,head_sequence,head_event_id,source_generation,load_session_id)
+VALUES('current',$generation,$timeline,$point,$day,$sequence,$head,$source,$session)
 ON CONFLICT(state_id) DO UPDATE SET restore_generation=excluded.restore_generation,timeline_id=excluded.timeline_id,
-save_point_id=excluded.save_point_id,world_day=excluded.world_day,head_sequence=excluded.head_sequence,head_event_id=excluded.head_event_id;
+save_point_id=excluded.save_point_id,world_day=excluded.world_day,head_sequence=excluded.head_sequence,head_event_id=excluded.head_event_id,
+source_generation=excluded.source_generation,load_session_id=excluded.load_session_id;
 DELETE FROM memory_restored_sources WHERE restore_generation<>$generation;", parameters);
+        }
+
+        // The restore generation recorded in a snapshot schema ("" = the active schema). An
+        // older snapshot without the table yields "", which keeps recovery unproven.
+        private static string SnapshotRestoreGeneration(ReignDbConnection connection, string snapshotSchema)
+        {
+            snapshotSchema ??= "";
+            if (snapshotSchema.Length > 0 && (!snapshotSchema.StartsWith("reign_save_", StringComparison.Ordinal)
+                || snapshotSchema.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '_'))))
+                throw new InvalidOperationException("Invalid memory snapshot schema.");
+            string table = (snapshotSchema.Length == 0 ? "" : snapshotSchema + ".") + "memory_precision_state";
+            if (ReadString(QuerySql(connection, "SELECT to_regclass($name)::text AS name;", TestDict("name", table)).Single(), "name", "").Length == 0)
+                return "";
+            return ReadString(QuerySql(connection, "SELECT restore_generation FROM " + table + " WHERE state_id='current';").FirstOrDefault(),
+                "restore_generation", "");
+        }
+
+        // Verified no-op load whose context already names this save point in the current
+        // generation (otherwise InitializeVerifiedSnapshotMemorySources rewrites it): bind
+        // the load session, and record the snapshot's generation only if none is known.
+        // One statement; the caller restores the clean Save Sync marker afterwards.
+        private static void BindVerifiedNoOpLoadSession(string campaign, string savePointId, string snapshotPoint, string loadSessionId)
+        {
+            using var connection = OpenCampaignConnection(campaign);
+            EnsureMemorySnapshotSourceSchema(connection);
+            string source = SnapshotRestoreGeneration(connection, ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotPoint));
+            ExecuteSql(connection, @"UPDATE memory_restored_source_context SET load_session_id=$session,
+source_generation=CASE WHEN source_generation='' THEN $source ELSE source_generation END
+WHERE state_id='current' AND save_point_id=$point
+AND restore_generation=(SELECT restore_generation FROM memory_precision_state WHERE state_id='current');",
+                TestDict("session", loadSessionId ?? "", "source", source, "point", savePointId ?? ""));
         }
 
         private static void BindRecoveredMemorySources(ReignDbConnection connection, string requested, string recovered, long sequence, string head)
@@ -136,14 +178,15 @@ WHERE b.timeline_id=$requested AND " + SnapshotSourceMembershipSql("conversation
                 + " ON CONFLICT(timeline_id,owner_id,source_record_id) DO NOTHING;", TestDict("requested", requested, "recovered", recovered));
         }
 
-        private static void InitializeVerifiedSnapshotMemorySources(string campaign, Dictionary<string, object> point, string snapshotPoint)
+        private static void InitializeVerifiedSnapshotMemorySources(string campaign, Dictionary<string, object> point, string snapshotPoint,
+            string loadSessionId = "")
         {
             using var connection = OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction();
             AcquirePostgreSqlTransactionMutationLock(connection);
             string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             ExecuteSql(connection, "DELETE FROM memory_restored_sources; DELETE FROM memory_restored_source_context;");
-            CaptureRestoredMemorySources(connection, point, generation, ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotPoint));
+            CaptureRestoredMemorySources(connection, point, generation, ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotPoint), loadSessionId);
             RecoverLegacySnapshotMemorySources(connection, campaign, point, generation);
             ExecuteSql(connection, "DELETE FROM memory_projections; UPDATE memory_precision_state SET projection_generation=projection_generation+1,source_revision=source_revision+1 WHERE state_id='current';");
             QueueAllEmbeddingJobs(connection, true);

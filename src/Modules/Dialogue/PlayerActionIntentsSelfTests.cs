@@ -628,6 +628,120 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             var staleReplay = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
             add("terminal_report_stale_generation_offers_no_effect", ReadString(staleReplay, "disposition", "") == "stale"
                 && ReadDictionary(staleReplay, "nativeEffect") == null && !ReadBool(protocolAck(protocolGeneration), "ok", true), staleReplay);
+            // Stage 3 recovery: the exact restored report is admitted only under a verified load
+            // context bound inside the transaction; every refusal mutates nothing.
+            {
+                var P = Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoverySchema;
+                Func<string> liveGeneration = () => { using (var c = OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""); };
+                Func<Dictionary<string, object>> restoreContext = () => { using (var c = OpenCampaignConnection(campaign)) return TerminalReportRestoreContext(c); };
+                Action<string, string> setContext = (column, value) => { using (var c = OpenCampaignConnection(campaign))
+                    ExecuteSql(c, "UPDATE memory_restored_source_context SET " + column + "=$v WHERE state_id='current';", TestDict("v", value)); };
+                Func<string, Dictionary<string, object>> markerOf = id => ReadDictionary(ReadDurableConversationAction(campaign, id), "terminalReport");
+                Func<Dictionary<string, object>, string, string, string, Dictionary<string, object>> recover = (envelope, live, session, point) =>
+                {
+                    var e = CloneDictionary(envelope); e["schema"] = P;
+                    e["recovery"] = TestDict("liveGeneration", live, "savePointId", point, "loadSessionId", session);
+                    e["loadProof"] = TestDict("loadSessionId", session, "savePointId", point, "restoreGeneration", live);
+                    return e;
+                };
+                // A second nonterminal pa_ row from the original generation, never reported.
+                var jobRow = ReadDictionaryList(job, "queuedDialogueActions").FirstOrDefault();
+                string jobId = ReadString(jobRow, "id", "");
+                var jobRecord = ReadDictionary(ReadDurableConversationAction(campaign, jobId), "record");
+                string jobJson = Json.Serialize(TestDict("campaignId", campaign, "serverActionId", jobId, "actionId", jobId,
+                    "timelineId", "player_actions_timeline", "playerHeroStringId", ReadString(jobRecord, "actorHeroStringId", ""),
+                    "sharedActivityGeneration", protocolGeneration, "status", "completed", "type", "RegularTransferGold", "message", "Recovered handover.",
+                    "actorHeroStringId", ReadString(jobRecord, "actorHeroStringId", ""), "targetHeroStringId", ReadString(jobRecord, "targetHeroStringId", ""),
+                    "termsHash", ReadString(jobRecord, "termsHash", ""), "worldDay", 21d));
+                Reign.Core.Contracts.Actions.TerminalActionReportProtocol.TryReportSha256(jobJson, out string jobSha, out _);
+                var jobEnvelope = TestDict("schema", Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema, "campaignId", campaign,
+                    "timelineId", "player_actions_timeline", "playerHeroStringId", ReadString(jobRecord, "actorHeroStringId", ""), "generation", protocolGeneration,
+                    "actionId", jobId, "termsHash", ReadString(jobRecord, "termsHash", ""), "status", "completed", "reportJson", jobJson, "reportSha256", jobSha);
+                // Fixture precondition: the second row is an eligible gold transfer, so later
+                // dispositions are about recovery authority, not fixture shape.
+                string jobIneligible = "missing";
+                using (var c = OpenCampaignConnection(campaign))
+                {
+                    var storedJob = QuerySql(c, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", jobId)).FirstOrDefault();
+                    var jobPayload = storedJob == null ? null : TryParseJsonObject(ReadString(storedJob, "payload_json", "{}"));
+                    if (jobPayload != null) jobIneligible = TerminalReportIneligibility(c, jobPayload, campaign, jobId, ReadString(storedJob, "timeline_id", ""));
+                }
+                add("terminal_report_recovery_fixture_row_is_eligible", jobId.StartsWith("pa_", StringComparison.Ordinal) && jobIneligible.Length == 0
+                    && TerminalReportExpectedType(jobRecord) == "RegularTransferGold", TestDict("id", jobId, "ineligible", jobIneligible));
+                var protocolBase = protocolEnvelope(protocolActor, protocolJson);
+                var stage3Point = TestDict("savePointId", "stage3_point", "timelineId", "player_actions_timeline");
+                string beforeRollback = liveGeneration();
+                AdvanceMemoryRestoreGeneration(campaign, stage3Point, "", "stage3_l1");
+                string g2 = liveGeneration();
+                var context = restoreContext();
+                add("terminal_report_rollback_context_binds_load_session", ReadString(context, "load_session_id", "") == "stage3_l1"
+                    && ReadString(context, "source_generation", "") == beforeRollback && ReadString(context, "restore_generation", "") == g2
+                    && ReadString(context, "save_point_id", "") == "stage3_point" && g2 != beforeRollback, context);
+                string markerBefore = Json.Serialize(markerOf(protocolId));
+                var wrongSource = TerminalActionReportApi(recover(protocolBase, g2, "stage3_l1", "stage3_point"));
+                var wrongSourceFirst = TerminalActionReportApi(recover(jobEnvelope, g2, "stage3_l1", "stage3_point"));
+                var staleProof = TerminalActionReportApi(recover(protocolBase, g2, "stage3_other", "stage3_point"));
+                add("terminal_report_recovery_refusals_mutate_nothing", ReadString(wrongSource, "reason", "") == "recovery_unproven:source_generation"
+                    && ReadString(wrongSourceFirst, "reason", "") == "recovery_unproven:source_generation"
+                    && ReadString(staleProof, "disposition", "") == "conflict" && ReadString(staleProof, "reason", "") == "load_proof_stale"
+                    && Json.Serialize(markerOf(protocolId)) == markerBefore && markerOf(jobId) == null
+                    && new[] { wrongSource, wrongSourceFirst, staleProof }.All(r => ReadString(r, "disposition", "") != "stale"),
+                    TestDict("source", wrongSource, "first", wrongSourceFirst, "proof", staleProof));
+                // The context now names a restore of the report's own generation.
+                setContext("source_generation", protocolGeneration);
+                var admitted = TerminalActionReportApi(recover(protocolBase, g2, "stage3_l1", "stage3_point"));
+                var admission = ReadDictionary(markerOf(protocolId), "admission");
+                var replayed = TerminalActionReportApi(recover(protocolBase, g2, "stage3_l1", "stage3_point"));
+                add("terminal_report_recovery_adopts_marker_once_with_stable_receipt", ReadString(admitted, "reason", "") == "recovery_admitted"
+                    && ReadString(replayed, "reason", "") == "recovery_replay" && ReadString(admitted, "generation", "") == protocolGeneration
+                    && ReadString(admission, "generation", "") == g2 && ReadString(admission, "loadSessionId", "") == "stage3_l1"
+                    && Json.Serialize(ReadDictionary(markerOf(protocolId), "admission")) == Json.Serialize(admission)
+                    && ReadString(markerOf(protocolId), "generation", "") == protocolGeneration
+                    && ReadString(markerOf(protocolId), "reportJson", "") == protocolJson
+                    && ReadString(ReadDictionary(admitted, "nativeEffect"), "receiptId", "") == ReadString(protocolEffect, "receiptId", "")
+                    && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1, TestDict("admitted", admitted, "replayed", replayed));
+                var firstRecovered = TerminalActionReportApi(recover(jobEnvelope, g2, "stage3_l1", "stage3_point"));
+                var jobMarker = markerOf(jobId);
+                string jobReceipt = ReadString(ReadDictionary(firstRecovered, "nativeEffect"), "receiptId", "");
+                add("terminal_report_recovery_first_acceptance_keeps_report_generation", ReadString(firstRecovered, "reason", "") == "first_acceptance"
+                    && ReadString(jobMarker, "generation", "") == protocolGeneration && ReadString(ReadDictionary(jobMarker, "admission"), "generation", "") == g2
+                    && (jobReceipt.Length == 0 || jobReceipt == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ReceiptId(jobId, "player_actions_timeline", protocolGeneration, jobSha))
+                    && ReadString(firstRecovered, "memoryProjectionStatus", "") == "completed" && jobMarker.ContainsKey("projectedShared"), firstRecovered);
+                Func<Dictionary<string, object>, Dictionary<string, object>, Dictionary<string, object>> admittedAck = (echo, proof) =>
+                {
+                    var body = TestDict("campaignId", campaign, "receiptIds", new List<string> { ReadString(protocolEffect, "receiptId", "") }, "nativeReceipt", TestDict(
+                        "schema", "reign-native-relationship-receipt-v2", "subjectId", ReadString(protocolEffect, "subjectId", ""), "targetId", ReadString(protocolEffect, "targetId", ""),
+                        "priorNativeRelation", 0, "nativeRelation", ReadInt(protocolEffect, "delta", 0), "delta", ReadInt(protocolEffect, "delta", 0),
+                        "timelineId", "player_actions_timeline", "reportGeneration", protocolGeneration, "reportSha256", ReadString(protocolFirst, "reportSha256", ""),
+                        "admission", echo));
+                    if (proof != null) body["loadProof"] = proof;
+                    return ConversationRelationshipNativeReceiptApi(body);
+                };
+                var l1Echo = TestDict("generation", g2, "loadSessionId", "stage3_l1");
+                var l1Proof = TestDict("loadSessionId", "stage3_l1", "savePointId", "stage3_point", "restoreGeneration", g2);
+                add("terminal_report_admitted_ack_requires_admission_echo", ReadBool(admittedAck(l1Echo, l1Proof), "ok", false)
+                    && !ReadBool(admittedAck(null, l1Proof), "ok", true) && !ReadBool(protocolAck(protocolGeneration), "ok", true), null);
+                // A later verified restore re-adopts by the earlier admission; earlier proofs and echoes fail closed.
+                AdvanceMemoryRestoreGeneration(campaign, stage3Point, "", "stage3_l2");
+                string g3 = liveGeneration();
+                var readopted = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                var oldAck = admittedAck(l1Echo, l1Proof);
+                add("terminal_report_multi_hop_readoption_rejects_older_load", ReadString(readopted, "reason", "") == "recovery_admitted"
+                    && ReadString(ReadDictionary(markerOf(protocolId), "admission"), "generation", "") == g3
+                    && !ReadBool(oldAck, "ok", true) && ReadString(oldAck, "reason", "") == "load_proof_stale"
+                    && !ReadBool(admittedAck(l1Echo, null), "ok", true)
+                    && ReadBool(admittedAck(TestDict("generation", g3, "loadSessionId", "stage3_l2"),
+                        TestDict("loadSessionId", "stage3_l2", "savePointId", "stage3_point", "restoreGeneration", g3)), "ok", false), readopted);
+                // A backup import stamps the context; no proof (including the stamp itself) matches it.
+                setContext("load_session_id", Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ImportedLoadSession);
+                string markerBeforeImport = Json.Serialize(markerOf(protocolId));
+                var afterImport = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                var forgedStamp = TerminalActionReportApi(recover(protocolBase, g3,
+                    Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ImportedLoadSession, "stage3_point"));
+                add("terminal_report_import_invalidates_load_proof", ReadString(afterImport, "reason", "") == "load_proof_stale"
+                    && ReadString(forgedStamp, "reason", "") == "load_proof_stale" && Json.Serialize(markerOf(protocolId)) == markerBeforeImport,
+                    TestDict("import", afterImport, "forged", forgedStamp));
+            }
             var point = SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");
             point["timelineId"] = "player_actions_timeline";
             var registered = SaveSyncRegisterApi(point);

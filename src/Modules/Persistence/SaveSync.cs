@@ -2540,6 +2540,22 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 Dictionary<string, object> copied = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["nativeSaveName"] = "Renamed Copy" }, false);
                 int pointCountAfterRename = ReadDictionaryList(ReadSaveSyncLedger(campaignId), "points").Count;
                 add("copied_or_renamed_save_uses_durable_identity", ReadBool(copied, "ok", false) && SaveSyncTestMarkerExists(campaignId, "future") && pointCountBeforeRename == pointCountAfterRename, "Changing the visible native slot name does not change the serialized save-point identity or create a duplicate point.");
+                // Terminal report load proof: binding each verified no-op load session leaves the
+                // state clean (the next load of the same save stays a no-op), and both a rollback
+                // and a no-op echo the restore generation bound to their own session.
+                Dictionary<string, object> boundNoOp = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["loadSessionId"] = "noop_a_" + token }, false);
+                Dictionary<string, object> repeatNoOp = SaveSyncLoadApi(new Dictionary<string, object>(newPayload) { ["loadSessionId"] = "noop_b_" + token }, false);
+                string boundSession = SaveSyncTestSqlValue(campaignId,
+                    "SELECT load_session_id FROM memory_restored_source_context WHERE state_id='current';", "load_session_id");
+                string liveRestoreGeneration = SaveSyncTestSqlValue(campaignId,
+                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';", "restore_generation");
+                add("no_op_load_proof_bind_keeps_no_op",
+                    ReadString(boundNoOp, "result", "") == "no_op" && ReadString(repeatNoOp, "result", "") == "no_op"
+                    && boundSession == "noop_b_" + token && liveRestoreGeneration.Length > 0
+                    && ReadString(boundNoOp, "restoreGeneration", "") == liveRestoreGeneration
+                    && ReadString(repeatNoOp, "restoreGeneration", "") == liveRestoreGeneration
+                    && ReadString(rolledBack, "restoreGeneration", "").Length > 0,
+                    "A verified no-op load binds its session without dirtying Save Sync state, and each verified load echoes the restore generation bound to it.");
                 add("cross_campaign_isolation", FileSha256(siblingFile) == siblingHash, "Save-point registration and backward/forward restores never write to a sibling campaign.");
 
                 Directory.CreateDirectory(nativeSaveFixture);

@@ -46,6 +46,32 @@ namespace ReignBetaServer
                 ApplicationError = r.ApplicationError, AppliedUtc = r.AppliedUtc }).ToList();
             var restoredReceipt = NativeRelationEffectLedger.Apply(restored, new[] { "first" }, "npc", "player", 3, () => native, _ => calls++, _ => { }, out bool replayed);
             Check("restored_journal_preserves_old_observation", replayed && restoredReceipt.After == 16 && native == afterError && calls == afterErrorCalls);
+            // Pure classification of what a persisted journal proves (Apply's identity rules).
+            var unobserved = new NativeRelationEffectReceipt { ReceiptIds = new[] { "unobserved" }, SubjectId = "npc", TargetId = "player", RequestedDelta = 2 };
+            var classified = restored.Concat(new[] { unobserved }).ToList();
+            Check("classify_distinguishes_absent_complete_incomplete_mismatch",
+                NativeRelationEffectLedger.Classify(classified, new[] { "missing" }, "npc", "player", 3) == NativeRelationEffectClass.Absent
+                && NativeRelationEffectLedger.Classify(classified, new[] { "first" }, "player", "npc", 3) == NativeRelationEffectClass.Complete
+                && NativeRelationEffectLedger.Classify(classified, new[] { "callback_error" }, "npc", "player", 2) == NativeRelationEffectClass.Complete
+                && NativeRelationEffectLedger.Classify(classified, new[] { "unobserved" }, "npc", "player", 2) == NativeRelationEffectClass.Incomplete
+                && NativeRelationEffectLedger.Classify(classified, new[] { "first" }, "npc", "player", 4) == NativeRelationEffectClass.Mismatch
+                && NativeRelationEffectLedger.Classify(classified, new[] { "first" }, "other", "player", null) == NativeRelationEffectClass.Mismatch
+                && NativeRelationEffectLedger.Classify(classified, new[] { "first", "new" }, "npc", "player", 3) == NativeRelationEffectClass.Mismatch);
+            // Before throws: no entry, no native call. persist throws after the native call: the
+            // cache has the entry but the persisted list does not (the unpersisted gap).
+            var cache = new List<NativeRelationEffectReceipt>();
+            var persisted = new List<NativeRelationEffectReceipt>();
+            int throwCalls = 0;
+            bool beforeThrew = false, persistThrew = false;
+            try { NativeRelationEffectLedger.Apply(cache, new[] { "before" }, "npc", "player", 2, () => throw new InvalidOperationException("read"), _ => throwCalls++, persisted.Add, out _); }
+            catch (InvalidOperationException) { beforeThrew = true; }
+            Check("before_failure_leaves_no_entry_and_no_native_call", beforeThrew && cache.Count == 0 && throwCalls == 0
+                && NativeRelationEffectLedger.Classify(persisted, new[] { "before" }, "npc", "player", 2) == NativeRelationEffectClass.Absent);
+            try { NativeRelationEffectLedger.Apply(cache, new[] { "persist" }, "npc", "player", 2, () => 0, _ => throwCalls++, _ => throw new InvalidOperationException("persist"), out _); }
+            catch (InvalidOperationException) { persistThrew = true; }
+            Check("persist_failure_is_cached_but_unpersisted", persistThrew && throwCalls == 1
+                && NativeRelationEffectLedger.Classify(cache, new[] { "persist" }, "npc", "player", 2) == NativeRelationEffectClass.Complete
+                && NativeRelationEffectLedger.Classify(persisted, new[] { "persist" }, "npc", "player", 2) == NativeRelationEffectClass.Absent);
             string campaign = "native_relation_receipt_test_" + Guid.NewGuid().ToString("N");
             try
             {

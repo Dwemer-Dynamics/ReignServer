@@ -17,10 +17,37 @@ namespace ReignBeta.Shared
         public string AppliedUtc { get; set; } = "";
     }
 
+    // What a persisted journal proves about one native effect identity.
+    public enum NativeRelationEffectClass { Absent, Complete, Incomplete, Mismatch }
+
     // The caller runs this on the native thread and persists the returned receipt
     // with the same save as the relationship. The native API owns modifiers/events.
     public static class NativeRelationEffectLedger
     {
+        // Pure and read-only, using Apply's own identity rules. Absent: no entry shares an id.
+        // Complete: the one exact entry observed Before and After (ApplicationError allowed,
+        // it still means attempted). Incomplete: that entry lacks an After observation.
+        // Mismatch: reused ids with a different pair, delta or id set, or invalid identity.
+        // A null requestedDelta compares ids and pair only (the server did not restate it).
+        public static NativeRelationEffectClass Classify(IEnumerable<NativeRelationEffectReceipt> journal,
+            IEnumerable<string> receiptIds, string subjectId, string targetId, int? requestedDelta)
+        {
+            var ids = (receiptIds ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal)
+                .OrderBy(id => id, StringComparer.Ordinal).ToArray();
+            if (journal == null || ids.Length == 0 || ids.Length > 64 || ids.Any(id => id.Length > 200)
+                || string.IsNullOrWhiteSpace(subjectId) || string.IsNullOrWhiteSpace(targetId) || subjectId == targetId)
+                return NativeRelationEffectClass.Mismatch;
+            var previous = journal.Where(r => r != null && (r.ReceiptIds ?? Array.Empty<string>()).Any(ids.Contains)).ToList();
+            if (previous.Count == 0) return NativeRelationEffectClass.Absent;
+            var receipt = previous[0];
+            bool samePair = (receipt.SubjectId == subjectId && receipt.TargetId == targetId)
+                || (receipt.SubjectId == targetId && receipt.TargetId == subjectId);
+            if (previous.Count != 1 || !receipt.ReceiptIds.OrderBy(id => id, StringComparer.Ordinal).SequenceEqual(ids)
+                || !samePair || (requestedDelta.HasValue && receipt.RequestedDelta != requestedDelta.Value))
+                return NativeRelationEffectClass.Mismatch;
+            return receipt.ObservationComplete ? NativeRelationEffectClass.Complete : NativeRelationEffectClass.Incomplete;
+        }
+
         public static NativeRelationEffectReceipt Apply(IList<NativeRelationEffectReceipt> journal,
             IEnumerable<string> receiptIds, string subjectId, string targetId, int requestedDelta,
             Func<int> readRelation, Action<int> applyNative, Action<NativeRelationEffectReceipt> persist,
