@@ -177,8 +177,11 @@ namespace ReignBetaServer
                 return !string.IsNullOrWhiteSpace(ReadString(settings, "codexExecutable", "codex"));
             }
             string url = LlmApiUrl(settings);
+            if (string.IsNullOrWhiteSpace(url)) return false;
             bool local = url.IndexOf("127.0.0.1", StringComparison.OrdinalIgnoreCase) >= 0 || url.IndexOf("localhost", StringComparison.OrdinalIgnoreCase) >= 0;
-            return !string.IsNullOrWhiteSpace(url) && (ProviderKeyConfigured(settings, LlmApiKeySlot(settings)) || local);
+            // Local endpoints are keyless-capable: decide before anything that may consult the global key store.
+            if (local) return true;
+            return ProviderKeyConfigured(settings, LlmApiKeySlot(settings));
         }
 
         private static Dictionary<string, object> CodexStatusApi()
@@ -1190,8 +1193,15 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
             tests.AddRange(RunCodexRuntimeSelfTests());
-            tests.AddRange(RunOpenRouterProviderContractTests());
-            tests.AddRange(RunOllamaCloudProviderContractTests());
+            // Fixture suites must not pick up a real installation's automatic global key; the bridge suite uses its fake store.
+            bool previousAutoSelection = GlobalKeyAutoSelectionOffForTests;
+            GlobalKeyAutoSelectionOffForTests = true;
+            try
+            {
+                tests.AddRange(RunOpenRouterProviderContractTests());
+                tests.AddRange(RunOllamaCloudProviderContractTests());
+            }
+            finally { GlobalKeyAutoSelectionOffForTests = previousAutoSelection; }
             tests.AddRange(RunGlobalKeyBridgeContractTests());
             Action<string, bool, string> add = (id, passed, summary) => tests.Add(new Dictionary<string, object>
             {

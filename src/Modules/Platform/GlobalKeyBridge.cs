@@ -12,8 +12,11 @@ namespace ReignBetaServer
 {
     // Provider keys stored in DwemerDistro's global API keys. Reign keeps only {keyId, provider, origin} references and
     // resolves the current secret at each outbound call through Core's root-owned consumer socket; nothing is cached.
-    // Enrolled installations send new secrets to the global store. Unenrolled
-    // installations retain local key editing; a bound slot never falls back.
+    // Layered resolution per slot: (1) a Reign-only key saved in Reign's own settings/vault overrides everything;
+    // (2) otherwise a bound global key; (3) otherwise, when enrolled, the single configured global key that matches the
+    // slot's server-controlled provider and origin is used automatically (never persisted, never guessed between several);
+    // (4) otherwise no key. A bound or automatic global key that cannot be resolved refuses the request; it never falls
+    // back to sending without a key.
     internal static partial class Program
     {
         private const string GlobalKeysConfigPath = "/etc/reignserver/global-keys.json";
@@ -24,10 +27,17 @@ namespace ReignBetaServer
         private const string GlobalKeyUnavailableError = "The selected Global API key is unavailable. No provider request was sent; start DwemerDistro or choose another key in API Settings.";
         private const int GlobalKeyRequestLimit = 16 * 1024, GlobalKeyReplyLimit = 256 * 1024;
         private static readonly SemaphoreSlim GlobalKeyWriteGate = new SemaphoreSlim(1, 1);
-        // Test seams: an in-process fake transport and a per-thread allowance for legacy fixtures that store local keys.
-        // Neither is reachable from requests or settings.
+        // Test seams: an in-process fake transport, a per-thread allowance kept for legacy fixtures (local key writes are now
+        // always allowed), and a per-thread switch that keeps fixture suites from consulting a real store for automatic
+        // keys. None is reachable from requests or settings.
         internal static Func<Dictionary<string, object>, Dictionary<string, object>> GlobalKeyTransportOverride;
         [ThreadStatic] internal static bool LegacyLocalKeyWritesForTests;
+        [ThreadStatic] internal static bool GlobalKeyAutoSelectionOffForTests;
+        // The slot whose automatic global key was chosen but could not be resolved by the most recent ProviderSecret call on
+        // this thread. ProviderKeyUnavailable reads it, so a failed automatic key refuses the request without a second store
+        // round-trip. Every caller resolves and checks sequentially on one thread.
+        [ThreadStatic] private static string AutoGlobalKeyFailedSlot;
+        private const string BoundShadowCleanupMarker = "reignOnlyKeyOverrides";
         private static readonly string[] GlobalKeySlots = { "apiKey", "openRouterApiKey", "ollamaCloudApiKey", "nanoGptApiKey", "portraitNanoGptApiKey", "portraitAtlasApiKey" };
 
         private static string NormalizedOrigin(string url)
@@ -113,14 +123,55 @@ namespace ReignBetaServer
 
         private static string BoundKeyId(Dictionary<string, object> settings, string slot) => ReadString(GlobalKeyBinding(settings, slot), "keyId", "");
 
-        private static bool ProviderKeyConfigured(Dictionary<string, object> settings, string slot) =>
-            HasGlobalKeyBindingEntry(settings, slot) || !string.IsNullOrWhiteSpace(ReadString(settings, slot, ""));
+        // Presence check (no secret is resolved). A Reign-only key or binding counts directly; otherwise, unless the caller
+        // needs a store-independent answer (cache fingerprints), an automatic global candidate counts too, read from the
+        // shared status cache (at most one bounded status call per TTL for the whole process).
+        private static bool ProviderKeyConfigured(Dictionary<string, object> settings, string slot, bool includeAutomatic = true)
+        {
+            if (HasGlobalKeyBindingEntry(settings, slot) || !string.IsNullOrWhiteSpace(ReadString(settings, slot, ""))) return true;
+            if (!includeAutomatic || !AutoGlobalKeySelectionAllowed(slot)) return false;
+            return AutoGlobalKeyCandidate(settings, slot, CachedGlobalKeyStatus(), out _) != null;
+        }
 
-        // Bound slots never keep a local value in settings.json or the installed vault.
+        private static bool AutoGlobalKeySelectionAllowed(string slot) =>
+            !GlobalKeyAutoSelectionOffForTests && GlobalKeySlots.Contains(slot) && GlobalKeysEnrolled();
+
+        // Configured store keys whose provider and origin are exactly the slot's server-controlled target. A key whose
+        // status entry does not say configured: true is never chosen automatically (the same default as the row list).
+        private static List<Dictionary<string, object>> MatchingGlobalKeys((string Provider, string Origin) target,
+            List<Dictionary<string, object>> keys)
+        {
+            if (target.Provider == null || target.Origin == null || keys == null) return new List<Dictionary<string, object>>();
+            return keys.Where(k => ReadString(k, "provider", "") == target.Provider && ReadString(k, "origin", "") == target.Origin
+                && ReadBool(k, "configured", false) && Guid.TryParse(ReadString(k, "key_id", ""), out _)).ToList();
+        }
+
+        // The single automatic candidate from one successful status reply, or null when the reply failed or zero or several
+        // keys match (Reign never guesses between keys). candidates reports the match count.
+        private static Dictionary<string, object> AutoGlobalKeyCandidate(Dictionary<string, object> settings, string slot,
+            Dictionary<string, object> status, out int candidates)
+        {
+            candidates = 0;
+            if (!ReadBool(status, "ok", false)) return null;
+            var matches = MatchingGlobalKeys(GlobalKeyTarget(settings, slot, ReadDictionaryList(status, "providers")), ReadDictionaryList(status, "keys"));
+            candidates = matches.Count;
+            if (matches.Count != 1) return null;
+            return matches[0];
+        }
+
+        // One-time upgrade cleanup. Before Reign-only keys existed a bound slot never kept a local value, so a value found
+        // beside a binding before this marker is set is a stale shadow and is cleared once. After that, a local value on a
+        // bound slot is the user's Reign-only key: it is kept in settings.json and the installed vault and overrides the
+        // binding until cleared. Explicitly binding a global key (SetGlobalKeyBinding) still clears it.
         private static void SanitizeBoundKeySlots(Dictionary<string, object> settings)
         {
+            var migrations = ReadDictionary(settings, "globalKeyMigrations");
+            if (ReadBool(migrations, BoundShadowCleanupMarker, false)) return;
             foreach (string slot in GlobalKeySlots)
                 if (HasGlobalKeyBindingEntry(settings, slot) && settings.ContainsKey(slot)) settings[slot] = "";
+            migrations = new Dictionary<string, object>(migrations ?? new Dictionary<string, object>());
+            migrations[BoundShadowCleanupMarker] = true;
+            settings["globalKeyMigrations"] = migrations;
         }
 
         private static string LlmApiKeySlot(Dictionary<string, object> settings)
@@ -143,21 +194,53 @@ namespace ReignBetaServer
                 && destinations.All(url => NormalizedOrigin(url) == expected);
         }
 
-        // The key for one outbound request. Unbound slots keep their legacy local value, but a chat slot's local value is
-        // withheld ("" = no credential sent) from any destination outside its configured origin, including a malformed
-        // one. A bound slot requires every destination to share the bound origin and resolves the current global value,
-        // with no fallback of any kind. Callers must check ProviderKeyUnavailable before dispatch: "" for a bound slot is
-        // a refusal, never "no auth".
+        // The key for one outbound request, in order:
+        // 1. Reign-only key: a non-empty local value wins over any global key, bound or not. A chat slot's local value is
+        //    withheld ("" = no credential sent) from any destination outside its configured origin, including a malformed
+        //    one, and then nothing else is tried.
+        // 2. Bound global key: every destination must share the bound origin; the current value is resolved each call.
+        // 3. Automatic global key: unbound, enrolled, and exactly one configured store key matching the slot's target
+        //    provider and origin, with every destination at that origin. Resolved each call; never saved as a binding.
+        // 4. Otherwise "".
+        // Callers must check ProviderKeyUnavailable before dispatch: "" from a bound or automatic global key is a refusal,
+        // never "no auth".
         private static string ProviderSecret(Dictionary<string, object> settings, string slot, params string[] destinations)
         {
-            var binding = GlobalKeyBinding(settings, slot);
-            if (!HasGlobalKeyBindingEntry(settings, slot))
+            AutoGlobalKeyFailedSlot = null;
+            destinations = destinations ?? Array.Empty<string>();
+            string local = ReadString(settings, slot, "");
+            if (!string.IsNullOrWhiteSpace(local))
             {
-                string local = ReadString(settings, slot, "");
-                if (local.Length == 0 || LocalKeyDestinationAllowed(settings, slot, destinations)) return local;
+                if (LocalKeyDestinationAllowed(settings, slot, destinations)) return local;
                 LogOperational("provider_key.withheld", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = "origin_mismatch" });
                 return "";
             }
+            if (HasGlobalKeyBindingEntry(settings, slot)) return BoundProviderSecret(settings, slot, destinations);
+            return AutoProviderSecret(settings, slot, destinations);
+        }
+
+        private static string AutoProviderSecret(Dictionary<string, object> settings, string slot, string[] destinations)
+        {
+            if (!AutoGlobalKeySelectionAllowed(slot)) return "";
+            // The slot's origin does not depend on the provider catalog, so a foreign destination costs no store call.
+            string expectedOrigin = GlobalKeyTarget(settings, slot).Origin;
+            if (expectedOrigin == null || destinations.Length == 0 || destinations.Any(url => NormalizedOrigin(url) != expectedOrigin)) return "";
+            var candidate = AutoGlobalKeyCandidate(settings, slot, CachedGlobalKeyStatus(), out _);
+            if (candidate == null) return "";
+            string provider = ReadString(candidate, "provider", ""), origin = ReadString(candidate, "origin", "");
+            if (origin != expectedOrigin) return "";
+            var reply = GlobalKeyCall("resolve", new Dictionary<string, object> { ["key_id"] = ReadString(candidate, "key_id", ""),
+                ["provider"] = provider, ["origin"] = origin });
+            if (ReadBool(reply, "ok", false) && reply.TryGetValue("secret", out object secret) && secret is string value && !string.IsNullOrWhiteSpace(value))
+                return value;
+            AutoGlobalKeyFailedSlot = slot;
+            LogOperational("global_keys.auto_resolve", new Dictionary<string, object> { ["slot"] = slot, ["outcome"] = ReadString(reply, "outcome", "unavailable") });
+            return "";
+        }
+
+        private static string BoundProviderSecret(Dictionary<string, object> settings, string slot, string[] destinations)
+        {
+            var binding = GlobalKeyBinding(settings, slot);
             if (binding == null) return "";
             if (slot != "apiKey")
             {
@@ -179,8 +262,12 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static bool ProviderKeyUnavailable(Dictionary<string, object> settings, string slot, string resolved) =>
-            HasGlobalKeyBindingEntry(settings, slot) && string.IsNullOrEmpty(resolved);
+        // Must directly follow the ProviderSecret call for the same slot on the same thread.
+        private static bool ProviderKeyUnavailable(Dictionary<string, object> settings, string slot, string resolved)
+        {
+            if (!string.IsNullOrEmpty(resolved)) return false;
+            return HasGlobalKeyBindingEntry(settings, slot) || AutoGlobalKeyFailedSlot == slot;
+        }
 
         [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
         private static extern int NativeLstat(string path, byte[] buffer);
@@ -280,6 +367,49 @@ namespace ReignBetaServer
             catch (Exception) { return GlobalKeyFail(dispatched && GlobalKeyWriteOp(op) ? "unknown" : "unavailable"); }
         }
 
+        // Short-lived, process-wide copy of the store's status metadata (ids, providers, origins, labels, previews, the
+        // provider catalog; a status reply never carries a secret, and nothing else is copied). Gating checks and automatic
+        // selection share it, so requests make at most one status call per TTL. Failures are cached too, so a stopped or
+        // hung store costs one bounded call per TTL instead of one per request. Concurrent callers wait for the single call
+        // in flight (bounded by its 15 s deadline) and never start a second. Resolve calls are never cached. Any key write or
+        // binding change bumps the generation, which discards the entry without waiting for a call in flight.
+        private const int GlobalKeyStatusCacheMs = 5000;
+        private const int GlobalKeyStatusWaitMs = 16000;
+        private static readonly object GlobalKeyStatusCacheGate = new object();
+        private static Dictionary<string, object> GlobalKeyStatusCached;
+        private static long GlobalKeyStatusCachedAt, GlobalKeyStatusCachedGeneration = -1, GlobalKeyStatusGeneration;
+
+        private static void InvalidateGlobalKeyStatusCache() => Interlocked.Increment(ref GlobalKeyStatusGeneration);
+
+        private static Dictionary<string, object> CachedGlobalKeyStatus()
+        {
+            if (!Monitor.TryEnter(GlobalKeyStatusCacheGate, GlobalKeyStatusWaitMs)) return GlobalKeyFail("busy");
+            try
+            {
+                long generation = Interlocked.Read(ref GlobalKeyStatusGeneration);
+                if (GlobalKeyStatusCached != null && GlobalKeyStatusCachedGeneration == generation
+                    && Environment.TickCount64 - GlobalKeyStatusCachedAt < GlobalKeyStatusCacheMs)
+                    return GlobalKeyStatusCached;
+                var metadata = GlobalKeyStatusMetadata(GlobalKeyCall("status", new Dictionary<string, object>()));
+                GlobalKeyStatusCached = metadata;
+                GlobalKeyStatusCachedAt = Environment.TickCount64;
+                GlobalKeyStatusCachedGeneration = generation;
+                return metadata;
+            }
+            finally { Monitor.Exit(GlobalKeyStatusCacheGate); }
+        }
+
+        private static Dictionary<string, object> GlobalKeyStatusMetadata(Dictionary<string, object> status)
+        {
+            var keys = ReadDictionaryList(status, "keys").Select(k => new Dictionary<string, object> { ["key_id"] = ReadString(k, "key_id", ""),
+                ["provider"] = ReadString(k, "provider", ""), ["origin"] = ReadString(k, "origin", ""), ["label"] = ReadString(k, "label", ""),
+                ["preview"] = ReadString(k, "preview", ""), ["configured"] = ReadBool(k, "configured", false) }).ToList();
+            var providers = ReadDictionaryList(status, "providers").Select(p => new Dictionary<string, object> {
+                ["provider"] = ReadString(p, "provider", ""), ["origin"] = p.TryGetValue("origin", out object o) ? o : null }).ToList();
+            return new Dictionary<string, object> { ["ok"] = ReadBool(status, "ok", false), ["outcome"] = ReadString(status, "outcome", "unavailable"),
+                ["keys"] = keys, ["providers"] = providers };
+        }
+
         private static string GlobalKeySlotName(string slot) => slot switch
         {
             "openRouterApiKey" => "OpenRouter", "ollamaCloudApiKey" => "Ollama Cloud", "nanoGptApiKey" => "NanoGPT text", "portraitNanoGptApiKey" => "NanoGPT images",
@@ -290,11 +420,26 @@ namespace ReignBetaServer
             (string Provider, string Origin) target, List<Dictionary<string, object>> keys)
         {
             var binding = GlobalKeyBinding(settings, slot);
+            bool reignOnly = !string.IsNullOrWhiteSpace(ReadString(settings, slot, ""));
+            bool bound = HasGlobalKeyBindingEntry(settings, slot);
+            var candidates = MatchingGlobalKeys(target, keys);
+            // Which key the slot's own requests use now, mirroring ProviderSecret's order. Masked metadata only.
+            string source = "none";
+            Dictionary<string, object> autoKey = null;
+            if (reignOnly) source = "reign_only";
+            else if (bound) source = "global_bound";
+            else if (candidates.Count == 1 && AutoGlobalKeySelectionAllowed(slot))
+            {
+                source = "global_auto";
+                autoKey = new Dictionary<string, object> { ["keyId"] = ReadString(candidates[0], "key_id", ""),
+                    ["label"] = ReadString(candidates[0], "label", ""), ["preview"] = ReadString(candidates[0], "preview", "") };
+            }
             return new Dictionary<string, object>
             {
                 ["slot"] = slot, ["name"] = GlobalKeySlotName(slot), ["provider"] = target.Provider ?? "", ["origin"] = target.Origin ?? "",
-                ["legacy"] = !string.IsNullOrWhiteSpace(ReadString(settings, slot, "")),
-                ["bound"] = HasGlobalKeyBindingEntry(settings, slot),
+                ["legacy"] = reignOnly,
+                ["source"] = source, ["autoCandidates"] = candidates.Count, ["autoKey"] = autoKey,
+                ["bound"] = bound,
                 ["binding"] = binding == null ? null : new Dictionary<string, object> { ["keyId"] = ReadString(binding, "keyId", ""),
                     ["provider"] = ReadString(binding, "provider", ""), ["origin"] = ReadString(binding, "origin", ""),
                     ["originMatches"] = ReadString(binding, "origin", "") == target.Origin },
@@ -304,8 +449,8 @@ namespace ReignBetaServer
             };
         }
 
-        // Masked status for API Settings. Unenrolled, unbound slots keep local
-        // editing; enrolled or bound slots retain explicit shared-store controls.
+        // Masked status for API Settings. Every installation may save a Reign-only key for any slot (localKeyWorkflow is
+        // always true); enrolled or bound slots also show the shared-store controls and each slot's current source.
         private static Dictionary<string, object> GlobalKeysStatus(string onlySlot = null)
         {
             var settings = LoadSettings();
@@ -316,7 +461,7 @@ namespace ReignBetaServer
             var slots = GlobalKeySlots.Where(slot => onlySlot == null || slot == onlySlot)
                 .Select(slot => GlobalKeyRow(settings, slot, GlobalKeyTarget(settings, slot, catalog), keys)).ToList();
             return new Dictionary<string, object> { ["ok"] = true, ["available"] = available, ["enrolled"] = ReadString(status, "outcome", "") != "not_enrolled",
-                ["localKeyWorkflow"] = !GlobalKeysEnrolled(),
+                ["localKeyWorkflow"] = true,
                 ["outcome"] = available ? "listed" : ReadString(status, "outcome", "unavailable"), ["slots"] = slots,
                 ["settingsRevision"] = ReadString(settings, "settingsRevision", "") };
         }
@@ -325,7 +470,7 @@ namespace ReignBetaServer
         // existing key. Serialized, checked against the caller's binding snapshot, and only a confirmed global result with
         // matching metadata changes the local reference; a later local conflict reports saved_not_bound and never retries.
         private static Dictionary<string, object> SaveGlobalKey(Dictionary<string, object> payload,
-            Func<string, Dictionary<string, object>, string, string, bool> bind = null, Func<Dictionary<string, object>> settingsSource = null)
+            Func<string, Dictionary<string, object>, string, string, bool, bool> bind = null, Func<Dictionary<string, object>> settingsSource = null)
         {
             string slot = ReadString(payload, "slot", ""), mode = ReadString(payload, "mode", "");
             string secret = ReadString(payload, "secret", "").Trim();
@@ -383,22 +528,38 @@ namespace ReignBetaServer
                         : new Dictionary<string, object> { ["ok"] = true, ["outcome"] = "bound" };
                 }
                 else return GlobalKeyFail("invalid");
+                // Creating, selecting or replacing the value of a global key is an explicit choice of that key for the slot and
+                // clears its Reign-only key. A rename (rotate with no new value) changes nothing about which key is used.
+                bool clearReignOnlyKey = mode != "rotate" || secret.Length > 0;
                 secret = null;
+                InvalidateGlobalKeyStatusCache();
                 string outcome = ReadString(reply, "outcome", "unavailable");
                 LogOperational("global_keys.save", new Dictionary<string, object> { ["slot"] = slot, ["mode"] = mode, ["outcome"] = outcome });
                 if (!ReadBool(reply, "ok", false) || !Guid.TryParse(keyId, out _))
                     return GlobalKeyFail(ReadBool(reply, "ok", false) ? "unknown" : outcome);
                 if (!(bind ?? SetGlobalKeyBinding)(slot, new Dictionary<string, object> { ["keyId"] = keyId, ["provider"] = target.Provider, ["origin"] = target.Origin },
-                        boundId, target.Origin))
+                        boundId, target.Origin, clearReignOnlyKey))
                     return new Dictionary<string, object> { ["ok"] = false, ["outcome"] = "saved_not_bound", ["keyId"] = keyId };
                 return new Dictionary<string, object> { ["ok"] = true, ["outcome"] = outcome, ["keyId"] = keyId };
             }
             finally { GlobalKeyWriteGate.Release(); }
         }
 
-        // Records (or removes) a reference only if the slot still has the expected binding and endpoint origin, then clears
-        // the slot's legacy local value. The global key is never deleted.
-        private static bool SetGlobalKeyBinding(string slot, Dictionary<string, object> binding, string expectedKeyId, string expectedOrigin)
+        // Records (or removes) a binding in settings. clearReignOnlyKey (create, bind or a value replacement through Save key)
+        // also clears the slot's Reign-only key; a rename and an unbind leave it in place.
+        private static void ApplyGlobalKeyBinding(Dictionary<string, object> settings, string slot, Dictionary<string, object> binding, bool clearReignOnlyKey)
+        {
+            var bindings = new Dictionary<string, object>(ReadDictionary(settings, "globalKeyBindings") ?? new Dictionary<string, object>());
+            if (binding == null) bindings.Remove(slot);
+            else bindings[slot] = binding;
+            settings["globalKeyBindings"] = bindings;
+            if (binding != null && clearReignOnlyKey) settings[slot] = "";
+        }
+
+        // Records (or removes) a reference only if the slot still has the expected binding and endpoint origin (see
+        // ApplyGlobalKeyBinding for the Reign-only key). The global key is never deleted.
+        private static bool SetGlobalKeyBinding(string slot, Dictionary<string, object> binding, string expectedKeyId, string expectedOrigin,
+            bool clearReignOnlyKey = true)
         {
             try
             {
@@ -407,15 +568,13 @@ namespace ReignBetaServer
                     var settings = LoadSettingsCore();
                     if (BoundKeyId(settings, slot) != (expectedKeyId ?? "")
                         || (expectedOrigin != null && GlobalKeyTarget(settings, slot, null).Origin != expectedOrigin)) return false;
-                    var bindings = new Dictionary<string, object>(ReadDictionary(settings, "globalKeyBindings") ?? new Dictionary<string, object>());
-                    if (binding == null) bindings.Remove(slot); else bindings[slot] = binding;
-                    settings["globalKeyBindings"] = bindings;
-                    if (binding != null) settings[slot] = "";
+                    ApplyGlobalKeyBinding(settings, slot, binding, clearReignOnlyKey);
                     settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
                     Directory.CreateDirectory(DataDir);
                     WriteJsonObject(SettingsPath, settings);
                     PersistInstalledSettingsSecrets(settings, true);
                 }
+                InvalidateGlobalKeyStatusCache();
                 InvalidateCodexThreads("provider_or_codex_settings_changed");
                 return true;
             }
@@ -442,22 +601,12 @@ namespace ReignBetaServer
             finally { GlobalKeyWriteGate.Release(); }
         }
 
-        // Unenrolled installations retain their existing local key workflow. Once
-        // enrolled, new secrets go through the shared store. A binding never falls
-        // back to local storage, even if enrollment is missing or malformed.
+        // Policy hook for local provider-key writes through the settings save. A typed key is the user's Reign-only key for
+        // that slot and is accepted whether or not Global API Keys is enrolled and whether or not the slot is bound (it then
+        // overrides the binding). Blank and masked values never reach storage: MergeProviderSettings ignores them. Nothing is
+        // refused today; the parameters are kept for the call site and fixtures.
         private static string LocalProviderKeyWriteRefusal(Dictionary<string, object> incoming, Dictionary<string, object> settings = null,
-            bool? enrolledForFixture = null)
-        {
-            if (LegacyLocalKeyWritesForTests || incoming == null || !GlobalKeySlots.Any(slot => incoming.TryGetValue(slot, out object value)
-                && !string.IsNullOrWhiteSpace(Convert.ToString(value)) && !IsMaskedSecretValue(Convert.ToString(value)))) return null;
-            bool enrolled = enrolledForFixture ?? GlobalKeysEnrolled();
-            if (!enrolled && !GlobalKeySlots.Any(slot => HasGlobalKeyBindingEntry(settings, slot)
-                && incoming.TryGetValue(slot, out object value) && !string.IsNullOrWhiteSpace(Convert.ToString(value))
-                && !IsMaskedSecretValue(Convert.ToString(value)))) return null;
-            return enrolled
-                ? "Provider keys are stored in DwemerDistro Global API Keys. Use Save key beside the key; nothing was saved."
-                : "Provider keys are stored only in DwemerDistro Global API Keys, which is not set up for Reign. Run scripts/Connect-GlobalKeys.ps1 once, then use Save key; nothing was saved.";
-        }
+            bool? enrolledForFixture = null) => null;
 
         private static readonly HashSet<string> GlobalKeyApacheHosts = new HashSet<string>(StringComparer.Ordinal) { "127.0.0.1:8089", "localhost:8089", "[::1]:8089" };
         private static readonly HashSet<string> GlobalKeyDirectHosts = new HashSet<string>(StringComparer.Ordinal) { "127.0.0.1:5101", "localhost:5101", "[::1]:5101" };

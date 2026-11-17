@@ -24,12 +24,15 @@ namespace ReignBetaServer
             var calls = new List<Dictionary<string, object>>();
             string resolveOutcome = "resolved", writeOutcome = "updated", createdOrigin = NanoGptOrigin, createdProvider = "nano_gpt";
             var store = new List<Dictionary<string, object>> {
-                new Dictionary<string, object> { ["key_id"] = keyId, ["provider"] = "openrouter", ["origin"] = OpenRouterOrigin, ["label"] = "Reign", ["preview"] = "...abcd", ["revision"] = 3 },
-                new Dictionary<string, object> { ["key_id"] = other, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin, ["label"] = "Other", ["preview"] = "...zz", ["revision"] = 1 } };
+                new Dictionary<string, object> { ["key_id"] = keyId, ["provider"] = "openrouter", ["origin"] = OpenRouterOrigin, ["label"] = "Reign", ["preview"] = "...abcd", ["revision"] = 3, ["configured"] = true },
+                new Dictionary<string, object> { ["key_id"] = other, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin, ["label"] = "Other", ["preview"] = "...zz", ["revision"] = 1, ["configured"] = true } };
             var catalog = new List<Dictionary<string, object>> {
                 new Dictionary<string, object> { ["provider"] = "openai", ["origin"] = openAi },
                 new Dictionary<string, object> { ["provider"] = "custom_openai", ["origin"] = null } };
             var previous = GlobalKeyTransportOverride;
+            bool previousAutoSelection = GlobalKeyAutoSelectionOffForTests;
+            GlobalKeyAutoSelectionOffForTests = false;
+            InvalidateGlobalKeyStatusCache();
             GlobalKeyTransportOverride = request =>
             {
                 calls.Add(request);
@@ -46,12 +49,6 @@ namespace ReignBetaServer
             string root = Path.Combine(Path.GetTempPath(), "reign-global-keys-" + Guid.NewGuid().ToString("N"));
             try
             {
-                var localPatch = TestDict("ollamaCloudApiKey", "fixture-local-new", "nanoGptApiKey", "fixture-local-nano");
-                var malformedLocalBinding = TestDict("globalKeyBindings", TestDict("ollamaCloudApiKey", TestDict("keyId", "malformed")));
-                check("unenrolled_local_workflow_retained", LocalProviderKeyWriteRefusal(localPatch, TestDict(), false) == null);
-                check("enrolled_local_secret_write_refused", LocalProviderKeyWriteRefusal(localPatch, TestDict(), true) != null);
-                check("unenrolled_binding_never_becomes_local", LocalProviderKeyWriteRefusal(localPatch, malformedLocalBinding, false) != null
-                    && LocalProviderKeyWriteRefusal(TestDict("nanoGptApiKey", "fixture-other-slot"), malformedLocalBinding, false) == null);
                 // Named Ollama migration carries an opaque reference once, without
                 // depending on the store being available or resolving a secret.
                 string ollamaOrigin = NormalizedOrigin(OllamaCloudChatUrl);
@@ -84,8 +81,15 @@ namespace ReignBetaServer
                 ReadDictionary(malformed, "globalKeyBindings")["ollamaCloudApiKey"] = TestDict("keyId", "bad", "provider", "custom_openai", "origin", ollamaOrigin);
                 malformed["ollamaCloudApiKey"] = "shadow-local";
                 NormalizeChatProviderProfiles(malformed);
-                check("ollama_malformed_binding_blocks_fallback", ProviderSecret(malformed, "ollamaCloudApiKey", OllamaCloudChatUrl) == ""
+                // A pre-upgrade shadow beside a binding is cleared once on load; later Reign-only keys are kept.
+                SanitizeBoundKeySlots(malformed);
+                check("ollama_malformed_binding_blocks_fallback", ReadString(malformed, "ollamaCloudApiKey", "x") == ""
+                    && ProviderSecret(malformed, "ollamaCloudApiKey", OllamaCloudChatUrl) == ""
                     && ProviderKeyUnavailable(malformed, "ollamaCloudApiKey", "") && calls.Count == 0);
+                malformed["ollamaCloudApiKey"] = "fixture-reign-only";
+                SanitizeBoundKeySlots(malformed);
+                check("bound_shadow_cleanup_runs_once", ReadString(malformed, "ollamaCloudApiKey", "") == "fixture-reign-only"
+                    && ReadBool(ReadDictionary(malformed, "globalKeyMigrations"), BoundShadowCleanupMarker, false));
                 var markerPatch = TestDict("globalKeyMigrations", TestDict("ollamaCloudFromApiKey", false), "legacyMemoryMode", true);
                 var filteredPatch = WithoutGlobalKeyMigrationPatch(markerPatch);
                 check("migration_marker_server_owned_patch_clone", !filteredPatch.ContainsKey("globalKeyMigrations")
@@ -135,9 +139,73 @@ namespace ReignBetaServer
                     && ReadInt(refused, "providerCallCount", -1) == 0 && ReadString(redirected, "errorCode", "") == "global_key_unavailable");
                 resolveOutcome = "resolved";
                 calls.Clear();
+                InvalidateGlobalKeyStatusCache();
+                calls.Clear();
+                SettingsFingerprint(TestDict("llmProvider", NanoGptProvider, "nanoGptApiKey", ""));
                 SettingsFingerprint(settings);
                 SettingsForUi(settings);
                 check("diagnostics_never_resolve", calls.Count == 0);
+
+                // Layered resolution: Reign-only key, then binding, then the single matching global key, then nothing.
+                Func<string, int> resolvesOf = id => calls.Count(c => ReadString(c, "op", "") == "resolve" && ReadString(ReadDictionary(c, "body"), "key_id", "") == id);
+                var layered = TestDict("llmProvider", "openrouter", "openRouterApiKey", "fixture-reign-only",
+                    "globalKeyBindings", TestDict("openRouterApiKey", binding));
+                calls.Clear();
+                check("reign_only_key_overrides_binding", ProviderSecret(layered, "openRouterApiKey", OpenRouterChatUrl) == "fixture-reign-only"
+                    && !ProviderKeyUnavailable(layered, "openRouterApiKey", "fixture-reign-only") && calls.Count == 0);
+                layered["openRouterApiKey"] = "";
+                check("cleared_reign_only_key_falls_back_to_binding", ProviderSecret(layered, "openRouterApiKey", OpenRouterChatUrl) == secret
+                    && resolvesOf(keyId) == 1);
+                var auto = TestDict("llmProvider", NanoGptProvider, "nanoGptApiKey", "fixture-reign-only-nano");
+                calls.Clear();
+                bool localFirst = ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == "fixture-reign-only-nano" && calls.Count == 0;
+                auto["nanoGptApiKey"] = "";
+                check("auto_picks_single_matching_key", localFirst && ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == secret
+                    && resolvesOf(other) == 1 && !HasGlobalKeyBindingEntry(auto, "nanoGptApiKey")
+                    && ProviderKeyConfigured(auto, "nanoGptApiKey") && !ProviderKeyConfigured(auto, "nanoGptApiKey", false));
+                calls.Clear();
+                check("auto_destination_origin_mismatch_no_auto", ProviderSecret(auto, "nanoGptApiKey", "https://nano-gpt.com.attacker.invalid/v1") == ""
+                    && ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl, "https://other.invalid/") == ""
+                    && !ProviderKeyUnavailable(auto, "nanoGptApiKey", "") && calls.Count == 0);
+                check("auto_zero_matches_no_key", ProviderSecret(TestDict(), "portraitAtlasApiKey", "https://api.atlascloud.ai/api/v1/model/generateImage") == ""
+                    && !ProviderKeyUnavailable(TestDict(), "portraitAtlasApiKey", "") && !calls.Any(c => ReadString(c, "op", "") == "resolve"));
+                const string secondNano = "44444444-2222-4333-8444-555555555555";
+                store.Add(new Dictionary<string, object> { ["key_id"] = secondNano, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin, ["label"] = "Second", ["preview"] = "...yy", ["revision"] = 1, ["configured"] = true });
+                InvalidateGlobalKeyStatusCache();
+                calls.Clear();
+                check("auto_two_matches_never_guesses", ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == ""
+                    && !ProviderKeyUnavailable(auto, "nanoGptApiKey", "") && !ProviderKeyConfigured(auto, "nanoGptApiKey")
+                    && !calls.Any(c => ReadString(c, "op", "") == "resolve")
+                    && ReadString(GlobalKeyRow(auto, "nanoGptApiKey", GlobalKeyTarget(auto, "nanoGptApiKey", catalog), store), "source", "") == "none");
+                store.RemoveAt(store.Count - 1);
+                InvalidateGlobalKeyStatusCache();
+                resolveOutcome = "unavailable";
+                bool autoBinding;
+                string autoKey = ResolveLlmRequestApiKey(auto, null, out autoBinding);
+                bool autoUnavailable = ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == ""
+                    && ProviderKeyUnavailable(auto, "nanoGptApiKey", "");
+                var autoRefused = ChatWithLlm(new Dictionary<string, object> { ["requestType"] = "dialogue", ["singleProviderAttempt"] = true }, null, null, auto);
+                check("auto_failed_resolve_is_unavailable", autoKey == "" && autoBinding && autoUnavailable
+                    && ReadString(autoRefused, "errorCode", "") == "global_key_unavailable" && ReadInt(autoRefused, "providerCallCount", -1) == 0);
+                resolveOutcome = "resolved";
+                InvalidateGlobalKeyStatusCache();
+                calls.Clear();
+                Func<int> statusCalls = () => calls.Count(c => ReadString(c, "op", "") == "status");
+                bool gated = ProviderKeyConfigured(auto, "nanoGptApiKey") && ProviderKeyConfigured(auto, "nanoGptApiKey");
+                bool resolvedOnce = ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == secret
+                    && ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == secret;
+                int warmStatus = statusCalls();
+                InvalidateGlobalKeyStatusCache();
+                ProviderKeyConfigured(auto, "nanoGptApiKey");
+                check("status_metadata_cached_and_invalidated", gated && resolvedOnce && warmStatus == 1 && resolvesOf(other) == 2 && statusCalls() == 2
+                    && !Json.Serialize(CachedGlobalKeyStatus()).Contains(secret));
+                var autoRow = GlobalKeyRow(auto, "nanoGptApiKey", GlobalKeyTarget(auto, "nanoGptApiKey", catalog), store);
+                var layeredRow = GlobalKeyRow(TestDict("openRouterApiKey", "fixture-reign-only", "globalKeyBindings", TestDict("openRouterApiKey", binding)),
+                    "openRouterApiKey", GlobalKeyTarget(layered, "openRouterApiKey", catalog), store);
+                check("status_row_reports_source", ReadString(autoRow, "source", "") == "global_auto" && ReadInt(autoRow, "autoCandidates", 0) == 1
+                    && ReadString(ReadDictionary(autoRow, "autoKey"), "label", "") == "Other" && ReadString(layeredRow, "source", "") == "reign_only"
+                    && ReadString(GlobalKeyRow(layered, "openRouterApiKey", GlobalKeyTarget(layered, "openRouterApiKey", catalog), store), "source", "") == "global_bound"
+                    && !Json.Serialize(autoRow).Contains(secret) && !Json.Serialize(layeredRow).Contains("fixture-reign-only"));
 
                 var custom = new Dictionary<string, object> { ["apiUrl"] = "https://Custom.invalid:8443/v1/chat" };
                 check("custom_endpoint_exact_origin", GlobalKeyTarget(custom, "apiKey", catalog) == ("custom_openai", "https://custom.invalid:8443")
@@ -161,9 +229,6 @@ namespace ReignBetaServer
                 MergeProviderSettings(merged, new Dictionary<string, object> { ["globalKeyBindings"] = new Dictionary<string, object> {
                     ["nanoGptApiKey"] = new Dictionary<string, object> { ["keyId"] = other, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin } } });
                 check("generic_settings_cannot_bind", GlobalKeyBinding(merged, "nanoGptApiKey") == null && GlobalKeyBinding(merged, "openRouterApiKey") != null);
-                check("new_local_provider_secret_refused", LocalProviderKeyWriteRefusal(new Dictionary<string, object> { ["openRouterApiKey"] = "sk-new" }) != null
-                    && LocalProviderKeyWriteRefusal(new Dictionary<string, object> { ["apiKey"] = "************", ["nanoGptApiKey"] = "" }) == null
-                    && LocalProviderKeyWriteRefusal(new Dictionary<string, object> { ["qdrantApiKey"] = "qdrant-local" }) == null);
 
                 var ui = SettingsForUi(settings);
                 check("ui_and_diagnostics_hold_no_secret", !Json.Serialize(ui).Contains(secret) && ReadBool(ui, "openRouterApiKeyBound", false)
@@ -171,8 +236,9 @@ namespace ReignBetaServer
 
                 var bound = new List<string>();
                 bool bindResult = true;
-                Func<string, Dictionary<string, object>, string, string, bool> bind = (slot, b, expected, origin) =>
-                { bound.Add(slot + "=" + ReadString(b, "keyId", "") + "<" + expected); return bindResult; };
+                var clearsReignOnly = new List<bool>();
+                Func<string, Dictionary<string, object>, string, string, bool, bool> bind = (slot, b, expected, origin, clearLocal) =>
+                { bound.Add(slot + "=" + ReadString(b, "keyId", "") + "<" + expected); clearsReignOnly.Add(clearLocal); return bindResult; };
                 Func<Dictionary<string, object>, Dictionary<string, object>> save = payload => SaveGlobalKey(payload, bind, () => settings);
                 writeOutcome = "updated";
                 var rotate = new Dictionary<string, object> { ["slot"] = "openRouterApiKey", ["mode"] = "rotate", ["keyId"] = keyId, ["revision"] = 3, ["label"] = "Reign",
@@ -181,6 +247,23 @@ namespace ReignBetaServer
                 var edit = ReadDictionary(calls.Last(), "body");
                 check("rotate_same_uuid_with_revision", ReadBool(rotated, "ok", false) && ReadString(edit, "key_id", "") == keyId && ReadInt(edit, "revision", 0) == 3
                     && bound.SequenceEqual(new[] { "openRouterApiKey=" + keyId + "<" + keyId }) && !rotate.ContainsKey("secret") && !Json.Serialize(rotated).Contains("fixture-new"));
+                clearsReignOnly.Clear();
+                save(new Dictionary<string, object> { ["slot"] = "openRouterApiKey", ["mode"] = "rotate", ["keyId"] = keyId, ["revision"] = 3,
+                    ["label"] = "Renamed", ["secret"] = "", ["expectedKeyId"] = keyId });
+                save(new Dictionary<string, object> { ["slot"] = "openRouterApiKey", ["mode"] = "rotate", ["keyId"] = keyId, ["revision"] = 3,
+                    ["label"] = "Renamed", ["secret"] = "************", ["expectedKeyId"] = keyId });
+                save(new Dictionary<string, object> { ["slot"] = "openRouterApiKey", ["mode"] = "rotate", ["keyId"] = keyId, ["revision"] = 3,
+                    ["label"] = "Reign", ["secret"] = "fixture-new", ["expectedKeyId"] = keyId });
+                save(new Dictionary<string, object> { ["slot"] = "portraitNanoGptApiKey", ["mode"] = "bind", ["keyId"] = other, ["expectedKeyId"] = "" });
+                var renamed = TestDict("openRouterApiKey", "fixture-kept", "globalKeyBindings", TestDict("openRouterApiKey", binding));
+                ApplyGlobalKeyBinding(renamed, "openRouterApiKey", binding, false);
+                bool renameKeeps = ReadString(renamed, "openRouterApiKey", "") == "fixture-kept";
+                ApplyGlobalKeyBinding(renamed, "openRouterApiKey", null, true);
+                bool unbindKeeps = ReadString(renamed, "openRouterApiKey", "") == "fixture-kept" && !HasGlobalKeyBindingEntry(renamed, "openRouterApiKey");
+                ApplyGlobalKeyBinding(renamed, "openRouterApiKey", binding, true);
+                check("rename_keeps_reign_only_key_bind_clears_it", clearsReignOnly.SequenceEqual(new[] { false, false, true, true })
+                    && renameKeeps && unbindKeeps && ReadString(renamed, "openRouterApiKey", "x") == "" && BoundKeyId(renamed, "openRouterApiKey") == keyId);
+                bound.Clear();
                 check("rotate_other_uuid_refused", ReadString(save(new Dictionary<string, object> { ["slot"] = "openRouterApiKey", ["mode"] = "rotate", ["keyId"] = other,
                     ["revision"] = 1, ["secret"] = "x", ["expectedKeyId"] = keyId }), "outcome", "") == "conflict");
                 int beforeStale = calls.Count;
@@ -272,6 +355,58 @@ namespace ReignBetaServer
                 check("vault_never_resurrects_or_stores_bound_slot", ReadString(reloaded, "openRouterApiKey", "x") == "" && ReadString(reloaded, "qdrantApiKey", "") == "qdrant-local"
                     && ReadString(fullRestore, "openRouterApiKey", "") == "" && ReadString(afterWrite, "openRouterApiKey", "x") == ""
                     && !File.ReadAllText(vault).Contains("leaked"));
+                // After the one-time cleanup, a Reign-only key saved beside a binding is persisted to the vault and restored
+                // into that same bound slot (partial and full recovery); a vault value without that binding never is (above).
+                WriteSettingsSecretsVault(vault, new Dictionary<string, object> { ["openRouterApiKey"] = "fixture-vault-reign-only",
+                    ["globalKeyBindings"] = settings["globalKeyBindings"], ["globalKeyMigrations"] = TestDict(BoundShadowCleanupMarker, true) });
+                var reignOnlyRestore = new Dictionary<string, object> { ["openRouterApiKey"] = "", ["globalKeyBindings"] = settings["globalKeyBindings"] };
+                RecoverSettingsSecretsFromVault(vault, reignOnlyRestore, false, out _);
+                var reignOnlyFull = new Dictionary<string, object> { ["globalKeyBindings"] = settings["globalKeyBindings"] };
+                RecoverSettingsSecretsFromVault(vault, reignOnlyFull, true, out _);
+                var otherBinding = new Dictionary<string, object> { ["openRouterApiKey"] = "", ["globalKeyBindings"] = TestDict("openRouterApiKey",
+                    TestDict("keyId", other, "provider", "openrouter", "origin", OpenRouterOrigin)) };
+                RecoverSettingsSecretsFromVault(vault, otherBinding, false, out _);
+                check("vault_keeps_reign_only_key_on_bound_slot", ReadString(reignOnlyRestore, "openRouterApiKey", "") == "fixture-vault-reign-only"
+                    && BoundKeyId(reignOnlyRestore, "openRouterApiKey") == keyId
+                    && ReadString(reignOnlyFull, "openRouterApiKey", "") == "fixture-vault-reign-only"
+                    && ReadString(otherBinding, "openRouterApiKey", "x") == "");
+
+                // Saving and clearing through the real settings paths, against a disposable settings file.
+                string settingsFile = Path.Combine(root, "settings.json");
+                Func<Dictionary<string, object>> readFile = () => Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(settingsFile));
+                var routerBinding = TestDict("openRouterApiKey", binding);
+                WriteJsonObject(settingsFile, TestDict("openRouterApiKey", "stale-shadow", "globalKeyBindings", routerBinding));
+                var unrelatedSave = SaveSettingsCore(TestDict("siteUrl", "https://fixture.invalid/"), out _, out _, settingsFile);
+                var afterUnrelated = readFile();
+                check("save_clears_preupgrade_shadow_once", ReadBool(unrelatedSave, "ok", false) && ReadString(afterUnrelated, "openRouterApiKey", "x") == ""
+                    && ReadBool(ReadDictionary(afterUnrelated, "globalKeyMigrations"), BoundShadowCleanupMarker, false)
+                    && BoundKeyId(afterUnrelated, "openRouterApiKey") == keyId);
+                WriteJsonObject(settingsFile, TestDict("openRouterApiKey", "stale-shadow", "globalKeyBindings", routerBinding));
+                var reignOnlySave = SaveSettingsCore(TestDict("openRouterApiKey", "fixture-file-reign-only"), out _, out _, settingsFile);
+                var reloadedFile = readFile();
+                SanitizeBoundKeySlots(reloadedFile);
+                calls.Clear();
+                check("reign_only_key_saved_on_bound_slot_survives_reload", ReadBool(reignOnlySave, "ok", false)
+                    && ReadString(reloadedFile, "openRouterApiKey", "") == "fixture-file-reign-only" && BoundKeyId(reloadedFile, "openRouterApiKey") == keyId
+                    && ProviderSecret(reloadedFile, "openRouterApiKey", OpenRouterChatUrl) == "fixture-file-reign-only" && calls.Count == 0
+                    && !Json.Serialize(reignOnlySave).Contains("fixture-file-reign-only"));
+                var localClear = ClearSettingsKey(TestDict("key", "openRouterApiKey"), null, settingsFile);
+                var afterClear = readFile();
+                var guardedUnbind = ClearSettingsKey(TestDict("key", "openRouterApiKey"), null, settingsFile);
+                var nothingToClear = ClearSettingsKey(TestDict("key", "nanoGptApiKey"), null, settingsFile);
+                check("clear_on_bound_slot_clears_reign_only_key_and_keeps_binding", ReadString(localClear, "outcome", "") == "local_cleared"
+                    && ReadString(afterClear, "openRouterApiKey", "x") == "" && BoundKeyId(afterClear, "openRouterApiKey") == keyId
+                    && ReadString(guardedUnbind, "outcome", "") == "forbidden" && BoundKeyId(readFile(), "openRouterApiKey") == keyId
+                    && ReadBool(nothingToClear, "ok", false) && ReadString(nothingToClear, "outcome", "") == "unchanged");
+                // The custom endpoint's Reign-only key is refused unless the URL the caller saw is the endpoint left in place.
+                WriteJsonObject(settingsFile, TestDict("llmProvider", "openai_compatible", "apiUrl", "https://old.invalid/v1/chat/completions"));
+                var staleEndpoint = SaveSettingsCore(TestDict("apiKey", "fixture-endpoint-key", "expectedApiUrl", "https://new.invalid/v1"), out _, out _, settingsFile);
+                bool staleStoredNothing = ReadString(readFile(), "apiKey", "") == "";
+                var sameEndpoint = SaveSettingsCore(TestDict("apiKey", "fixture-endpoint-key", "expectedApiUrl", "https://OLD.invalid/other"), out _, out _, settingsFile);
+                var afterEndpoint = readFile();
+                check("reign_only_custom_key_endpoint_checked", ReadString(staleEndpoint, "outcome", "") == "endpoint_changed" && staleStoredNothing
+                    && ReadBool(sameEndpoint, "ok", false) && ReadString(afterEndpoint, "apiKey", "") == "fixture-endpoint-key"
+                    && !afterEndpoint.ContainsKey("expectedApiUrl"));
 
                 // A legacy local custom key never survives a new origin, in settings or the vault; same-origin edits, a bound
                 // reference, an explicitly supplied key and the other slots keep theirs.
@@ -567,6 +702,8 @@ namespace ReignBetaServer
             finally
             {
                 GlobalKeyTransportOverride = previous;
+                InvalidateGlobalKeyStatusCache();
+                GlobalKeyAutoSelectionOffForTests = previousAutoSelection;
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
             return rows;

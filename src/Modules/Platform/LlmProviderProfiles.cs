@@ -56,9 +56,10 @@ namespace ReignBetaServer
             }
             // A legacy local custom key belongs to the origin it was saved for. A new origin clears it (settings and, through
             // the explicit-clear vault write, the installed vault) unless this merge supplies its own key; a bound slot
-            // already fails closed on mismatch and keeps its reference.
+            // already fails closed on mismatch and keeps its reference, but a Reign-only key saved beside it is cleared too.
             string suppliedApiKey = ReadString(incoming, "apiKey", "");
-            if (NormalizedOrigin(ReadString(settings, "apiUrl", "")) != previousOrigin && GlobalKeyBinding(settings, "apiKey") == null
+            bool apiKeyClearable = GlobalKeyBinding(settings, "apiKey") == null || !string.IsNullOrWhiteSpace(ReadString(settings, "apiKey", ""));
+            if (NormalizedOrigin(ReadString(settings, "apiUrl", "")) != previousOrigin && apiKeyClearable
                 && (string.IsNullOrWhiteSpace(suppliedApiKey) || IsMaskedSecretValue(suppliedApiKey)) && !clearKeys.Contains("apiKey"))
                 clearKeys.Add("apiKey");
             foreach (string key in clearKeys) if (SensitiveSettingsKeys().Contains(key)) settings[key] = "";
@@ -109,13 +110,14 @@ namespace ReignBetaServer
         private static string LlmRequestApiUrl(Dictionary<string, object> settings, Dictionary<string, object> payload) =>
             IsNamedLlmApiProvider(settings) ? LlmApiUrl(settings) : ReadString(payload, "apiUrl", LlmApiUrl(settings));
 
-        // True when the request carries no key of its own and would otherwise use the slot's saved, unbound key at a
-        // destination outside that key's origin. Empty saved keys (deliberately keyless endpoints) never match.
+        // True when the request carries no key of its own and would otherwise use the slot's saved Reign-only key (which
+        // wins over any binding) at a destination outside that key's origin. Empty saved keys (deliberately keyless
+        // endpoints) never match.
         private static bool StoredKeyForeignDestination(Dictionary<string, object> settings, Dictionary<string, object> payload, string apiUrl)
         {
             if (UsesCodexSubscription(settings) || (payload != null && payload.ContainsKey("apiKey"))) return false;
             string slot = LlmApiKeySlot(settings);
-            return !HasGlobalKeyBindingEntry(settings, slot) && ReadString(settings, slot, "").Length > 0
+            return !string.IsNullOrWhiteSpace(ReadString(settings, slot, ""))
                 && !LocalKeyDestinationAllowed(settings, slot, new[] { apiUrl });
         }
 
@@ -131,8 +133,11 @@ namespace ReignBetaServer
             if (!named && payload != null && payload.ContainsKey("apiKey")) return ReadString(payload, "apiKey", "");
             string slot = LlmApiKeySlot(settings);
             string destination = named ? LlmApiUrl(settings) : actualApiUrl ?? ReadString(payload, "apiUrl", LlmApiUrl(settings));
-            usesBinding = HasGlobalKeyBindingEntry(settings, slot);
-            return ProviderSecret(settings, slot, destination);
+            string key = ProviderSecret(settings, slot, destination);
+            // usesBinding: the slot is bound, or its automatic global key could not be resolved. Either way an empty key is
+            // a refusal (global_key_unavailable), never a keyless request. Checked immediately, on this thread.
+            usesBinding = HasGlobalKeyBindingEntry(settings, slot) || ProviderKeyUnavailable(settings, slot, key);
+            return key;
         }
 
         private static string DefaultChatProviderModel(string provider) => provider == OllamaCloudProvider ? DefaultOllamaCloudModel

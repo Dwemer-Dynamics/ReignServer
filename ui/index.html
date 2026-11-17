@@ -1637,13 +1637,14 @@
       const status = document.getElementById('status');
       const button = document.getElementById('saveChangesButton');
       if (button.disabled || !beginWarEconomySave()) return;
-      // Typed provider keys are never sent with the main Save and never dropped: everything else (including a new API URL)
-      // saves, and the typed keys stay in their inputs for Save key.
-      const typedKeys = Object.fromEntries(globalKeySlotIds.filter(id => !globalKeyState.localWorkflow
+      // Where a slot shows Global API Keys controls, a typed provider key is never sent with the main Save and never dropped:
+      // everything else (including a new API URL) saves, and the typed key stays in its input for an explicit Save key
+      // (global) or Save Reign-only key. Without Global API Keys, an unbound slot keeps the plain local Save.
+      const typedKeys = Object.fromEntries(globalKeySlotIds.filter(id => !globalKeyState.localWorkflow || globalKeyState.enrolled
         || globalKeyState.slots[id]?.bound || globalKeyState.slots[id]?.binding).map(id => [id, document.getElementById(id)])
         .filter(([, el]) => el && el.value && el.value !== el.dataset.savedMask).map(([id, el]) => [id, el.value]));
-      const keptKeyText = !Object.keys(typedKeys).length ? '' : ' ' + (globalKeyState.available ? 'Typed provider key kept: use Save key beside it to store it in Global API Keys.'
-        : globalKeyUnavailableText() + ' Your typed key was kept.');
+      const keptKeyText = !Object.keys(typedKeys).length ? '' : ' ' + (globalKeyState.available ? 'Typed provider key kept: use Save key beside it to store it in Global API Keys, or Save Reign-only key to keep it for Reign only.'
+        : globalKeyUnavailableText() + ' Your typed key was kept; Save Reign-only key still works.');
       button.disabled = true;
       status.textContent = 'Saving changes...';
       let settingsSaved = false;
@@ -1723,21 +1724,77 @@
     }
 
     async function clearKey(key) {
-      const bound = globalKeyState.slots[key]?.binding?.keyId || '';
+      const slot = globalKeyState.slots[key];
+      // A Reign-only key is cleared first, enrolled or not (the slot then uses its bound or automatic global key, if any);
+      // the server makes the same choice, so this never offers an unbind while a Reign-only key exists.
+      if (slot?.source === 'reign_only' || (!slot?.source && slot?.legacy)) { await clearReignOnlyKey(key); return; }
+      const bound = slot?.binding?.keyId || '';
       // A bound slot unbinds only; the global key stays in DwemerDistro for every other product.
       if (!confirm(bound ? `Stop using the global key for ${key}? The key itself stays in Global API Keys.` : `Clear saved ${key}?`)) return;
       const headers = {'Content-Type':'application/json'};
       if (bound) headers['X-Reign-Keys'] = '1';
       const r = await fetch('/api/settings/clear-key', { method:'POST', headers, body:JSON.stringify({key}) });
       const j = await r.json();
-      if (bound) { await refreshGlobalKeyRow(key, j.ok ? 'No longer using the global key.' : (globalKeyMessages[j.outcome] || 'Unbind failed; nothing changed.')); return; }
+      if (bound) {
+        const message = j.outcome === 'local_cleared' ? globalKeyMessages.local_cleared
+          : j.ok ? 'No longer using the global key.' : (globalKeyMessages[j.outcome] || 'Unbind failed; nothing changed.');
+        await refreshGlobalKeyRow(key, message);
+        return;
+      }
       document.getElementById('status').textContent = j.ok ? 'Key cleared' : 'Clear failed';
       await loadSettings();
     }
 
-    // Provider keys are saved only to DwemerDistro Global API Keys; Reign keeps the reference and never receives the
-    // stored value back. Rows are always shown (disabled with the reason when not set up or stopped). Each row saves on
-    // its own and refreshes only itself, so other unsaved inputs survive. Nothing is selected or imported automatically.
+    // Clears only this slot's Reign-only key through the normal settings path; the slot falls back to its bound or
+    // automatic global key. Other pending inputs are untouched.
+    async function clearReignOnlyKey(id) {
+      const slot = globalKeyState.slots[id] || {};
+      const name = slot.name || id;
+      let question = `Clear the saved Reign-only key for ${name}?`;
+      if (slot.binding?.keyId || globalKeyState.enrolled) question = `Clear the Reign-only key for ${name}? Reign will use your global key again if one applies.`;
+      if (!confirm(question)) return;
+      let j;
+      try { j = await (await fetch('/api/settings/clear-key', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key:id}) })).json(); }
+      catch (e) { j = { ok:false }; }
+      const input = document.getElementById(id);
+      if (j.ok && input) { input.dataset.hasSavedSecret = 'false'; input.dataset.savedMask = ''; input.value = ''; }
+      let message = 'Clear failed; nothing changed.';
+      if (j.ok && j.outcome === 'unchanged') message = 'No Reign-only key was saved.';
+      else if (j.ok) message = globalKeyMessages.local_cleared;
+      await refreshGlobalKeyRow(id, message);
+      // Slots without Global API Keys controls have no row status; report on the page status instead.
+      if (!document.getElementById(id + 'GlobalRow')) document.getElementById('status').textContent = message;
+    }
+
+    // Saves the typed key for this slot only, through the normal settings path, as a key used by Reign alone. It overrides
+    // any global key for the slot until cleared and needs no DwemerDistro connection.
+    async function saveReignOnlyKey(id) {
+      const input = document.getElementById(id), status = document.getElementById(id + 'GlobalRow')?.lastElementChild;
+      const secret = input && input.value && input.value !== input.dataset.savedMask ? input.value.trim() : '';
+      if (!secret) { if (status) status.textContent = 'Type the key above first.'; return; }
+      // The custom endpoint key is only ever sent to the saved API URL, so it must be saved for the URL shown.
+      if (id === 'apiKey' && (document.getElementById('apiUrl')?.value.trim() || '') !== globalKeyState.savedApiUrl.trim()) {
+        if (status) status.textContent = globalKeyMessages.endpoint_changed;
+        return;
+      }
+      const body = {[id]:secret};
+      // The server repeats the endpoint check against the saved URL (endpoint_changed), as it does for Save key.
+      if (id === 'apiKey') body.expectedApiUrl = document.getElementById('apiUrl')?.value.trim() || '';
+      let j;
+      try { j = await (await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })).json(); }
+      catch (e) { j = { ok:false }; }
+      if (j.outcome === 'endpoint_changed') { if (status) status.textContent = globalKeyMessages.endpoint_changed; return; }
+      if (!j.ok) { if (status) status.textContent = j.error || 'Save failed; your typed key was kept.'; return; }
+      input.dataset.hasSavedSecret = 'true';
+      input.dataset.savedMask = makeSecretMask(j[id + 'Length']);
+      await refreshGlobalKeyRow(id, globalKeyMessages.local_saved);
+    }
+
+    // Each slot uses, in order: a Reign-only key saved here; the global key bound to it; the single global key in
+    // DwemerDistro Global API Keys that matches its provider and endpoint (used automatically, never saved as a selection);
+    // otherwise no key. Global keys are never sent back to this page. Rows are shown when Global API Keys is set up or the
+    // slot is bound (disabled with the reason when stopped). Each row saves on its own and refreshes only itself, so other
+    // unsaved inputs survive.
     const globalKeySlotIds = ['apiKey','openRouterApiKey','ollamaCloudApiKey','nanoGptApiKey','portraitNanoGptApiKey','portraitAtlasApiKey'];
     const globalKeyState = { enrolled:false, available:false, localWorkflow:false, outcome:'', slots:{}, savedApiUrl:'' };
     const globalKeyMessages = { created:'Saved to Global API Keys', updated:'Global key updated', unchanged:'No change', bound:'Using the selected global key',
@@ -1747,7 +1804,22 @@
       endpoint_changed:'The saved API URL differs from the one shown. Save Changes (or reload) first; your typed key was kept and nothing was sent.', busy:'Global API Keys is busy; try again.',
       limit:'The global key limit is reached.', invalid:'The key or name was refused.', invalid_endpoint:'Set a valid API URL first.',
       not_configured:'Global API Keys is not set up in DwemerDistro.', forbidden:'Refused: open this page from the Reign server on this PC.',
-      not_enrolled:'Global API Keys is not connected. Run scripts/Connect-GlobalKeys.ps1 once.' };
+      not_enrolled:'Global API Keys is not connected. Run scripts/Connect-GlobalKeys.ps1 once.',
+      local_saved:'Reign-only key saved. It is used instead of any global key.', local_cleared:'Reign-only key cleared; using global keys again where one applies.' };
+
+    const globalKeyDisplayName = key => `${key.label || ''} ${key.preview || ''}`.trim();
+
+    // Plain text describing which key the slot's requests use now (labels and previews only, never a secret).
+    function globalKeySourceText(slot) {
+      if (slot.source === 'reign_only' || (!slot.source && slot.legacy)) return 'Using your Reign-only key.';
+      if (slot.source === 'global_bound' || (!slot.source && slot.binding?.keyId)) {
+        const key = (slot.keys || []).find(k => k.keyId === slot.binding?.keyId);
+        return key ? `Using global key ${globalKeyDisplayName(key)}.` : 'Using the selected global key.';
+      }
+      if (slot.source === 'global_auto' && slot.autoKey) return `Using global key ${globalKeyDisplayName(slot.autoKey)} automatically.`;
+      if (slot.autoCandidates > 1) return `No key: ${slot.autoCandidates} matching global keys, choose one below or save a Reign-only key.`;
+      return 'No key.';
+    }
 
     function globalKeyUnavailableText() {
       return globalKeyState.outcome === 'not_enrolled' ? 'Global API Keys not set up: run scripts/Connect-GlobalKeys.ps1 once. Keys cannot be saved until then.'
@@ -1791,9 +1863,12 @@
       const input = document.getElementById(slot.slot);
       if (!input) return;
       let row = document.getElementById(slot.slot + 'GlobalRow');
+      let sourceRow = document.getElementById(slot.slot + 'KeySourceRow');
       globalKeyState.slots[slot.slot] = slot;
-      if (globalKeyState.localWorkflow && !slot.bound && !slot.binding) {
+      // Without Global API Keys an unbound slot keeps the plain local key field (Save Changes and its Clear button).
+      if (globalKeyState.localWorkflow && !globalKeyState.enrolled && !slot.bound && !slot.binding) {
         if (row) row.remove();
+        if (sourceRow) sourceRow.remove();
         return;
       }
       if (!row) {
@@ -1804,10 +1879,26 @@
         row.querySelector('button').addEventListener('click', () => saveGlobalKey(slot.slot));
         (input.closest('label') || input).after(row);
       }
+      if (!sourceRow) {
+        sourceRow = document.createElement('div');
+        sourceRow.id = slot.slot + 'KeySourceRow';
+        sourceRow.className = 'actions';
+        sourceRow.innerHTML = `<span class='hint' data-key-source></span><button type='button' data-reign-only='save'>Save Reign-only key</button><button type='button' class='danger' data-reign-only='clear'>Clear Reign-only key</button>`;
+        sourceRow.querySelector('[data-reign-only=save]').addEventListener('click', () => saveReignOnlyKey(slot.slot));
+        sourceRow.querySelector('[data-reign-only=clear]').addEventListener('click', () => clearReignOnlyKey(slot.slot));
+        row.after(sourceRow);
+      }
+      sourceRow.querySelector('[data-key-source]').textContent = globalKeySourceText(slot);
+      sourceRow.querySelector('[data-reign-only=clear]').hidden = !slot.legacy;
       const [select, label, button, status] = row.children;
       const bound = slot.binding?.keyId || '';
       const options = [];
-      if (!bound) options.push(new Option(slot.legacy ? 'Local key (not in Global API Keys)' : 'No key selected', ''));
+      if (!bound) {
+        let text = 'No key selected';
+        if (slot.legacy) text = 'Reign-only key (not in Global API Keys)';
+        else if (slot.source === 'global_auto' && slot.autoKey) text = `Automatic: ${globalKeyDisplayName(slot.autoKey)}`;
+        options.push(new Option(text, ''));
+      }
       (slot.keys || []).forEach(k => options.push(new Option(`${k.label} ${k.preview}`.trim(), k.keyId)));
       if (bound && !(slot.keys || []).some(k => k.keyId === bound)) options.push(new Option('Selected global key (not listed)', bound));
       options.push(new Option('+ New global key', 'new'));
@@ -1818,9 +1909,9 @@
       [select, label, button].forEach(el => el.disabled = !globalKeyState.available);
       status.textContent = !globalKeyState.available ? globalKeyUnavailableText()
         : bound && slot.binding.originMatches === false ? 'The endpoint changed; choose a key for the new endpoint.'
-        : bound ? 'Using a global key.' : slot.legacy ? 'Local key in use until you save it to Global API Keys.' : '';
-      input.placeholder = bound ? 'Using a global key. Type a new value, then Save key, to change it.'
-        : input.dataset.hasSavedSecret === 'true' ? 'Saved key is masked. Type a new key, then Save key.' : 'Type a key, then Save key.';
+        : slot.legacy ? 'The Reign-only key is used instead of global keys.' : bound ? 'Using a global key.' : '';
+      input.placeholder = bound ? 'Using a global key. Type a new value, then Save key or Save Reign-only key.'
+        : input.dataset.hasSavedSecret === 'true' ? 'Saved key is masked. Type a new key, then Save key or Save Reign-only key.' : 'Type a key, then Save key or Save Reign-only key.';
     }
 
     async function saveGlobalKey(id) {
