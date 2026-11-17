@@ -54,6 +54,15 @@ try {
     if (url.pathname === '/api/global-keys/save') {
       globalSaves.push({body:route.request().postDataJSON(),header:route.request().headers()['x-reign-keys']});
       body = globalSaveReply || {ok:true,outcome:'created',keyId:'99999999-2222-4333-8444-555555555555'};
+      // Mirror GlobalKeyBridge: a successful create, bind or value replacement binds the slot and clears its
+      // Reign-only key; a rename keeps it. The row the page refreshes afterwards reflects that.
+      const req = globalSaves.at(-1).body, row = globalKeys?.slots?.find(s => s.slot === req.slot);
+      if (body.ok && row) {
+        const keyId = req.mode === 'create' ? body.keyId : req.keyId;
+        if (req.mode === 'create') row.keys = [...(row.keys || []),{keyId,label:req.label || 'Reign - ' + row.name,preview:'...new',revision:1,configured:true}];
+        row.binding = {keyId,provider:row.provider,origin:row.origin,originMatches:true};
+        if (req.mode !== 'rotate' || req.secret) Object.assign(row,{legacy:false,source:'global_bound'});
+      }
     }
     if (url.pathname === '/api/codex/status') body = {...settings.codex,ok:true,models:settings.codex.models || []};
     if (url.pathname === '/api/codex/models/refresh') {
@@ -357,6 +366,8 @@ try {
   for (let i = 0; i < 100 && !globalSaves.length; i++) await page.waitForTimeout(20);
   assert.deepEqual(globalSaves[0],{body:{slot:'openRouterApiKey',mode:'create',label:'',secret:'fixture-global',expectedKeyId:''},header:'1'});
   await page.waitForFunction(() => document.getElementById('openRouterApiKey').value === '');
+  assert.equal(await page.inputValue('#openRouterApiKeyGlobalRow select'),'99999999-2222-4333-8444-555555555555','The created key is selected for the row');
+  assert.match(await page.textContent('#openRouterApiKeyKeySourceRow [data-key-source]'),/^Using global key/,'Creating a global key replaces the Reign-only key');
   // Saving one key refreshes only its row: other unsaved settings and key inputs survive, and settings are not reloaded.
   globalKeys.slots.push({slot:'nanoGptApiKey',name:'NanoGPT text',provider:'nano_gpt',origin:'https://nano-gpt.com:443',legacy:false,binding:null,keys:[]});
   globalKeys.slots[0] = {...globalKeys.slots[0],legacy:false,binding:{keyId:sharedKey.keyId,provider:'openrouter',origin:'https://openrouter.ai:443',originMatches:true}};
