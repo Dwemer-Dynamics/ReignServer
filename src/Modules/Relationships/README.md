@@ -42,7 +42,7 @@ relationship kernel `shared/Reign.Relationships`; wire types and policies such a
 `/notables/mbti/initialize|confirm-batch`, `/rulers/*` (dispatched by `RulerRelationsApi`).
 
 Retired routes kept for compatibility (they return `RetiredRelationshipMechanicResult`):
-`/relationships/developments/poll|resolve`, `/relationships/simulation/census/status|start|stop|status`.
+`/relationships/developments/poll|resolve`, `/relationships/simulation/census/status`, `/relationships/simulation/start|stop|status`.
 
 ## Tables
 

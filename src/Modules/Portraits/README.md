@@ -16,8 +16,9 @@ still in `Platform/Program.cs`.
 - Generation: `PortraitGeneration.cs`, `PortraitRefresh.cs`, `PortraitProviderFailure.cs`,
   `OpenRouterImageProvider.cs`, `CodexImageProvider.cs`, `ImageProfileControlCenter.cs`, `AdultPortraitGeneration.cs`,
   `EncounteredResidentPortraits.cs`, `NativePortraitSourceGeneration.cs`.
-- Image analysis and codecs: `PortraitVision.cs`, `PortraitFaceDetection.cs` (loads the bundled
-  `version-RFB-320.onnx` face model from `resources/portrait-models`), `PortraitPhysique.cs`, `PortraitPhysicalConfidenceCatalog.cs`,
+- Image analysis and codecs: `PortraitVision.cs`, `PortraitFaceDetection.cs` (loads the
+  `version-RFB-320.onnx` face model from `portrait_models/` beside the executable; the source copy is in
+  `resources/portrait-models`), `PortraitPhysique.cs`, `PortraitPhysicalConfidenceCatalog.cs`,
   `LinuxImageCodec.cs`.
 - Clothing: `PortraitClothingCatalog.cs`, `OutfitChanges.cs`.
 - Shared portraits and derivatives: `SharedPortraitGeneration.cs`, `SharedPortraitRebuild.cs`,

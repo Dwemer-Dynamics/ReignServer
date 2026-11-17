@@ -8,12 +8,12 @@ How the server is composed (entry point, router, campaign gate, storage, verific
 [ARCHITECTURE.md](../ARCHITECTURE.md); each folder under `src/Modules` has a README for its routes, tables and
 self-tests.
 
-The native world-history database and claim-verification contract are documented in the client repository at
+The native world-history database and claim-verification contract are documented in the client repository (link requires the paired sibling checkout) at
 [ReignBeta/docs/WorldHistory.md](../../../Reign/ReignBeta/docs/WorldHistory.md).
 The offline, live-LLM, and Bannerlord verification tiers are documented in [VerificationLab.md](VerificationLab.md).
 The canonical agent-facing testing catalog, autonomous campaign procedure, save
 safety rules, and restart recovery contract are documented in
-[docs/agent/TESTING_TOOL_GUIDE.md](../../../Reign/docs/agent/TESTING_TOOL_GUIDE.md) in the client repository.
+[docs/agent/TESTING_TOOL_GUIDE.md](../../../Reign/docs/agent/TESTING_TOOL_GUIDE.md) in the client repository (paired sibling checkout).
 
 ## Documents in this folder
 

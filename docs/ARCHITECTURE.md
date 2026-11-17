@@ -5,7 +5,7 @@ ReignServer is the local Linux server for the Bannerlord mod Reign. It is one C#
 Bannerlord client (`ReignBeta`, sibling `Reign` repository) talks to it over loopback HTTP; the Control Center UI in
 `ui/` is served by the same process. This document describes how the server is composed today, verified against the
 code on 2026-11-17, and points at the direction of the current restructuring programme. The client side is described in
-`../Reign/docs/agent/ARCHITECTURE.md`.
+the Reign repository's `docs/agent/ARCHITECTURE.md` (in a paired checkout, `../../Reign/docs/agent/ARCHITECTURE.md`).
 
 ## Repositories and assemblies
 
@@ -66,9 +66,10 @@ character, action and portrait request handling.
 
 `Main` (`Platform/Program.cs`) runs in this order:
 
-1. One-shot commands that must not touch campaign storage: `--import-tavern-native-sources`
-   (`Portraits/PreparedTavernPortraitSources.cs`), `--activate-only`, `--continuity-repair`. A `--run-verification`
-   process is forced onto the isolated `ReignValidation` database (`REIGN_VALIDATION_MODE=1`) before anything else.
+1. Commands that run before normal startup. `--import-tavern-native-sources`
+   (`Portraits/PreparedTavernPortraitSources.cs`) is checked first. Then a `--run-verification` process is forced
+   onto the isolated `ReignValidation` database (`REIGN_VALIDATION_MODE=1`). Then `--activate-only` (which must not
+   touch campaign storage) and `--continuity-repair` (which repairs a campaign schema) run and exit.
 2. `RunServer`: more one-shot commands (`--author-character-narratives`, `--complete-delete-all`,
    `--generate-profile-library`), then startup housekeeping (data directories, log compaction, Save Sync recovery
    cleanup, prompt templates, default test cases).
@@ -247,7 +248,7 @@ dependencies on other modules.
 
 ## Direction (2026-11 restructuring programme)
 
-These are planned, one reviewed PR at a time and without behaviour change. None of them exists yet; update this
+These are planned, one reviewed PR at a time and without behaviour change. None of them exists yet except the partial CI noted in step 7; update this
 document in the same PR as any step that lands.
 
 1. A verification build flavour: `*SelfTests*`, VerificationLab, test routes and the `--run-*` flags compiled only
@@ -260,4 +261,5 @@ document in the same PR as any step that lands.
 5. Per-campaign versioned migrations: each module's `Ensure*` DDL becomes ordered migrations under one runner,
    following the `reign_meta` pattern, and runtime `Ensure*` calls leave hot paths.
 6. Typed request and response DTOs in `Reign.Core.Contracts` for client-facing routes, module by module.
-7. CI: server build, tests and MCP tests in GitHub Actions.
+7. CI: extend the existing `.github/workflows/reign-channels.yml` (today it verifies the promotion path and builds
+   the public Linux server with `scripts/Build-Linux.py`) to run the server tests and MCP tests.

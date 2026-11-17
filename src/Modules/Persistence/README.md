@@ -29,8 +29,9 @@ retirement, and the validation archive.
 `POST /save-sync/register`, `POST /save-sync/finalize`, `POST /save-sync/delete-native-save`,
 `POST /save-sync/campaign-unloaded`, `POST /save-sync/load`, `POST /api/save-sync/preview`, `GET /api/save-sync/status`.
 
-All of these are exempt from the per-request `CampaignDataGate` read lease; the ones that change campaigns take the
-write lock themselves.
+All of these except `GET /api/campaigns` and `GET /api/campaigns/storage-audit` are exempt from the per-request
+`CampaignDataGate` read lease (those two take the ordinary read lease); the exempt routes that change campaigns take
+the write lock themselves.
 
 ## Tables
 
