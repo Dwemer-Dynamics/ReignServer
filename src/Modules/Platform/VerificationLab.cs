@@ -233,6 +233,41 @@ namespace ReignBetaServer
             return StartVerificationApi(options);
         }
 
+        // Drops the campaigns a verification run created and returns those still registered afterwards.
+        // Campaigns registered when the run began, campaigns other processes created, and real campaigns
+        // this process created outside the run (for example by a live game during a Control Center run)
+        // are never dropped. Internal campaigns this process created with no run attribution while the
+        // run was active (work that did not flow the run's context) are treated as the run's own.
+        private static List<string> DropVerificationRunCampaigns(
+            CampaignCreationScope scope,
+            ISet<string> preexistingCampaigns)
+        {
+            HashSet<string> owned = new HashSet<string>(
+                scope.CreatedCampaignIds.Concat(
+                    scope.UnattributedCampaignIds.Where(IsInternalCampaignId))
+                    .Where(id => !string.IsNullOrWhiteSpace(id)
+                        && !preexistingCampaigns.Contains(id)),
+                StringComparer.OrdinalIgnoreCase);
+            if (owned.Count == 0) return new List<string>();
+            foreach (Dictionary<string, object> registered
+                in ReignPostgreSqlStorage.ListCampaignMetadata())
+            {
+                string registeredId = ReadString(
+                    registered, "campaignId", "");
+                if (!owned.Contains(registeredId)) continue;
+                try
+                {
+                    ReignPostgreSqlStorage.DropCampaign(registeredId);
+                }
+                catch { }
+            }
+            return ReignPostgreSqlStorage.ListCampaignMetadata()
+                .Select(registered => ReadString(registered, "campaignId", ""))
+                .Where(owned.Contains)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToList();
+        }
+
         private static Dictionary<string, object> RunVerification(Dictionary<string, object> rawOptions)
         {
             EnsureVerificationDirectories();
@@ -283,6 +318,8 @@ namespace ReignBetaServer
 
             SetVerificationStatus(runId, "running", "Discovering coverage and running deterministic checks.", 0, 0, 0);
             CampaignsRootOverride.Value = verificationCampaignsRoot;
+            CampaignCreationScope campaignScope =
+                ReignPostgreSqlStorage.BeginCampaignCreationScope();
             try
             {
                 // A game process can already be open when the runner begins. Leave a fresh
@@ -340,21 +377,17 @@ namespace ReignBetaServer
                     if (ActiveCodexPerformanceBudget.Value != null) ActiveCodexPerformanceBudget.Value.Closed = true;
                     ActiveCodexPerformanceBudget.Value = previousCodexBudget;
                 }
+                ReignPostgreSqlStorage.EndCampaignCreationScope(campaignScope);
                 ReignPostgreSqlStorage.ClearAllPools();
                 try
                 {
-                    foreach (Dictionary<string, object> registered
-                        in ReignPostgreSqlStorage.ListCampaignMetadata())
+                    List<string> leakedCampaigns = DropVerificationRunCampaigns(
+                        campaignScope, preexistingPostgreSqlCampaigns);
+                    if (leakedCampaigns.Count > 0)
                     {
-                        string registeredId = ReadString(
-                            registered, "campaignId", "");
-                        if (!string.IsNullOrWhiteSpace(registeredId)
-                            && !preexistingPostgreSqlCampaigns.Contains(
-                                registeredId))
-                        {
-                            ReignPostgreSqlStorage.DropCampaign(
-                                registeredId);
-                        }
+                        AddVerificationCheck(checks, "verification.campaign_cleanup", "runner", false,
+                            "Verification could not remove " + leakedCampaigns.Count + " campaign(s) it created.",
+                            new Dictionary<string, object> { ["campaignIds"] = leakedCampaigns });
                     }
                 }
                 catch { }

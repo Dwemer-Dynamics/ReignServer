@@ -151,6 +151,10 @@ namespace ReignBetaServer
                         if (!RegisteredCampaignSchemas.ContainsKey(
                             normalizedCampaignId))
                         {
+                            // Claim before the registry row exists so another process's
+                            // startup cleanup never sees this internal campaign unowned.
+                            ClaimInternalCampaignOwnership(normalizedCampaignId);
+                            bool created;
                             using (NpgsqlTransaction transaction =
                                 connection.BeginTransaction(
                                     IsolationLevel.ReadCommitted))
@@ -162,22 +166,32 @@ namespace ReignBetaServer
                                         ["campaign_id"] =
                                             normalizedCampaignId
                                     });
+                                bool schemaExisted = SchemaExists(
+                                    connection, transaction, schema);
                                 ExecuteNonQuery(connection, transaction,
                                     "CREATE SCHEMA IF NOT EXISTS "
                                     + QuoteIdentifier(schema) + ";");
-                                ExecuteNonQuery(connection, transaction, @"
+                                using (NpgsqlCommand register = new NpgsqlCommand(@"
 INSERT INTO reign_meta.campaign_registry(campaign_id, schema_name, created_utc, updated_utc)
 VALUES(@campaign_id, @schema_name, now(), now())
 ON CONFLICT(campaign_id) DO UPDATE
-SET schema_name=excluded.schema_name;",
-                                    new Dictionary<string, object>
-                                    {
-                                        ["campaign_id"] =
-                                            normalizedCampaignId,
-                                        ["schema_name"] = schema
-                                    });
+SET schema_name=excluded.schema_name
+RETURNING (xmax = 0) AS inserted;", connection, transaction))
+                                {
+                                    register.CommandTimeout = 180;
+                                    register.Parameters.AddWithValue(
+                                        "campaign_id", normalizedCampaignId);
+                                    register.Parameters.AddWithValue(
+                                        "schema_name", schema);
+                                    created = Convert.ToBoolean(
+                                        register.ExecuteScalar(),
+                                        CultureInfo.InvariantCulture)
+                                        || !schemaExisted;
+                                }
                                 transaction.Commit();
                             }
+                            if (created)
+                                RecordCampaignCreated(normalizedCampaignId);
                             DeduplicateSchemaIndexes(connection, schema);
                             RegisteredCampaignSchemas[
                                 normalizedCampaignId] = 0;
@@ -674,6 +688,7 @@ ORDER BY created_utc,save_point_id;", connection))
                     "This campaign already exists in PostgreSQL.");
             if (exists)
                 DropCampaign(normalizedCampaignId);
+            ClaimInternalCampaignOwnership(normalizedCampaignId);
 
             List<string> arguments = new List<string>
             {
@@ -762,6 +777,8 @@ SET schema_name=excluded.schema_name,
                 }
                 transaction.Commit();
             }
+            if (!exists)
+                RecordCampaignCreated(normalizedCampaignId);
             NpgsqlConnection.ClearAllPools();
         }
 
@@ -922,6 +939,7 @@ WHERE campaign_id=@campaign_id;",
                     campaignTransaction.Commit();
                 }
             }
+            ReleaseInternalCampaignOwnership(normalizedCampaignId);
             NpgsqlConnection.ClearAllPools();
         }
 

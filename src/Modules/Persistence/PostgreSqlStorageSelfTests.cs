@@ -4,6 +4,9 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Npgsql;
 
 namespace ReignBetaServer
 {
@@ -142,7 +145,145 @@ AND indexdef LIKE '%(payload)%';").FirstOrDefault(), "count", 0);
                 TryDeleteDirectory(CampaignDirectory(campaignId));
                 TryDeleteDirectory(SaveSyncCampaignRoot(campaignId));
             }
+            RunCampaignCleanupScopeSelfTests(add);
             return results;
+        }
+
+        private static HashSet<string> RegisteredCampaignIdsForSelfTest()
+        {
+            return new HashSet<string>(
+                ReignPostgreSqlStorage.ListCampaignMetadata()
+                    .Select(row => ReadString(row, "campaignId", "")),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Cleanup must remove only the campaigns its own run or process owns: a verification run's
+        // sweep keeps campaigns other processes or live requests created during the run, and startup
+        // cleanup keeps internal campaigns another live process still owns.
+        private static void RunCampaignCleanupScopeSelfTests(Action<string, bool, string> add)
+        {
+            string token = Guid.NewGuid().ToString("N").Substring(0, 10);
+            string runInternal = "__sweep_run_" + token;
+            string runReal = "sweep_run_" + token;
+            string liveReal = "sweep_live_" + token;
+            string backgroundInternal = "__sweep_background_" + token;
+            string foreignInternal = "__sweep_foreign_" + token;
+            try
+            {
+                HashSet<string> preexisting = RegisteredCampaignIdsForSelfTest();
+                CampaignCreationScope scope =
+                    ReignPostgreSqlStorage.BeginCampaignCreationScope();
+                try
+                {
+                    using (ReignPostgreSqlStorage.OpenCampaignConnection(runInternal)) { }
+                    using (ReignPostgreSqlStorage.OpenCampaignConnection(runReal)) { }
+                    // Work in this process that does not carry the run's context: a live
+                    // game request (real campaign) and background work (internal campaign).
+                    using (ExecutionContext.SuppressFlow())
+                    {
+                        Task.Run(() =>
+                        {
+                            using (ReignPostgreSqlStorage.OpenCampaignConnection(liveReal)) { }
+                            using (ReignPostgreSqlStorage.OpenCampaignConnection(backgroundInternal)) { }
+                        }).Wait();
+                    }
+                    // Another server process registers its own fixture campaign meanwhile.
+                    string foreignSchema =
+                        ReignPostgreSqlStorage.CampaignSchemaName(foreignInternal);
+                    using (NpgsqlConnection other =
+                        ReignPostgreSqlStorage.OpenCampaignOwnerSessionConnection())
+                    {
+                        using (NpgsqlCommand command = new NpgsqlCommand(
+                            "CREATE SCHEMA IF NOT EXISTS \"" + foreignSchema + "\";", other))
+                            command.ExecuteNonQuery();
+                        using (NpgsqlCommand command = new NpgsqlCommand(@"
+INSERT INTO reign_meta.campaign_registry(campaign_id,schema_name,created_utc,updated_utc)
+VALUES(@campaign_id,@schema_name,now(),now());", other))
+                        {
+                            command.Parameters.AddWithValue("campaign_id", foreignInternal);
+                            command.Parameters.AddWithValue("schema_name", foreignSchema);
+                            command.ExecuteNonQuery();
+                        }
+                    }
+                }
+                finally
+                {
+                    ReignPostgreSqlStorage.EndCampaignCreationScope(scope);
+                }
+                bool registeredDuringRun = RegisteredCampaignIdsForSelfTest().IsSupersetOf(
+                    new[] { runInternal, runReal, liveReal, backgroundInternal, foreignInternal });
+                List<string> leaked = DropVerificationRunCampaigns(scope, preexisting);
+                HashSet<string> after = RegisteredCampaignIdsForSelfTest();
+                add("verification_sweep_drops_only_run_campaigns",
+                    registeredDuringRun
+                    && leaked.Count == 0
+                    && !after.Contains(runInternal)
+                    && !after.Contains(runReal)
+                    && !after.Contains(backgroundInternal)
+                    && after.Contains(liveReal)
+                    && after.Contains(foreignInternal),
+                    "A verification run's cleanup removes every campaign the run created (including internal campaigns its background work created) and keeps real campaigns created outside the run and other processes' campaigns.");
+            }
+            catch (Exception ex)
+            {
+                add("verification_sweep_exception", false, ex.ToString());
+            }
+            finally
+            {
+                foreach (string id in new[] { runInternal, runReal, liveReal, backgroundInternal, foreignInternal })
+                {
+                    try { ReignPostgreSqlStorage.DropCampaign(id); }
+                    catch { }
+                }
+            }
+
+            string liveOwned = "__owner_live_" + token;
+            string orphaned = "__owner_orphan_" + token;
+            NpgsqlConnection otherProcess = null;
+            try
+            {
+                using (ReignPostgreSqlStorage.OpenCampaignConnection(liveOwned)) { }
+                using (ReignPostgreSqlStorage.OpenCampaignConnection(orphaned)) { }
+                bool claimed = ReignPostgreSqlStorage.OwnsInternalCampaign(liveOwned)
+                    && ReignPostgreSqlStorage.OwnsInternalCampaign(orphaned);
+                // Hand one campaign to another live session (as another server process would
+                // hold it) and orphan the other (as if its process had exited).
+                ReignPostgreSqlStorage.ReleaseInternalCampaignOwnership(liveOwned);
+                ReignPostgreSqlStorage.ReleaseInternalCampaignOwnership(orphaned);
+                otherProcess = ReignPostgreSqlStorage.OpenCampaignOwnerSessionConnection();
+                bool otherOwns = ReignPostgreSqlStorage.TryAcquireCampaignOwnerLock(
+                    otherProcess, liveOwned);
+                HashSet<string> kept =
+                    ReignPostgreSqlStorage.DropInternalCampaignsWithoutLiveOwner(
+                        new[] { liveOwned, orphaned });
+                bool liveKept = kept.Contains(liveOwned)
+                    && ReignPostgreSqlStorage.CampaignExists(liveOwned);
+                bool orphanDropped = !kept.Contains(orphaned)
+                    && !ReignPostgreSqlStorage.CampaignExists(orphaned);
+                otherProcess.Dispose();
+                otherProcess = null;
+                HashSet<string> keptAfterExit =
+                    ReignPostgreSqlStorage.DropInternalCampaignsWithoutLiveOwner(
+                        new[] { liveOwned });
+                bool droppedAfterExit = keptAfterExit.Count == 0
+                    && !ReignPostgreSqlStorage.CampaignExists(liveOwned);
+                add("startup_cleanup_keeps_live_owned_internal_campaigns",
+                    claimed && otherOwns && liveKept && orphanDropped && droppedAfterExit,
+                    "Startup cleanup keeps internal campaigns another live server process owns and removes orphans, including the same campaign once its owner has exited.");
+            }
+            catch (Exception ex)
+            {
+                add("startup_cleanup_ownership_exception", false, ex.ToString());
+            }
+            finally
+            {
+                otherProcess?.Dispose();
+                foreach (string id in new[] { liveOwned, orphaned })
+                {
+                    try { ReignPostgreSqlStorage.DropCampaign(id); }
+                    catch { }
+                }
+            }
         }
     }
 }
