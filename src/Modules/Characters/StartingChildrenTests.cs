@@ -162,13 +162,15 @@ namespace ReignBetaServer
             test("native_initialization_and_catalog_contract", () =>
             {
                 string root = FindVerificationSourceRoot();
-                string adapter = File.ReadAllText(Path.Combine(root, "ReignBeta", "src", "Modules", "Characters", "Campaign", "ReignStartingChildrenCampaignBehavior.cs"));
-                string submodule = File.ReadAllText(Path.Combine(root, "ReignBeta", "src", "Modules", "Platform", "SubModule.cs"));
+                string clientRoot = Path.Combine(root, "ReignBeta");
+                string adapter = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+                string adapterScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignStartingChildrenCampaignBehavior");
+                string submodule = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBeta.SubModule");
                 string catalog = File.ReadAllText(Path.Combine(root, "reign.testing.json"));
                 RequireStarting(adapter.Contains("HeroCreator.CreateChild(") && adapter.Contains("if (_loadedSave || _state.Completed) return;")
-                    && !adapter.Contains("OnGameLoadedEvent.Add") && !adapter.Contains("DailyTickEvent.Add")
-                    && !adapter.Contains("DeliverOffSpring(") && !adapter.Contains(".IsPregnant =")
-                    && !adapter.Contains(".OnGivenBirth(") && !adapter.Contains("ChangeState("), "Seeding must be new-game-only and preserve pregnancy and native child lifecycle.");
+                    && !adapterScoped.Contains("OnGameLoadedEvent.Add") && !adapterScoped.Contains("DailyTickEvent.Add")
+                    && !adapterScoped.Contains("DeliverOffSpring(") && !adapterScoped.Contains(".IsPregnant =")
+                    && !adapterScoped.Contains(".OnGivenBirth(") && !adapterScoped.Contains("ChangeState("), "Seeding must be new-game-only and preserve pregnancy and native child lifecycle.");
                 RequireStarting(submodule.IndexOf("new ReignStartingChildrenCampaignBehavior()", StringComparison.Ordinal)
                     > submodule.IndexOf("new ReignCourtNobleCampaignBehavior()", StringComparison.Ordinal), "Court household initialization must precede child creation.");
                 RequireStarting(catalog.Contains("contracts.starting_children") && catalog.Contains("reign-starting-children-runtime-v1")
