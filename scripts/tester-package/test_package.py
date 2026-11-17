@@ -2,9 +2,11 @@
 print('tester-contracts: isolated Python started',flush=True)
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 import os
@@ -61,6 +63,37 @@ class PackageContracts(unittest.TestCase):
         self.assertIn('create_main_cluster = false',source)
         self.assertIn('--leave-stopped',(HERE/'initialize-server.sh').read_text())
         self.assertIn('pg_createcluster 15 main --port=5432',(HERE/'initialize-server.sh').read_text())
+
+    def test_image_sanitizer_rewrites_gnu_sparse_members(self):
+        spec=importlib.util.spec_from_file_location('sanitize_image',HERE/'sanitize_image.py')
+        sanitizer=importlib.util.module_from_spec(spec);spec.loader.exec_module(sanitizer)
+        def sparse(name):
+            # GNU sparse 1.0 PAX member: extent map block, then stored extents [(0,4),(1024,4)] of a 1028-byte file.
+            stored=b'2\n0\n4\n1024\n4\n'.ljust(512,b'\0')+b'headtail'
+            info=tarfile.TarInfo('./GNUSparseFile.0/'+name.rsplit('/',1)[-1]);info.size=len(stored)
+            info.pax_headers={'GNU.sparse.major':'1','GNU.sparse.minor':'0','GNU.sparse.name':name,'GNU.sparse.realsize':'1028'}
+            return info,io.BytesIO(stored)
+        with tempfile.TemporaryDirectory(prefix='reign-package-sparse-') as raw:
+            source=Path(raw)/'raw.tar';output=Path(raw)/'clean.tar'
+            with tarfile.open(source,'w',format=tarfile.PAX_FORMAT) as tar:
+                tar.addfile(*sparse('./var/log/lastlog'));tar.addfile(*sparse('./opt/kept.bin'))
+                stale=tarfile.TarInfo('./var/log/app.log');stale.size=5;stale.pax_headers={'size':'5'}
+                tar.addfile(stale,io.BytesIO(b'stale'))
+                sentinel=tarfile.TarInfo('./etc/sentinel');sentinel.size=8
+                tar.addfile(sentinel,io.BytesIO(b'sentinel'))
+            with tarfile.open(source) as tar:self.assertEqual(tar.getmember('./var/log/lastlog').sparse,[(0,4),(1024,4)])
+            self.assertEqual(sanitizer.sanitize(source,output),['var/log/lastlog','var/log/app.log'])
+            self.assertNotIn(b'GNU.sparse',output.read_bytes())
+            with tarfile.open(output) as tar:
+                members={m.name:m for m in tar}
+                self.assertEqual(list(members),['./var/log/lastlog','./opt/kept.bin','./var/log/app.log','./etc/sentinel'])
+                for m in members.values():
+                    self.assertTrue(m.isreg());self.assertIsNone(m.sparse)
+                    self.assertFalse([k for k in m.pax_headers if k.startswith('GNU.sparse.')])
+                read=lambda name:tar.extractfile(members[name]).read()
+                self.assertEqual((read('./var/log/lastlog'),read('./var/log/app.log')),(b'',b''))
+                self.assertEqual(read('./opt/kept.bin'),b'head'+b'\0'*1020+b'tail')
+                self.assertEqual(read('./etc/sentinel'),b'sentinel')
 
     def test_windows_installer_contracts(self):
         with tempfile.TemporaryDirectory(prefix='reign-package-ps-') as raw:
