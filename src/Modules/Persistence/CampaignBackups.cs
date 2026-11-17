@@ -1364,12 +1364,26 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> DeleteAllCampaignBackupData(Dictionary<string, object> payload)
         {
-            CampaignDataGate.EnterWriteLock();
-            try { return DeleteAllCampaignBackupDataCore(payload); }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            return DeleteAllCampaignBackupData(payload, out _);
         }
 
-        private static Dictionary<string, object> DeleteAllCampaignBackupDataCore(Dictionary<string, object> payload)
+        // Validates and schedules only; it makes no destructive call. scheduled is true only for the
+        // one request that published the pending owner, which then owns the response-sent signal.
+        private static Dictionary<string, object> DeleteAllCampaignBackupData(Dictionary<string, object> payload, out bool scheduled)
+        {
+            scheduled = false;
+            CampaignDataGate.EnterWriteLock();
+            try { return DeleteAllCampaignBackupDataCore(payload, ref scheduled); }
+            finally
+            {
+                CampaignDataGate.ExitWriteLock();
+                // After both campaign locks are released: the first scheduler stop settles queued
+                // never-started releases synchronously on this thread.
+                if (scheduled) RequestServerShutdown("campaign_delete_all");
+            }
+        }
+
+        private static Dictionary<string, object> DeleteAllCampaignBackupDataCore(Dictionary<string, object> payload, ref bool scheduled)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!ReadString(payload, "confirmation", "").Equals("delete", StringComparison.Ordinal))
@@ -1401,34 +1415,125 @@ namespace ReignBetaServer
                 if (localVectors) bytesDeleted += SafeDirectorySize(vectorsRoot);
                 string legacyActionQueue = Path.Combine(DataDir, "action-queue.json");
                 try { if (File.Exists(legacyActionQueue)) bytesDeleted += new FileInfo(legacyActionQueue).Length; } catch { }
-                try
+                string refusal = "";
+                // Validate the trusted configured external target without contacting it.
+                if (!localVectors && string.IsNullOrWhiteSpace(ReadString(settings, "qdrantUrl", "")))
+                    refusal = "External Qdrant is selected, but its URL is not configured. No campaign data was deleted.";
+                else
                 {
-                    if (!localVectors) DeleteExternalSemanticCollection(settings);
-                    DeleteAllCampaignResponseSent.Reset();
-                    DeleteAllCampaignDataPending = true;
-                    Dictionary<string, object> result = new Dictionary<string, object>
+                    lock (DeleteAllScheduleLock)
                     {
-                        ["ok"] = true,
-                        ["serverStopping"] = true,
-                        ["campaignsScheduled"] = campaignCount,
-                        ["backupArchivesScheduled"] = backupCount,
-                        ["bytesScheduled"] = bytesDeleted,
-                        ["semanticProvider"] = localVectors ? "local" : "qdrant",
-                        ["cleanupMode"] = "server_shutdown",
-                        ["message"] = "Campaign deletion is confirmed. Reign is shutting down, then this same server process will remove all campaign data, campaign-specific portraits, backups, queued actions, semantic indexes, and accumulated test results. The pregenerated shared portrait library, test definitions, global settings, API key, and native Bannerlord saves are preserved. Restart the Reign server after this page disconnects."
-                    };
-                    LogOperational("campaign.all_delete_scheduled", result);
-                    RequestServerShutdown("campaign_delete_all");
-                    return result;
+                        if (DeleteAllSchedulingClosed)
+                            refusal = "Reign is already shutting down, so campaign deletion was not scheduled. No campaign data was deleted. Restart the Reign server and try again.";
+                        else if (DeleteAllCampaignDataPending)
+                            refusal = "Campaign deletion is already scheduled and Reign is shutting down.";
+                        else
+                        {
+                            // Exactly this request's selection is carried to teardown; never overwritten.
+                            DeleteAllScheduledSettings = settings;
+                            DeleteAllCampaignResponseSent.Reset();
+                            DeleteAllCampaignDataPending = true;
+                            scheduled = true;
+                        }
+                    }
                 }
-                catch (Exception ex)
+                if (!scheduled)
                 {
-                    DeleteAllCampaignDataPending = false;
-                    DeleteAllCampaignResponseSent.Set();
-                    LogOperational("campaign.all_delete_failed", new Dictionary<string, object> { ["error"] = ex.Message });
-                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message };
+                    LogOperational("campaign.all_delete_failed", new Dictionary<string, object> { ["error"] = refusal });
+                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = refusal };
+                }
+                Dictionary<string, object> result = new Dictionary<string, object>
+                {
+                    ["ok"] = true,
+                    ["serverStopping"] = true,
+                    ["campaignsScheduled"] = campaignCount,
+                    ["backupArchivesScheduled"] = backupCount,
+                    ["bytesScheduled"] = bytesDeleted,
+                    ["semanticProvider"] = localVectors ? "local" : "qdrant",
+                    ["cleanupMode"] = "server_shutdown",
+                    ["message"] = "Campaign deletion is scheduled. Reign is shutting down; once background work has stopped, this same server process will remove all campaign data, campaign-specific portraits, backups, queued actions, semantic indexes, and accumulated test results. If cleanup cannot start safely, nothing is deleted; logs/delete-all-last.json records the outcome and how to retry after restarting. The pregenerated shared portrait library, test definitions, global settings, API key, and native Bannerlord saves are preserved. Restart the Reign server after this page disconnects."
+                };
+                LogOperational("campaign.all_delete_scheduled", result);
+                return result;
+            }
+        }
+
+        // Re-evaluated after quiescence, before any delete phase. Local teardown rechecks Bannerlord itself.
+        private static string DeleteAllPreDeleteBlockReason()
+        {
+            string running = CampaignMutationBlockReason();
+            if (!string.IsNullOrWhiteSpace(running)) return running;
+            if (VerificationTask != null && !VerificationTask.IsCompleted)
+                return "A verification run was still active.";
+            return "";
+        }
+
+        private static void WriteDeleteAllFailureReceipt(Dictionary<string, object> result)
+        {
+            try
+            {
+                Directory.CreateDirectory(LogsDir);
+                WriteJsonObject(Path.Combine(LogsDir, "delete-all-last.json"), result);
+                LogOperational("campaign.all_delete_failed", result);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// API teardown for a scheduled delete-all, after the listener claimed it. Runs with no
+        /// campaign/backup lock held. Unless quiescence settled and the guard passes, it makes no
+        /// external or local delete call. The captured external collection is erased first, while the
+        /// vector worker can serve; semantic memory is then stopped on every path; local teardown runs
+        /// only after external success and a clean semantic stop. Failures write the existing
+        /// delete-all-last.json receipt; the first known failure is kept and a stop fault is added.
+        /// </summary>
+        private static int CompleteScheduledDeleteAllCampaignData(Dictionary<string, object> settings, Dictionary<string, object> quiescence,
+            Func<string> preDeleteBlockReason, Action<Dictionary<string, object>> deleteExternal, Action stopSemantic,
+            Func<int> deleteLocal, Action<Dictionary<string, object>> recordFailure)
+        {
+            const string retry = " No campaign data was deleted. Restart the Reign server and run Delete all again.";
+            // Once the external call has been made, the external index may be erased (fully or partly).
+            const string externalRetry = " Local campaign data was not deleted, but the external semantic index may already be erased. Restart the Reign server and run Delete all again.";
+            settings = settings ?? new Dictionary<string, object>();
+            string failure = "";
+            bool externalAttempted = false;
+            try
+            {
+                if (!ReadBool(quiescence, "settled", false))
+                    failure = "Background work, in-flight requests or semantic indexing did not stop within the shutdown limit." + retry;
+                else
+                {
+                    string blocked = preDeleteBlockReason();
+                    if (!string.IsNullOrWhiteSpace(blocked)) failure = blocked + retry;
+                    else if (ReadString(settings, "vectorProvider", "local").Equals("qdrant", StringComparison.OrdinalIgnoreCase))
+                    {
+                        externalAttempted = true;
+                        deleteExternal(settings);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                string message = string.IsNullOrWhiteSpace(ex.Message) ? "Campaign deletion failed." : ex.Message.Trim();
+                failure = message + (externalAttempted ? externalRetry : retry);
+            }
+            string stopFailure = "";
+            try { stopSemantic(); }
+            catch (Exception ex) { stopFailure = string.IsNullOrWhiteSpace(ex.Message) ? "unknown error" : ex.Message.Trim(); }
+            if (failure.Length == 0 && stopFailure.Length != 0)
+                failure = "Semantic memory did not stop cleanly (" + stopFailure + ")." + (externalAttempted ? externalRetry : retry);
+            if (failure.Length == 0) return deleteLocal();
+            Dictionary<string, object> receipt = new Dictionary<string, object>
+            {
+                ["ok"] = false,
+                ["completedUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                ["error"] = failure,
+                ["externalDeleteAttempted"] = externalAttempted,
+                ["quiescence"] = quiescence ?? new Dictionary<string, object>()
+            };
+            if (stopFailure.Length != 0) receipt["semanticStopError"] = stopFailure;
+            recordFailure(receipt);
+            return 1;
         }
 
         private static int CompleteDeferredDeleteAllCampaignData(string[] args)
@@ -2620,6 +2725,40 @@ WHERE table_schema=current_schema()
                 CampaignMutationAllowDuringTests = true;
                 Dictionary<string, object> rejected = DeleteAllCampaignBackupData(new Dictionary<string, object> { ["confirmation"] = "DELETE" });
                 add("delete_all_requires_exact_confirmation", !ReadBool(rejected, "ok", true), "Delete all requires the exact lowercase word delete.");
+
+                // Scheduled teardown phases with inert recording callbacks: no deletion, no receipt write.
+                string lastReceiptError = "";
+                string RunPhases(string provider, bool settled, bool externalFails, string blocked, bool stopFails = false)
+                {
+                    List<string> calls = new List<string>();
+                    int code = CompleteScheduledDeleteAllCampaignData(
+                        new Dictionary<string, object> { ["vectorProvider"] = provider, ["qdrantUrl"] = "http://qdrant.invalid" },
+                        new Dictionary<string, object> { ["settled"] = settled },
+                        () => { calls.Add("guard"); return blocked; },
+                        _ => { calls.Add("external"); if (externalFails) throw new InvalidOperationException("external failed"); },
+                        () => { calls.Add("stop"); if (stopFails) throw new InvalidOperationException("stop failed"); },
+                        () => { calls.Add("local"); return 0; },
+                        receipt =>
+                        {
+                            lastReceiptError = ReadString(receipt, "error", "");
+                            calls.Add(ReadBool(receipt, "ok", true) ? "receipt_ok" : "receipt_failed");
+                        });
+                    return string.Join(",", calls) + ":" + code;
+                }
+                add("delete_all_timeout_deletes_nothing", RunPhases("qdrant", false, false, "") == "stop,receipt_failed:1",
+                    "Unsettled shutdown quiescence writes a failure receipt and makes no external or local delete call.");
+                add("delete_all_guard_recheck_deletes_nothing", RunPhases("qdrant", true, false, "blocked") == "guard,stop,receipt_failed:1",
+                    "A failed pre-delete guard recheck makes no external or local delete call.");
+                add("delete_all_external_failure_skips_local", RunPhases("qdrant", true, true, "") == "guard,external,stop,receipt_failed:1",
+                    "External index failure stops semantic memory and never reaches local teardown.");
+                add("delete_all_external_then_local", RunPhases("qdrant", true, false, "") == "guard,external,stop,local:0"
+                    && RunPhases("local", true, false, "") == "guard,stop,local:0",
+                    "After quiescence the captured external index is erased before semantic memory stops, and local teardown runs last.");
+                add("delete_all_stop_fault_skips_local", RunPhases("qdrant", true, false, "", true) == "guard,external,stop,receipt_failed:1"
+                    && lastReceiptError.Contains("Restart the Reign server") && !lastReceiptError.Contains("No campaign data was deleted")
+                    && RunPhases("qdrant", true, true, "", true) == "guard,external,stop,receipt_failed:1"
+                    && lastReceiptError.StartsWith("external failed", StringComparison.Ordinal),
+                    "A semantic stop fault is surfaced and skips local teardown, keeping the earlier failure and never claiming nothing was deleted after the external call.");
 
                 List<string> purgeDirectories = new List<string>
                 {

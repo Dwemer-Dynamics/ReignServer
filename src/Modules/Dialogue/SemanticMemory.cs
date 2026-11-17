@@ -593,14 +593,21 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
             return task != null && !task.IsCompleted && cancellation != null && !cancellation.IsCancellationRequested;
         }
 
-        private static void StopSemanticMemorySubsystem()
+        // Returns true only when the worker owned when this stop began is proven exited (or none was
+        // owned) and no newer worker is tracked. Ordinary callers ignore the result; it never throws.
+        private static bool StopSemanticMemorySubsystem(int processExitTimeoutMs = 1500)
         {
             Task pump;
             CancellationTokenSource cancellation;
+            Process owned;
             lock (SemanticWorkerLock)
             {
                 pump = SemanticPumpTask;
                 cancellation = SemanticPumpCancellation;
+                // Identity only: the exact Process this server spawned, captured with the pump before
+                // any wait so a replacement started after this stop began cannot become its target.
+                // No endpoint, URL or PID lookup.
+                owned = SemanticWorkerProcess;
                 try { cancellation?.Cancel(); } catch { }
             }
             try { pump?.Wait(1500); } catch { }
@@ -613,25 +620,40 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
                     try { cancellation?.Dispose(); } catch { }
                 }
             }
-            Dictionary<string, object> settings = LoadSettings();
-            lock (SemanticWorkerLock)
+            // Kill and the bounded exit check run with no campaign, backup or worker lock held.
+            bool exitProven = owned == null;
+            if (owned != null)
             {
                 try
                 {
-                    if (SemanticWorkerProcess != null && !SemanticWorkerProcess.HasExited)
+                    if (!owned.HasExited)
                     {
-                        // A healthy external endpoint is not proof that this process owns it.
-                        try { PostJsonToUrl(ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082") + "/shutdown", "{}", 750); } catch { }
-                        if (!SemanticWorkerProcess.WaitForExit(1500)) SemanticWorkerProcess.Kill();
+                        try { owned.Kill(); } catch { }
                     }
+                    exitProven = owned.WaitForExit(processExitTimeoutMs);
                 }
-                catch { }
-                SemanticWorkerProcess = null;
+                catch { exitProven = false; }
+            }
+            lock (SemanticWorkerLock)
+            {
+                // An unproven exit keeps the exact handle tracked so a later stop cannot treat a
+                // live/unknown worker as unowned; a replacement is never cleared by this stop.
+                if (owned != null && exitProven && ReferenceEquals(SemanticWorkerProcess, owned)) SemanticWorkerProcess = null;
+                return exitProven && SemanticWorkerProcess == null;
             }
         }
 
         private static void StartManagedSemanticWorker(Dictionary<string, object> settings)
         {
+            StartManagedSemanticWorker(settings, null);
+        }
+
+        // stopRequested is the pump-only admission check: a canceled or shut-down pump must not probe
+        // or spawn. Other callers (explicit external delete, Save Sync, restore) pass null and keep
+        // their ability to start the worker after ShutdownRequested.
+        private static void StartManagedSemanticWorker(Dictionary<string, object> settings, Func<bool> stopRequested)
+        {
+            if (stopRequested != null && stopRequested()) return;
             string baseUrl = ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082").TrimEnd('/');
             try
             {
@@ -646,6 +668,9 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
 
             lock (SemanticWorkerLock)
             {
+                // Rechecked under the same lock StopSemanticMemorySubsystem cancels and snapshots under:
+                // either this spawn is visible to that stop, or the stale pump is refused here.
+                if (stopRequested != null && stopRequested()) return;
                 if (SemanticWorkerProcess != null && !SemanticWorkerProcess.HasExited) return;
                 Uri workerUri;
                 if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out workerUri)
@@ -691,7 +716,10 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
 
         private static void SemanticIndexPump(CancellationToken token, int generation)
         {
-            while (!token.IsCancellationRequested && !ShutdownRequested)
+            // A replaced (disable/re-enable) or shut-down pump may still be running; it must not
+            // enumerate, open a campaign DB or spawn a worker once stopped.
+            Func<bool> stopRequested = () => token.IsCancellationRequested || ShutdownRequested;
+            while (!stopRequested())
             {
                 if (SemanticIndexShouldYield())
                 {
@@ -704,13 +732,21 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
                 {
                     SemanticPumpLastCycleUtc = DateTime.UtcNow;
                     Dictionary<string, object> settings = LoadSettings();
-                    if (ReadBool(settings, "enableSemanticMemory", true))
+                    if (ReadBool(settings, "enableSemanticMemory", true) && !stopRequested())
                     {
-                        StartManagedSemanticWorker(settings);
-                        foreach (Dictionary<string, object> campaign
-                            in ReignPostgreSqlStorage.ListCampaignMetadata())
+                        StartManagedSemanticWorker(settings, stopRequested);
+                        // ListCampaignMetadata runs EnsureInfrastructure: short read lease around enumeration only.
+                        List<Dictionary<string, object>> campaigns = null;
+                        CampaignDataGate.EnterReadLock();
+                        try
                         {
-                            if (token.IsCancellationRequested) break;
+                            if (!stopRequested()) campaigns = ReignPostgreSqlStorage.ListCampaignMetadata();
+                        }
+                        finally { CampaignDataGate.ExitReadLock(); }
+                        if (campaigns != null)
+                        foreach (Dictionary<string, object> campaign in campaigns)
+                        {
+                            if (stopRequested()) break;
                             if (SemanticIndexShouldYield()) break;
                             string campaignId =
                                 ReadString(campaign, "campaignId", "");
@@ -721,6 +757,10 @@ next_attempt_ts=0,last_error='',enqueued_ts=$ts,updated_ts=$ts;",
                                 {
                                     lock (SemanticJobProcessingLock)
                                     {
+                                        // Rechecked after both locks: a stale acquisition after the
+                                        // delete-all write barrier is refused before any DB open.
+                                        // Breaking here still releases both locks before leaving.
+                                        if (stopRequested()) break;
                                         processed += ProcessSemanticJobs(campaignId, settings);
                                     }
                                 }

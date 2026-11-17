@@ -2499,10 +2499,11 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 add("replay_corpus_bounded_path", Path.GetFileName(boundedReplayPath).Length < 40,
                     "Automatic replay filenames remain below legacy Windows path limits even with long correlation ids.", boundedReplayPath);
 
-                int ran = 0;
-                System.Threading.Tasks.Task scheduled = EnqueuePriorityBackgroundWork("architecture.self_test", "interactive", () => Interlocked.Increment(ref ran));
-                bool scheduledDone = scheduled.Wait(3000);
-                add("priority_scheduler", scheduledDone && ran == 1, "Priority work completes through the shared scheduler and exposes queue state.", PriorityBackgroundStatus());
+                // Isolated instance: this suite runs as verification.run on the shared scheduler's
+                // only worker, so it must never wait on that scheduler.
+                add("priority_scheduler", RunPrioritySchedulerSelfTest(out Dictionary<string, object> schedulerEvidence),
+                    "A bounded scheduler keeps interactive headroom, refuses saturated lower priorities as busy, defers lower priorities without dequeuing them, keeps FIFO within priority, and on stop cancels queued work before start while active work reports its real outcome; concurrent stops share one fence that settles only after held queued releases and the active callback finish.",
+                    schedulerEvidence);
 
                 ManualResetEvent firstReaderEntered = new ManualResetEvent(false);
                 ManualResetEvent releaseFirstReader = new ManualResetEvent(false);
@@ -3464,6 +3465,104 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ReadBool(codexTest, "passed", false), ReadString(codexTest, "summary", "Codex app-server provider contract."), codexTest);
             }
             return results;
+        }
+
+        private static bool RunPrioritySchedulerSelfTest(out Dictionary<string, object> evidence)
+        {
+            var order = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var releases = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var entered = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            var release = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            var queuedReleaseEntered = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            var queuedReleaseGate = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            int hold = 1;
+            // Capacity 4, reserve 1: interactive limit 4, normal 3, maintenance 2.
+            BoundedPriorityScheduler scheduler = new BoundedPriorityScheduler("Reign priority scheduler self-test", 4, 1,
+                level => Volatile.Read(ref hold) == 1, false);
+            PriorityWorkAdmission Add(string name, int level, out System.Threading.Tasks.Task task) =>
+                scheduler.TryEnqueue(name, level, () => order.Enqueue(name), reason => releases.Enqueue(name + ":" + reason), out task);
+            bool Settled(System.Threading.Tasks.Task task) =>
+                System.Threading.Tasks.Task.WaitAny(new[] { task }, 3000) == 0;
+            evidence = new Dictionary<string, object>();
+            try
+            {
+                PriorityWorkAdmission m1 = Add("m1", 2, out _), m2Admission = Add("m2", 2, out var m2);
+                bool admissions = m1 == PriorityWorkAdmission.Accepted && m2Admission == PriorityWorkAdmission.Accepted
+                    && Add("m3", 2, out _) == PriorityWorkAdmission.Busy && Add("n1", 1, out _) == PriorityWorkAdmission.Accepted
+                    && Add("n2", 1, out _) == PriorityWorkAdmission.Busy;
+                PriorityWorkAdmission interactive = scheduler.TryEnqueue("i1", 0, () => order.Enqueue("i1"), null, out var i1);
+                bool headroom = interactive == PriorityWorkAdmission.Accepted && Settled(i1) && i1.Status == System.Threading.Tasks.TaskStatus.RanToCompletion;
+                Dictionary<string, object> deferred = scheduler.Status();
+                bool deferredQueued = string.Join(",", order) == "i1" && ReadInt(deferred, "normalQueued", -1) == 1
+                    && ReadInt(deferred, "maintenanceQueued", -1) == 2;
+                scheduler.TryEnqueue("fault", 0, () => throw new InvalidOperationException("self-test fault"), null, out var fault);
+                bool faultReported = Settled(fault) && fault.Exception?.GetBaseException() is InvalidOperationException;
+                Volatile.Write(ref hold, 0);
+                bool fifo = Settled(m2) && string.Join(",", order) == "i1,n1,m1,m2";
+
+                Volatile.Write(ref hold, 1);
+                scheduler.TryEnqueue("active", 0, () =>
+                {
+                    entered.TrySetResult(true);
+                    release.Task.Wait(5000);
+                    throw new InvalidOperationException("self-test active fault");
+                }, null, out var activeTask);
+                bool activeEntered = entered.Task.Wait(3000);
+                // Stays queued behind the maintenance quiet period; its release blocks until signaled.
+                bool queuedAccepted = scheduler.TryEnqueue("queued", 2, () => order.Enqueue("queued"), reason =>
+                {
+                    releases.Enqueue("queued:" + reason);
+                    queuedReleaseEntered.TrySetResult(true);
+                    queuedReleaseGate.Task.Wait(5000);
+                }, out var queuedTask) == PriorityWorkAdmission.Accepted;
+                // Stop A makes the transition and is held inside the queued release.
+                // Explicit Task<Task> keeps Stop's raw return; untyped Task.Run would pick the
+                // Func<Task> overload and unwrap it, losing the fence identity under test.
+                System.Threading.Tasks.Task<System.Threading.Tasks.Task> stopA =
+                    System.Threading.Tasks.Task.Run<System.Threading.Tasks.Task>(() => scheduler.Stop("self_test_stop"));
+                bool releaseHeld = queuedReleaseEntered.Task.Wait(3000);
+                System.Threading.Tasks.Task fence = scheduler.Stop("self_test_stop_b");
+                bool fenceShared = ReferenceEquals(fence, scheduler.Stop("self_test_stop_c"));
+                bool fenceOpen = !fence.IsCompleted && !queuedTask.IsCompleted;
+                bool lateRefused = Add("late", 0, out var lateTask) == PriorityWorkAdmission.Stopping && lateTask.IsCanceled;
+                release.TrySetResult(true);
+                // Active alone is terminal with its real fault; the held release still owes the fence.
+                bool activeReal = Settled(activeTask) && activeTask.IsFaulted
+                    && activeTask.Exception?.GetBaseException() is InvalidOperationException;
+                bool fenceHeldByRelease = !fence.IsCompleted && !queuedTask.IsCompleted && !stopA.IsCompleted;
+                queuedReleaseGate.TrySetResult(true);
+                bool fenceSettled = Settled(fence) && fence.Status == System.Threading.Tasks.TaskStatus.RanToCompletion
+                    && Settled(stopA) && ReferenceEquals(stopA.Result, fence) && queuedTask.IsCanceled;
+                bool releasesExact = string.Join(",", releases.OrderBy(value => value, StringComparer.Ordinal))
+                    == "late:stopping,m3:busy,n2:busy,queued:canceled_before_start";
+                bool noLateCallback = !order.Contains("queued") && !order.Contains("late");
+                Dictionary<string, object> stopped = scheduler.Status();
+                evidence = new Dictionary<string, object>
+                {
+                    ["admissions"] = admissions, ["headroom"] = headroom, ["deferredQueued"] = deferredQueued,
+                    ["faultReported"] = faultReported, ["fifo"] = fifo, ["order"] = string.Join(",", order),
+                    ["activeEntered"] = activeEntered, ["queuedAccepted"] = queuedAccepted, ["releaseHeld"] = releaseHeld,
+                    ["fenceShared"] = fenceShared, ["fenceOpen"] = fenceOpen, ["lateRefused"] = lateRefused,
+                    ["activeReal"] = activeReal, ["fenceHeldByRelease"] = fenceHeldByRelease, ["fenceSettled"] = fenceSettled,
+                    ["releases"] = releases.ToList(), ["noLateCallback"] = noLateCallback,
+                    ["stoppedStatus"] = stopped, ["sharedStatus"] = PriorityBackgroundStatus()
+                };
+                return admissions && headroom && deferredQueued && faultReported && fifo && activeEntered && queuedAccepted
+                    && releaseHeld && fenceShared && fenceOpen && lateRefused && activeReal && fenceHeldByRelease && fenceSettled
+                    && releasesExact && noLateCallback
+                    && ReadInt(stopped, "canceledBeforeStart", -1) == 1 && ReadInt(stopped, "failed", -1) == 2;
+            }
+            catch (Exception ex)
+            {
+                evidence["error"] = ex.GetType().Name;
+                return false;
+            }
+            finally
+            {
+                release.TrySetResult(true);
+                queuedReleaseGate.TrySetResult(true);
+                scheduler.Stop("self_test_complete");
+            }
         }
     }
 }

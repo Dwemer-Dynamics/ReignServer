@@ -114,23 +114,39 @@ WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
             }
         }
 
+        // Startup-only reconciliation with no dedicated retry. Program submits it immediately after
+        // the scheduler starts, ahead of every other producer and memory fan-out, but admission is
+        // still not guaranteed (busy, stopping or canceled before start skips it); the result
+        // (queued, completed, yielded, failed or skipped_<reason>) is exposed through
+        // /api/background/status as reputationReasonResumeOutcome.
+        private static string ReputationReasonResumeOutcome = "";
+
         private static void ResumePendingReputationReasonJobs()
         {
-            EnqueuePriorityBackgroundWork("reputation.reason.resume", "maintenance", () =>
+            System.Threading.Volatile.Write(ref ReputationReasonResumeOutcome, "queued");
+            TryEnqueuePriorityBackgroundWork("reputation.reason.resume", "maintenance", () =>
             {
-                string root = CampaignsRoot();
-                if (!Directory.Exists(root)) return;
-                foreach (string directory in Directory.GetDirectories(root))
+                string outcome = "failed";
+                try { outcome = ReconcileRecordedReputationReasonsAtStartup(); }
+                finally { System.Threading.Volatile.Write(ref ReputationReasonResumeOutcome, outcome); }
+            }, reason => System.Threading.Volatile.Write(ref ReputationReasonResumeOutcome, "skipped_" + reason), out _);
+        }
+
+        private static string ReconcileRecordedReputationReasonsAtStartup()
+        {
+            string root = CampaignsRoot();
+            if (!Directory.Exists(root)) return "completed";
+            foreach (string directory in Directory.GetDirectories(root))
+            {
+                if (PriorityBackgroundWorkShouldYield()) return "yielded";
+                string campaignId = Path.GetFileName(directory);
+                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
-                    if (PriorityBackgroundWorkShouldYield()) return;
-                    string campaignId = Path.GetFileName(directory);
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    {
-                        EnsureSocialReputationSchema(connection);
-                        NormalizeRecordedReputationReasons(connection);
-                    }
+                    EnsureSocialReputationSchema(connection);
+                    NormalizeRecordedReputationReasons(connection);
                 }
-            });
+            }
+            return "completed";
         }
 
         private static Dictionary<string, object> CharacterSocialStandingProjection(
