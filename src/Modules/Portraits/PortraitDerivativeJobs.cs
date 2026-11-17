@@ -574,9 +574,8 @@ namespace ReignBetaServer
                     && PortraitDerivativeCore.PortraitCompositionError(vaminesaFocus) == null,
                     "The saved Vaminesa receipt's 8.89481008% face passes the one shared client/server gate without regenerating its image.");
                 string compositionSourceRoot = FindVerificationSourceRoot();
-                string compositionClientPath = string.IsNullOrEmpty(compositionSourceRoot) ? "" : Path.Combine(compositionSourceRoot,
-                    "ReignBeta", "src", "Modules", "Portraits", "AIPortraits", "PortraitCache.cs");
-                string compositionClientSource = File.Exists(compositionClientPath) ? File.ReadAllText(compositionClientPath) : "";
+                string compositionClientSource = string.IsNullOrEmpty(compositionSourceRoot) ? "" :
+                    VerificationSourceLocator.ReadClientTypeSourceText(Path.Combine(compositionSourceRoot, "ReignBeta"), "PortraitCache");
                 AddPortraitDerivativeTest(rows, "composition_client_shared_gate_wiring",
                     compositionClientSource.Contains("PortraitDerivativeCore.PortraitCompositionError(product.FaceFocus)")
                     && !compositionClientSource.Contains("product.FaceFocus.Height <")

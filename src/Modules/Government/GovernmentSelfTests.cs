@@ -501,13 +501,16 @@ namespace ReignBetaServer
                 && governmentPrefab.Contains("ExecuteSpeak", StringComparison.Ordinal),
                 "The actual hearing prefab binds public discussion and weighted voting with no manual recess, instant private lobbying, live relationship/loyalty predictions or retired Trust display. Rendered/native evidence separately proves artwork and live bindings.",
                 new Dictionary<string, object> { ["prefab"] = governmentPrefabPath });
-            string governmentClientRoot = Path.Combine(root, "ReignBeta", "src", "Modules", "Government");
-            string governmentText = Directory.Exists(governmentClientRoot)
+            string clientRoot = Path.Combine(root, "ReignBeta");
+            string governmentText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            // Influence changes are legitimate elsewhere in the client (court, debug tools); the Government module
+            // itself must never apply them, so this one absence check stays scoped to that module folder.
+            string governmentClientRoot = Path.Combine(clientRoot, "src", "Modules", "Government");
+            string governmentModuleText = Directory.Exists(governmentClientRoot)
                 ? string.Join("\n", Directory.GetFiles(governmentClientRoot, "*.cs", SearchOption.AllDirectories)
                     .Select(File.ReadAllText)) : string.Empty;
-            string liveHostPath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignBeta"),
-                "ReignLiveInteractionTestHost.cs", "src");
-            string liveHost = File.Exists(liveHostPath) ? File.ReadAllText(liveHostPath) : string.Empty;
+            string liveHostPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignLiveInteractionTestHost.cs");
+            string liveHost = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string serverLivePath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignServer"),
                 "LiveInteractionTest.cs", "src");
             string serverLive = File.Exists(serverLivePath) ? File.ReadAllText(serverLivePath) : string.Empty;
@@ -527,7 +530,7 @@ namespace ReignBetaServer
                 && governmentText.Contains("TryCaptureNativeDecision", StringComparison.Ordinal)
                 && governmentText.Contains("kingdom.RemoveDecision(decision)", StringComparison.Ordinal)
                 && governmentText.Contains("DiplomacyExchangePrisoners", StringComparison.Ordinal)
-                && !governmentText.Contains("ChangeClanInfluenceAction", StringComparison.Ordinal)
+                && !governmentModuleText.Contains("ChangeClanInfluenceAction", StringComparison.Ordinal)
                 && !governmentText.Contains("ChangePublicStanding", StringComparison.Ordinal)
                 && liveHost.Contains("\"government\"", StringComparison.Ordinal)
                 && liveHost.Contains("\"government_test\"", StringComparison.Ordinal)
