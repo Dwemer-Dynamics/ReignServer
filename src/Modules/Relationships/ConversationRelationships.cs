@@ -891,6 +891,12 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                 EnsureConversationRelationshipSchema(connection);
                 using var transaction = connection.BeginTransaction();
                 var receiptRows = new List<Dictionary<string, object>>();
+                // The acknowledgment update fires the revision trigger on this row, so
+                // take it for update before any receipt lock to keep one lock order.
+                string currentGeneration = receiptIds.Any(id => id.StartsWith(TerminalActionReportProtocol.ReceiptIdPrefix, StringComparison.Ordinal))
+                    ? ReadString(QuerySql(connection,
+                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "")
+                    : "";
                 foreach (string receiptId in receiptIds.OrderBy(id => id, StringComparer.Ordinal))
                 {
                     Dictionary<string, object> prior = QuerySql(connection,
@@ -899,7 +905,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                     if (prior == null) return TestDict("ok", false, "error", "A native relationship receipt does not exist in this campaign.", "receiptId", receiptId);
                     if (ReadString(prior, "receipt_id", "").StartsWith(TerminalActionReportProtocol.ReceiptIdPrefix, StringComparison.Ordinal))
                     {
-                        string actionError = CompletedActionReceiptAckError(connection, prior, nativeReceipt, measuredReceipt, receiptIds.Count);
+                        string actionError = CompletedActionReceiptAckError(currentGeneration, prior, nativeReceipt, measuredReceipt, receiptIds.Count);
                         if (actionError.Length > 0) return TestDict("ok", false, "error", actionError, "receiptId", receiptId);
                     }
                     string observer = ReadString(prior, "observer_id", ""), target = ReadString(prior, "target_id", "");
@@ -1028,7 +1034,7 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
 
         // Measured acknowledgment of an action receipt stays bound to its exact
         // report, timeline and the current campaign generation, including repeats.
-        private static string CompletedActionReceiptAckError(ReignDbConnection connection, Dictionary<string, object> prior,
+        private static string CompletedActionReceiptAckError(string current, Dictionary<string, object> prior,
             Dictionary<string, object> nativeReceipt, bool measuredReceipt, int receiptCount)
         {
             if (!measuredReceipt || receiptCount != 1)
@@ -1045,8 +1051,6 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
             }
             catch (ArgumentException) { bound = false; }
             if (!bound) return "The native acknowledgment does not match its action report binding.";
-            string current = ReadString(QuerySql(connection,
-                "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
             return current.Length > 0 && current == generation ? "" : "The action relationship receipt belongs to a different campaign generation.";
         }
 

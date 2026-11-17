@@ -520,8 +520,11 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                 EnsureCourtSocialReputationSchema(connection);
                 using (var transaction = connection.BeginTransaction())
                 {
+                    // The receipt/memory triggers later UPDATE this row; a shared lock here could be held
+                    // by a second writer queued on the outbox row and deadlock that upgrade. Take it once,
+                    // still before the outbox row, in the mode the trigger needs.
                     string current = ReadString(QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
+                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
                     var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                         TestDict("id", actionId)).FirstOrDefault();
                     var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
@@ -639,14 +642,17 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             ReadString(stored, "fingerprint", "") == termsHash && ReadString(record, "termsHash", "") == termsHash
             && ReadString(stored, "timeline_id", "") == timeline && ReadString(record, "actorHeroStringId", "") == player;
 
-        // The client reports ReignWorldActionType.ToString() parsed from the record's
-        // command (no type/typeValue is published). Bind it exactly so a changed type
-        // cannot alter relationship exclusions, duel handling or memory adjudication.
+        // The client reports ReignWorldActionType.ToString() for the record's exact transfer
+        // command. NormalizeActionCommand stores that same mapped name as type; older rows
+        // carry the command only. Any other stored type, or any typeValue (which the client
+        // prefers over both), is never accepted. Bind it exactly so a changed type cannot
+        // alter relationship exclusions, duel handling or memory adjudication.
         private static string TerminalReportExpectedType(Dictionary<string, object> record)
         {
             string command = ReadString(record, "command", "");
-            return record == null || record.ContainsKey("type") || record.ContainsKey("typeValue") ? ""
-                : command == "transfer_gold" ? "RegularTransferGold" : command == "transfer_item" ? "RegularTransferItem" : "";
+            if (record == null || record.ContainsKey("typeValue") || (command != "transfer_gold" && command != "transfer_item")) return "";
+            string expected = MapCommandToActionType(command);
+            return !record.TryGetValue("type", out object stored) || (stored is string type && type == expected) ? expected : "";
         }
 
         // Protected read-only preflight on the same versioned path. It answers, before any
@@ -778,8 +784,9 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                 using (var connection = OpenCampaignConnection(campaign))
                 using (var transaction = connection.BeginTransaction())
                 {
+                    // Same order and mode as acceptance: the memory trigger updates this row.
                     string current = ReadString(QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
+                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
                     var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                         TestDict("id", actionId)).FirstOrDefault();
                     var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");

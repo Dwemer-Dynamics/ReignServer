@@ -108,13 +108,33 @@ namespace ReignBetaServer
                 && !IsTerminalActionReportStatus(ReadString(afterInterrupt, "status", "")) && protocolCount(directionalSql) == 0 && protocolCount(actionReceiptSql) == 0, afterInterrupt);
             add("terminal_report_interruption_rolls_back_derived_standing", derivedMetricsBefore == 0 && derivedMetricsInTransaction > 0
                 && derivedCommitted() == derivedBefore, TestDict("inTransaction", derivedMetricsInTransaction, "before", derivedBefore));
-            var changedType = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson.Replace("\"RegularTransferGold\"", "\"RegularDuelPlayer\"")));
-            add("terminal_report_changed_action_type_rejected", ReadString(changedType, "reason", "") == "action_type_mismatch"
-                && !IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, protocolId)) && protocolCount(directionalSql) == 0, changedType);
             // Read-only preflight: the same predicates, distinct dispositions, no writes and no campaign creation.
             Func<string, string, string, string, Dictionary<string, object>> preflight = (camp, id, gen, terms) => TerminalActionReportPreflightApi(
                 new Dictionary<string, string> { ["campaignId"] = camp, ["timelineId"] = "player_actions_timeline", ["playerHeroStringId"] = protocolActor,
                     ["generation"] = gen, ["actionId"] = id, ["termsHash"] = terms });
+            var changedType = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson.Replace("\"RegularTransferGold\"", "\"RegularDuelPlayer\"")));
+            // The stored record carries the normalized type; a different stored type or any typeValue
+            // override is rejected by GET and POST, then the exact original row text is restored.
+            Func<string> storedPayload = () => { using (var c = OpenCampaignConnection(campaign)) return ReadString(QuerySql(c,
+                "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", protocolId)).Single(), "payload_json", ""); };
+            string originalPayload = storedPayload();
+            Func<string, bool> storedOverrideRejected = patch =>
+            {
+                using (var c = OpenCampaignConnection(campaign)) ExecuteSql(c,
+                    "UPDATE conversation_action_outbox SET payload_json=jsonb_set(payload_json::jsonb, '{record}', (payload_json::jsonb->'record') || $patch::jsonb)::text WHERE action_id=$id;",
+                    TestDict("id", protocolId, "patch", patch));
+                var get = preflight(campaign, protocolId, protocolGeneration, ReadString(protocolRecord, "termsHash", ""));
+                var post = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
+                using (var c = OpenCampaignConnection(campaign)) ExecuteSql(c,
+                    "UPDATE conversation_action_outbox SET payload_json=$payload WHERE action_id=$id;", TestDict("id", protocolId, "payload", originalPayload));
+                return ReadString(get, "disposition", "") == "conflict" && ReadString(get, "reason", "") == "action_type_mismatch"
+                    && ReadString(post, "reason", "") == "action_type_mismatch";
+            };
+            bool storedOverridesRejected = storedOverrideRejected("{\"type\":\"RegularDuelPlayer\"}") & storedOverrideRejected("{\"typeValue\":30}");
+            add("terminal_report_changed_action_type_rejected", ReadString(changedType, "reason", "") == "action_type_mismatch"
+                && ReadString(protocolRecord, "command", "") == "transfer_gold" && ReadString(protocolRecord, "type", "") == "RegularTransferGold"
+                && !protocolRecord.ContainsKey("typeValue") && storedOverridesRejected && storedPayload() == originalPayload
+                && !IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, protocolId)) && protocolCount(directionalSql) == 0, changedType);
             string protocolTerms = ReadString(protocolRecord, "termsHash", ""), rowBeforePreflight = Json.Serialize(ReadDurableConversationAction(campaign, protocolId));
             var eligible = preflight(campaign, protocolId, protocolGeneration, protocolTerms);
             string absentCampaign = "player_actions_absent_" + Guid.NewGuid().ToString("N");
@@ -204,6 +224,39 @@ VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peac
             bool waiter = concurrent != null && concurrent.Wait(30000) && concurrent.Result;
             add("terminal_report_concurrent_projection_writes_once", lockHolder && waiter && markerProjected() && onePerOwner()
                 && lockedMemory.Length > 0 && memoryRows() == lockedMemory, TestDict("locked", lockedMemory, "committed", memoryRows()));
+            // Generation upgrade under contention: a writer holds the generation shared and the outbox row, a
+            // projection queues behind it, then the holder's memory trigger updates the generation row. A
+            // projection that queued on the outbox while holding the generation shared deadlocks that upgrade.
+            clearProjected();
+            System.Threading.Tasks.Task<bool> queued = null;
+            bool queuedObserved = false, holderUpgraded = false;
+            string holderError = "";
+            using (var c = OpenCampaignConnection(campaign))
+            using (var transaction = c.BeginTransaction())
+            {
+                Func<long> revision = () => ReadLong(QuerySql(c, "SELECT source_revision FROM memory_precision_state WHERE state_id='current';").Single(), "source_revision", 0);
+                QuerySql(c, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;");
+                QuerySql(c, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", protocolId));
+                long revisionBefore = revision();
+                queued = System.Threading.Tasks.Task.Run(() => project(null));
+                // Proceed only once the projection is actually blocked by this transaction.
+                for (int i = 0; i < 300 && !queuedObserved && !queued.IsCompleted; i++)
+                {
+                    queuedObserved = ReadLong(QuerySql(c, "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid));").Single(), "n", 0) > 0;
+                    if (!queuedObserved) System.Threading.Thread.Sleep(50);
+                }
+                try
+                {
+                    // A statement trigger fires with zero rows: the real memory trigger upgrades the generation row.
+                    ExecuteSql(c, "DELETE FROM memories WHERE false;");
+                    holderUpgraded = revision() > revisionBefore;
+                    transaction.Commit();
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { holderUpgraded = false; holderError = ex.GetType().Name; }
+            }
+            bool queuedProjected = queued != null && queued.Wait(30000) && queued.Result;
+            add("terminal_report_queued_projection_never_blocks_generation_upgrade", queuedObserved && holderUpgraded && queuedProjected
+                && markerProjected() && onePerOwner(), TestDict("queued", queuedObserved, "upgraded", holderUpgraded, "projected", queuedProjected, "error", holderError));
             var protocolReplay =TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
             add("terminal_report_exact_replay_leaves_derived_writes", derivedCommitted() == derivedAfterFirst, null);
             add("terminal_report_exact_replay_reuses_receipt", ReadString(protocolReplay, "reason", "") == "exact_replay"
