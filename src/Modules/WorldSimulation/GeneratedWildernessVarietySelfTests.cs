@@ -202,10 +202,13 @@ namespace ReignBetaServer
             Check("client_saved_history_and_failed_generation_contract", () =>
             {
                 string client = Path.Combine(FindVerificationSourceRoot(), "ReignBeta");
-                string behavior = File.ReadAllText(Path.Combine(client, "src/Modules/WorldSimulation/Campaign/ReignSocialEventsCampaignBehavior.cs"));
-                string record = File.ReadAllText(Path.Combine(client, "src/Modules/WorldSimulation/Events/SocialEventRecord.cs"));
-                string adapter = File.ReadAllText(Path.Combine(client, "src/Modules/Platform/Integration/ReignServerClient.cs"));
-                Require(!behavior.Contains("BuildFallbackGeneratedWildernessScenario") && !behavior.Contains("Something Ahead"), "The repeated success-shaped fallback remains reachable.");
+                // Located by type name (absence and save-id uniqueness are scoped to the owning type) or across all
+                // client source (presence-only markers), never by file path.
+                string behaviorScoped = VerificationSourceLocator.ReadClientTypeSourceText(client, "ReignSocialEventsCampaignBehavior");
+                string behavior = VerificationSourceLocator.ReadClientSourceText(client);
+                string record = VerificationSourceLocator.ReadClientTypeSourceText(client, "SocialEventRecord");
+                string adapter = VerificationSourceLocator.ReadClientSourceText(client);
+                Require(!behaviorScoped.Contains("BuildFallbackGeneratedWildernessScenario") && !behaviorScoped.Contains("Something Ahead"), "The repeated success-shaped fallback remains reachable.");
                 Require(behavior.Contains("!recentWilderness.Contains(x)") && behavior.Contains("RecentEvents = _events.Where"), "Recent event history is pruned or not projected.");
                 Require(System.Text.RegularExpressions.Regex.IsMatch(record, @"\[SaveableField\(27\)\]\s+public string GeneratedVarietyKey;"), "The direction key is not saveable with its additive field id.");
                 Require(System.Text.RegularExpressions.Regex.IsMatch(record, @"\[SaveableField\(28\)\]\s+public string GeneratedInitiatorHeroStringId;"), "Initiator lacks additive native save field 28.");
