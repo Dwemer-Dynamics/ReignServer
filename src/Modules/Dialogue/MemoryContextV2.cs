@@ -126,14 +126,17 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
         private static string MemoryPrecisionMode(ReignDbConnection connection, Dictionary<string, object> settings = null) =>
             ResolveMemoryMode(settings ?? LoadSettings(), IsIsolatedMemoryValidation);
 
-        private static void AdvanceMemoryRestoreGeneration(string campaignId, Dictionary<string, object> restoredPoint = null, string snapshotSchema = "")
+        // Only the Save Sync rollback passes its load session; any other restore stays
+        // unproven for terminal report recovery (fail closed).
+        private static void AdvanceMemoryRestoreGeneration(string campaignId, Dictionary<string, object> restoredPoint = null, string snapshotSchema = "",
+            string loadSessionId = "")
         {
             using (var connection = OpenCampaignConnection(campaignId))
             using (var transaction = connection.BeginTransaction())
             {
                 EnsureMemoryPrecisionSchema(connection);
                 string generation = Guid.NewGuid().ToString("N");
-                CaptureRestoredMemorySources(connection, restoredPoint, generation, snapshotSchema);
+                CaptureRestoredMemorySources(connection, restoredPoint, generation, snapshotSchema, loadSessionId);
                 RecoverLegacySnapshotMemorySources(connection, campaignId, restoredPoint, generation);
                 ExecuteSql(connection, "UPDATE memory_precision_state SET restore_generation=$generation,updated_ts=$ts WHERE state_id='current';",
                     new Dictionary<string, object> { ["generation"] = generation, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });

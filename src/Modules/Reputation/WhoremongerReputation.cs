@@ -349,13 +349,18 @@ AND last_activity_day+30<=$day;", new Dictionary<string, object>
             sources.RemoveAll(source => IsWhoremongerStandingSource(source) && !ReferenceEquals(source, retained));
         }
 
+        // With a file snapshot (terminal acceptance under row locks) both profiles come
+        // only from it; a missing entry is refused rather than read under FileLock.
         private static double WhoremongerSpouseStandingAdjustment(string campaignId,
-            string observerId, string subjectId, List<Dictionary<string, object>> sources)
+            string observerId, string subjectId, List<Dictionary<string, object>> sources,
+            RelationshipFileSnapshot files = null)
         {
             var entry = sources.FirstOrDefault(IsWhoremongerStandingSource);
             if (entry == null || string.IsNullOrWhiteSpace(observerId) || observerId == subjectId) return 0d;
-            var profile = ReadJsonObject(CharacterFile(campaignId, subjectId, "profile.json"));
-            var observerProfile = ReadJsonObject(CharacterFile(campaignId, observerId, "profile.json"));
+            var profile = files != null ? files.Document(subjectId, "profile.json")
+                : ReadJsonObject(CharacterFile(campaignId, subjectId, "profile.json"));
+            var observerProfile = files != null ? files.Document(observerId, "profile.json")
+                : ReadJsonObject(CharacterFile(campaignId, observerId, "profile.json"));
             bool spouses = ReadString(profile, "spouseId", "").Equals(observerId, StringComparison.OrdinalIgnoreCase)
                 || ReadString(observerProfile, "spouseId", "").Equals(subjectId, StringComparison.OrdinalIgnoreCase);
             if (!spouses) return 0d;

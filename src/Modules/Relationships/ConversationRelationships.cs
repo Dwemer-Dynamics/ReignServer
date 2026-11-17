@@ -905,8 +905,14 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                     if (prior == null) return TestDict("ok", false, "error", "A native relationship receipt does not exist in this campaign.", "receiptId", receiptId);
                     if (ReadString(prior, "receipt_id", "").StartsWith(TerminalActionReportProtocol.ReceiptIdPrefix, StringComparison.Ordinal))
                     {
-                        string actionError = CompletedActionReceiptAckError(currentGeneration, prior, nativeReceipt, measuredReceipt, receiptIds.Count);
-                        if (actionError.Length > 0) return TestDict("ok", false, "error", actionError, "receiptId", receiptId);
+                        string actionError = CompletedActionReceiptAckError(connection, currentGeneration, prior, nativeReceipt, measuredReceipt,
+                            receiptIds.Count, ReadDictionary(payload, TerminalActionReportProtocol.LoadProofField));
+                        if (actionError.Length > 0)
+                        {
+                            var refusal = TestDict("ok", false, "error", actionError, "receiptId", receiptId);
+                            if (actionError == TerminalActionReportProtocol.LoadProofStale) refusal["reason"] = actionError;
+                            return refusal;
+                        }
                     }
                     string observer = ReadString(prior, "observer_id", ""), target = ReadString(prior, "target_id", "");
                     if (subjectId.Length > 0 || targetId.Length > 0)
@@ -1034,8 +1040,11 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
 
         // Measured acknowledgment of an action receipt stays bound to its exact
         // report, timeline and the current campaign generation, including repeats.
-        private static string CompletedActionReceiptAckError(string current, Dictionary<string, object> prior,
-            Dictionary<string, object> nativeReceipt, bool measuredReceipt, int receiptCount)
+        // A recovered (admitted) report is acknowledged only in its admitting generation and
+        // with an exact echo of that admission, so an ack from before a later restore cannot
+        // land after a re-adoption. A load proof, when sent, must name the current verified load.
+        private static string CompletedActionReceiptAckError(ReignDbConnection connection, string current, Dictionary<string, object> prior,
+            Dictionary<string, object> nativeReceipt, bool measuredReceipt, int receiptCount, Dictionary<string, object> loadProof)
         {
             if (!measuredReceipt || receiptCount != 1)
                 return "An action relationship receipt requires exactly one measured native acknowledgment.";
@@ -1051,6 +1060,18 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
             }
             catch (ArgumentException) { bound = false; }
             if (!bound) return "The native acknowledgment does not match its action report binding.";
+            string proofError = TerminalReportLoadProofError(connection, current, loadProof, out _);
+            if (proofError.Length > 0) return proofError;
+            var admission = TerminalReportMarkerAdmission(connection, actionId, sha);
+            if (admission != null)
+            {
+                var echoed = ReadDictionary(nativeReceipt, TerminalActionReportProtocol.AdmissionField);
+                string admitted = ReadString(admission, "generation", ""), session = ReadString(admission, "loadSessionId", "");
+                bool exact = admitted.Length > 0 && current == admitted
+                    && echoed != null && echoed.TryGetValue("generation", out object g) && g is string echoedGeneration && echoedGeneration == admitted
+                    && echoed.TryGetValue("loadSessionId", out object l) && l is string echoedSession && echoedSession == session;
+                return exact ? "" : "The native acknowledgment does not match the load that admitted this action report.";
+            }
             return current.Length > 0 && current == generation ? "" : "The action relationship receipt belongs to a different campaign generation.";
         }
 

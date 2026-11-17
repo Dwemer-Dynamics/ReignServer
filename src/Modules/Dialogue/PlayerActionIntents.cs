@@ -471,6 +471,8 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
         private static bool IsProtocolOwnedTerminalAction(Dictionary<string, object> row) => ReadDictionary(row, "terminalReport") != null;
 
         // beforeCommit is a self-test seam; it receives the connection that owns the open transaction.
+        // First acceptance invokes it with 0 (row locks held, before evaluation), 1 (after evaluation)
+        // and 2 (immediately before commit).
         private static Dictionary<string, object> TerminalActionReportApi(Dictionary<string, object> payload,
             Action<int, ReignDbConnection> beforeCommit = null)
         {
@@ -482,14 +484,39 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             string campaign = exact("campaignId"), timeline = exact("timelineId"), player = exact("playerHeroStringId");
             string generation = exact("generation"), actionId = exact("actionId"), termsHash = exact("termsHash");
             string status = exact("status"), reportJson = exact("reportJson"), sha = exact("reportSha256");
-            Dictionary<string, object> Reply(string disposition, string reason, Dictionary<string, object> marker = null, Dictionary<string, object> effect = null) =>
-                TestDict("ok", true, "schema", TerminalActionReportProtocol.ResponseSchema, "disposition", disposition, "reason", reason,
+            // Recovery keeps the v1 envelope (generation is still the report's own generation)
+            // and adds the verified load it is recovered under; loadProof (outside the SHA) binds
+            // any proof-carrying write to the campaign's current verified load context.
+            bool recovery = exact("schema") == TerminalActionReportProtocol.RecoverySchema;
+            Func<Dictionary<string, object>, string, string> envelopeText = (source, key) =>
+                source != null && source.TryGetValue(key, out object value) && value is string s ? s : "";
+            var proof = ReadDictionary(payload, TerminalActionReportProtocol.LoadProofField);
+            var recoveryFields = recovery ? ReadDictionary(payload, TerminalActionReportProtocol.RecoveryField) : null;
+            string liveGeneration = envelopeText(recoveryFields, "liveGeneration"), recoveryPoint = envelopeText(recoveryFields, "savePointId");
+            string recoverySession = envelopeText(recoveryFields, "loadSessionId");
+            bool proofMalformed = payload.ContainsKey(TerminalActionReportProtocol.LoadProofField) && (proof == null
+                || !new[] { envelopeText(proof, "loadSessionId"), envelopeText(proof, "savePointId"), envelopeText(proof, "restoreGeneration") }.All(TerminalActionReportProtocol.IsTrustedIdentifier));
+            bool recoveryMalformed = recovery && (recoveryFields == null || proof == null
+                || !new[] { liveGeneration, recoveryPoint, recoverySession }.All(TerminalActionReportProtocol.IsTrustedIdentifier)
+                || liveGeneration == generation || envelopeText(proof, "restoreGeneration") != liveGeneration
+                || envelopeText(proof, "savePointId") != recoveryPoint || envelopeText(proof, "loadSessionId") != recoverySession);
+            // Proof-carrying and recovery requests come only from new clients, which receive the
+            // staged receipt whatever its status so they can compare it with their journal.
+            bool fullEffect = recovery || proof != null;
+            Dictionary<string, object> Reply(string disposition, string reason, Dictionary<string, object> marker = null, Dictionary<string, object> effect = null)
+            {
+                var reply = TestDict("ok", true, "schema", TerminalActionReportProtocol.ResponseSchema, "disposition", disposition, "reason", reason,
                     "campaignId", campaign, "actionId", actionId, "reportSha256", sha, "generation", generation,
                     "authoritativeStatus", ReadString(marker, "authoritativeStatus", ""), "relationshipEvidence", ReadString(marker, "relationshipEvidence", ""),
                     "nativeEffect", effect, "nativeEffectStatus", effect == null ? "none" : ReadString(effect, "nativeApplicationStatus", ""));
+                var admission = ReadDictionary(marker, TerminalActionReportProtocol.AdmissionField);
+                if (admission != null) reply[TerminalActionReportProtocol.AdmissionField] = admission;
+                return reply;
+            }
             var report = TerminalActionReportProtocol.TryReportSha256(reportJson, out string computed, out int bytes) ? TryParseJsonObject(reportJson) : null;
             // The exact encoded report must restate the envelope identity it is filed under.
-            if (exact("schema") != TerminalActionReportProtocol.RequestSchema || report == null || computed != sha
+            if ((exact("schema") != TerminalActionReportProtocol.RequestSchema && !recovery) || proofMalformed || recoveryMalformed
+                || report == null || computed != sha
                 || !reportJson.StartsWith("{", StringComparison.Ordinal) || !reportJson.EndsWith("}", StringComparison.Ordinal)
                 || !new[] { campaign, timeline, player, generation, actionId, termsHash }.All(TerminalActionReportProtocol.IsTrustedIdentifier)
                 || !TerminalReportStatuses.Contains(status) || !same(report, "status", status)
@@ -508,6 +535,14 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             Dictionary<string, object> response, record, marker;
             bool firstAcceptance = false, popularityChanged = false;
             var evaluations = new List<Dictionary<string, object>>();
+            // A poll or publication can hold FileLock while queued on the rows locked below,
+            // so the pair's file-derived inputs are captured first, with no lock held.
+            RelationshipFileSnapshot pairFiles = CaptureTerminalReportPairFiles(campaign, timeline, player,
+                generation, actionId, termsHash, report);
+            // Recovery evaluates under the live generation (the probe compares only that value),
+            // so it snapshots the same pair for it; the v1 path never takes this second probe.
+            if (recovery) pairFiles = CaptureTerminalReportPairFiles(campaign, timeline, player,
+                liveGeneration, actionId, termsHash, report);
             // Lock order: campaign relationship writer, then database. Never FileLock here.
             using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
             using (var connection = OpenCampaignConnection(campaign))
@@ -525,6 +560,16 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                     // still before the outbox row, in the mode the trigger needs.
                     string current = ReadString(QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
+                    // Under the generation lock, before the outbox row: a proof that no longer names the
+                    // campaign's current verified load mutates nothing. Recovery's proof is its own
+                    // {loadSessionId, savePointId, liveGeneration}; its context must also name this
+                    // timeline. source_generation is only read here: membership depends on the exact
+                    // locked row and marker, so it is tested after identity, before any mutation.
+                    string proofError = TerminalReportLoadProofError(connection, current, proof, out var restoreContext);
+                    if (proofError.Length > 0) return Reply(TerminalActionReportProtocol.Conflict, proofError);
+                    if (recovery && ReadString(restoreContext, "timeline_id", "") != timeline)
+                        return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "timeline");
+                    string sourceGeneration = recovery ? ReadString(restoreContext, "source_generation", "") : "";
                     var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                         TestDict("id", actionId)).FirstOrDefault();
                     var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
@@ -547,26 +592,66 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                             return Reply(TerminalActionReportProtocol.Conflict, "different_terminal_report", marker);
                         if (expectedType.Length == 0 || !same(report, "type", expectedType))
                             return Reply(TerminalActionReportProtocol.Conflict, "action_type_mismatch", marker);
-                        if (ReadString(marker, "generation", "") != generation || current != generation)
-                            return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch", marker);
-                        string priorReceipt = ReadString(marker, "receiptId", "");
-                        var effect = priorReceipt.Length == 0 ? null
-                            : CompletedActionRelationshipEffect(connection, priorReceipt, actionId, timeline, generation, sha);
-                        response = Reply(TerminalActionReportProtocol.Accepted, "exact_replay", marker,
-                            ReadString(effect, "nativeApplicationStatus", "") == "pending" ? effect : null);
-                        if (effect != null && response["nativeEffect"] == null) response["nativeEffectStatus"] = ReadString(effect, "nativeApplicationStatus", "");
+                        if (recovery)
+                        {
+                            // Adoption of the exact restored marker: its report generation stays the
+                            // original one; the context must come from that generation or from the
+                            // generation that last admitted it. A repeat with the same admission is a read.
+                            var priorAdmission = ReadDictionary(marker, TerminalActionReportProtocol.AdmissionField);
+                            if (ReadString(marker, "generation", "") != generation)
+                                return Reply(TerminalActionReportProtocol.Conflict, "different_terminal_report", marker);
+                            if (sourceGeneration.Length == 0 || (sourceGeneration != generation
+                                && sourceGeneration != ReadString(priorAdmission, "generation", "")))
+                                return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "source_generation", marker);
+                            bool admits = ReadString(priorAdmission, "generation", "") != liveGeneration
+                                || ReadString(priorAdmission, "savePointId", "") != recoveryPoint
+                                || ReadString(priorAdmission, "loadSessionId", "") != recoverySession;
+                            if (admits)
+                            {
+                                var admission = TerminalReportAdmission(liveGeneration, recoveryPoint, recoverySession, now);
+                                ExecuteSql(connection, @"UPDATE conversation_action_outbox
+SET payload_json=jsonb_set(payload_json::jsonb,'{terminalReport,admission}',CAST($admission AS jsonb))::text
+WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
+                                    TestDict("id", actionId, "sha", sha, "admission", Json.Serialize(admission)));
+                                marker[TerminalActionReportProtocol.AdmissionField] = admission;
+                            }
+                            string adoptedReceipt = ReadString(marker, "receiptId", "");
+                            var adoptedEffect = adoptedReceipt.Length == 0 ? null
+                                : CompletedActionRelationshipEffect(connection, adoptedReceipt, actionId, timeline, generation, sha);
+                            if (admits) transaction.Commit();
+                            response = Reply(TerminalActionReportProtocol.Accepted, admits ? "recovery_admitted" : "recovery_replay", marker, adoptedEffect);
+                        }
+                        else
+                        {
+                            if (ReadString(marker, "generation", "") != generation || current != generation)
+                                return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch", marker);
+                            string priorReceipt = ReadString(marker, "receiptId", "");
+                            var effect = priorReceipt.Length == 0 ? null
+                                : CompletedActionRelationshipEffect(connection, priorReceipt, actionId, timeline, generation, sha);
+                            response = Reply(TerminalActionReportProtocol.Accepted, "exact_replay", marker,
+                                fullEffect || ReadString(effect, "nativeApplicationStatus", "") == "pending" ? effect : null);
+                            if (effect != null && response["nativeEffect"] == null) response["nativeEffectStatus"] = ReadString(effect, "nativeApplicationStatus", "");
+                        }
                     }
                     else
                     {
                         // A legacy terminal row may already carry a legacy delta; never upgrade it.
                         if (IsTerminalActionReportStatus(ReadString(row, "status", "")))
                             return Reply(TerminalActionReportProtocol.Conflict, "legacy_terminal_status");
-                        if (current.Length == 0 || current != generation)
+                        // Recovery never answers Stale: the generation authority is the verified context.
+                        if (!recovery && (current.Length == 0 || current != generation))
                             return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch");
                         string ineligible = TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", ""));
-                        if (ineligible.Length > 0) return Reply(TerminalActionReportProtocol.Ineligible, ineligible);
+                        // Ineligible permits legacy fallback only for a current-generation row; recovery never does.
+                        if (ineligible.Length > 0) return recovery
+                            ? Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryIneligiblePrefix + ineligible)
+                            : Reply(TerminalActionReportProtocol.Ineligible, ineligible);
                         if (expectedType.Length == 0 || !same(report, "type", expectedType))
                             return Reply(TerminalActionReportProtocol.Conflict, "action_type_mismatch");
+                        // A first acceptance under recovery requires the restored context to come from the
+                        // report's own generation (exact locked row identity is already proven above).
+                        if (recovery && sourceGeneration != generation)
+                            return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "source_generation");
                         string authoritative = NormalizeActionReportStatus(record, report, status);
                         var directions = CompletedActionRelationshipDirections(report, timeline);
                         string evidence = directions.Count == 0 ? "not_applicable" : "evaluated";
@@ -574,20 +659,31 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                             "SELECT event_id FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
                             TestDict("event", ReadString(d, "eventId", ""), "subject", ReadString(d, "subjectId", ""), "target", ReadString(d, "targetId", ""))).Count > 0))
                         { evidence = "pre_protocol"; directions.Clear(); }
-                        int shared = EvaluateCompletedActionRelationshipsInTransaction(connection, directions, evaluations);
-                        beforeCommit?.Invoke(1, connection);
-                        // Derived court popularity and dependent public standing commit with
-                        // the directional result, receipt and marker, or roll back with them.
-                        foreach (var evaluation in evaluations)
-                            popularityChanged |= RecomputeRelationshipEvaluationReputation(connection, campaign, timeline,
-                                ReadString(evaluation, "targetId", ""), ReadDouble(evaluation, "worldDay", 0d),
-                                ReadString(evaluation, "eventId", ""), ReadInt(evaluation, "nativeRelationDelta", 0), schemaReady: true);
+                        beforeCommit?.Invoke(0, connection);
+                        int shared;
+                        // File-derived inputs come only from the pre-lock snapshot of this exact pair;
+                        // without one every such read is refused (rollback), never taken under FileLock.
+                        // Database standing/roster reads still pass through to this transaction.
+                        using (new RelationshipStandingContext(connection, campaign, timeline,
+                            pairFiles ?? RelationshipFileSnapshot.Refusing(campaign, timeline)))
+                        {
+                            shared = EvaluateCompletedActionRelationshipsInTransaction(connection, directions, evaluations);
+                            beforeCommit?.Invoke(1, connection);
+                            // Derived court popularity and dependent public standing commit with
+                            // the directional result, receipt and marker, or roll back with them.
+                            foreach (var evaluation in evaluations)
+                                popularityChanged |= RecomputeRelationshipEvaluationReputation(connection, campaign, timeline,
+                                    ReadString(evaluation, "targetId", ""), ReadDouble(evaluation, "worldDay", 0d),
+                                    ReadString(evaluation, "eventId", ""), ReadInt(evaluation, "nativeRelationDelta", 0), schemaReady: true);
+                        }
                         string receiptId = shared == 0 ? "" : StageCompletedActionRelationshipReceipt(connection, campaign, timeline, actionId,
                             generation, sha, ReadString(directions[0], "subjectId", ""), ReadString(directions[0], "targetId", ""), shared, now);
                         marker = TestDict("schema", TerminalActionReportProtocol.MarkerSchema, "sha256", sha, "utf8Bytes", bytes,
                             "generation", generation, "timelineId", timeline, "playerHeroStringId", player, "acceptedTs", now,
                             "reportedStatus", status, "authoritativeStatus", authoritative, "relationshipEvidence", evidence,
                             "receiptId", receiptId, "reportJson", reportJson);
+                        // The marker keeps the report's generation; only the mutable admission names the live one.
+                        if (recovery) marker[TerminalActionReportProtocol.AdmissionField] = TerminalReportAdmission(liveGeneration, recoveryPoint, recoverySession, now);
                         row["status"] = authoritative; row["reportTs"] = now; row["report"] = report; row["terminalReport"] = marker;
                         SaveDurableConversationAction(connection, row);
                         if (ReadString(ReadDictionary(row, "terminalReport"), "sha256", "") != sha)
@@ -621,9 +717,10 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                         "error", ex.GetType().Name, "bestEffort", true, "retry", "none"));
                 }
             // Shared activity and action memory only; independently retryable by exact replay.
-            // The snapshot shortcut is safe because projectedTs is only ever added, never removed;
-            // an absent snapshot is rechecked under the outbox row lock.
-            bool projected = !firstAcceptance && marker.ContainsKey("projectedTs")
+            // The snapshot shortcut is safe because both stamps are only ever added, never removed;
+            // an absent snapshot is rechecked under the outbox row lock. A legacy marker with
+            // projectedTs alone still owes its shared-activity receipt.
+            bool projected = !firstAcceptance && marker.ContainsKey("projectedTs") && marker.ContainsKey("projectedShared")
                 || ProjectAcceptedTerminalReport(campaign, actionId, sha, generation, report, record, ReadString(marker, "authoritativeStatus", ""));
             response["memoryProjectionStatus"] = projected ? "completed" : "pending";
             return response;
@@ -636,6 +733,111 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             record != null && ReadString(row, "id", "") == actionId && ReadString(row, "campaignId", "") == campaign
             && ReadString(record, "serverActionId", "") == actionId && ReadString(record, "campaignId", "") == campaign
             && TerminalReportIdentityMatches(stored, record, timeline, player, termsHash);
+
+        // ---- Terminal report load proof and recovery admission. ----
+        // The campaign's single restore context row, read as JSON so a schema without the newer
+        // columns simply lacks them (unproven). Plain SELECT: Save Sync loads and backup imports,
+        // the only writers, run under the CampaignDataGate write lock that excludes this request.
+        private static Dictionary<string, object> TerminalReportRestoreContext(ReignDbConnection connection)
+        {
+            if (!TableExists(connection, "memory_restored_source_context")) return null;
+            var row = QuerySql(connection, "SELECT to_jsonb(c)::text AS context FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault();
+            return row == null ? null : TryParseJsonObject(ReadString(row, "context", "{}"));
+        }
+
+        // "" when no proof was sent (older clients, or newly captured reports during unverified
+        // play) or when it names the current verified load: context bound to this exact load
+        // session and save point in the current generation. Otherwise load_proof_stale.
+        private static string TerminalReportLoadProofError(ReignDbConnection connection, string current,
+            Dictionary<string, object> proof, out Dictionary<string, object> context)
+        {
+            context = null;
+            if (proof == null) return "";
+            context = TerminalReportRestoreContext(connection);
+            string session = proof.TryGetValue("loadSessionId", out object s) && s is string sv ? sv : "";
+            string point = proof.TryGetValue("savePointId", out object p) && p is string pv ? pv : "";
+            string restore = proof.TryGetValue("restoreGeneration", out object g) && g is string gv ? gv : "";
+            // The import stamp is never a load session a Save Sync load could have proved.
+            bool bound = context != null && new[] { session, point, restore }.All(TerminalActionReportProtocol.IsTrustedIdentifier)
+                && !session.StartsWith(TerminalActionReportProtocol.ImportedLoadSession, StringComparison.Ordinal)
+                && ReadString(context, "load_session_id", "") == session && ReadString(context, "save_point_id", "") == point
+                && ReadString(context, "restore_generation", "") == restore && current.Length > 0 && current == restore;
+            return bound ? "" : TerminalActionReportProtocol.LoadProofStale;
+        }
+
+        private static Dictionary<string, object> TerminalReportAdmission(string generation, string savePointId, string loadSessionId, long now) =>
+            TestDict("generation", generation, "savePointId", savePointId, "loadSessionId", loadSessionId, "admittedTs", now);
+
+        // Save Sync load echo: the current generation only while the context is bound to this
+        // exact load (so a later proof can hold); "" leaves the client's load unverified. Never
+        // throws, so it cannot fail an otherwise completed load.
+        private static string TerminalReportLoadProofGeneration(string campaign, string savePointId, string loadSessionId)
+        {
+            if (!TerminalActionReportProtocol.IsTrustedIdentifier(savePointId) || !TerminalActionReportProtocol.IsTrustedIdentifier(loadSessionId)) return "";
+            try
+            {
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    if (!TableExists(connection, "memory_precision_state")) return "";
+                    string current = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
+                    return TerminalReportLoadProofError(connection, current, TestDict("loadSessionId", loadSessionId,
+                        "savePointId", savePointId, "restoreGeneration", current), out _).Length == 0 ? current : "";
+                }
+            }
+            catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException)) { return ""; }
+        }
+
+        // The admission of this exact accepted report, read without a lock after the caller's
+        // generation row lock (which also serializes adoption); null for a v1 marker.
+        private static Dictionary<string, object> TerminalReportMarkerAdmission(ReignDbConnection connection, string actionId, string sha)
+        {
+            if (string.IsNullOrEmpty(actionId) || !TableExists(connection, "conversation_action_outbox")) return null;
+            var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", actionId)).FirstOrDefault();
+            var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
+            return marker != null && ReadString(marker, "sha256", "") == sha ? ReadDictionary(marker, TerminalActionReportProtocol.AdmissionField) : null;
+        }
+
+        // Unlocked, read-only probe run before the relationship lock and the acceptance
+        // transaction. It only decides whether a first acceptance would evaluate the pair
+        // and, if so, which durable row's actor/target to snapshot; the transaction rechecks
+        // every predicate under its row locks. It never reads a client-chosen path: both
+        // heroes must equal the stored record and the restated report identity. Replays,
+        // non-relationship reports, mismatched identity, stale generations, legacy or
+        // foreign-owned rows and type mismatches read no files (null).
+        // Its predicates must stay no stricter than the transaction's. The only one that can
+        // turn from refusing to admitting is the foreign-owner probe: if an owner is removed
+        // between this probe and the row locks, the transaction evaluates under a refusing
+        // scope, and any file-derived read rolls the whole acceptance back (HTTP 500, nothing
+        // committed). The client keeps the report "posted" and re-sends the exact persisted
+        // envelope, which re-probes here.
+        private static RelationshipFileSnapshot CaptureTerminalReportPairFiles(string campaign, string timeline,
+            string player, string generation, string actionId, string termsHash, Dictionary<string, object> report)
+        {
+            var directions = CompletedActionRelationshipDirections(report, timeline);
+            if (directions.Count == 0) return null;
+            string target;
+            using (var connection = OpenCampaignConnection(campaign))
+            {
+                if (!TableExists(connection, "conversation_action_outbox") || !TableExists(connection, "memory_precision_state")) return null;
+                string current = ReadString(QuerySql(connection,
+                    "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
+                var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
+                    TestDict("id", actionId)).FirstOrDefault();
+                var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
+                var record = ReadDictionary(row, "record");
+                target = ReadString(record, "targetHeroStringId", "");
+                string expectedType = TerminalReportExpectedType(record);
+                if (row == null || !TerminalReportScopeMatches(stored, row, record, campaign, actionId, timeline, player, termsHash)
+                    || ReadString(report, "actorHeroStringId", "") != player || ReadString(report, "targetHeroStringId", "") != target
+                    || ReadString(directions[0], "subjectId", "") != player || ReadString(directions[0], "targetId", "") != target
+                    || ReadDictionary(row, "terminalReport") != null || IsTerminalActionReportStatus(ReadString(row, "status", ""))
+                    || current.Length == 0 || current != generation
+                    || TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", "")).Length > 0
+                    || expectedType.Length == 0 || ReadString(report, "type", "") != expectedType)
+                    return null;
+            }
+            return RelationshipFileSnapshot.Capture(campaign, timeline, new[] { player, target });
+        }
 
         private static bool TerminalReportIdentityMatches(Dictionary<string, object> stored, Dictionary<string, object> record,
             string timeline, string player, string termsHash) =>
@@ -757,14 +959,18 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             return "";
         }
 
-        // Shared-activity receipts are idempotent by fixed ID (INSERT OR IGNORE), so they may
-        // repeat outside the lock. Action memory replaces its participant rows with fresh IDs,
-        // so it is serialized on the exact durable outbox row and commits atomically with
-        // projectedTs: concurrent exact callers and post-commit retries cannot duplicate or
-        // re-key it. Lock order matches acceptance (restore generation, then outbox row); no
-        // campaign work lock or FileLock is taken while the row lock is held, and nothing here
-        // re-runs native effects, relationship acceptance or audit.
-        // beforeMarker is a self-test seam; it runs after the memory write, before projectedTs.
+        // The shared-activity receipt (idempotent by fixed ID) and action memory (fresh IDs per
+        // participant row) are both serialized on the exact durable outbox row and commit
+        // atomically with their stamps, projectedShared and projectedTs: concurrent exact callers
+        // and post-commit retries cannot duplicate, skip or re-key them. The shared receipt uses
+        // the verified live generation under the lock, never the report's own generation, so a
+        // recovered report is not silently skipped. A legacy marker with projectedTs alone gets
+        // only its shared receipt; its memory is never rewritten. Lock order matches acceptance
+        // (restore generation, then outbox row); no campaign work lock or FileLock is taken while
+        // the row lock is held, and nothing here re-runs native effects, relationship acceptance
+        // or audit. generation is the report's own; an admitted marker projects only in the
+        // generation that admitted it.
+        // beforeMarker is a self-test seam; it runs after the memory write, before the stamps.
         private static bool ProjectAcceptedTerminalReport(string campaign, string actionId, string sha, string generation,
             Dictionary<string, object> report, Dictionary<string, object> record, string status,
             Action<ReignDbConnection> beforeMarker = null)
@@ -780,39 +986,56 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
             string deferredPending = null;
             try
             {
-                RecordSharedActionReceipt(campaign, report, record, status);
                 using (var connection = OpenCampaignConnection(campaign))
-                using (var transaction = connection.BeginTransaction())
                 {
-                    // Same order and mode as acceptance: the memory trigger updates this row.
-                    string current = ReadString(QuerySql(connection,
-                        "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
-                    var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
-                        TestDict("id", actionId)).FirstOrDefault();
-                    var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
-                    // Reread under the lock: the accepted marker must still be this exact report in the current generation.
-                    if (marker == null || ReadString(marker, "sha256", "") != sha || ReadString(marker, "generation", "") != generation
-                        || current.Length == 0 || current != generation)
+                    // Schema (and any one-time migration) stays outside the projection transaction.
+                    EnsureSharedActivityMemorySchema(connection);
+                    using (var transaction = connection.BeginTransaction())
                     {
-                        deferredPending = "marker_changed";
-                        return false;
-                    }
-                    // An earlier caller already committed memory and marker together.
-                    if (marker.ContainsKey("projectedTs")) return true;
-                    // A refused memory write returns ok=false without throwing; disposal rolls back.
-                    var memory = StoreActionResultMemory(report, "actions_report", connection);
-                    if (!ReadBool(memory, "ok", false))
-                    {
-                        deferredPending = "memory_store_refused";
-                        return false;
-                    }
-                    beforeMarker?.Invoke(connection);
-                    ExecuteSql(connection, @"UPDATE conversation_action_outbox
-SET payload_json=jsonb_set(payload_json::jsonb,'{terminalReport,projectedTs}',to_jsonb(CAST($ts AS bigint)))::text
+                        // Same order and mode as acceptance: the memory trigger updates this row.
+                        string current = ReadString(QuerySql(connection,
+                            "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
+                        var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
+                            TestDict("id", actionId)).FirstOrDefault();
+                        var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
+                        // Reread under the lock: the accepted marker must still be this exact report, and
+                        // the generation it projects in (its admission, else its own) must be current.
+                        string projectionGeneration = FirstNonEmpty(ReadString(ReadDictionary(marker, TerminalActionReportProtocol.AdmissionField), "generation", ""),
+                            ReadString(marker, "generation", ""));
+                        if (marker == null || ReadString(marker, "sha256", "") != sha || ReadString(marker, "generation", "") != generation
+                            || current.Length == 0 || current != projectionGeneration)
+                        {
+                            deferredPending = "marker_changed";
+                            return false;
+                        }
+                        bool memoryProjected = marker.ContainsKey("projectedTs"), sharedProjected = marker.ContainsKey("projectedShared");
+                        // An earlier caller already committed both projections and their stamps together.
+                        if (memoryProjected && sharedProjected) return true;
+                        if (!sharedProjected && !RecordSharedActionReceipt(connection, report, record, status, current))
+                        {
+                            deferredPending = "shared_activity_generation_changed";
+                            return false;
+                        }
+                        if (!memoryProjected)
+                        {
+                            // A refused memory write returns ok=false without throwing; disposal rolls back.
+                            var memory = StoreActionResultMemory(report, "actions_report", connection);
+                            if (!ReadBool(memory, "ok", false))
+                            {
+                                deferredPending = "memory_store_refused";
+                                return false;
+                            }
+                        }
+                        beforeMarker?.Invoke(connection);
+                        ExecuteSql(connection, @"UPDATE conversation_action_outbox
+SET payload_json=jsonb_set(jsonb_set(payload_json::jsonb,'{terminalReport,projectedTs}',
+ COALESCE(payload_json::jsonb->'terminalReport'->'projectedTs',to_jsonb(CAST($ts AS bigint)))),
+ '{terminalReport,projectedShared}',to_jsonb(CAST($ts AS bigint)))::text
 WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
-                        TestDict("id", actionId, "sha", sha, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                    transaction.Commit();
-                    return true;
+                            TestDict("id", actionId, "sha", sha, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                        transaction.Commit();
+                        return true;
+                    }
                 }
             }
             catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))

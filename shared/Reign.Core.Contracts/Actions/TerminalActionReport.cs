@@ -22,6 +22,25 @@ namespace Reign.Core.Contracts.Actions
         // Additive /health field whose value is RequestSchema once the route is wired.
         public const string HealthCapabilityField = "terminalActionReportProtocol";
 
+        // Opt-in recovery of an exact report captured under an earlier restore generation.
+        // The v1 envelope (generation, reportJson and SHA) is unchanged; only schema and the
+        // sibling recovery/loadProof objects differ. An older server refuses it as invalid.
+        public const string RecoverySchema = "reign-terminal-action-report-recovery-v1";
+        public const string RecoveryHealthCapabilityField = "terminalActionReportRecovery";
+        public const string RecoveryField = "recovery";
+        // {loadSessionId, savePointId, restoreGeneration} echoed by a verified Save Sync load.
+        // A sibling of the envelope: never part of reportJson or its SHA.
+        public const string LoadProofField = "loadProof";
+        // Mutable marker progress for a recovered report: {generation, savePointId, loadSessionId, admittedTs}.
+        public const string AdmissionField = "admission";
+        public const string LoadProofStale = "load_proof_stale";
+        public const string RecoveryUnprovenPrefix = "recovery_unproven:";
+        public const string RecoveryIneligiblePrefix = "recovery_ineligible:";
+        // Stamped into the restore context by a backup import. It can never equal a valid
+        // Save Sync load session (those are letters, digits, '_' and '-'), so every earlier
+        // load proof stops matching until a fresh verified load rebinds the context.
+        public const string ImportedLoadSession = "imported:";
+
         public const string Accepted = "accepted";
         public const string Conflict = "conflict";
         public const string Stale = "stale";
