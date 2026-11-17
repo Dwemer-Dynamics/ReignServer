@@ -504,9 +504,13 @@ namespace ReignBetaServer
             string clientRoot = Path.Combine(root, "ReignBeta");
             string governmentText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             // Influence changes are legitimate elsewhere in the client (court, debug tools); Government code itself
-            // must never apply them, so this absence check is scoped to the ReignBeta.Government namespaces, wherever
-            // their files live, and fails closed when no such file is found.
-            string governmentModuleText = VerificationSourceLocator.ReadClientNamespaceSourceText(clientRoot, "ReignBeta.Government");
+            // must never apply them. This absence check covers the union of files declaring a ReignBeta.Government
+            // namespace (wherever they live) and files under the Government module folder, and fails closed when the
+            // union is empty.
+            string governmentModuleText = string.Join("\n\n", VerificationSourceLocator.ReadClientSourceFiles(clientRoot)
+                .Where(file => VerificationSourceLocator.SourceDeclaresNamespace(file.Value, "ReignBeta.Government")
+                    || file.Key.StartsWith("Modules/Government/", StringComparison.Ordinal))
+                .Select(file => file.Value));
             string liveHostPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignLiveInteractionTestHost.cs");
             string liveHost = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string serverLivePath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignServer"),

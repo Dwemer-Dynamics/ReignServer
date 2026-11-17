@@ -97,21 +97,16 @@ namespace ReignBetaServer
             return snapshot == null ? new List<KeyValuePair<string, string>>() : snapshot.Files;
         }
 
-        /// <summary>
-        /// Every client source file that declares <paramref name="namespaceName"/> or one of its child namespaces,
-        /// concatenated in ordinal path order, wherever those files live. Empty when the client root is unavailable or
-        /// no file declares the namespace; callers that require the namespace must treat empty text as a failure.
-        /// </summary>
-        public static string ReadClientNamespaceSourceText(string clientRoot, string namespaceName)
+        /// <summary>Whether a source text declares <paramref name="namespaceName"/> or one of its child namespaces.</summary>
+        public static bool SourceDeclaresNamespace(string sourceText, string namespaceName)
         {
             if (string.IsNullOrWhiteSpace(namespaceName))
                 throw new ArgumentException("A client namespace is required.", "namespaceName");
-            return string.Join("\n\n", ReadClientSourceFiles(clientRoot)
-                .Where(file => NamespacePattern.Matches(file.Value).Cast<Match>()
+            return !string.IsNullOrEmpty(sourceText)
+                && NamespacePattern.Matches(sourceText).Cast<Match>()
                     .Select(match => match.Groups["name"].Value)
                     .Any(name => string.Equals(name, namespaceName, StringComparison.Ordinal)
-                        || name.StartsWith(namespaceName + ".", StringComparison.Ordinal)))
-                .Select(file => file.Value));
+                        || name.StartsWith(namespaceName + ".", StringComparison.Ordinal));
         }
 
         /// <summary>Whether a source text declares a type with the given simple name.</summary>
