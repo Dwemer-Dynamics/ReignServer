@@ -173,7 +173,8 @@ namespace Reign.Core.Contracts.Relationships
         public string TimelineId { get; set; } = ClanConflictNoticeProtocol.DefaultTimelineId;
         // Required for a successful acknowledgement; empty never matches an incident.
         public string IncidentId { get; set; } = string.Empty;
-        // Optional; the client sends the game day, the server does not use it.
+        // Optional; the client sends the game day as a float and the server does not use it. A client
+        // adopting this type should keep sending a float: widening to double changes the serialized digits.
         public double? WorldDay { get; set; }
 
         public static ClanConflictAcknowledgeRequest FromDictionary(IDictionary<string, object>? payload)

@@ -1323,14 +1323,16 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
             RunClanConflictNoticeContractSelfTests(add);
             string persistenceCampaign = "__clan_conflict_contract_"
                 + Guid.NewGuid().ToString("N").Substring(0, 8);
+            const string persistenceTimeline = "main";
+            double persistenceWorldDay = 0d;
             try
             {
-                const string persistenceTimeline = "main";
                 const string persistenceKingdom = "kingdom_contract";
                 int persistenceDay = Enumerable.Range(6, 512).First(day =>
                     StableRulerD100(persistenceCampaign, persistenceTimeline, day,
                         "clan-conflict:daily:" + persistenceKingdom)
                     <= ClanConflictIncidentChance);
+                persistenceWorldDay = persistenceDay;
                 Dictionary<string, object> fixture = new Dictionary<string, object>
                 {
                     ["kingdoms"] = new List<Dictionary<string, object>>
@@ -1389,6 +1391,14 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
                     && ReadInt(persistenceOverview, "relationshipEffectsFailed", -1) == 0
                     && ReadInt(persistenceOverview, "ruleViolations", -1) == 0,
                     "A passed roll persists its complete incident and effect provenance exactly once, resumes safely, and reports lossless World Test coverage.");
+            }
+            catch (Exception ex)
+            {
+                add("persistence_and_resume_are_idempotent", false,
+                    "Clan-conflict persistence contract failed: " + ex.Message);
+            }
+            try
+            {
                 Dictionary<string, object> fetched = NextClanConflictNotices(new Dictionary<string, string>
                 {
                     ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline, ["limit"] = "10"
@@ -1404,7 +1414,7 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
                 string acknowledgedJson = Json.Serialize(AcknowledgeClanConflictNotice(new Dictionary<string, object>
                 {
                     ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline,
-                    ["incidentId"] = fetchedIncident, ["worldDay"] = (double)persistenceDay
+                    ["incidentId"] = fetchedIncident, ["worldDay"] = persistenceWorldDay
                 }));
                 string missingJson = Json.Serialize(AcknowledgeClanConflictNotice(new Dictionary<string, object>
                 {
@@ -1427,9 +1437,13 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
             }
             catch (Exception ex)
             {
-                add("persistence_and_resume_are_idempotent", false,
-                    "Clan-conflict persistence contract failed: " + ex.Message);
+                add("notice_routes_keep_legacy_wire_bytes", false,
+                    "Clan-conflict notice route contract failed: " + ex.Message);
             }
+            // Both blocks above catch everything, so the fixture is always removed. The suite also runs outside the
+            // verification sandbox (--run-relationship-tests, /tests runs).
+            try { ReignPostgreSqlStorage.DropCampaign(persistenceCampaign); } catch { }
+            TryDeleteDirectory(CampaignDirectory(persistenceCampaign));
             return rows;
         }
 

@@ -26,6 +26,9 @@ parentage) and ruler judgment relations.
 The deterministic policies `RelationshipCompatibilityPolicy` and `ArrangedMarriagePolicy` live in the shared
 relationship kernel `shared/Reign.Relationships`; wire types and policies such as `PlayerApproachPolicy`,
 `NativeRelationEffectLedger` and `CorrespondenceTransitPolicy` live in `shared/Reign.Core.Contracts`.
+The clan-conflict notice routes use the typed contracts in
+`shared/Reign.Core.Contracts/Relationships/ClanConflictNoticeContracts.cs` (see
+[TypedContracts](../../../docs/server/TypedContracts.md)).
 
 ## Routes
 
@@ -71,7 +74,8 @@ Created by the `Ensure*Schema` methods in this folder (for example `EnsureRelati
 
 ## Self-tests
 
-`RunCurrentRelationshipSelfTests` (CLI `--run-relationship-tests` and `--run-relationship-simulation-tests`),
+`RunCurrentRelationshipSelfTests` (CLI `--run-relationship-tests` and `--run-relationship-simulation-tests`;
+it includes the `clan_conflicts` suite and its notice wire-contract checks),
 `RunPregnancyChoiceSelfTests` (`--run-pregnancy-choice-tests`), `RunNotableMbtiSelfTests`
 (`--run-notable-mbti-tests`); `--run-relationship-simulation-audit` is retired and only returns a message. About 30
 suites in total, many aggregated by `RelationshipLifecycle.cs`, for example `RunRelationshipLifecycleSelfTests`,
