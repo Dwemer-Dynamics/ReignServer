@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Reign.Core.Contracts.Relationships;
 
 namespace ReignBetaServer
 {
@@ -767,13 +768,10 @@ WHERE pair_key=$pair LIMIT 1;", new Dictionary<string, object>
         private static Dictionary<string, object> NextClanConflictNotices(
             Dictionary<string, string> query)
         {
-            query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign)
-                ? campaign : "default";
-            string timelineId = query.TryGetValue("timelineId", out string timeline)
-                ? timeline : "main";
-            int limit = Math.Max(1, Math.Min(20, query.TryGetValue("limit", out string rawLimit)
-                && int.TryParse(rawLimit, out int parsedLimit) ? parsedLimit : 5));
+            ClanConflictNoticesRequest request = ClanConflictNoticesRequest.FromQuery(query);
+            string campaignId = request.CampaignId;
+            string timelineId = request.TimelineId;
+            int limit = request.Limit;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
@@ -796,21 +794,17 @@ notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;",
                             ["incident"] = ReadString(notice, "incident_id", "")
                         });
                 }
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = true, ["count"] = notices.Count,
-                    ["notices"] = notices.Cast<object>().ToList()
-                };
+                return new ClanConflictNoticesResponse(notices).ToDictionary();
             }
         }
 
         private static Dictionary<string, object> AcknowledgeClanConflictNotice(
             Dictionary<string, object> payload)
         {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string timelineId = ReadString(payload, "timelineId", "main");
-            string incidentId = ReadString(payload, "incidentId", "");
+            ClanConflictAcknowledgeRequest request = ClanConflictAcknowledgeRequest.FromDictionary(payload);
+            string campaignId = request.CampaignId;
+            string timelineId = request.TimelineId;
+            string incidentId = request.IncidentId;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
@@ -821,10 +815,7 @@ FROM clan_conflict_incidents WHERE incident_id=$incident AND campaign_id=$campai
                         ["incident"] = incidentId, ["campaign"] = campaignId,
                         ["timeline"] = timelineId
                     }).FirstOrDefault(), "count", 0);
-                if (found == 0) return new Dictionary<string, object>
-                {
-                    ["ok"] = false, ["error"] = "Clan conflict incident was not found."
-                };
+                if (found == 0) return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
                 ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
 notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$incident;",
                     new Dictionary<string, object>
@@ -834,10 +825,7 @@ notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$incident;",
                     });
             }
             InvalidateWorldTestOverviewCache(campaignId, timelineId);
-            return new Dictionary<string, object>
-            {
-                ["ok"] = true, ["incidentId"] = incidentId
-            };
+            return ClanConflictAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
 
         private static Dictionary<string, object> BuildWorldTestClanConflicts(
@@ -1332,6 +1320,7 @@ WHERE e.campaign_id=$campaign AND e.timeline_id=$timeline;",
                 && failure.Count(x => x.Kind == "loser_to_ruler") == 1
                 && !failure.Any(x => x.ObserverId == "ruler"),
                 "Mediation rewards the full mutual clique; failed mediation creates only the mutual cross-clan feud and directional lord-to-ruler effects.");
+            RunClanConflictNoticeContractSelfTests(add);
             string persistenceCampaign = "__clan_conflict_contract_"
                 + Guid.NewGuid().ToString("N").Substring(0, 8);
             try
@@ -1400,6 +1389,41 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
                     && ReadInt(persistenceOverview, "relationshipEffectsFailed", -1) == 0
                     && ReadInt(persistenceOverview, "ruleViolations", -1) == 0,
                     "A passed roll persists its complete incident and effect provenance exactly once, resumes safely, and reports lossless World Test coverage.");
+                Dictionary<string, object> fetched = NextClanConflictNotices(new Dictionary<string, string>
+                {
+                    ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline, ["limit"] = "10"
+                });
+                List<Dictionary<string, object>> fetchedRows = ReadDictionaryList(fetched, "notices");
+                string fetchedIncident = ReadString(fetchedRows.FirstOrDefault(), "incident_id", "");
+                string fetchedJson = Json.Serialize(fetched);
+                string legacyFetchedJson = Json.Serialize(new Dictionary<string, object>
+                {
+                    ["ok"] = true, ["count"] = fetchedRows.Count,
+                    ["notices"] = fetchedRows.Cast<object>().ToList()
+                });
+                string acknowledgedJson = Json.Serialize(AcknowledgeClanConflictNotice(new Dictionary<string, object>
+                {
+                    ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline,
+                    ["incidentId"] = fetchedIncident, ["worldDay"] = (double)persistenceDay
+                }));
+                string missingJson = Json.Serialize(AcknowledgeClanConflictNotice(new Dictionary<string, object>
+                {
+                    ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline,
+                    ["incidentId"] = "missing_incident"
+                }));
+                string drainedJson = Json.Serialize(NextClanConflictNotices(new Dictionary<string, string>
+                {
+                    ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline
+                }));
+                add("notice_routes_keep_legacy_wire_bytes",
+                    fetchedRows.Count == 1 && fetchedIncident.Length > 0
+                    && fetchedJson == legacyFetchedJson
+                    && fetchedJson.StartsWith("{\"ok\":true,\"count\":1,\"notices\":[{", StringComparison.Ordinal)
+                    && fetchedRows[0].ContainsKey(ClanConflictNoticeFields.NewsDescription)
+                    && acknowledgedJson == "{\"ok\":true,\"incidentId\":" + Json.Serialize(fetchedIncident) + "}"
+                    && missingJson == "{\"ok\":false,\"error\":\"Clan conflict incident was not found.\"}"
+                    && drainedJson == "{\"ok\":true,\"count\":0,\"notices\":[]}",
+                    "The typed notice and acknowledgement routes return the exact legacy JSON for a fetched, acknowledged, unknown and drained notice.");
             }
             catch (Exception ex)
             {
@@ -1407,6 +1431,106 @@ FROM clan_conflict_incidents WHERE campaign_id=$campaign AND timeline_id=$timeli
                     "Clan-conflict persistence contract failed: " + ex.Message);
             }
             return rows;
+        }
+
+        // Byte equality of the typed clan-conflict contract against the pre-contract Dictionary shapes.
+        private static void RunClanConflictNoticeContractSelfTests(Action<string, bool, string> add)
+        {
+            try
+            {
+                var rows = new List<Dictionary<string, object>>
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["incident_id"] = "clan_conflict_a", ["campaign_id"] = "c", ["timeline_id"] = "main",
+                        ["day_key"] = 12L, ["world_day"] = 12.25d, ["kingdom_id"] = "k", ["charm_skill"] = 125L,
+                        ["charm_chance_bp"] = 1750L, ["mediation_succeeded"] = 1L, ["headline"] = "Quote \" and <tag>",
+                        ["involved_a_names_json"] = "[\"A\"]", ["news_description"] = ""
+                    },
+                    new Dictionary<string, object> { ["incident_id"] = "clan_conflict_b", ["world_day"] = 3d, ["narrative"] = null }
+                };
+                bool noticesEqual = true;
+                foreach (List<Dictionary<string, object>> sample in new[] { rows, new List<Dictionary<string, object>>() })
+                {
+                    string legacy = Json.Serialize(new Dictionary<string, object>
+                    {
+                        ["ok"] = true, ["count"] = sample.Count, ["notices"] = sample.Cast<object>().ToList()
+                    });
+                    string typed = Json.Serialize(new ClanConflictNoticesResponse(sample).ToDictionary());
+                    ClanConflictNoticesResponse parsed = ClanConflictNoticesResponse.FromDictionary(
+                        Json.Deserialize<Dictionary<string, object>>(typed));
+                    noticesEqual &= typed == legacy && parsed != null && parsed.Count == sample.Count
+                        && Json.Serialize(parsed.ToDictionary()) == legacy;
+                }
+                string acknowledgedLegacy = Json.Serialize(new Dictionary<string, object> { ["ok"] = true, ["incidentId"] = "clan_conflict_a" });
+                string missingLegacy = Json.Serialize(new Dictionary<string, object> { ["ok"] = false, ["error"] = "Clan conflict incident was not found." });
+                ClanConflictAcknowledgeResponse acknowledgedParsed = ClanConflictAcknowledgeResponse.FromDictionary(
+                    Json.Deserialize<Dictionary<string, object>>(acknowledgedLegacy));
+                ClanConflictAcknowledgeResponse missingParsed = ClanConflictAcknowledgeResponse.FromDictionary(
+                    Json.Deserialize<Dictionary<string, object>>(missingLegacy));
+                bool acknowledgeEqual = Json.Serialize(ClanConflictAcknowledgeResponse.Acknowledged("clan_conflict_a").ToDictionary()) == acknowledgedLegacy
+                    && Json.Serialize(ClanConflictAcknowledgeResponse.NotFound().ToDictionary()) == missingLegacy
+                    && Json.Serialize(acknowledgedParsed.ToDictionary()) == acknowledgedLegacy
+                    && Json.Serialize(missingParsed.ToDictionary()) == missingLegacy;
+                add("notice_contract_responses_match_legacy_bytes", noticesEqual && acknowledgeEqual,
+                    "Typed notice and acknowledgement responses serialize byte-identically to the legacy dictionaries and round-trip.");
+            }
+            catch (Exception ex)
+            {
+                add("notice_contract_responses_match_legacy_bytes", false, "Clan-conflict notice response contract failed: " + ex.Message);
+            }
+
+            try
+            {
+                bool requestsEqual = true;
+                foreach (string body in new[]
+                {
+                    "{\"campaignId\":\"camp\",\"timelineId\":\"tl\",\"incidentId\":\"clan_conflict_a\",\"worldDay\":12.5}",
+                    "{\"campaignId\":\"camp\",\"timelineId\":\"main\",\"incidentId\":\"clan_conflict_a\"}",
+                    "{\"campaignId\":42,\"timelineId\":null,\"incidentId\":7}",
+                    "{}"
+                })
+                {
+                    Dictionary<string, object> payload = Json.Deserialize<Dictionary<string, object>>(body);
+                    ClanConflictAcknowledgeRequest request = ClanConflictAcknowledgeRequest.FromDictionary(payload);
+                    requestsEqual &= request.CampaignId == ReadString(payload, "campaignId", "default")
+                        && request.TimelineId == ReadString(payload, "timelineId", "main")
+                        && request.IncidentId == ReadString(payload, "incidentId", "");
+                }
+                string clientBody = "{\"campaignId\":\"camp\",\"timelineId\":\"tl\",\"incidentId\":\"clan_conflict_a\",\"worldDay\":12.5}";
+                requestsEqual &= Json.Serialize(ClanConflictAcknowledgeRequest.FromDictionary(
+                    Json.Deserialize<Dictionary<string, object>>(clientBody)).ToDictionary()) == clientBody;
+                ClanConflictAcknowledgeRequest nullRequest = ClanConflictAcknowledgeRequest.FromDictionary(null);
+                requestsEqual &= nullRequest.CampaignId == "default" && nullRequest.TimelineId == "main"
+                    && nullRequest.IncidentId == "" && !nullRequest.WorldDay.HasValue;
+
+                foreach (Dictionary<string, string> query in new[]
+                {
+                    null, new Dictionary<string, string>(),
+                    new Dictionary<string, string> { ["limit"] = "0" },
+                    new Dictionary<string, string> { ["limit"] = "99" },
+                    new Dictionary<string, string> { ["limit"] = "abc" },
+                    new Dictionary<string, string> { ["campaignId"] = "", ["timelineId"] = "tl", ["limit"] = "7" }
+                })
+                {
+                    Dictionary<string, string> legacyQuery = query ?? new Dictionary<string, string>();
+                    string legacyCampaign = legacyQuery.TryGetValue("campaignId", out string campaign) ? campaign : "default";
+                    string legacyTimeline = legacyQuery.TryGetValue("timelineId", out string timeline) ? timeline : "main";
+                    int legacyLimit = Math.Max(1, Math.Min(20, legacyQuery.TryGetValue("limit", out string rawLimit)
+                        && int.TryParse(rawLimit, out int parsedLimit) ? parsedLimit : 5));
+                    ClanConflictNoticesRequest request = ClanConflictNoticesRequest.FromQuery(query);
+                    requestsEqual &= request.CampaignId == legacyCampaign && request.TimelineId == legacyTimeline
+                        && request.Limit == legacyLimit;
+                }
+                requestsEqual &= new ClanConflictNoticesRequest { CampaignId = "my camp", TimelineId = "main", Limit = 10 }.ToRelativeUri()
+                    == "/clan-conflicts/notices?campaignId=my%20camp&timelineId=main&limit=10";
+                add("notice_contract_requests_match_legacy_parsing", requestsEqual,
+                    "Typed notice query and acknowledgement body parsing equals the legacy server reads, and the client body round-trips byte-identically.");
+            }
+            catch (Exception ex)
+            {
+                add("notice_contract_requests_match_legacy_parsing", false, "Clan-conflict notice request contract failed: " + ex.Message);
+            }
         }
 
         private static Dictionary<string, object> ClanConflictSelfTestClan(
