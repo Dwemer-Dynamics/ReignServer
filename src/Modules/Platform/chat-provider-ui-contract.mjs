@@ -435,7 +435,63 @@ try {
   for (let i = 0; i < 100 && globalSaves.length < savesBeforeEndpoint + 2; i++) await page.waitForTimeout(20);
   await page.waitForFunction(() => document.getElementById('apiKey').value === '');
   assert.equal(globalSaves.at(-1).body.expectedApiUrl,'https://new-endpoint.invalid/v1/chat/completions');
-  results.push({globalKeys:true,noAutoSelect:true,endpointGuard:true,mainSaveGuard:true,rowOnlyRefresh:true,unbind:true,rename:true,unavailable:true,notEnrolled:true,passed:true});
+  // Layered keys: each row names the key in use (Reign-only, bound, automatic or none). An automatic key is never saved as a
+  // selection; a Reign-only key is saved and cleared only by its explicit buttons through the plain settings routes.
+  const autoKey = {keyId:sharedKey.keyId,label:'Shared',preview:'...abcd'};
+  globalKeys = {ok:true,available:true,enrolled:true,localKeyWorkflow:true,outcome:'listed',slots:[
+    {slot:'openRouterApiKey',name:'OpenRouter',provider:'openrouter',origin:'https://openrouter.ai:443',legacy:false,source:'global_auto',
+      autoCandidates:1,autoKey,bound:false,binding:null,keys:[sharedKey]},
+    {slot:'nanoGptApiKey',name:'NanoGPT text',provider:'nano_gpt',origin:'https://nano-gpt.com:443',legacy:false,source:'global_bound',autoCandidates:0,
+      autoKey:null,bound:true,binding:{keyId:sharedKey.keyId,provider:'nano_gpt',origin:'https://nano-gpt.com:443',originMatches:true},keys:[sharedKey]},
+    {slot:'ollamaCloudApiKey',name:'Ollama Cloud',provider:'custom_openai',origin:'https://ollama.com:443',legacy:false,source:'none',autoCandidates:2,
+      autoKey:null,bound:false,binding:null,keys:[]}]};
+  await page.reload();
+  await page.waitForFunction(() => !!document.getElementById('openRouterApiKeyKeySourceRow'));
+  await page.evaluate(() => { document.querySelectorAll('.page').forEach(x => x.classList.remove('active')); document.getElementById('llm').classList.add('active'); });
+  await page.selectOption('#llmProvider','openrouter');
+  assert.match(await page.textContent('#openRouterApiKeyKeySourceRow [data-key-source]'),/Using global key Shared \.\.\.abcd automatically/);
+  assert.match(await page.textContent('#nanoGptApiKeyKeySourceRow [data-key-source]'),/^Using global key Shared/);
+  assert.match(await page.textContent('#ollamaCloudApiKeyKeySourceRow [data-key-source]'),/No key: 2 matching/);
+  assert.equal(await page.inputValue('#openRouterApiKeyGlobalRow select'),'','An automatic key is never saved as a selection');
+  assert.equal(await page.locator('#openRouterApiKeyKeySourceRow [data-reign-only=clear]').isHidden(),true);
+  await page.fill('#openRouterApiKey','fixture-reign-only');
+  await page.evaluate(() => saveSettings());
+  assert.equal(saved.openRouterApiKey,'','Main Save never turns a typed key into a Reign-only key on its own');
+  assert.equal(await page.inputValue('#openRouterApiKey'),'fixture-reign-only');
+  globalKeys.slots[0] = {...globalKeys.slots[0],legacy:true,source:'reign_only',autoKey:null};
+  await page.click('#openRouterApiKeyKeySourceRow [data-reign-only=save]');
+  await page.waitForFunction(() => /Reign-only key saved/.test(document.querySelector('#openRouterApiKeyGlobalRow [role=status]').textContent));
+  assert.deepEqual(saved,{openRouterApiKey:'fixture-reign-only'},'Save Reign-only key sends only that key through the settings route');
+  assert.match(await page.inputValue('#openRouterApiKey'),/^\*{12,32}$/,'A saved Reign-only key stays masked');
+  assert.match(await page.textContent('#openRouterApiKeyKeySourceRow [data-key-source]'),/Using your Reign-only key/);
+  assert.equal(await page.locator('#openRouterApiKeyKeySourceRow [data-reign-only=clear]').isVisible(),true);
+  const clearsBeforeLocal = globalClears.length;
+  globalKeys.slots[0] = {...globalKeys.slots[0],legacy:false,source:'global_auto',autoKey};
+  await page.click('#openRouterApiKeyKeySourceRow [data-reign-only=clear]');
+  for (let i = 0; i < 100 && globalClears.length === clearsBeforeLocal; i++) await page.waitForTimeout(20);
+  assert.deepEqual(globalClears.at(-1),{body:{key:'openRouterApiKey'},header:undefined},'Clearing a Reign-only key never uses the unbind guard');
+  assert.match(dialogs.at(-1),/Reign-only key/);
+  await page.waitForFunction(() => /automatically/.test(document.querySelector('#openRouterApiKeyKeySourceRow [data-key-source]').textContent));
+  assert.equal(await page.inputValue('#openRouterApiKey'),'');
+  // The custom endpoint's Reign-only key carries the URL shown, for the server's endpoint_changed check.
+  globalKeys.slots.push({slot:'apiKey',name:'Custom endpoint',provider:'custom_openai',origin:'https://fixture.invalid:443',legacy:false,source:'none',
+    autoCandidates:0,autoKey:null,bound:false,binding:null,keys:[]});
+  await page.evaluate(() => loadGlobalKeys());
+  await page.selectOption('#llmProvider','openai_compatible');
+  const shownApiUrl = await page.inputValue('#apiUrl');
+  await page.fill('#apiKey','fixture-custom-reign-only');
+  await page.click('#apiKeyKeySourceRow [data-reign-only=save]');
+  await page.waitForFunction(() => /Reign-only key saved/.test(document.querySelector('#apiKeyGlobalRow [role=status]').textContent));
+  assert.deepEqual(saved,{apiKey:'fixture-custom-reign-only',expectedApiUrl:shownApiUrl});
+  await page.selectOption('#llmProvider','openrouter');
+  for (const width of [1672,1024,600]) {
+    await page.setViewportSize({width,height:941});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth>innerWidth+1),false);
+    const screenshot=path.join(output,`${width}-layered-keys.png`);
+    await page.locator('#llm').screenshot({path:screenshot});
+    results.push({width,layeredKeys:true,screenshot,passed:true});
+  }
+  results.push({globalKeys:true,noAutoSelect:true,endpointGuard:true,mainSaveGuard:true,rowOnlyRefresh:true,unbind:true,rename:true,unavailable:true,notEnrolled:true,reignOnlyKey:true,autoSource:true,passed:true});
   globalKeys = null;
   assert.deepEqual(errors,[]);
   const report=path.join(output,'ui-report.json');

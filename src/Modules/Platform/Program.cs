@@ -23538,9 +23538,12 @@ Return exactly this JSON shape:
             }
             return result;
         }
+        // settingsPathForTests: contract tests save to a disposable file instead of the live settings; the installed vault is
+        // then not written. Never set from a request.
         private static Dictionary<string, object> SaveSettingsCore(Dictionary<string, object> incoming,
-            out Dictionary<string, object> applied, out bool invalidate)
+            out Dictionary<string, object> applied, out bool invalidate, string settingsPathForTests = null)
         {
+            string settingsPath = settingsPathForTests ?? SettingsPath;
             applied = null;
             invalidate = false;
             string gossipError = ValidatePersonalGossipOptions(incoming);
@@ -23566,11 +23569,11 @@ Return exactly this JSON shape:
             string visionError = ValidatePortraitVisionSettings(incoming);
             if (!string.IsNullOrEmpty(visionError)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = visionError };
             Dictionary<string, object> settings = DefaultSettings();
-            if (File.Exists(SettingsPath))
+            if (File.Exists(settingsPath))
             {
                 try
                 {
-                    Dictionary<string, object> saved = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(SettingsPath, Encoding.UTF8));
+                    Dictionary<string, object> saved = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(settingsPath, Encoding.UTF8));
                     foreach (KeyValuePair<string, object> pair in saved)
                     {
                         settings[pair.Key] = pair.Value;
@@ -23583,6 +23586,9 @@ Return exactly this JSON shape:
                 }
             }
 
+            // Stale pre-upgrade shadows are cleared from the stored state before the merge, so a Reign-only key in this
+            // save is never mistaken for one.
+            SanitizeBoundKeySlots(settings);
             string localKeyRefusal = LocalProviderKeyWriteRefusal(incoming, settings);
             if (localKeyRefusal != null) return TestDict("ok", false, "error", localKeyRefusal, "outcome", "global_keys_required");
             string processSettingRefusal = OperatorOwnedProcessSettingRefusal(settings, incoming);
@@ -23598,6 +23604,18 @@ Return exactly this JSON shape:
             {
                 incoming = new Dictionary<string, object>(incoming);
                 incoming.Remove("expectedSettingsRevision");
+            }
+            // A Reign-only custom endpoint key belongs to the API URL the caller saw, exactly like Save key: the save carries
+            // that URL and is refused before anything is stored unless its origin is the endpoint this save leaves in place.
+            if (incoming.ContainsKey("expectedApiUrl"))
+            {
+                string effectiveApiUrl = incoming.ContainsKey("apiUrl") ? ReadString(incoming, "apiUrl", "") : ReadString(settings, "apiUrl", "");
+                string expectedOrigin = NormalizedOrigin(ReadString(incoming, "expectedApiUrl", ""));
+                if (expectedOrigin == null || expectedOrigin != NormalizedOrigin(effectiveApiUrl))
+                    return TestDict("ok", false, "outcome", "endpoint_changed",
+                        "error", "The saved API URL differs from the one shown. Save Changes (or reload) first; nothing was saved.");
+                incoming = new Dictionary<string, object>(incoming);
+                incoming.Remove("expectedApiUrl");
             }
             string previousCodexSettingsIdentity = CodexSettingsIdentity(settings);
             string settingsBeforeMerge = Json.Serialize(settings);
@@ -23630,9 +23648,9 @@ Return exactly this JSON shape:
             }
             SanitizeBoundKeySlots(settings);
             settings["settingsRevision"] = DateTime.UtcNow.ToString("o");
-            Directory.CreateDirectory(DataDir);
-            WriteJsonObject(SettingsPath, settings);
-            PersistInstalledSettingsSecrets(settings, clearKeys.Count > 0);
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath));
+            WriteJsonObject(settingsPath, settings);
+            if (settingsPathForTests == null) PersistInstalledSettingsSecrets(settings, clearKeys.Count > 0);
             applied = settings;
             invalidate = previousCodexSettingsIdentity != CodexSettingsIdentity(settings);
 
@@ -23826,7 +23844,9 @@ Return exactly this JSON shape:
             return changed;
         }
 
-        private static Dictionary<string, object> ClearSettingsKey(Dictionary<string, object> payload, HttpRequest request = null)
+        // settingsPathForTests: contract tests clear in a disposable settings file; never set from a request.
+        private static Dictionary<string, object> ClearSettingsKey(Dictionary<string, object> payload, HttpRequest request = null,
+            string settingsPathForTests = null)
         {
             string key = ReadString(payload, "key", "");
             if (!SensitiveSettingsKeys().Contains(key))
@@ -23834,16 +23854,45 @@ Return exactly this JSON shape:
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Unknown or non-sensitive key cannot be cleared." };
             }
 
-            // Clearing a bound slot unbinds it (the global key stays) and is a key mutation: same guard as the key routes.
-            if (GlobalKeySlots.Contains(key) && GlobalKeyBinding(LoadSettings(), key) != null)
-                return request == null || !GlobalKeyRequestAllowed(request) ? GlobalKeyFail("forbidden") : UnbindGlobalKey(new Dictionary<string, object> { ["slot"] = key });
+            // A Reign-only key is cleared first, even on a bound slot, so the slot returns to its global key. Clearing a bound
+            // slot without one unbinds it (the global key stays) and is a key mutation: same guard as the key routes.
+            bool globalSlot = GlobalKeySlots.Contains(key);
+            bool hadReignOnlyKey = false;
+            if (globalSlot)
+            {
+                Dictionary<string, object> current;
+                if (settingsPathForTests == null) current = LoadSettings();
+                else current = ReadSettingsFileForTests(settingsPathForTests);
+                hadReignOnlyKey = !string.IsNullOrWhiteSpace(ReadString(current, key, ""));
+                if (GlobalKeyBinding(current, key) != null && !hadReignOnlyKey)
+                    return request == null || !GlobalKeyRequestAllowed(request) ? GlobalKeyFail("forbidden") : UnbindGlobalKey(new Dictionary<string, object> { ["slot"] = key });
+            }
             Dictionary<string, object> incoming = new Dictionary<string, object>
             {
                 ["clearKeys"] = new List<string> { key }
             };
-            Dictionary<string, object> result = SaveSettings(incoming);
+            Dictionary<string, object> result;
+            if (settingsPathForTests == null) result = SaveSettings(incoming);
+            else lock (SettingsSaveGate) result = SaveSettingsCore(incoming, out _, out _, settingsPathForTests);
+            if (globalSlot && ReadBool(result, "ok", false))
+            {
+                // The explicit clear still runs (it also clears the vault copy); the outcome says whether a key was removed.
+                if (hadReignOnlyKey) result["outcome"] = "local_cleared";
+                else result["outcome"] = "unchanged";
+            }
             LogOperational("settings.clear_key", new Dictionary<string, object> { ["key"] = key });
             return result;
+        }
+
+        // The stored settings as a save would see them (file contents over defaults, one-time shadow cleanup applied).
+        private static Dictionary<string, object> ReadSettingsFileForTests(string path)
+        {
+            Dictionary<string, object> settings = DefaultSettings();
+            if (File.Exists(path))
+                foreach (var pair in Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(path, Encoding.UTF8)) ?? new Dictionary<string, object>())
+                    settings[pair.Key] = pair.Value;
+            SanitizeBoundKeySlots(settings);
+            return settings;
         }
 
         private static HashSet<string> SensitiveSettingsKeys()
@@ -23894,7 +23943,7 @@ Return exactly this JSON shape:
                 + "|dialogueModel=" + ModelForRequest(settings, "dialogue")
                 + "|constructionModel=" + ModelForRequest(settings, "character_construction")
                 + "|constructionMaxTokens=" + ReadInt(settings, "characterConstructionMaxTokens", CharacterConstructionTokenCeiling)
-                + "|apiKeyPresent=" + ProviderKeyConfigured(settings, LlmApiKeySlot(settings))
+                + "|apiKeyPresent=" + ProviderKeyConfigured(settings, LlmApiKeySlot(settings), false)
                 + "|apiKeyBinding=" + ReadString(GlobalKeyBinding(settings, LlmApiKeySlot(settings)), "keyId", "")
                 + "|apiKeyLength=" + apiKey.Length;
         }

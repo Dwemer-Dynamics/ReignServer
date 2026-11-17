@@ -236,8 +236,9 @@ namespace ReignBetaServer
                 {
                     foreach (KeyValuePair<string, object> pair in savedSettings)
                     {
-                        // A slot bound to a global key never takes a value back from an older vault.
-                        if (GlobalKeyBinding(settings, pair.Key) != null) continue;
+                        // A slot bound to a global key never takes a value back from an older vault, except a Reign-only key
+                        // the vault recorded beside that same binding.
+                        if (GlobalKeyBinding(settings, pair.Key) != null && !VaultHoldsReignOnlyKey(savedSettings, settings, pair.Key)) continue;
                         settings[pair.Key] = pair.Value;
                         restoredSettingCount++;
                         if (SensitiveSettingsKeys().Contains(pair.Key)
@@ -251,7 +252,12 @@ namespace ReignBetaServer
 
                 foreach (string key in SensitiveSettingsKeys())
                 {
-                    if (!string.IsNullOrWhiteSpace(ReadString(settings, key, "")) || GlobalKeyBinding(settings, key) != null)
+                    if (!string.IsNullOrWhiteSpace(ReadString(settings, key, "")))
+                    {
+                        continue;
+                    }
+
+                    if (GlobalKeyBinding(settings, key) != null && !VaultHoldsReignOnlyKey(savedSettings, settings, key))
                     {
                         continue;
                     }
@@ -268,6 +274,20 @@ namespace ReignBetaServer
                 }
             }
             return recovered;
+        }
+
+        // True when the vault's value for a bound slot is a Reign-only key: the vault was written after the one-time shadow
+        // cleanup (it carries the marker) and recorded the same binding for that slot. A value saved before the slot was
+        // bound, or by an earlier version, is never restored into it.
+        private static bool VaultHoldsReignOnlyKey(Dictionary<string, object> savedSettings, Dictionary<string, object> settings, string slot)
+        {
+            if (!ReadBool(ReadDictionary(savedSettings, "globalKeyMigrations"), BoundShadowCleanupMarker, false))
+            {
+                return false;
+            }
+
+            string vaultKeyId = BoundKeyId(savedSettings, slot);
+            return vaultKeyId.Length > 0 && vaultKeyId == BoundKeyId(settings, slot);
         }
 
         private static Dictionary<string, object> RunSettingsSecretVaultSelfTest()
