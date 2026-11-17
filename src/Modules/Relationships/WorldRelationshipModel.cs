@@ -31,16 +31,21 @@ namespace ReignBetaServer
             private HashSet<string> playerIds;
             private bool standingStale;
             private bool rosterStale;
+            // Present only on a file-input scope. Such a scope answers file-derived
+            // relationship inputs strictly from its snapshot; its database reads
+            // pass through unchanged (For skips it), so standing/roster stay transactional.
+            private readonly RelationshipFileSnapshot files;
             public int StandingReads;
             public int RosterReads;
             public int PlayerReads;
 
             public RelationshipStandingContext(ReignDbConnection connection,
-                string campaignId, string timelineId)
+                string campaignId, string timelineId, RelationshipFileSnapshot files = null)
             {
                 this.connection = connection;
                 this.campaignId = campaignId;
                 this.timelineId = timelineId;
+                this.files = files;
                 previous = CurrentRelationshipStandingContext;
                 CurrentRelationshipStandingContext = this;
             }
@@ -49,9 +54,28 @@ namespace ReignBetaServer
                 string campaignId = null, string timelineId = null)
             {
                 RelationshipStandingContext context = CurrentRelationshipStandingContext;
+                while (context != null && context.files != null) context = context.previous;
                 return context != null && ReferenceEquals(context.connection, connection)
                     && (campaignId == null || context.campaignId == campaignId)
                     && (timelineId == null || context.timelineId == timelineId) ? context : null;
+            }
+
+            // The nearest file-input scope on this connection, through any nested
+            // ordinary scope. Null outside one: ordinary readers keep their own path.
+            // Inside one, a different campaign or timeline is refused, never read.
+            public static RelationshipFileSnapshot FilesFor(ReignDbConnection connection,
+                string campaignId, string timelineId = null)
+            {
+                for (RelationshipStandingContext context = CurrentRelationshipStandingContext;
+                    context != null; context = context.previous)
+                {
+                    if (context.files == null || !ReferenceEquals(context.connection, connection)) continue;
+                    if (context.campaignId != campaignId || context.files.CampaignId != campaignId
+                        || (timelineId != null && (context.timelineId != timelineId || context.files.TimelineId != timelineId)))
+                        throw new InvalidOperationException("A relationship file snapshot was requested outside its campaign or timeline scope.");
+                    return context.files;
+                }
+                return null;
             }
 
             public void Prefetch(IEnumerable<string> heroIds)
@@ -160,6 +184,67 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
             public void Dispose()
             {
                 CurrentRelationshipStandingContext = previous;
+            }
+        }
+
+        // File-derived relationship inputs for one exact hero set: each hero's
+        // traits.json and profile.json, read together under one FileLock hold, plus
+        // the shipped profile catalog reference. Captured before any database or
+        // relationship lock, so a caller holding row locks never waits on FileLock.
+        // A missing entry is refused, never read from disk. Each document is
+        // parsed once at capture and the same instance is returned on every
+        // read, like the shared catalog: readers must not mutate either.
+        private sealed class RelationshipFileSnapshot
+        {
+            private static readonly string[] FileNames = { "traits.json", "profile.json" };
+            private readonly Dictionary<string, Dictionary<string, Dictionary<string, object>>> documents =
+                new Dictionary<string, Dictionary<string, Dictionary<string, object>>>(StringComparer.Ordinal);
+            private readonly Dictionary<string, Dictionary<string, object>> catalog;
+            public readonly string CampaignId;
+            public readonly string TimelineId;
+
+            private RelationshipFileSnapshot(string campaignId, string timelineId,
+                Dictionary<string, Dictionary<string, object>> catalog)
+            {
+                CampaignId = campaignId;
+                TimelineId = timelineId;
+                this.catalog = catalog;
+            }
+
+            public Dictionary<string, Dictionary<string, object>> Catalog => catalog
+                ?? throw new InvalidOperationException("The relationship file snapshot has no captured profile catalog.");
+
+            public static RelationshipFileSnapshot Capture(string campaignId, string timelineId,
+                IEnumerable<string> heroIds)
+            {
+                // Lock order: no FileLock, profile-library or relationship lock may be
+                // held here. The library lock (which may log under FileLock) is taken
+                // and released first; FileLock is then held alone.
+                if (System.Threading.Monitor.IsEntered(FileLock)
+                    || System.Threading.Monitor.IsEntered(CharacterProfileLibraryLock)
+                    || System.Threading.Monitor.IsEntered(CampaignRelationshipWriteLock(campaignId)))
+                    throw new InvalidOperationException("A relationship file snapshot must be captured before any file, catalog or relationship lock.");
+                var snapshot = new RelationshipFileSnapshot(campaignId, timelineId, LoadCharacterProfileLibrary());
+                List<string> ids = (heroIds ?? Enumerable.Empty<string>())
+                    .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+                lock (FileLock)
+                    foreach (string heroId in ids)
+                        snapshot.documents[heroId] = FileNames.ToDictionary(name => name,
+                            name => ReadJsonObject(CharacterFile(campaignId, heroId, name)), StringComparer.Ordinal);
+                return snapshot;
+            }
+
+            // An empty snapshot: every file-derived read in its scope, including the
+            // catalog, is refused. It takes no lock, so it may be built under row locks.
+            public static RelationshipFileSnapshot Refusing(string campaignId, string timelineId) =>
+                new RelationshipFileSnapshot(campaignId, timelineId, null);
+
+            public Dictionary<string, object> Document(string heroId, string fileName)
+            {
+                if (heroId != null && documents.TryGetValue(heroId, out var files)
+                    && files.TryGetValue(fileName, out Dictionary<string, object> document))
+                    return document;
+                throw new InvalidOperationException("The relationship file snapshot has no captured " + fileName + " for this hero.");
             }
         }
 
@@ -298,8 +383,11 @@ LIMIT 1;", new Dictionary<string, object>
                 ? context.ReadSources(standing)
                 : ParsePublicStandingSources(ReadString(standing, "sources_json", "[]"));
             List<Dictionary<string, object>> favoring = sources.Where(IsRulerFavoringStandingSource).ToList();
+            // Inside a file-input scope (terminal acceptance) the traits/profile
+            // documents come only from its snapshot; FileLock is never entered there.
+            RelationshipFileSnapshot files = RelationshipStandingContext.FilesFor(connection, campaignId, timelineId);
             double spouseAdjustment = WhoremongerSpouseStandingAdjustment(campaignId,
-                observerId, subjectId, sources);
+                observerId, subjectId, sources, files);
             if (favoring.Count == 0)
             {
                 int adjusted = spouseAdjustment == 0d ? stored : RoundAwayFromZero(
@@ -326,8 +414,8 @@ LIMIT 1;", new Dictionary<string, object>
                 .Equals(observerId, StringComparison.OrdinalIgnoreCase));
             double jealousy = 50d;
             if (observer != null && ReadInt(observer, "is_player", 0) == 0)
-                jealousy = RelationshipTraitPercent(ReadJsonObject(CharacterFile(campaignId,
-                    observerId, "traits.json")), "jealousy");
+                jealousy = RelationshipTraitPercent(files != null ? files.Document(observerId, "traits.json")
+                    : ReadJsonObject(CharacterFile(campaignId, observerId, "traits.json")), "jealousy");
             double jealousyFactor = 0.5d + ClampDouble(jealousy, 0d, 100d) / 100d;
             double favorValue = 0d;
             string scope = "foreign";

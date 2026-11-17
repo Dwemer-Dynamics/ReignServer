@@ -3320,7 +3320,8 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
             Dictionary<string, object> traits = null;
             string source;
             double assignmentDay;
-            Dictionary<string, Dictionary<string, object>> catalog = LoadCharacterProfileLibrary();
+            Dictionary<string, Dictionary<string, object>> catalog =
+                RelationshipStandingContext.FilesFor(connection, campaignId)?.Catalog ?? LoadCharacterProfileLibrary();
             if (catalog.TryGetValue(heroId, out Dictionary<string, object> pregenerated))
             {
                 mbti = ReadDictionary(pregenerated, "mbtiProfile")
@@ -4761,7 +4762,10 @@ native_action_id=$action,updated_ts=$ts;",
                 new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
             string storedType = ReadString(stored, "mbti_type", "");
             if (MbtiDefinitions.ContainsKey(storedType)) return storedType;
-            Dictionary<string, Dictionary<string, object>> catalog = LoadCharacterProfileLibrary();
+            // A cold library load logs under FileLock; a file-input scope supplies the
+            // catalog reference it captured before its database locks.
+            Dictionary<string, Dictionary<string, object>> catalog =
+                RelationshipStandingContext.FilesFor(connection, campaignId)?.Catalog ?? LoadCharacterProfileLibrary();
             if (catalog.TryGetValue(heroId, out Dictionary<string, object> pregenerated))
             {
                 Dictionary<string, object> mbti = ReadDictionary(pregenerated, "mbtiProfile")
