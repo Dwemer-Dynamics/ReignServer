@@ -671,12 +671,35 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 var protocolBase = protocolEnvelope(protocolActor, protocolJson);
                 var stage3Point = TestDict("savePointId", "stage3_point", "timelineId", "player_actions_timeline");
                 string beforeRollback = liveGeneration();
+                // Snapshot taken before the rollback, so its own generation (beforeRollback) differs from the live one.
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "stage3_noop_snapshot");
                 AdvanceMemoryRestoreGeneration(campaign, stage3Point, "", "stage3_l1");
                 string g2 = liveGeneration();
                 var context = restoreContext();
                 add("terminal_report_rollback_context_binds_load_session", ReadString(context, "load_session_id", "") == "stage3_l1"
                     && ReadString(context, "source_generation", "") == beforeRollback && ReadString(context, "restore_generation", "") == g2
                     && ReadString(context, "save_point_id", "") == "stage3_point" && g2 != beforeRollback, context);
+                // A verified no-op load always takes source_generation from the snapshot itself, so a
+                // value left stale by an older server build cannot survive; other save points are untouched.
+                try
+                {
+                    setContext("source_generation", "stale_downgrade_generation");
+                    BindVerifiedNoOpLoadSession(campaign, "stage3_other_point", "stage3_noop_snapshot", "stage3_noop_other");
+                    var otherPoint = restoreContext();
+                    BindVerifiedNoOpLoadSession(campaign, "stage3_point", "stage3_noop_snapshot", "stage3_noop");
+                    var noOpBound = restoreContext();
+                    add("terminal_report_noop_bind_rewrites_stale_source_generation", ReadString(otherPoint, "source_generation", "") == "stale_downgrade_generation"
+                        && ReadString(otherPoint, "load_session_id", "") == "stage3_l1"
+                        && ReadString(noOpBound, "source_generation", "") == beforeRollback && ReadString(noOpBound, "load_session_id", "") == "stage3_noop"
+                        && ReadString(noOpBound, "save_point_id", "") == "stage3_point" && ReadString(noOpBound, "restore_generation", "") == g2,
+                        TestDict("otherPoint", otherPoint, "bound", noOpBound));
+                }
+                finally
+                {
+                    setContext("source_generation", beforeRollback);
+                    setContext("load_session_id", "stage3_l1");
+                    ReignPostgreSqlStorage.DropSnapshot(campaign, "stage3_noop_snapshot");
+                }
                 string markerBefore = Json.Serialize(markerOf(protocolId));
                 var wrongSource = TerminalActionReportApi(recover(protocolBase, g2, "stage3_l1", "stage3_point"));
                 var wrongSourceFirst = TerminalActionReportApi(recover(jobEnvelope, g2, "stage3_l1", "stage3_point"));
@@ -741,6 +764,188 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 add("terminal_report_import_invalidates_load_proof", ReadString(afterImport, "reason", "") == "load_proof_stale"
                     && ReadString(forgedStamp, "reason", "") == "load_proof_stale" && Json.Serialize(markerOf(protocolId)) == markerBeforeImport,
                     TestDict("import", afterImport, "forged", forgedStamp));
+                // Remaining held/rollback cases run on an unreported pa_ row from the original
+                // generation. The context row is saved exactly and restored afterwards.
+                string savedContext;
+                using (var cx = OpenCampaignConnection(campaign))
+                    savedContext = ReadString(QuerySql(cx, "SELECT to_jsonb(c)::text AS saved FROM memory_restored_source_context c WHERE c.state_id='current';").Single(), "saved", "");
+                Action restoreSavedContext = () => { using (var cx = OpenCampaignConnection(campaign)) ExecuteSql(cx,
+                    "DELETE FROM memory_restored_source_context; INSERT INTO memory_restored_source_context SELECT * FROM jsonb_populate_record(CAST(NULL AS memory_restored_source_context), CAST($saved AS jsonb));",
+                    TestDict("saved", savedContext)); };
+                const string reboundTimeline = "stage3_rebound_timeline";
+                try
+                {
+                    string giftId = ReadString(ReadDictionaryList(mixedFailure, "queuedDialogueActions").FirstOrDefault(), "id", "");
+                    var giftRecord = ReadDictionary(ReadDurableConversationAction(campaign, giftId), "record");
+                    string giftActor = ReadString(giftRecord, "actorHeroStringId", "");
+                    string giftJson = Json.Serialize(TestDict("campaignId", campaign, "serverActionId", giftId, "actionId", giftId,
+                        "timelineId", "player_actions_timeline", "playerHeroStringId", giftActor,
+                        "sharedActivityGeneration", protocolGeneration, "status", "completed", "type", "RegularTransferGold", "message", "A kind gift was recovered with thanks.",
+                        "actorHeroStringId", giftActor, "targetHeroStringId", ReadString(giftRecord, "targetHeroStringId", ""),
+                        "termsHash", ReadString(giftRecord, "termsHash", ""), "worldDay", 22d));
+                    Reign.Core.Contracts.Actions.TerminalActionReportProtocol.TryReportSha256(giftJson, out string giftSha, out _);
+                    var giftEnvelope = TestDict("schema", Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema, "campaignId", campaign,
+                        "timelineId", "player_actions_timeline", "playerHeroStringId", giftActor, "generation", protocolGeneration,
+                        "actionId", giftId, "termsHash", ReadString(giftRecord, "termsHash", ""), "status", "completed", "reportJson", giftJson, "reportSha256", giftSha);
+                    Func<string, string, int> countFor = (sql, id) => { using (var cx = OpenCampaignConnection(campaign)) return QuerySql(cx, sql, TestDict("id", id)).Count; };
+                    const string giftMemorySql = "SELECT owner_id,memory_id FROM memories WHERE event_id='action_' || $id ORDER BY owner_id,memory_id;";
+                    const string sharedRowSql = "SELECT activity_id FROM shared_activity_events WHERE source_id LIKE 'action_receipt_%' AND (payload_json::jsonb->'facts'->>'actionId')=$id;";
+                    Func<string> giftRow = () => Json.Serialize(ReadDurableConversationAction(campaign, giftId));
+                    Func<bool> giftUntouched = () => markerOf(giftId) == null && countFor(directionalSql, giftId) == 0
+                        && countFor(actionReceiptSql, giftId) == 0 && countFor(giftMemorySql, giftId) == 0 && countFor(sharedRowSql, giftId) == 0;
+                    string giftIneligible = "missing";
+                    using (var cx = OpenCampaignConnection(campaign))
+                    {
+                        var storedGift = QuerySql(cx, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", giftId)).FirstOrDefault();
+                        var storedGiftPayload = storedGift == null ? null : TryParseJsonObject(ReadString(storedGift, "payload_json", "{}"));
+                        if (storedGiftPayload != null) giftIneligible = TerminalReportIneligibility(cx, storedGiftPayload, campaign, giftId, ReadString(storedGift, "timeline_id", ""));
+                    }
+                    // A verified load bound to this generation whose snapshot came from the report's own generation.
+                    setContext("load_session_id", "stage3_l2");
+                    setContext("source_generation", protocolGeneration);
+                    string giftRowBefore = giftRow(), protocolMarkerBefore = Json.Serialize(markerOf(protocolId)), protocolAdmissionBefore = Json.Serialize(ReadDictionary(markerOf(protocolId), "admission"));
+                    add("terminal_report_recovery_second_fixture_row_is_eligible", giftId.StartsWith("pa_", StringComparison.Ordinal) && giftIneligible.Length == 0
+                        && TerminalReportExpectedType(giftRecord) == "RegularTransferGold" && giftUntouched()
+                        && giftActor == protocolActor && ReadString(giftRecord, "targetHeroStringId", "") == ReadString(protocolRecord, "targetHeroStringId", "")
+                        && ReadString(restoreContext(), "timeline_id", "") == "player_actions_timeline", TestDict("id", giftId, "ineligible", giftIneligible));
+
+                    // Empty context: with no restore context row no proof can be bound, so both a first
+                    // acceptance and an adoption fail closed as load_proof_stale and nothing is written.
+                    using (var cx = OpenCampaignConnection(campaign)) ExecuteSql(cx, "DELETE FROM memory_restored_source_context;");
+                    var emptyFirst = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
+                    var emptyAdopt = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                    restoreSavedContext();
+                    setContext("load_session_id", "stage3_l2");
+                    setContext("source_generation", protocolGeneration);
+                    add("terminal_report_recovery_empty_context_fails_closed", new[] { emptyFirst, emptyAdopt }.All(r =>
+                            ReadString(r, "disposition", "") == "conflict" && ReadString(r, "reason", "") == "load_proof_stale" && ReadDictionary(r, "nativeEffect") == null)
+                        && giftUntouched() && giftRow() == giftRowBefore && Json.Serialize(markerOf(protocolId)) == protocolMarkerBefore,
+                        TestDict("first", emptyFirst, "adopt", emptyAdopt));
+
+                    // Recovery needs both of its parts: the recovery schema without recovery or loadProof
+                    // (what a v1-only request shape would send) is an invalid envelope. A plain v1
+                    // envelope that carries the recovery parts stays on the v1 path, where an older
+                    // generation is stale; it is never admitted.
+                    Func<Action<Dictionary<string, object>>, Dictionary<string, object>> malformed = edit =>
+                    {
+                        var e = recover(giftEnvelope, g3, "stage3_l2", "stage3_point");
+                        edit(e);
+                        return TerminalActionReportApi(e);
+                    };
+                    var noParts = malformed(e => { e.Remove("recovery"); e.Remove("loadProof"); });
+                    var noProof = malformed(e => e.Remove("loadProof"));
+                    var noRecovery = malformed(e => e.Remove("recovery"));
+                    var sameGeneration = TerminalActionReportApi(recover(giftEnvelope, protocolGeneration, "stage3_l2", "stage3_point"));
+                    var v1First = recover(giftEnvelope, g3, "stage3_l2", "stage3_point");
+                    v1First["schema"] = Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema;
+                    var v1Adopt = recover(protocolBase, g3, "stage3_l2", "stage3_point");
+                    v1Adopt["schema"] = Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema;
+                    var v1FirstReply = TerminalActionReportApi(v1First);
+                    var v1AdoptReply = TerminalActionReportApi(v1Adopt);
+                    add("terminal_report_recovery_requires_recovery_schema_parts", new[] { noParts, noProof, noRecovery, sameGeneration }.All(r => !ReadBool(r, "ok", true))
+                        && new[] { v1FirstReply, v1AdoptReply }.All(r => ReadString(r, "disposition", "") == "stale" && ReadString(r, "reason", "") == "generation_mismatch")
+                        && giftUntouched() && giftRow() == giftRowBefore && Json.Serialize(markerOf(protocolId)) == protocolMarkerBefore,
+                        TestDict("noParts", noParts, "noProof", noProof, "noRecovery", noRecovery, "sameGeneration", sameGeneration, "v1First", v1FirstReply, "v1Adopt", v1AdoptReply));
+
+                    // Rebound timeline: once BindRecoveredMemorySources moves the verified context to another
+                    // timeline, reports filed under the requested timeline are held (nothing mutated); binding
+                    // the context to the report's timeline admits them again.
+                    var headContext = restoreContext();
+                    long headSequence = ReadLong(headContext, "head_sequence", 0);
+                    string headEvent = ReadString(headContext, "head_event_id", "");
+                    using (var cx = OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, "player_actions_timeline", reboundTimeline, headSequence, headEvent);
+                    string reboundTo = ReadString(restoreContext(), "timeline_id", "");
+                    var reboundAdopt = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                    var reboundFirst = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
+                    using (var cx = OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, reboundTimeline, "player_actions_timeline", headSequence, headEvent);
+                    string reboundBack = ReadString(restoreContext(), "timeline_id", "");
+                    var reboundAdmitted = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                    add("terminal_report_recovery_rebound_timeline_held_then_admitted", reboundTo == reboundTimeline && reboundBack == "player_actions_timeline"
+                        && new[] { reboundAdopt, reboundFirst }.All(r => ReadString(r, "disposition", "") == "unknown"
+                            && ReadString(r, "reason", "") == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoveryUnprovenPrefix + "timeline")
+                        && ReadString(reboundAdmitted, "disposition", "") == "accepted" && ReadString(reboundAdmitted, "reason", "") == "recovery_replay"
+                        && giftUntouched() && giftRow() == giftRowBefore
+                        && Json.Serialize(ReadDictionary(markerOf(protocolId), "admission")) == protocolAdmissionBefore,
+                        TestDict("reboundTo", reboundTo, "adopt", reboundAdopt, "first", reboundFirst, "admitted", reboundAdmitted));
+
+                    // projectedTs-only marker (written before projectedShared existed, its shared row
+                    // missing): an adoption replay writes only the shared row and the projectedShared
+                    // stamp; the existing action memory and projectedTs are never rewritten.
+                    string memoryBeforeLegacy = memoryRows();
+                    Func<object> projectedTsOf = () => { var m = markerOf(protocolId); return m != null && m.TryGetValue("projectedTs", out object v) ? v : null; };
+                    object projectedTsBefore = projectedTsOf();
+                    int sharedOriginal = countFor(sharedRowSql, protocolId);
+                    using (var cx = OpenCampaignConnection(campaign))
+                    {
+                        ExecuteSql(cx, "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedShared}')::text WHERE action_id=$id;", TestDict("id", protocolId));
+                        var sharedIds = QuerySql(cx, sharedRowSql, TestDict("id", protocolId)).Select(r => ReadString(r, "activity_id", "")).ToList();
+                        foreach (string sharedId in sharedIds)
+                            ExecuteSql(cx, "DELETE FROM shared_activity_observers WHERE activity_id=$a; DELETE FROM shared_activity_events WHERE activity_id=$a;", TestDict("a", sharedId));
+                    }
+                    bool legacyShape = markerOf(protocolId)?.ContainsKey("projectedTs") == true && markerOf(protocolId)?.ContainsKey("projectedShared") == false
+                        && countFor(sharedRowSql, protocolId) == 0;
+                    var legacyReplay = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                    var legacyRepeat = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
+                    add("terminal_report_projected_ts_only_marker_writes_only_shared_row", legacyShape && sharedOriginal == 1
+                        && ReadString(legacyReplay, "reason", "") == "recovery_replay" && ReadString(legacyReplay, "memoryProjectionStatus", "") == "completed"
+                        && ReadString(legacyRepeat, "memoryProjectionStatus", "") == "completed"
+                        && markerOf(protocolId)?.ContainsKey("projectedShared") == true
+                        && projectedTsBefore != null && Json.Serialize(projectedTsOf()) == Json.Serialize(projectedTsBefore)
+                        && countFor(sharedRowSql, protocolId) == 1 && memoryRows() == memoryBeforeLegacy && onePerOwner(),
+                        TestDict("sharedOriginal", sharedOriginal, "replay", legacyReplay, "memoryBefore", memoryBeforeLegacy, "memoryAfter", memoryRows()));
+
+                    // Injected restore during a recovery first acceptance: a concurrent generation write
+                    // inside the transaction plus a failure at each seam rolls back marker, admission,
+                    // receipts, derived standing and the generation; a clean retry then accepts once.
+                    string derivedBeforeRecovery = derivedCommitted();
+                    var injectionFailures = new List<int>();
+                    foreach (int seam in new[] { 1, 2 })
+                    {
+                        bool injected = false;
+                        try
+                        {
+                            TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"), (step, cx) =>
+                            {
+                                if (step != seam) return;
+                                ExecuteSql(cx, "UPDATE memory_precision_state SET restore_generation='stage3_injected_restore' WHERE state_id='current';");
+                                throw new InvalidOperationException("Injected restore during recovery acceptance.");
+                            });
+                        }
+                        catch (InvalidOperationException) { injected = true; }
+                        if (!injected || !giftUntouched() || giftRow() != giftRowBefore || liveGeneration() != g3 || derivedCommitted() != derivedBeforeRecovery)
+                            injectionFailures.Add(seam);
+                    }
+                    var giftAccepted = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
+                    var giftMarker = markerOf(giftId);
+                    int giftDirectional = countFor(directionalSql, giftId), giftActionReceipts = countFor(actionReceiptSql, giftId);
+                    string giftMemory; using (var cx = OpenCampaignConnection(campaign)) giftMemory = Json.Serialize(QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
+                    var giftReplay = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
+                    string giftMemoryAfterReplay; using (var cx = OpenCampaignConnection(campaign)) giftMemoryAfterReplay = Json.Serialize(QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
+                    string giftReceipt = ReadString(ReadDictionary(giftAccepted, "nativeEffect"), "receiptId", "");
+                    // The gift shares the protocol pair (fixture precondition), so derivedArgs reads its standing;
+                    // the clean acceptance must change it, which makes the rollback comparison above meaningful.
+                    string derivedAfterRecovery = derivedCommitted();
+                    add("terminal_report_recovery_injected_restore_rolls_back_first_acceptance", injectionFailures.Count == 0
+                        && ReadString(giftAccepted, "reason", "") == "first_acceptance" && ReadString(giftAccepted, "memoryProjectionStatus", "") == "completed"
+                        && ReadString(giftMarker, "generation", "") == protocolGeneration && ReadString(giftMarker, "reportJson", "") == giftJson
+                        && ReadString(ReadDictionary(giftMarker, "admission"), "generation", "") == g3
+                        && ReadString(ReadDictionary(giftMarker, "admission"), "loadSessionId", "") == "stage3_l2"
+                        && giftReceipt.Length > 0 && giftReceipt == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ReceiptId(giftId, "player_actions_timeline", protocolGeneration, giftSha)
+                        && derivedAfterRecovery != derivedBeforeRecovery
+                        && ReadString(giftReplay, "reason", "") == "recovery_replay"
+                        && ReadString(ReadDictionary(giftReplay, "nativeEffect"), "receiptId", "") == giftReceipt
+                        && Json.Serialize(markerOf(giftId)) == Json.Serialize(giftMarker)
+                        && giftActionReceipts == 1 && giftDirectional == 2 && countFor(actionReceiptSql, giftId) == 1 && countFor(directionalSql, giftId) == 2
+                        && giftMemory != "[]" && giftMemoryAfterReplay == giftMemory && countFor(sharedRowSql, giftId) == 1,
+                        TestDict("failedSeams", injectionFailures, "accepted", giftAccepted, "replay", giftReplay, "memory", giftMemory,
+                            "receipts", giftActionReceipts, "directional", giftDirectional, "derivedBefore", derivedBeforeRecovery, "derivedAfter", derivedAfterRecovery));
+                }
+                finally
+                {
+                    restoreSavedContext();
+                    using (var cx = OpenCampaignConnection(campaign))
+                        ExecuteSql(cx, "DELETE FROM memory_continuity_branches WHERE timeline_id=$t;", TestDict("t", reboundTimeline));
+                }
             }
             var point = SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");
             point["timelineId"] = "player_actions_timeline";
