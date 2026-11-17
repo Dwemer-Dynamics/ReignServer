@@ -128,8 +128,6 @@ AND indexdef LIKE '%(payload)%';").FirstOrDefault(), "count", 0);
                     !ReignPostgreSqlStorage.CampaignExists(campaignId)
                     && ReignPostgreSqlStorage.ListSnapshots(campaignId).Count == 0,
                     "Campaign retirement drops many Save Sync schemas in bounded transactions and removes their metadata without exhausting a single PostgreSQL lock transaction.");
-
-                RunCampaignMigrationSelfTests(add, token);
             }
             catch (Exception ex)
             {

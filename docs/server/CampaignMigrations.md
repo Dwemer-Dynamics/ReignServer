@@ -68,7 +68,7 @@ applies its idempotent DDL as before.
 2. Append one entry to `CampaignSchemaMigrations` with the next number. Add a named version
    constant if code outside the list refers to it.
 3. Turn the module's `Ensure*Schema` method into the guarded form above.
-4. Extend `RunCampaignMigrationSelfTests` in `PostgreSqlStorageSelfTests.cs` if the new
+4. Extend `RunCampaignMigrationSelfTests` in `PostgreSqlStorageSelfTests.cs` (run by the `save_sync` suite, so `--run-save-sync-tests` covers it) if the new
    migration needs a specific check (the generic checks cover every version).
 
 Ordering rules:

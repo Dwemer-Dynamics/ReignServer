@@ -2163,6 +2163,8 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 ["name"] = id, ["summary"] = summary, ["durationMs"] = 0
             });
             string token = Guid.NewGuid().ToString("N").Substring(0, 8);
+            // Save Sync restores older schemas; they must reach the latest campaign migration.
+            RunCampaignMigrationSelfTests(add, token);
             var loadedReceiptLedger = TestDict("lastLoadedSavePoint", TestDict("savePointId", "cached_point", "status", "ready"));
             var registeredLoadedPoint = TestDict("savePointId", "cached_point", "snapshotStorageId", "actual_retained_storage");
             add("loaded_receipt_uses_registered_storage_metadata",
