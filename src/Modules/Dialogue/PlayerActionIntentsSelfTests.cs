@@ -780,7 +780,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     string giftActor = ReadString(giftRecord, "actorHeroStringId", "");
                     string giftJson = Json.Serialize(TestDict("campaignId", campaign, "serverActionId", giftId, "actionId", giftId,
                         "timelineId", "player_actions_timeline", "playerHeroStringId", giftActor,
-                        "sharedActivityGeneration", protocolGeneration, "status", "completed", "type", "RegularTransferGold", "message", "Recovered small handover.",
+                        "sharedActivityGeneration", protocolGeneration, "status", "completed", "type", "RegularTransferGold", "message", "A kind gift was recovered with thanks.",
                         "actorHeroStringId", giftActor, "targetHeroStringId", ReadString(giftRecord, "targetHeroStringId", ""),
                         "termsHash", ReadString(giftRecord, "termsHash", ""), "worldDay", 22d));
                     Reign.Core.Contracts.Actions.TerminalActionReportProtocol.TryReportSha256(giftJson, out string giftSha, out _);
@@ -806,6 +806,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     string giftRowBefore = giftRow(), protocolMarkerBefore = Json.Serialize(markerOf(protocolId)), protocolAdmissionBefore = Json.Serialize(ReadDictionary(markerOf(protocolId), "admission"));
                     add("terminal_report_recovery_second_fixture_row_is_eligible", giftId.StartsWith("pa_", StringComparison.Ordinal) && giftIneligible.Length == 0
                         && TerminalReportExpectedType(giftRecord) == "RegularTransferGold" && giftUntouched()
+                        && giftActor == protocolActor && ReadString(giftRecord, "targetHeroStringId", "") == ReadString(protocolRecord, "targetHeroStringId", "")
                         && ReadString(restoreContext(), "timeline_id", "") == "player_actions_timeline", TestDict("id", giftId, "ineligible", giftIneligible));
 
                     // Empty context: with no restore context row no proof can be bound, so both a first
@@ -921,18 +922,23 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var giftReplay = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
                     string giftMemoryAfterReplay; using (var cx = OpenCampaignConnection(campaign)) giftMemoryAfterReplay = Json.Serialize(QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
                     string giftReceipt = ReadString(ReadDictionary(giftAccepted, "nativeEffect"), "receiptId", "");
+                    // The gift shares the protocol pair (fixture precondition), so derivedArgs reads its standing;
+                    // the clean acceptance must change it, which makes the rollback comparison above meaningful.
+                    string derivedAfterRecovery = derivedCommitted();
                     add("terminal_report_recovery_injected_restore_rolls_back_first_acceptance", injectionFailures.Count == 0
                         && ReadString(giftAccepted, "reason", "") == "first_acceptance" && ReadString(giftAccepted, "memoryProjectionStatus", "") == "completed"
                         && ReadString(giftMarker, "generation", "") == protocolGeneration && ReadString(giftMarker, "reportJson", "") == giftJson
                         && ReadString(ReadDictionary(giftMarker, "admission"), "generation", "") == g3
                         && ReadString(ReadDictionary(giftMarker, "admission"), "loadSessionId", "") == "stage3_l2"
-                        && (giftReceipt.Length == 0 || giftReceipt == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ReceiptId(giftId, "player_actions_timeline", protocolGeneration, giftSha))
+                        && giftReceipt.Length > 0 && giftReceipt == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ReceiptId(giftId, "player_actions_timeline", protocolGeneration, giftSha)
+                        && derivedAfterRecovery != derivedBeforeRecovery
                         && ReadString(giftReplay, "reason", "") == "recovery_replay"
                         && ReadString(ReadDictionary(giftReplay, "nativeEffect"), "receiptId", "") == giftReceipt
                         && Json.Serialize(markerOf(giftId)) == Json.Serialize(giftMarker)
-                        && giftActionReceipts <= 1 && countFor(actionReceiptSql, giftId) == giftActionReceipts && countFor(directionalSql, giftId) == giftDirectional
+                        && giftActionReceipts == 1 && giftDirectional == 2 && countFor(actionReceiptSql, giftId) == 1 && countFor(directionalSql, giftId) == 2
                         && giftMemory != "[]" && giftMemoryAfterReplay == giftMemory && countFor(sharedRowSql, giftId) == 1,
-                        TestDict("failedSeams", injectionFailures, "accepted", giftAccepted, "replay", giftReplay, "memory", giftMemory));
+                        TestDict("failedSeams", injectionFailures, "accepted", giftAccepted, "replay", giftReplay, "memory", giftMemory,
+                            "receipts", giftActionReceipts, "directional", giftDirectional, "derivedBefore", derivedBeforeRecovery, "derivedAfter", derivedAfterRecovery));
                 }
                 finally
                 {
