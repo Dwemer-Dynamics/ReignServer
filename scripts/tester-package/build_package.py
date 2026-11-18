@@ -18,10 +18,10 @@ CONTENT = ('GUI/', 'ModuleData/', 'EventArt/', 'TavernArt/', 'Videos/',
 SUPPORT = ('reignctl', 'reign_versions.py', 'reignserver.service', 'install-reign-control.sh',
            'prepare-systemd-sessions.sh', 'reign-control.py', 'reign-recover.py',
            'Start-ReignServer-Wsl.ps1', 'Prepare-LinuxRuntime.py', 'Prepare-MemorySelection.py')
-CLIENT_DLLS={'ArenaOverhaul.1.4.6.dll','JpegLibrary.dll','Reign.Core.Contracts.dll','ReignBeta.dll',
+CLIENT_DLLS={'ArenaOverhaul.1.4.6.dll','JpegLibrary.dll','Reign.Core.Contracts.dll','ReignBeta.Core.dll','ReignBeta.dll',
              'System.Buffers.dll','System.Memory.dll','System.Runtime.CompilerServices.Unsafe.dll'}
-# Client assemblies bundled when the build produced them; becomes required once the client ships it.
-OPTIONAL_CLIENT_DLLS={'ReignBeta.Core.dll'}
+# Client assemblies bundled when the build produced them but not required: the optional in-game test harness.
+OPTIONAL_CLIENT_DLLS={'ReignBeta.Testing.dll'}
 HELPER_FILES={'Bannerlord.NativeCharacterImageGenerator.App.exe','Bannerlord.NativeCharacterImageGenerator.runtimeconfig.json',
               'Bannerlord.NativePortraitRenderHost.exe','Bannerlord.NativePortraitRenderHost.exe.config'}
 # Reference outputs of separately installed modules; the release lock must name each module, and none is bundled.
