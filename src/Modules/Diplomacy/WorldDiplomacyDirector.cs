@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using Reign.Core.Contracts.Diplomacy;
 
 namespace ReignBetaServer
 {
@@ -1876,18 +1877,15 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> NextDiplomaticEvents(Dictionary<string, object> payload, Dictionary<string, string> query)
         {
-            payload = payload ?? new Dictionary<string, object>();
-            query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaignQuery) ? campaignQuery : ReadString(payload, "campaignId", "default");
-            bool publicHistory = query.TryGetValue("publicHistory", out string historyMode) && historyMode == "true";
-            int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsed) ? parsed : 10;
-            limit = Math.Max(1, Math.Min(publicHistory ? 500 : 20, limit));
+            DiplomaticEventsNextRequest request = DiplomaticEventsNextRequest.FromQuery(query, payload);
+            string campaignId = request.CampaignId;
+            bool publicHistory = request.PublicHistory;
+            int limit = request.Limit;
             if (publicHistory)
             {
                 List<Dictionary<string, object>> published;
                 lock (FileLock) published = PublicDiplomaticAnnouncements(ReadDiplomaticEventQueue(campaignId, requireValid: true), limit);
-                return TestDict("ok", true, "campaignId", campaignId, "publicHistory", true,
-                    "projection", "reign-public-diplomacy-v1", "count", published.Count, "events", published);
+                return DiplomaticEventsNextResponse.PublicHistoryProjection(campaignId, published).ToDictionary();
             }
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             lock (FileLock)
@@ -1905,7 +1903,7 @@ namespace ReignBetaServer
                 item.Remove("privateDecisionFactors");
                 item.Remove("initiativeDiagnostics");
             }
-            return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["count"] = selected.Count, ["events"] = selected };
+            return DiplomaticEventsNextResponse.Popups(campaignId, selected).ToDictionary();
         }
 
         private static List<Dictionary<string, object>> PublicDiplomaticAnnouncements(List<Dictionary<string, object>> queue, int limit)
@@ -1926,9 +1924,9 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> AcknowledgeDiplomaticEvent(Dictionary<string, object> payload)
         {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string eventId = ReadString(payload, "eventId", "");
+            DiplomaticEventAcknowledgeRequest request = DiplomaticEventAcknowledgeRequest.FromDictionary(payload);
+            string campaignId = request.CampaignId;
+            string eventId = request.EventId;
             bool found = false;
             lock (FileLock)
             {
@@ -1942,7 +1940,7 @@ namespace ReignBetaServer
                 }
                 WriteDiplomaticEventQueue(campaignId, queue);
             }
-            return new Dictionary<string, object> { ["ok"] = found, ["eventId"] = eventId, ["error"] = found ? "" : "Diplomatic event was not found." };
+            return new DiplomaticEventAcknowledgeResponse(found, eventId).ToDictionary();
         }
 
         private static void MarkDiplomaticEventAcknowledged(

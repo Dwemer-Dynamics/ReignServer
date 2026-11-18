@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Reign.Core.Contracts.Dialogue;
 
 namespace ReignBetaServer
 {
@@ -274,35 +275,34 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
 
         private static Dictionary<string, object> PersonalGossipStatusApi(Dictionary<string, string> query)
         {
-            string campaign = query != null && query.TryGetValue("campaignId", out string id) ? id : "";
-            if (string.IsNullOrWhiteSpace(campaign)) return GossipFields("ok", false, "error", "Campaign is required.");
+            GossipStatusRequest request = GossipStatusRequest.FromQuery(query);
+            string campaign = request.CampaignId;
+            if (!request.HasCampaign) return GossipStatusProtocol.Failure(GossipStatusProtocol.CampaignRequiredError);
             using (var c = OpenCampaignConnection(campaign))
             {
-                if (query != null && query.TryGetValue("deliveryOnly", out string compact) && compact == "true")
-                    return PersonalGossipDeliveryReadiness(c, campaign, query);
-                if (!TableExists(c, "personal_gossip_messages")) return GossipFields("ok", true, "messages", new List<object>(), "topics", new List<object>());
-                return GossipFields("ok", true, "policyVersion", PersonalGossipVersion,
-                    "messages", QuerySql(c, "SELECT message_id,root_id,timeline_id,speaker_id,recipient_id,is_reply,hop,created_day,due_day,expires_day,status,attempts FROM personal_gossip_messages ORDER BY created_day DESC,message_id LIMIT 100;"),
-                    "topics", QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
+                if (request.DeliveryOnly)
+                    return PersonalGossipDeliveryReadiness(c, campaign, request);
+                if (!TableExists(c, "personal_gossip_messages")) return GossipStatusResponse.NoSchema().ToDictionary();
+                return GossipStatusResponse.Snapshot(PersonalGossipVersion, QuerySql(c, "SELECT message_id,root_id,timeline_id,speaker_id,recipient_id,is_reply,hop,created_day,due_day,expires_day,status,attempts FROM personal_gossip_messages ORDER BY created_day DESC,message_id LIMIT 100;"),
+                    QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
                         .Select(row => GossipFields("id", ReadString(row, "topic_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
                             "status", ReadString(row, "status", ""), "shareChance", ReadInt(GossipJson(row), "shareChance", 0),
                             "shareRoll", ReadInt(GossipJson(row), "shareRoll", 0), "candidateAudit", ReadDictionary(GossipJson(row), "candidateAudit"),
                             "sourceOrigin", ReadString(GossipJson(row), "sourceOrigin", "participant"),
                             "witnessInterest", ReadInt(GossipJson(row), "witnessInterest", 0),
-                            "signalDiagnostic", ReadString(GossipJson(row), "signalDiagnostic", ""))).ToList());
+                            "signalDiagnostic", ReadString(GossipJson(row), "signalDiagnostic", ""))).ToList()).ToDictionary();
             }
         }
 
-        private static Dictionary<string, object> PersonalGossipDeliveryReadiness(ReignDbConnection c, string campaign, Dictionary<string, string> query)
+        private static Dictionary<string, object> PersonalGossipDeliveryReadiness(ReignDbConnection c, string campaign, GossipStatusRequest request)
         {
             // Read only: readiness must not create a schema, mutate a clock, or invoke a provider.
             string timeline = TableExists(c, "world_history_timelines") ? ActiveWorldHistoryTimeline(c) : "main";
-            if (query.TryGetValue("timelineId", out string requested) && requested != timeline)
-                return GossipFields("ok", false, "error", "Gossip timeline is not active.");
+            if (request.HasTimelineId && request.TimelineId != timeline)
+                return GossipStatusProtocol.Failure(GossipStatusProtocol.TimelineNotActiveError);
             bool schema = TableExists(c, "personal_gossip_messages");
-            double day = query.TryGetValue("worldDay", out string supplied) && double.TryParse(supplied,
-                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsed) && double.IsFinite(parsed)
-                    ? parsed : schema ? ReadDouble(GossipClock(c, timeline), "world_day", 0) : 0;
+            double day = request.WorldDay.HasValue
+                    ? request.WorldDay.Value : schema ? ReadDouble(GossipClock(c, timeline), "world_day", 0) : 0;
             var counts = schema ? QuerySql(c, @"SELECT status,COUNT(*) AS count FROM personal_gossip_messages
 WHERE timeline_id=$timeline AND status IN ('pending','generating','awaiting_native_clock','generation_failed') GROUP BY status;",
                 GossipFields("timeline", timeline)) : new List<Dictionary<string, object>>();
@@ -312,14 +312,18 @@ WHERE timeline_id=$timeline AND status IN ('pending','generating','awaiting_nati
             var ready = schema ? QuerySql(c, "SELECT payload_json FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;",
                 GossipFields("timeline", timeline)).Select(r => ReadString(GossipJson(r), "readyNonce", "")).Where(n => n.Length > 0).ToList() : new List<string>();
             var communications = CommunicationReadiness(c, timeline, day);
-            return GossipFields("ok", true, "schema", "reign-gossip-delivery-readiness-v1", "campaignId", campaign, "timelineId", timeline,
-                "enabled", ReadBool(PersonalGossipSettings(), "enabled", true) || ReadBool(communications, "active", false), "schemaReady", schema, "clockEpoch", GossipClockEpoch(c),
-                "pendingComposition", Count("pending") + Count("generating") + ReadLong(communications, "pending", 0) + ReadLong(communications, "failed", 0),
-                "awaitingNativeClock", Count("awaiting_native_clock"),
-                "failedComposition", Count("generation_failed") + ReadLong(communications, "failed", 0), "readyNonces", ready, "communications", communications,
-                "nextDueDay", next != null && next.TryGetValue("next_day", out object value) && value != null && value != DBNull.Value ? value : null,
-                "dueInTransit", schema ? ReadInt(QuerySql(c, "SELECT COUNT(*) AS count FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit' AND due_day<=$day;",
-                    GossipFields("timeline", timeline, "day", day)).FirstOrDefault(), "count", 0) + ReadLong(communications, "due", 0) : ReadLong(communications, "due", 0));
+            object nextDueDay = next != null && next.TryGetValue("next_day", out object value) && value != null && value != DBNull.Value ? value : null;
+            return new GossipDeliveryReadinessResponse
+            {
+                CampaignId = campaign, TimelineId = timeline,
+                Enabled = ReadBool(PersonalGossipSettings(), "enabled", true) || ReadBool(communications, "active", false), SchemaReady = schema, ClockEpoch = GossipClockEpoch(c),
+                PendingComposition = Count("pending") + Count("generating") + ReadLong(communications, "pending", 0) + ReadLong(communications, "failed", 0),
+                AwaitingNativeClock = Count("awaiting_native_clock"),
+                FailedComposition = Count("generation_failed") + ReadLong(communications, "failed", 0), ReadyNonces = ready, Communications = communications,
+                NextDueDay = nextDueDay,
+                DueInTransit = schema ? ReadInt(QuerySql(c, "SELECT COUNT(*) AS count FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit' AND due_day<=$day;",
+                    GossipFields("timeline", timeline, "day", day)).FirstOrDefault(), "count", 0) + ReadLong(communications, "due", 0) : ReadLong(communications, "due", 0)
+            }.ToDictionary();
         }
     }
 }

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using Reign.Core.Contracts.Dialogue;
 using ReignBeta.Shared;
 using ReignBeta.Shared.Characters;
 
@@ -139,8 +140,9 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
             using var c = OpenCampaignConnection(campaign);
             if (operation == "status")
             {
-                if (ActiveWorldHistoryTimeline(c) != timeline) return TestDict("ok", false, "error", "The communication timeline is not active.");
-                return ReadCommunicationSnapshot(c, timeline, ReadString(p, "heroId", ""), ReadInt(p, "offset", 0), ReadInt(p, "limit", 50));
+                if (ActiveWorldHistoryTimeline(c) != timeline) return CommunicationStatusProtocol.Failure(CommunicationStatusProtocol.TimelineNotActiveError);
+                CommunicationStatusRequest request = CommunicationStatusRequest.FromDictionary(p);
+                return ReadCommunicationSnapshot(c, timeline, request.HeroId, request.Offset, request.Limit);
             }
             EnsureCommunicationSchema(c); EnsureMemoryPrecisionSchema(c);
             string generation = NpcLivesGeneration(c);
@@ -192,8 +194,7 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
 
         private static Dictionary<string, object> ReadCommunicationSnapshot(ReignDbConnection c, string timeline, string hero, int offset, int limit)
         {
-            if (!TableExists(c, "communication_messages")) return TestDict("ok", true, "schemaReady", false, "messages", Array.Empty<object>(),
-                "history", Array.Empty<object>(), "messageCount", 0, "historyCount", 0, "timelineId", timeline);
+            if (!TableExists(c, "communication_messages")) return CommunicationStatusResponse.NoSchema(timeline).ToDictionary();
             var args = TestDict("timeline", timeline, "hero", hero, "offset", Math.Clamp(offset, 0, 1000000), "limit", Math.Clamp(limit, 1, 100));
             string messages = " FROM communication_messages WHERE timeline_id=$timeline AND ($hero='' OR speaker_id=$hero OR recipient_id=$hero)";
             string history = " FROM communication_history WHERE timeline_id=$timeline AND ($hero='' OR owner_id=$hero)";
@@ -204,13 +205,12 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.exchange_id=a.
 AND ($hero='' OR t.speaker_id=$hero)
 AND COALESCE(t.payload_json::jsonb->>'timelineId',s.payload_json::jsonb->>'timelineId','main')=$timeline)
 ORDER BY a.created_ts DESC,a.unit_id LIMIT $limit OFFSET $offset;", args) : new List<Dictionary<string, object>>();
-            return TestDict("ok", true, "generation", NpcLivesGeneration(c), "timelineId", timeline,
-                "admissions", admissions,
-                "messages", QuerySql(c, "SELECT *" + messages + " ORDER BY created_day,message_id LIMIT $limit OFFSET $offset;", args),
-                "history", QuerySql(c, "SELECT *" + history + " ORDER BY acquired_day,receipt_id LIMIT $limit OFFSET $offset;", args),
-                "messageCount", ReadLong(QuerySql(c, "SELECT COUNT(*) AS n" + messages + ";", args).Single(), "n", 0),
-                "historyCount", ReadLong(QuerySql(c, "SELECT COUNT(*) AS n" + history + ";", args).Single(), "n", 0),
-                "coverage", "Read-only ledger evidence; receipt presence does not certify native travel or provider semantics.");
+            return CommunicationStatusResponse.Snapshot(NpcLivesGeneration(c), timeline,
+                admissions,
+                QuerySql(c, "SELECT *" + messages + " ORDER BY created_day,message_id LIMIT $limit OFFSET $offset;", args),
+                QuerySql(c, "SELECT *" + history + " ORDER BY acquired_day,receipt_id LIMIT $limit OFFSET $offset;", args),
+                ReadLong(QuerySql(c, "SELECT COUNT(*) AS n" + messages + ";", args).Single(), "n", 0),
+                ReadLong(QuerySql(c, "SELECT COUNT(*) AS n" + history + ";", args).Single(), "n", 0)).ToDictionary();
         }
 
         private static Dictionary<string, object> CommunicationReadiness(ReignDbConnection c, string timeline, double day)
