@@ -68,20 +68,7 @@ namespace ReignBetaServer
             routes.Post("/arrests/case/apply", request => ArrestCaseApplyApi(request.JsonBody));
             routes.Post("/arrests/evidence/evaluate", request => ArrestEvidenceEvaluateApi(request.JsonBody));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Post("/arrests/test/contracts", request =>
-            {
-                List<Dictionary<string, object>> results = RunArrestSystemSelfTests();
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = results.All(item => ReadBool(item, "passed", false)),
-                    ["schema"] = "reign-arrest-contract-report-v2",
-                    ["caseCount"] = results.Count,
-                    ["languageCaseCount"] = results.Count(item =>
-                        ReadString(item, "name", "").StartsWith("arrest_language_",
-                            StringComparison.OrdinalIgnoreCase)),
-                    ["results"] = results
-                };
-            });
+            routes.Post("/arrests/test/contracts", request => ArrestContractReportApi());
 #endif
 #endif
             routes.Post("/events/social/approaches/roll", request => SocialEventApproachRollApi(request.JsonBody));

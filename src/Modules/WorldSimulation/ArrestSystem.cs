@@ -7,6 +7,24 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+#if !REIGN_EXCLUDE_VERIFICATION
+        // POST /arrests/test/contracts (registered in Program.WorldSimulationRoutes.cs).
+        private static Dictionary<string, object> ArrestContractReportApi()
+        {
+            List<Dictionary<string, object>> results = RunArrestSystemSelfTests();
+            return new Dictionary<string, object>
+            {
+                ["ok"] = results.All(item => ReadBool(item, "passed", false)),
+                ["schema"] = "reign-arrest-contract-report-v2",
+                ["caseCount"] = results.Count,
+                ["languageCaseCount"] = results.Count(item =>
+                    ReadString(item, "name", "").StartsWith("arrest_language_",
+                        StringComparison.OrdinalIgnoreCase)),
+                ["results"] = results
+            };
+        }
+#endif
+
         private static Dictionary<string, object> ArrestEvidenceEvaluateApi(
             Dictionary<string, object> payload)
         {
