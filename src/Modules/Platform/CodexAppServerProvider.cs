@@ -1189,6 +1189,7 @@ namespace ReignBetaServer
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCodexAppServerProviderSelfTests()
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
@@ -1269,5 +1270,6 @@ namespace ReignBetaServer
                 "The Reign Control Center exposes saved API providers and the account-backed GPT model catalog.");
             return tests;
         }
+#endif
     }
 }

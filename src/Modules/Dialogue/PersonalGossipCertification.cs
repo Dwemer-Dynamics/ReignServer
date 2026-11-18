@@ -84,6 +84,7 @@ namespace ReignBetaServer
 fixture_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,speaker_id TEXT NOT NULL,marker TEXT NOT NULL,
 created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL);");
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> PersonalGossipTestApi(Dictionary<string, object> p)
         {
             if (!GossipTestAuthorized(p)) throw new InvalidOperationException("An exact armed gossip command lease, paused Current and aligned recovery checkpoint are required.");
@@ -180,6 +181,7 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
                 return result;
             }
         }
+#endif
 
         // Calls the production validator only, inside the exact authorized native command.
         // Never schedules work or delivers anything, and rolls back even if a guard regresses.

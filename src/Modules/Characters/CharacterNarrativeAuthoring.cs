@@ -29,7 +29,9 @@ namespace ReignBetaServer
             var library = ReadJsonObject(CharacterProfileCatalogPath);
             var profiles = ReadDictionaryList(library, "profiles");
             string operation = ProfileArg(args, "--operation", "author");
+#if !REIGN_EXCLUDE_VERIFICATION
             if (operation == "evaluate") return EvaluateNarrativeProviderBatch(root, profiles, offset, count);
+#endif
             if (operation != "author") throw new InvalidOperationException("Unknown narrative operation.");
             var results = new List<Dictionary<string, object>>();
             Directory.CreateDirectory(root);

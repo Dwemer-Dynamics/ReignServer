@@ -1493,6 +1493,7 @@ VALUES($campaign,$timeline,$observer,$subject,$rumorTotal,$reputationTotal,$char
             EnsureSocialReputationSchema(connection);
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunRumorSubsystemSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -2749,5 +2750,6 @@ reputation_value,status,updated_ts) VALUES($id,'bulk_subject',$tag,'Bulk perform
             }
             return results;
         }
+#endif
     }
 }

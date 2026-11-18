@@ -2973,6 +2973,7 @@ namespace ReignBetaServer
                 });
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> RunWorldDiplomacySelfTests()
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
@@ -3653,6 +3654,7 @@ namespace ReignBetaServer
             bool passedAll = tests.All(x => ReadBool(x, "passed", false));
             return new Dictionary<string, object> { ["passed"] = passedAll, ["count"] = tests.Count, ["tests"] = tests };
         }
+#endif
 
         private static Dictionary<string, object> TestDirectorKingdom(string id, bool player, params string[] enemies)
         {

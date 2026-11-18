@@ -1146,6 +1146,7 @@ namespace ReignBetaServer
             }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunPortraitProviderAdapterContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
@@ -1296,6 +1297,7 @@ namespace ReignBetaServer
             rows.AddRange(RunOutfitChangeContractTests());
             return rows;
         }
+#endif
 
         private static void AddSharedPortraitSelfTest(
             List<Dictionary<string, object>> rows,

@@ -196,11 +196,13 @@ completed_ts=excluded.completed_ts,updated_ts=excluded.updated_ts;",
             if (operation != "social_reputation_profile") return;
 
             string profile = ReadString(command, "profile", "").Trim().ToLowerInvariant();
+#if !REIGN_EXCLUDE_VERIFICATION
             if (profile == "preflight")
             {
                 RecordPreflightProfileResult(liveRun, command);
                 return;
             }
+#endif
             if (profile == "player_flirt")
             {
                 RecordPlayerFlirtProfileResult(liveRun, command);
@@ -387,6 +389,7 @@ ORDER BY created_ts,signal_id;", new Dictionary<string, object>
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static void RecordPreflightProfileResult(
             Dictionary<string, object> liveRun,
             Dictionary<string, object> command)
@@ -433,6 +436,7 @@ ORDER BY created_ts,signal_id;", new Dictionary<string, object>
                 SocialBalancePreflightSuiteTasks.Remove(suiteKey);
             }
         }
+#endif
 
         private static void RecordPreflightProfileResultCore(
             Dictionary<string, object> liveRun,
@@ -2670,6 +2674,7 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
             return new Dictionary<string, object> { ["ok"] = true, ["stored"] = true, ["periodKey"] = periodKey };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> SocialBalanceRankAffairCandidatesApi(
             Dictionary<string, object> payload)
         {
@@ -2772,6 +2777,7 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                 ["candidates"] = rows
             };
         }
+#endif
 
         private static Dictionary<string, object> SocialBalanceSetUnderlyingAffinityApi(
             Dictionary<string, object> payload)

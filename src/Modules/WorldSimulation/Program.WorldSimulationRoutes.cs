@@ -11,6 +11,7 @@ namespace ReignBetaServer
         // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterWorldSimulationRoutes(ReignRouteTable routes)
         {
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Legacy("POST", "/tests/live/arm");
             routes.Legacy("GET", "/tests/live/runtime");
             routes.Legacy("POST", "/tests/live/targets/search");
@@ -36,6 +37,7 @@ namespace ReignBetaServer
             routes.Legacy("POST", "/tests/campaign-command/cancel");
             routes.Legacy("POST", "/tests/campaign-command/execution");
             routes.Legacy("GET", "/tests/campaign-command/readiness");
+#endif
             routes.Post("/world-history/ingest-batch", request => WorldHistoryIngestBatchApi(request.JsonBody));
             routes.Post("/world-history/timeline/open", request => WorldHistoryOpenTimelineApi(request.JsonBody));
             routes.Legacy("GET", "/world-history/query");
@@ -47,7 +49,9 @@ namespace ReignBetaServer
                 Dictionary<string, string> exportQuery = new Dictionary<string, string>(request.Query, StringComparer.OrdinalIgnoreCase) { ["limit"] = "500" };
                 return WorldHistoryQueryApi(exportQuery);
             });
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Post("/world-history/tests", request => RunWorldHistorySelfTests());
+#endif
             routes.Post("/world-test/heartbeat", request => WorldTestHeartbeatApi(request.JsonBody));
             routes.Legacy("GET", "/world-test/campaigns");
             routes.Legacy("GET", "/world-test/overview");
@@ -55,11 +59,15 @@ namespace ReignBetaServer
             routes.Legacy("GET", "/world-test/details");
             routes.Get("/world-test/checkpoints", request => WorldTestCheckpointsApi(request.Query));
             routes.Get("/world-test/comparison", request => WorldTestComparisonApi(request.Query));
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Get("/world-test/tests", request => RunWorldTestSelfTests());
+#endif
 #if !REIGN_EXCLUDE_COURT
             routes.Legacy("POST", "/arrests/case/apply");
             routes.Legacy("POST", "/arrests/evidence/evaluate");
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Legacy("POST", "/arrests/test/contracts");
+#endif
 #endif
             routes.Post("/events/social/approaches/roll", request => SocialEventApproachRollApi(request.JsonBody));
             routes.Legacy("POST", "/events/social/turn");

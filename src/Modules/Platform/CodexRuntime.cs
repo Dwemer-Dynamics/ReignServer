@@ -1422,7 +1422,11 @@ namespace ReignBetaServer
         private static bool ShouldCancelCodexWait(bool verification)
         {
             if (ShutdownRequested) return true;
+#if !REIGN_EXCLUDE_VERIFICATION
             return verification && ActiveCodexPerformanceBudget.Value != null && ShouldCancelVerification();
+#else
+            return false;
+#endif
         }
 
         private static void WaitForCodexTurn(CodexTurnWaiter waiter, int timeoutMs, bool verification, Func<bool> canceled = null)
@@ -2311,6 +2315,7 @@ namespace ReignBetaServer
             return CaptureCodexRequestContext(new Dictionary<string, object>(), payload, "dialogue", "gpt-selftest", "selftest-" + sessionId, source);
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCodexRuntimeSelfTests()
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
@@ -2401,6 +2406,7 @@ namespace ReignBetaServer
             tests.Add(RunCodexInjectedAdapterTransportSelfTest());
             return tests;
         }
+#endif
 
         private static List<Dictionary<string, object>> RunCodexRuntimeBoundarySelfTests()
         {

@@ -3121,6 +3121,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             using (SHA256 sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(canonical))).Replace("-", "").ToLowerInvariant();
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunIdentitySubsystemSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -4331,6 +4332,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             }
             return results;
         }
+#endif
 
         private static Dictionary<string, object> IdentityTestHero(string id, string name, string clanId, string kingdomId, bool isLord, bool isRuler)
         {

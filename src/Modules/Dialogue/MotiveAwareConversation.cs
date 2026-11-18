@@ -4073,6 +4073,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunMotiveAwareConversationSelfTests()
         {
             Dictionary<string, object> report = MotiveAwareConversationSelfTests();
@@ -4105,6 +4106,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             }));
             return rows;
         }
+#endif
 
         private static double InitiativeChanceForTest(double score) { return score < 45d ? 0d : score < 60d ? .25d : score < 75d ? .5d : score < 90d ? .75d : .9d; }
         private static double Trait01FromPercent(Dictionary<string, object> percentages, string key) { return ClampDouble(ReadDouble(percentages, key, 50d) / 100d, 0d, 1d); }

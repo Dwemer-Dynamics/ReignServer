@@ -48,6 +48,7 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["ok"] = true, ["saved"] = written.Count, ["files"] = written };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunPromptEditorPersistenceTests()
         {
             var results = new List<Dictionary<string, object>>();
@@ -80,5 +81,6 @@ namespace ReignBetaServer
             finally { Directory.Delete(root, true); }
             return results;
         }
+#endif
     }
 }

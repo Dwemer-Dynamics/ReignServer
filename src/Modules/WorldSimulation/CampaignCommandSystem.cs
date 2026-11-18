@@ -815,6 +815,7 @@ namespace ReignBetaServer
             return "arrival-or-target-terminal";
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCampaignCommandSystemSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
@@ -1010,7 +1011,9 @@ namespace ReignBetaServer
                 "The provider matrix requires one 300-case stratified natural-language pass with up to 100 targeted follow-ups only when evidence warrants them.", llmMatrix);
             return rows;
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static void RunCampaignCommandOfflineSimulationChecks(
             List<Dictionary<string, object>> checks, string sandbox, int seed)
         {
@@ -1061,7 +1064,9 @@ namespace ReignBetaServer
                 "Ten diverse seeded five-year command simulations completed with bounded queues and exactly-once terminal effects.",
                 new Dictionary<string, object>(evidence) { ["evidencePath"] = path });
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static void RunCampaignCommandLlmMatrixChecks(
             List<Dictionary<string, object>> checks, string sandbox, Dictionary<string, object> options)
         {
@@ -1244,6 +1249,7 @@ namespace ReignBetaServer
                     ["temporaryCaseLedgerPath"] = ledger, ["caseLedgerRows"] = ledgerRows
                 });
         }
+#endif
 
         private static Dictionary<string, object> RequestCampaignCommandLlmDecisions(
             List<Dictionary<string, object>> batch, int offset, int attempt)

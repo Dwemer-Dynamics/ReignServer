@@ -9,6 +9,7 @@ namespace ReignBetaServer
         // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterReputationRoutes(ReignRouteTable routes)
         {
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Legacy("GET", "/tests/social-balance/manifest");
             routes.Legacy("POST", "/tests/social-balance/prepare");
             routes.Legacy("POST", "/tests/social-balance/case/result");
@@ -17,6 +18,7 @@ namespace ReignBetaServer
             routes.Legacy("POST", "/tests/social-balance/affair/candidates");
             routes.Legacy("GET", "/tests/social-balance/status");
             routes.Legacy("GET", "/tests/social-balance/export");
+#endif
             routes.Legacy("POST", "/rumors/submit");
             routes.Legacy("POST", "/rumors/status");
             routes.Legacy("POST", "/rumors/correct");

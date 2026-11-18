@@ -290,6 +290,7 @@ namespace ReignBetaServer
             return result;
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunDialogueIntegrityAssertions()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
@@ -332,5 +333,6 @@ namespace ReignBetaServer
             rows.AddRange(RunDialogueClaimValidationAssertions());
             return rows;
         }
+#endif
     }
 }

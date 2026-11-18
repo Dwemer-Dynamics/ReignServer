@@ -72,9 +72,11 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
             {
             switch (operation)
             {
+#if !REIGN_EXCLUDE_VERIFICATION
                 case "test-fixture":
                     invitation = PrepareNpcLivesFixture(c, state, p, options, day);
                     break;
+#endif
                 case "evaluate":
                     string party = ReadString(p, "partyId", "");
                     var roster = ReadDictionaryList(p, "members").Take(512).Where(h => ReadBool(h, "inMainParty", false)

@@ -44,7 +44,9 @@ namespace ReignBetaServer
             routes.Post("/court/foreign-ambassadors/authority", request => ForeignAmbassadorAuthorityApi(request.JsonBody));
             routes.Post("/court/foreign-ambassadors/tick", request => ForeignAmbassadorTickApi(request.JsonBody));
             routes.Post("/court/foreign-ambassadors/referrals/respond", request => CapitalCourtApi(request.JsonBody, ForeignAmbassadorReferralRespondApi));
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Legacy("POST", "/court/foreign-ambassadors/test");
+#endif
             routes.Post("/court/intelligence/start", request => CapitalCourtApi(request.JsonBody, CourtIntelligenceStartApi));
             routes.Post("/court/intelligence/cancel", request => CapitalCourtApi(request.JsonBody, CourtIntelligenceCancelApi));
             routes.Post("/court/obligations/query", request => CapitalCourtApi(request.JsonBody, CourtObligationsQueryApi));
@@ -56,7 +58,9 @@ namespace ReignBetaServer
             routes.Post("/court/diplomacy/propose", request => CapitalCourtApi(request.JsonBody, CourtDiplomacyProposeApi));
             routes.Post("/court/supply/validate", request => CapitalCourtApi(request.JsonBody, CourtSupplyValidateApi));
             routes.Post("/court/native/validate", request => CapitalCourtApi(request.JsonBody, CourtNativeActionValidateApi));
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Get("/court/tests", request => RunCourtSelfTests());
+#endif
         }
     }
 }

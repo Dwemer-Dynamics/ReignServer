@@ -38,7 +38,8 @@ flowchart LR
 - `ReignServer.csproj` sets `EnableDefaultCompileItems=false` and compiles `src/**/*.cs` plus
   `shared/Reign.Shared.Source/**/*.cs` (linked under `Shared/`). It references the `Reign.Core.Contracts` and
   `Reign.Relationships` projects. `ExcludeCourt=true` removes `src/Modules/Court` and `src/Modules/Spymaster` and
-  defines `REIGN_EXCLUDE_COURT`.
+  defines `REIGN_EXCLUDE_COURT`. `ReignExcludeVerification=true` builds the opt-in test-free flavour described under
+  [Verification](#verification-compiled-into-the-server).
 - `database/reign_meta.sql`, the default prompts in `prompts/` and a few assets are embedded resources; `ui/`,
   `profiles/`, `services/vector-worker/*.py` and the portrait face-detection model are copied to the output.
 - `ReignIncludePrivateVerificationContracts=true` (paired workspace only) runs the `CopyVerificationContracts` target,
@@ -196,6 +197,26 @@ The shipped server contains its own test system. It is not a separate test proje
 - Never run these directly. All builds and tests go through the canonical Reign MCP validator in the paired client
   checkout (see `AGENTS.md`).
 
+### Test-free build flavour (opt-in)
+
+The default build is unchanged and still ships everything above. Building with
+`-p:ReignExcludeVerification=true` defines `REIGN_EXCLUDE_VERIFICATION` and removes the compiled-in test system:
+
+- Sources left out: `src/**/*SelfTests*.cs`, `src/**/*Tests.cs`, `src/**/*Fixtures.cs`, `Platform/VerificationLab.cs`,
+  `Platform/VerificationSourceLocator.cs`, `Platform/CodexPerformanceVerification.cs`,
+  `Court/CapitalAmbassadorTestSystem.cs`, `Portraits/BackgroundPortraitContracts.cs` and
+  `Dialogue/PersonalGossipCompositionProbe.cs`.
+- `#if !REIGN_EXCLUDE_VERIFICATION` guards the product call sites that reach them: the `Run*SelfTests` aggregators
+  inside product files, the `--run-*` / `--cancel-verification` dispatch in `RunServer` (the flavour refuses those
+  flags with exit code 1 instead of starting the server), the `/tests/*` and `/verification/*` `Legacy(...)`
+  registrations together with their `HandleClient` branches, and the module self-test routes (`/court/tests`,
+  `/court/foreign-ambassadors/test`, `/rebellions/tests`, `/world-history/tests`, `/world-test/tests`,
+  `/arrests/test/contracts`, `/gossip/test`). Those routes take the normal "Unknown route." 404 path.
+- The live-test bridge (`WorldSimulation/LiveInteractionTest.cs`), the final conversation gauntlet store and provider
+  budget, and the social-balance harness stay compiled because product paths consult them (prompt-override
+  authorization, relationship-worker pauses, the LLM retry budget); only their verification-only methods are guarded.
+- The validator still builds and tests the default flavour. Nothing ships the test-free flavour yet.
+
 ## Vector worker
 
 `services/vector-worker/worker.py` is a local HTTP service (default loopback port 5102) for semantic memory:
@@ -256,11 +277,13 @@ dependencies on other modules.
 
 ## Direction (2026-11 restructuring programme)
 
-These are planned, one reviewed PR at a time and without behaviour change. None of them exists yet except the partial CI noted in step 7 and the partial route table in step 2; update this
+These are planned, one reviewed PR at a time and without behaviour change. None of them exists yet except step 1, the partial CI noted in step 7 and the partial route table in step 2; update this
 document in the same PR as any step that lands.
 
 1. A verification build flavour: `*SelfTests*`, VerificationLab, test routes and the `--run-*` flags compiled only
    into a verification build (using a csproj condition like `ExcludeCourt`), with the validator building that flavour.
+   Landed as an opt-in: `ReignExcludeVerification=true` builds the test-free flavour (see
+   [Test-free build flavour](#test-free-build-flavour-opt-in)); the default build keeps everything.
 2. A route table: per-module route registrations (method, path, handler, gate policy) replace the `HandleClient`
    chain, and gate exemptions are declared on the routes instead of in a separate list. Partly landed: the table and
    gate declarations exist and serve most routes; the `Legacy(...)` routes still use the chain.

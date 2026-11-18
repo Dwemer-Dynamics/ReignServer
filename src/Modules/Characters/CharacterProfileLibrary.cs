@@ -1366,6 +1366,7 @@ namespace ReignBetaServer
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCharacterProfileLibrarySelfTests(bool includeCourt = true)
         {
             Dictionary<string, Dictionary<string, object>> profiles = LoadCharacterProfileLibrary();
@@ -1589,6 +1590,7 @@ namespace ReignBetaServer
             results.AddRange(RunTownNotableProfileSelfTests());
             return results;
         }
+#endif
 
         private static Dictionary<string, object> ProfileSelfTest(string caseId, bool passed, string summary, Dictionary<string, object> data)
         {

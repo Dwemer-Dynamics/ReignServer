@@ -50,6 +50,7 @@ namespace ReignBetaServer
             return "";
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         // Explicit CLI suite only. Private replay input lives beside this exact
         // validated artifact; no live campaign or external path is read.
         private static Dictionary<string, object> RunMemoryAccuracyReplay()
@@ -139,5 +140,6 @@ start_ts,start_world_day,participants_json,payload_json) VALUES($session,$campai
             return TestDict("ok", results.Count == cases.Count, "resultPath", resultPath, "completedCases", results.Count,
                 "inputSha256", report["inputSha256"], "certificateEligible", false, "providerCalls", 0);
         }
+#endif
     }
 }

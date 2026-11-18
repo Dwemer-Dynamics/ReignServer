@@ -377,6 +377,7 @@ namespace ReignBetaServer
             }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunPortraitDerivativeSelfTests()
         {
             var rows = new List<Dictionary<string, object>>();
@@ -664,6 +665,7 @@ namespace ReignBetaServer
             }
             return rows;
         }
+#endif
 
         private static bool ContainsStrongBlue(byte[] rgba)
         {
