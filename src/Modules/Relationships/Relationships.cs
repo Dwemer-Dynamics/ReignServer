@@ -415,57 +415,6 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
                 + Math.Min(10d, influence / 150d) + (ReadBool(data, "isRuler", false) ? 15d : 0d), 0d, 100d);
         }
 
-        private static Dictionary<string, object> EvaluateRelationshipEvent(string campaignId, string subjectId, string targetId, string eventId, Dictionary<string, object> payload, Dictionary<string, object> state)
-        {
-            string summary = LimitText(ReadFirstString(payload, "summary", "text", "description", "playerText"), 2400);
-            string eventType = ReadString(payload, "eventType", "relationship_event");
-            Dictionary<string, object> memory = BuildNpcMemoryPacket(campaignId, subjectId, targetId, ReadString(payload, "locationId", ""), summary, 1400, payload);
-            Dictionary<string, object> subjectTraitDocument = ReadJsonObject(CharacterFile(campaignId, subjectId, "traits.json"));
-            Dictionary<string, object> subjectTraits = ReadDictionary(subjectTraitDocument, "foundationTraits") ?? new Dictionary<string, object>();
-            Dictionary<string, object> subjectProfile = ReadJsonObject(CharacterFile(campaignId, subjectId, "profile.json"));
-            string prompt = BuildRelationshipEvaluationPrompt(subjectId, targetId, eventId, eventType, summary, state, subjectTraits, memory, payload)
-                + "\n\nSubject defining capabilities:\n" + BuildCoreSkillAwarenessPrompt(subjectProfile,
-                    LoadPassiveCharacterStack(campaignId, subjectId, subjectProfile))
-                + "\nCapability evidence is background and self-knowledge only. Do not change relationship facets because of skill alone; require conduct in the supplied event.";
-            Dictionary<string, object> llm = ChatWithLlm(new Dictionary<string, object>
-            {
-                ["requestType"] = "relationship",
-                ["campaignId"] = campaignId, ["heroStringId"] = subjectId,
-                ["correlationId"] = "relationship_event_" + eventId,
-                ["maxTokens"] = 1400,
-                ["temperature"] = 0.15d,
-                ["messages"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object> { ["role"] = "system", ["content"] = "You are Reign's private directional relationship evaluator. Return strict JSON only. Judge only the subject's relationship toward the target from supplied evidence. Do not roleplay or write dialogue." },
-                    new Dictionary<string, object> { ["role"] = "user", ["content"] = prompt }
-                },
-                ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
-            });
-            Dictionary<string, object> parsed = ReadBool(llm, "ok", false) ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
-            if (parsed != null)
-            {
-                EnforceMotiveSpecificRelationshipEvaluation(parsed, payload);
-                parsed["evaluator"] = "relationship_model";
-                return parsed;
-            }
-            Dictionary<string, object> fallback = DeterministicRelationshipEvaluation(eventType, summary, payload, state);
-            fallback["evaluator"] = "deterministic_fallback";
-            fallback["evaluatorError"] = ReadString(llm, "error", "");
-            return fallback;
-        }
-
-        private static string BuildRelationshipEvaluationPrompt(string subjectId, string targetId, string eventId, string eventType, string summary, Dictionary<string, object> state, Dictionary<string, object> traits, Dictionary<string, object> memory, Dictionary<string, object> payload)
-        {
-            return "Evaluate one event as a coherent relationship outcome.\n"
-                + "Subject: " + subjectId + "\nTarget: " + targetId + "\nEvent: " + eventId + " / " + eventType + "\n"
-                + "Event summary:\n" + summary + "\n\nCurrent facets (-100..100):\n" + Json.Serialize(RelationshipFacetSnapshot(state))
-                + "\n\nSubject personality (-2..2):\n" + Json.Serialize(traits)
-                + "\n\nRelevant memory:\n" + ReadString(memory, "memoryPacket", "")
-                + "\n\nEvent metadata:\n" + Json.Serialize(payload)
-                + "\n\nMotive rule: calculated romantic reciprocity may raise interest_alignment, dependence, or debt, but must not invent attraction or love. Genuine reciprocity may raise attraction and affection. Coercive placation is not consent."
-                + "\n\nReturn {impactLevel:'ordinary|major|transformative', reasoning:'...', facetDeltas:{trust:0,...}, facetReasons:{trust:'...'}, nativeRelationDelta:0, milestoneUpdates:[{kind:'in_love',operation:'activate|reinforce|erode|remove',stabilityDelta:0,strength:0,reason:'...'}], pressureUpdates:[{kind:'humiliation',operation:'create|reinforce|reduce|resolve',intensityDelta:0,secrecy:0.5,summary:'...',triggered:false}], development:{kind:'',polarity:'positive|negative|mixed',deliveryMode:'in_person|letter|offscreen',requiresPhysical:false,priority:0.5,summary:''}}. Change only facets supported by this event. Ordinary max 10, major max 30, transformative max 60. At most eight nonzero facets.";
-        }
-
         private static void EnforceMotiveSpecificRelationshipEvaluation(Dictionary<string, object> evaluation, Dictionary<string, object> payload)
         {
             Dictionary<string, object> motive = ReadDictionary(payload, "motiveDecision") ?? new Dictionary<string, object>();
@@ -630,96 +579,6 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
             return result;
         }
 
-        private static Dictionary<string, object> ApplyRelationshipEvaluation(ReignDbConnection connection, string campaignId, string eventId, string subjectId, string targetId, double worldDay, long ts, Dictionary<string, object> state, Dictionary<string, object> evaluation)
-        {
-            string impact = ReadString(evaluation, "impactLevel", "ordinary").ToLowerInvariant();
-            int maxDelta = impact == "transformative" ? 60 : impact == "major" ? 30 : 10;
-            Dictionary<string, object> rawDeltas = ReadDictionary(evaluation, "facetDeltas") ?? new Dictionary<string, object>();
-            Dictionary<string, object> reasons = ReadDictionary(evaluation, "facetReasons") ?? new Dictionary<string, object>();
-            List<string> changed = rawDeltas.Keys.Where(key => RelationshipFacetKeys.Contains(key, StringComparer.OrdinalIgnoreCase) && Math.Abs(ReadDouble(rawDeltas, key, 0d)) > 0.001d).Take(8).ToList();
-            Dictionary<string, object> args = new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["ts"] = ts, ["event"] = Json.Serialize(new[] { eventId }) };
-            Dictionary<string, object> updated = new Dictionary<string, object>();
-            foreach (string key in RelationshipFacetKeys)
-            {
-                double oldValue = ReadDouble(state, key, 0d);
-                double delta = changed.Contains(key, StringComparer.OrdinalIgnoreCase) ? ClampDouble(ReadDouble(rawDeltas, key, 0d), -maxDelta, maxDelta) : 0d;
-                double newValue = ClampRelationship(oldValue + delta);
-                args[key] = newValue;
-                updated[key] = newValue;
-                if (Math.Abs(delta) > 0.001d)
-                {
-                    ExecuteSql(connection, @"INSERT INTO relationship_changes(change_id,evaluation_id,event_id,subject_id,target_id,facet,old_value,delta,new_value,impact_level,reason,confidence,evidence_json,world_day,ts)
-VALUES($id,'',$event,$subject,$target,$facet,$old,$delta,$new,$impact,$reason,$confidence,$evidence,$day,$ts);",
-                        new Dictionary<string, object>
-                        {
-                            ["id"] = "rchg_" + Guid.NewGuid().ToString("N"), ["event"] = eventId, ["subject"] = subjectId, ["target"] = targetId,
-                            ["facet"] = key, ["old"] = oldValue, ["delta"] = delta, ["new"] = newValue, ["impact"] = impact,
-                            ["reason"] = ReadString(reasons, key, ReadString(evaluation, "reasoning", "")), ["confidence"] = ClampDouble(ReadDouble(evaluation, "confidence", 0.65d), 0d, 1d),
-                            ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = worldDay, ["ts"] = ts
-                        });
-                }
-            }
-            bool socialEventOverride = ReadBool(evaluation, "nativeRelationOverride", false);
-            int nativeDelta = socialEventOverride
-                ? Clamp(ReadInt(evaluation, "nativeRelationDelta", 0), -4, 4)
-                : Clamp(ReadInt(evaluation, "nativeRelationDelta", 0), impact == "ordinary" ? -2 : -25, impact == "ordinary" ? 2 : 15);
-            int native = Clamp(ReadInt(state, "native_relation", 0) + nativeDelta, -100, 100);
-            args["native"] = native;
-            ExecuteSql(connection, @"UPDATE relationships SET trust=$trust,fear=$fear,respect=$respect,resentment=$resentment,loyalty=$loyalty,debt=$debt,affection=$affection,rivalry=$rivalry,envy=$envy,attraction=$attraction,jealousy=$jealousy,dependence=$dependence,interest_alignment=$interest_alignment,native_relation=$native,last_eval_ts=$ts,last_updated_from_json=$event,updated_ts=$ts WHERE subject_id=$subject AND target_id=$target;", args);
-
-            List<Dictionary<string, object>> milestoneResults = ApplyMilestoneUpdates(connection, subjectId, targetId, eventId, worldDay, ts, evaluation, updated);
-            List<Dictionary<string, object>> pressureResults = ApplyPressureUpdates(connection, subjectId, targetId, eventId, worldDay, ts, evaluation);
-            Dictionary<string, object> development = ApplyRelationshipDevelopment(connection, subjectId, targetId, eventId, worldDay, ts, evaluation, updated, milestoneResults, pressureResults);
-            return new Dictionary<string, object>
-            {
-                ["ok"] = true, ["subjectId"] = subjectId, ["targetId"] = targetId, ["impactLevel"] = impact,
-                ["facetValues"] = updated, ["nativeRelationDelta"] = nativeDelta, ["proposedNativeRelation"] = native,
-                ["milestones"] = milestoneResults, ["pressures"] = pressureResults, ["development"] = development,
-                ["evaluator"] = ReadString(evaluation, "evaluator", "")
-            };
-        }
-
-        private static List<Dictionary<string, object>> ApplyMilestoneUpdates(ReignDbConnection connection, string subjectId, string targetId, string eventId, double day, long ts, Dictionary<string, object> evaluation, Dictionary<string, object> facets)
-        {
-            List<Dictionary<string, object>> updates = ReadDictionaryList(evaluation, "milestoneUpdates");
-            string summary = ReadString(evaluation, "reasoning", "");
-            if (ReadDouble(facets, "affection", 0d) >= 65d && ReadDouble(facets, "attraction", 0d) >= 35d && ContainsAny(summary, "intimate", "love", "vulnerab", "kiss"))
-                updates.Add(new Dictionary<string, object> { ["kind"] = "in_love", ["operation"] = "activate", ["stabilityDelta"] = 25, ["strength"] = 70, ["reason"] = summary });
-            if (ReadDouble(facets, "trust", 0d) >= 70d && ReadDouble(facets, "affection", 0d) >= 30d && ContainsAny(summary, "confession", "secret", "confid"))
-                updates.Add(new Dictionary<string, object> { ["kind"] = "confidant", ["operation"] = "activate", ["stabilityDelta"] = 20, ["strength"] = 65, ["reason"] = summary });
-            if (ReadDouble(facets, "resentment", 0d) >= 70d && ReadDouble(facets, "rivalry", 0d) >= 55d)
-                updates.Add(new Dictionary<string, object> { ["kind"] = "nemesis", ["operation"] = "activate", ["stabilityDelta"] = 20, ["strength"] = 70, ["reason"] = summary });
-
-            List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
-            foreach (Dictionary<string, object> item in updates.Take(6))
-            {
-                string kind = ReadString(item, "kind", "");
-                string operation = ReadString(item, "operation", "reinforce").ToLowerInvariant();
-                if (!RelationshipMilestoneKinds.Contains(kind)) continue;
-                Dictionary<string, object> existing = QuerySql(connection, "SELECT * FROM relationship_milestones WHERE subject_id=$subject AND target_id=$target AND kind=$kind AND status='active' ORDER BY updated_ts DESC LIMIT 1;",
-                    new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind }).FirstOrDefault();
-                if (existing == null && (operation == "activate" || operation == "reinforce"))
-                {
-                    string id = "rms_" + Guid.NewGuid().ToString("N");
-                    double stability = ClampDouble(ReadDouble(item, "stability", 50d) + ReadDouble(item, "stabilityDelta", 0d), 0d, 100d);
-                    ExecuteSql(connection, @"INSERT INTO relationship_milestones(milestone_id,subject_id,target_id,kind,status,stability,strength,reason,created_event_id,last_event_id,evidence_json,created_day,last_meaningful_day,updated_ts,payload_json)
-VALUES($id,$subject,$target,$kind,'active',$stability,$strength,$reason,$event,$event,$evidence,$day,$day,$ts,$payload);",
-                        new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["stability"] = stability, ["strength"] = ClampDouble(ReadDouble(item, "strength", 50d), 0d, 100d), ["reason"] = ReadString(item, "reason", ""), ["event"] = eventId, ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
-                    results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = "activated", ["stability"] = stability, ["milestoneId"] = id });
-                }
-                else if (existing != null)
-                {
-                    double delta = ClampDouble(ReadDouble(item, "stabilityDelta", operation == "remove" ? -100d : operation == "erode" ? -15d : 10d), -100d, 100d);
-                    double stability = ClampDouble(ReadDouble(existing, "stability", 50d) + delta, 0d, 100d);
-                    string status = operation == "remove" || stability <= 0d ? "inactive" : "active";
-                    ExecuteSql(connection, "UPDATE relationship_milestones SET status=$status,stability=$stability,last_event_id=$event,last_meaningful_day=$day,updated_ts=$ts,payload_json=$payload WHERE milestone_id=$id;",
-                        new Dictionary<string, object> { ["status"] = status, ["stability"] = stability, ["event"] = eventId, ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item), ["id"] = ReadString(existing, "milestone_id", "") });
-                    results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = status == "inactive" ? "removed" : operation, ["stability"] = stability, ["milestoneId"] = ReadString(existing, "milestone_id", "") });
-                }
-            }
-            return results;
-        }
-
         private static List<Dictionary<string, object>> ApplyPressureUpdates(ReignDbConnection connection, string subjectId, string targetId, string eventId, double day, long ts, Dictionary<string, object> evaluation)
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -750,22 +609,6 @@ VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entitie
                 }
             }
             return results;
-        }
-
-        private static Dictionary<string, object> ApplyRelationshipDevelopment(ReignDbConnection connection, string subjectId, string targetId, string eventId, double day, long ts, Dictionary<string, object> evaluation, Dictionary<string, object> facets, List<Dictionary<string, object>> milestones, List<Dictionary<string, object>> pressures)
-        {
-            Dictionary<string, object> requested = ReadDictionary(evaluation, "development") ?? new Dictionary<string, object>();
-            bool triggeredPressure = pressures.Any(item => ReadDouble(item, "intensity", 0d) >= 70d);
-            bool milestoneActivated = milestones.Any(item => ReadString(item, "operation", "") == "activated");
-            string kind = ReadString(requested, "kind", milestoneActivated ? "milestone_turning_point" : triggeredPressure ? "pressure_turning_point" : "");
-            if (string.IsNullOrWhiteSpace(kind)) return new Dictionary<string, object>();
-            string id = "rdev_" + Guid.NewGuid().ToString("N");
-            string mode = ReadString(requested, "deliveryMode", ReadBool(requested, "requiresPhysical", false) ? "in_person" : "letter").ToLowerInvariant();
-            if (mode != "in_person" && mode != "letter" && mode != "offscreen") mode = "in_person";
-            ExecuteSql(connection, @"INSERT INTO relationship_developments(development_id,subject_id,target_id,kind,polarity,status,delivery_mode,requires_physical,priority,summary,trigger_event_id,related_entities_json,available_day,expires_day,payload_json,updated_ts)
-VALUES($id,$subject,$target,$kind,$polarity,'ready',$mode,$physical,$priority,$summary,$event,$entities,$day,$expires,$payload,$ts);",
-                new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["polarity"] = ReadString(requested, "polarity", "mixed"), ["mode"] = mode, ["physical"] = ReadBool(requested, "requiresPhysical", false) ? 1 : 0, ["priority"] = ClampDouble(ReadDouble(requested, "priority", 0.7d), 0d, 1d), ["summary"] = FirstNonEmpty(ReadString(requested, "summary", ""), ReadString(evaluation, "reasoning", "")), ["event"] = eventId, ["entities"] = Json.Serialize(ReadStringList(requested, "relatedEntityIds")), ["day"] = day, ["expires"] = day + 30d, ["payload"] = Json.Serialize(requested), ["ts"] = ts });
-            return new Dictionary<string, object> { ["developmentId"] = id, ["kind"] = kind, ["deliveryMode"] = mode, ["status"] = "ready" };
         }
 
         private static Dictionary<string, object> RelationshipContextApi(Dictionary<string, object> payload)
@@ -1589,57 +1432,6 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             return merged;
         }
 
-        private static void TryQueueRelationshipMaintenanceLetter(ReignDbConnection connection, string campaignId, string playerId, double day, List<Dictionary<string, object>> queued)
-        {
-            if (string.IsNullOrWhiteSpace(playerId) || ((int)Math.Floor(day)) % 3 != 0) return;
-            List<Dictionary<string, object>> candidates = QuerySql(connection, "SELECT * FROM relationships WHERE target_id=$player ORDER BY updated_ts DESC LIMIT 30;", new Dictionary<string, object> { ["player"] = playerId });
-            foreach (Dictionary<string, object> state in candidates)
-            {
-                string senderId = ReadString(state, "subject_id", "");
-                double strongest = RelationshipFacetKeys.Select(key => Math.Abs(ReadDouble(state, key, 0d))).DefaultIfEmpty(0d).Max();
-                if (strongest < 60d) continue;
-                Dictionary<string, object> recent = QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$sender AND recipient_id=$player ORDER BY dispatch_day DESC LIMIT 1;", new Dictionary<string, object> { ["sender"] = senderId, ["player"] = playerId }).FirstOrDefault();
-                if (recent != null && day - ReadDouble(recent, "dispatch_day", 0d) < 14d) continue;
-                Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, senderId, "profile.json"));
-                Dictionary<string, object> synthetic = new Dictionary<string, object> { ["sender_name"] = ReadString(ReadJsonObject(CharacterFile(campaignId, playerId, "profile.json")), "name", "Player"), ["body"] = "No new letter has arrived. Decide whether this relationship now gives you a concrete reason to write.", ["reason"] = "relationship maintenance" };
-                Dictionary<string, object> generated = GenerateNpcLetter(campaignId, senderId, playerId, synthetic, day);
-                if (!ReadBool(generated, "shouldReply", false) || string.IsNullOrWhiteSpace(ReadString(generated, "body", ""))) return;
-                queued.Add(InsertLetter(connection, senderId, ReadString(profile, "name", senderId), playerId, ReadString(synthetic, "sender_name", "Player"), ReadString(generated, "body", ""), "npc_initiated", ReadString(generated, "reason", "relationship maintenance"), "", ReadString(profile, "currentSettlementId", ""), "", day, day + 3d, generated));
-                return;
-            }
-        }
-
-        private static void TryQueueRelationshipDevelopmentLetter(ReignDbConnection connection, string campaignId, string playerId, double day, List<Dictionary<string, object>> queued)
-        {
-            if (string.IsNullOrWhiteSpace(playerId)) return;
-            Dictionary<string, object> development = QuerySql(connection, @"SELECT * FROM relationship_developments
-WHERE status='ready' AND delivery_mode='letter' AND target_id=$player AND available_day<=$day AND (expires_day=0 OR expires_day>=$day)
-ORDER BY priority DESC,updated_ts ASC LIMIT 1;", new Dictionary<string, object> { ["player"] = playerId, ["day"] = day }).FirstOrDefault();
-            if (development == null) return;
-
-            string senderId = ReadString(development, "subject_id", "");
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, senderId, "profile.json"));
-            Dictionary<string, object> playerProfile = ReadJsonObject(CharacterFile(campaignId, playerId, "profile.json"));
-            Dictionary<string, object> synthetic = new Dictionary<string, object>
-            {
-                ["sender_name"] = ReadString(playerProfile, "name", "Player"),
-                ["body"] = "A relationship development gives you a concrete reason to write now: " + ReadString(development, "summary", ""),
-                ["reason"] = ReadString(development, "kind", "relationship development")
-            };
-            Dictionary<string, object> generated = GenerateNpcLetter(campaignId, senderId, playerId, synthetic, day);
-            if (!ReadBool(generated, "shouldReply", false) || string.IsNullOrWhiteSpace(ReadString(generated, "body", ""))) return;
-
-            Dictionary<string, object> letter = InsertLetter(connection, senderId, ReadString(profile, "name", senderId), playerId, ReadString(playerProfile, "name", "Player"), ReadString(generated, "body", ""), "relationship_development", ReadString(generated, "reason", ReadString(development, "kind", "relationship development")), "", ReadString(profile, "currentSettlementId", ""), ReadString(playerProfile, "currentSettlementId", ""), day, day + 3d, generated);
-            queued.Add(letter);
-            ExecuteSql(connection, "UPDATE relationship_developments SET status='resolved',resolved_day=$day,payload_json=$payload,updated_ts=$ts WHERE development_id=$id;", new Dictionary<string, object>
-            {
-                ["day"] = day,
-                ["payload"] = Json.Serialize(new Dictionary<string, object> { ["letterId"] = ReadString(letter, "letterId", ""), ["resolution"] = "correspondence_dispatched" }),
-                ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                ["id"] = ReadString(development, "development_id", "")
-            });
-        }
-
         private static void AppendDeliveredLetterHistory(string campaignId, string playerId, Dictionary<string, object> letter, double day)
         {
             string senderId = ReadString(letter, "sender_id", "");
@@ -1660,39 +1452,6 @@ ORDER BY priority DESC,updated_ts ASC LIMIT 1;", new Dictionary<string, object> 
                 AcceptPregnancyDisclosures(pregnancyConnection, ReadString(letter, "timeline_id", "main"), senderId,
                     ReadString(letter, "body", ""), TryParseJsonObject(ReadString(letter, "payload_json", "{}")),
                     new[] { recipientId }, "delivered_letter:" + ReadString(letter, "letter_id", ""), day);
-        }
-
-        private static Dictionary<string, object> RelationshipFacetSnapshot(Dictionary<string, object> row)
-        {
-            return RelationshipFacetKeys.ToDictionary(key => key, key => (object)Math.Round(ReadDouble(row, key, 0d), 2), StringComparer.OrdinalIgnoreCase);
-        }
-
-        private static Dictionary<string, object> RelationshipFacetDescriptions(Dictionary<string, object> row)
-        {
-            return RelationshipFacetKeys.ToDictionary(key => key, key => (object)RelationshipFacetDescriptor(key, ReadDouble(row, key, 0d)), StringComparer.OrdinalIgnoreCase);
-        }
-
-        private static string RelationshipFacetDescriptor(string key, double value)
-        {
-            string[] levels;
-            switch ((key ?? "").ToLowerInvariant())
-            {
-                case "trust": levels = new[] { "is certain they will betray them", "deeply distrusts them", "expects deception", "remains guarded", "has no settled trust", "offers cautious trust", "trusts them", "relies on them deeply", "trusts them completely" }; break;
-                case "respect": levels = new[] { "holds them in absolute contempt", "despises their standing or ability", "dismisses them", "shows little respect", "is neutral about their worth", "grants measured respect", "respects them", "holds them in high esteem", "reveres them" }; break;
-                case "affection": levels = new[] { "hates them", "feels profound aversion", "strongly dislikes them", "feels cool toward them", "has no strong affection", "feels some warmth", "is fond of them", "loves them deeply", "is consumed by love for them" }; break;
-                case "loyalty": levels = new[] { "is ready to betray them", "would abandon them readily", "is disloyal", "offers weak conditional allegiance", "has no settled loyalty", "offers conditional support", "is loyal", "is devoted", "would sacrifice almost anything for them" }; break;
-                case "fear": levels = new[] { "feels completely safe and unintimidated", "feels strongly secure around them", "rarely regards them as a threat", "feels mostly safe", "feels neither safe nor afraid", "is wary of them", "fears them", "is deeply afraid", "is terrified of them" }; break;
-                case "resentment": levels = new[] { "has fully forgiven and released every grievance", "feels deeply reconciled", "has largely forgiven them", "is inclined to let grievances go", "holds no active grievance", "carries mild resentment", "is bitter toward them", "nurses a powerful grievance", "is consumed by resentment" }; break;
-                case "rivalry": levels = new[] { "sees their success as completely shared", "actively wants them to succeed", "feels strongly cooperative", "does not compete with them", "feels no rivalry", "compares themselves against them", "treats them as a rival", "must surpass them", "is obsessed with defeating them" }; break;
-                case "envy": levels = new[] { "is wholly content with their advantages", "admiringly accepts their success", "rarely compares themselves", "feels little envy", "feels no settled envy", "notices what they possess", "envies them", "finds their advantages intolerable", "is consumed by envy" }; break;
-                case "attraction": levels = new[] { "feels active physical or romantic repulsion", "is strongly repelled", "finds them unattractive", "feels little attraction", "feels no settled attraction", "notices some attraction", "desires them", "feels intense desire", "is consumed by desire" }; break;
-                case "jealousy": levels = new[] { "feels completely secure and nonpossessive", "actively welcomes their independence", "is secure about rivals", "feels little jealousy", "feels no settled jealousy", "is sensitive to divided attention", "is jealous", "is highly possessive", "is obsessively jealous" }; break;
-                case "dependence": levels = new[] { "is deliberately disentangled from them", "rejects relying on them", "is strongly independent", "needs little from them", "has no settled dependence", "relies on them somewhat", "depends on them", "struggles to function without them", "cannot imagine functioning without them" }; break;
-                case "interest_alignment": levels = new[] { "has completely incompatible interests", "sees their interests as directly opposed", "expects conflict between their aims", "shares few interests", "has no clear alignment", "shares some useful interests", "has aligned interests", "sees their fortunes as joined", "believes their interests are inseparable" }; break;
-                default: levels = new[] { "believes they are owed an enormous debt", "believes they are owed greatly", "believes the other owes them", "expects some repayment", "feels no debt either way", "feels they owe a modest favor", "feels indebted", "feels profoundly indebted", "believes they owe nearly everything" }; break;
-            }
-            int index = value <= -76 ? 0 : value <= -51 ? 1 : value <= -26 ? 2 : value <= -6 ? 3 : value < 6 ? 4 : value < 26 ? 5 : value < 51 ? 6 : value < 76 ? 7 : 8;
-            return levels[index];
         }
 
         private static double ClampRelationship(double value) => ClampDouble(value, -100d, 100d);

@@ -316,14 +316,6 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return string.Join(" ", Regex.Split(text ?? "", @"\s+").Where(x => x.Length > 2).Take(3));
         }
 
-        private static double DynamicTextOverlap(string left, string right)
-        {
-            HashSet<string> a = new HashSet<string>(MemoryQueryTerms(left), StringComparer.OrdinalIgnoreCase);
-            HashSet<string> b = new HashSet<string>(MemoryQueryTerms(right), StringComparer.OrdinalIgnoreCase);
-            if (a.Count == 0) return 0d;
-            return a.Count(x => b.Contains(x)) / (double)a.Count;
-        }
-
         private static bool HasDynamicTextEvidence(string summary, string visibleReply)
         {
             // Grounding must inspect the complete visible reply. MemoryQueryTerms intentionally

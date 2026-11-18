@@ -30,15 +30,6 @@ namespace ReignBetaServer
         private static readonly Regex SqliteMasterSource = new Regex(
             @"\bFROM\s+sqlite_master\b",
             RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-        private static readonly Regex NestedNumericClamp = new Regex(
-            @"\bMAX\s*\(\s*(?<low>-?\d+(?:\.\d+)?)\s*,\s*MIN\s*\(\s*(?<high>-?\d+(?:\.\d+)?)\s*,\s*(?<value>[^()]+)\)\s*\)",
-            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-        private static readonly Regex FlatScalarMin = new Regex(
-            @"\bMIN\s*\(\s*(?<left>[^(),]+)\s*,\s*(?<right>[^()]+)\)",
-            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-        private static readonly Regex FlatScalarMax = new Regex(
-            @"\bMAX\s*\(\s*(?<left>[^(),]+)\s*,\s*(?<right>[^()]+)\)",
-            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
         private static readonly Regex JsonExtractText = new Regex(
             @"\bjson_extract\s*\(\s*(?<column>[A-Za-z_][A-Za-z0-9_\.]*)\s*,\s*'\$\.(?<key>[A-Za-z_][A-Za-z0-9_]*)'\s*\)",
             RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);

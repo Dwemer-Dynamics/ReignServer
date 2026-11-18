@@ -597,28 +597,6 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                 ContinuousRelationshipBottleneck = largest.Key;
         }
 
-        private static int CountQueuedRelationshipDays()
-        {
-            string root = CampaignsRoot();
-            if (!Directory.Exists(root)) return 0;
-            int count = 0;
-            foreach (string directory in Directory.GetDirectories(root))
-            {
-                try
-                {
-                    using (ReignDbConnection connection = OpenCampaignConnection(Path.GetFileName(directory)))
-                    {
-                        EnsureMbtiRelationshipSchema(connection);
-                        count += ReadInt(QuerySql(connection,
-                            "SELECT COUNT(*) AS count FROM relationship_daily_inputs WHERE status='pending';")
-                            .FirstOrDefault(), "count", 0);
-                    }
-                }
-                catch { }
-            }
-            return count;
-        }
-
         private static int RelationshipCampaignWorkPriority(string campaignId, string timelineId,
             string activeCampaignId, string activeTimelineId, bool serveInactive)
         {

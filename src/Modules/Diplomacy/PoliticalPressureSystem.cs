@@ -10,7 +10,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private const int PoliticalPressureIncidentChance = 43;
-        private const int PoliticalPressureMinimumActionValue = 10;
         private static readonly string[] PoliticalPressureVirtues =
         {
             "compassion", "boldness", "honor", "loyalty", "responsibility", "courage", "judgment"

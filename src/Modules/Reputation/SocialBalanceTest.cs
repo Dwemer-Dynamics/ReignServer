@@ -2602,7 +2602,7 @@ AND (tags.tag_id='favored_by' OR tags.tag_id LIKE 'favored_by:%');", parameters)
                     ["intimacyReceipts"] = PersistenceSection(intimacy),
                     ["flirtTargets"] = PersistenceSection(flirtTargets)
                 };
-                string overallHash = SocialBalanceHash(string.Join("|", sections
+                string overallHash = SemanticSha256Hex(string.Join("|", sections
                     .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
                     .Select(pair => pair.Key + ":" + ReadString(
                         pair.Value as Dictionary<string, object>, "hash", ""))));
@@ -2629,7 +2629,7 @@ AND (tags.tag_id='favored_by' OR tags.tag_id LIKE 'favored_by:%');", parameters)
             return new Dictionary<string, object>
             {
                 ["count"] = rows.Count,
-                ["hash"] = SocialBalanceHash(Json.Serialize(rows))
+                ["hash"] = SemanticSha256Hex(Json.Serialize(rows))
             };
         }
 
@@ -3544,7 +3544,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
                     material.Append("|").Append(relative).Append("|");
                     material.Append(File.Exists(path) ? SocialBalanceFileHash(path) : "semantic-v1");
                 }
-                result[capability.Key] = SocialBalanceHash(material.ToString()).Substring(0, 24);
+                result[capability.Key] = SemanticSha256Hex(material.ToString()).Substring(0, 24);
             }
             // This version identifies the unchanged shared enrollment, isolation, receipt, and
             // snapshot contract. Profile-specific harness behavior owns a separate capability
@@ -3567,7 +3567,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
                 capabilities.TryGetValue(dependency, out string fingerprint);
                 material.Append("|").Append(dependency).Append(":").Append(fingerprint ?? "missing");
             }
-            return SocialBalanceHash(material.ToString()).Substring(0, 32);
+            return SemanticSha256Hex(material.ToString()).Substring(0, 32);
         }
 
         private static bool IsSocialBalanceCompatibleResult(
@@ -3592,12 +3592,6 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
         {
             using (SHA256 sha = SHA256.Create())
                 return BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(path))).Replace("-", "").ToLowerInvariant();
-        }
-
-        private static string SocialBalanceHash(string value)
-        {
-            using (SHA256 sha = SHA256.Create())
-                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""))).Replace("-", "").ToLowerInvariant();
         }
 
         private static ReignDbConnection OpenSocialBalanceDatabase()

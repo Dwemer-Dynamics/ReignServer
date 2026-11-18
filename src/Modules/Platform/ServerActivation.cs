@@ -60,10 +60,5 @@ namespace ReignBetaServer
             return int.TryParse(value, out int parsed) ? parsed : fallback;
         }
 
-        private static string QuoteCommandLineArgument(string value)
-        {
-            return "\"" + (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-        }
-
     }
 }

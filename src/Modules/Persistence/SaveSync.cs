@@ -840,34 +840,6 @@ namespace ReignBetaServer
             finally { TryDeleteDirectory(temp); }
         }
 
-        private static void CreateSaveSyncSnapshot(
-            string campaignId,
-            string destinationRoot,
-            Dictionary<string, object> metadata)
-        {
-            Dictionary<string, object> snapshotMetadata =
-                new Dictionary<string, object>(
-                    metadata ?? new Dictionary<string, object>(),
-                    StringComparer.OrdinalIgnoreCase);
-            string comparisonPointId = "comparison_"
-                + Guid.NewGuid().ToString("N");
-            try
-            {
-                ReignPostgreSqlStorage.CloneCampaignToSnapshot(
-                    campaignId, comparisonPointId);
-                snapshotMetadata["postgresqlSnapshotPointId"] =
-                    comparisonPointId;
-                snapshotMetadata["savePointId"] = comparisonPointId;
-                CreateRawSaveSyncSnapshot(
-                    campaignId, destinationRoot, snapshotMetadata);
-            }
-            finally
-            {
-                ReignPostgreSqlStorage.DropSnapshot(
-                    campaignId, comparisonPointId);
-            }
-        }
-
 
         private static Dictionary<string, object> BuildSaveSyncInventory(string campaignRoot)
         {
@@ -914,64 +886,6 @@ namespace ReignBetaServer
                 }
             }
             return counts.ToDictionary(x => x.Key, x => (object)x.Value, StringComparer.OrdinalIgnoreCase);
-        }
-
-        private static Dictionary<string, object> CompareSaveSyncInventory(Dictionary<string, object> current, Dictionary<string, object> target,
-            string currentSnapshotRoot, string targetSnapshotRoot, Dictionary<string, object> currentManifest,
-            Dictionary<string, object> targetManifest, bool analyzeDifferences)
-        {
-            Dictionary<string, object> result = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-            foreach (string subsystem in SaveSyncSubsystemNames())
-            {
-                long before = ReadLong(current, subsystem, 0), after = ReadLong(target, subsystem, 0);
-                if (subsystem == "audit") after = before;
-                result[subsystem] = new Dictionary<string, object>
-                {
-                    ["current"] = before, ["target"] = after,
-                    ["removed"] = 0L, ["restored"] = 0L, ["affected"] = 0L, ["netChange"] = after - before
-                };
-            }
-            if (!analyzeDifferences) return result;
-
-            Dictionary<string, Dictionary<string, object>> beforeFiles = ReadDictionaryList(currentManifest, "files")
-                .Where(x => !IsSaveSyncFingerprintExcluded(ReadString(x, "path", "")))
-                .ToDictionary(x => ReadString(x, "path", ""), x => x, StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, Dictionary<string, object>> afterFiles = ReadDictionaryList(targetManifest, "files")
-                .Where(x => !IsSaveSyncFingerprintExcluded(ReadString(x, "path", "")))
-                .ToDictionary(x => ReadString(x, "path", ""), x => x, StringComparer.OrdinalIgnoreCase);
-            foreach (string relative in beforeFiles.Keys.Union(afterFiles.Keys, StringComparer.OrdinalIgnoreCase))
-            {
-                if (Path.GetFileName(relative).StartsWith("world_memory.sqlite", StringComparison.OrdinalIgnoreCase)) continue;
-                bool hasBefore = beforeFiles.TryGetValue(relative, out Dictionary<string, object> beforeFile);
-                bool hasAfter = afterFiles.TryGetValue(relative, out Dictionary<string, object> afterFile);
-                if (hasBefore && hasAfter && ReadString(beforeFile, "sha256", "").Equals(ReadString(afterFile, "sha256", ""), StringComparison.OrdinalIgnoreCase)) continue;
-                string subsystem = SaveSyncSubsystemForPath(relative);
-                string beforePath = hasBefore ? SaveSyncSnapshotFile(currentSnapshotRoot, relative) : "";
-                string afterPath = hasAfter ? SaveSyncSnapshotFile(targetSnapshotRoot, relative) : "";
-                long removed = 0, restored = 0;
-                if (hasBefore && hasAfter && relative.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
-                    CompareSaveSyncJsonLines(beforePath, afterPath, out removed, out restored);
-                else
-                {
-                    if (hasBefore) removed = SaveSyncFileRecordCount(beforePath);
-                    if (hasAfter) restored = SaveSyncFileRecordCount(afterPath);
-                }
-                AddSaveSyncAffectedCounts(result, subsystem, removed, restored);
-            }
-
-            foreach (string subsystem in SaveSyncSubsystemNames())
-            {
-                long before = ReadLong(current, subsystem, 0);
-                long after = ReadLong(target, subsystem, 0);
-                AddSaveSyncAffectedCounts(
-                    result,
-                    subsystem,
-                    Math.Max(0L, before - after),
-                    Math.Max(0L, after - before));
-            }
-            foreach (Dictionary<string, object> row in result.Values.OfType<Dictionary<string, object>>())
-                row["affected"] = ReadLong(row, "removed", 0) + ReadLong(row, "restored", 0);
-            return result;
         }
 
         private static string SaveSyncSnapshotFile(string snapshotRoot, string relative)
@@ -1059,12 +973,6 @@ namespace ReignBetaServer
             return "other";
         }
 
-        private static bool IsSaveSyncFtsShadowTable(string table)
-        {
-            string value = (table ?? "").ToLowerInvariant();
-            return value.EndsWith("_data") || value.EndsWith("_idx") || value.EndsWith("_content") || value.EndsWith("_docsize") || value.EndsWith("_config") || value.EndsWith("_fts");
-        }
-
         private static long SaveSyncJsonRecordCount(string path)
         {
             try
@@ -1081,13 +989,6 @@ namespace ReignBetaServer
         {
             try { long count = 0; using (StreamReader reader = new StreamReader(path)) while (reader.ReadLine() != null) count++; return count; }
             catch { return 0; }
-        }
-
-        private static int CountChangedSnapshotFiles(Dictionary<string, object> current, Dictionary<string, object> target)
-        {
-            Dictionary<string, string> before = ReadDictionaryList(current, "files").Where(x => !IsSaveSyncFingerprintExcluded(ReadString(x, "path", ""))).ToDictionary(x => ReadString(x, "path", ""), x => ReadString(x, "sha256", ""), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, string> after = ReadDictionaryList(target, "files").Where(x => !IsSaveSyncFingerprintExcluded(ReadString(x, "path", ""))).ToDictionary(x => ReadString(x, "path", ""), x => ReadString(x, "sha256", ""), StringComparer.OrdinalIgnoreCase);
-            return before.Keys.Union(after.Keys, StringComparer.OrdinalIgnoreCase).Count(path => !before.TryGetValue(path, out string left) || !after.TryGetValue(path, out string right) || !left.Equals(right, StringComparison.OrdinalIgnoreCase));
         }
 
         private static long SumSaveSyncCount(Dictionary<string, object> counts, string field)
@@ -1198,55 +1099,6 @@ namespace ReignBetaServer
                 return SaveSyncSemanticBlockedCampaigns.Contains(campaignId ?? "");
         }
 
-        private static void QueueSaveSyncSemanticReconciliation(
-            string campaignId,
-            SaveSyncSemanticReconciliationPlan plan,
-            Dictionary<string, object> settings)
-        {
-            if (SaveSyncSkipSemanticForTests)
-            {
-                SetSaveSyncSemanticBlocked(campaignId, false);
-                return;
-            }
-            Task.Run(() =>
-            {
-                bool stopped = false;
-                try
-                {
-                    if (!InvalidateSaveSyncSemanticVectors(plan, settings))
-                        throw new InvalidOperationException(
-                            "Semantic vector invalidation failed; lexical search remains active.");
-                    StopSemanticMemorySubsystem();
-                    stopped = true;
-                    Dictionary<string, object> queued =
-                        ReconcileSemanticMemoryAfterSaveSync(campaignId, plan, settings);
-                    AppendSaveSyncAudit(campaignId, "load.semantic_reconciled",
-                        new Dictionary<string, object>
-                        {
-                            ["result"] = "completed",
-                            ["semanticReindexQueued"] = ReadInt(queued, "queued", 0),
-                            ["semanticSourcesRequeued"] = ReadInt(queued, "explicitlyRequeued", 0)
-                        });
-                }
-                catch (Exception ex)
-                {
-                    AppendSaveSyncAudit(campaignId, "load.semantic_reconcile_failed",
-                        new Dictionary<string, object>
-                        {
-                            ["result"] = "lexical_fallback",
-                            ["error"] = ex.ToString()
-                        });
-                }
-                finally
-                {
-                    if (stopped && ReadBool(LoadSettings(), "enableSemanticMemory", true)
-                        && !ShutdownRequested)
-                        StartSemanticMemorySubsystem(LoadSettings());
-                    SetSaveSyncSemanticBlocked(campaignId, false);
-                }
-            });
-        }
-
         private static SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
             Dictionary<string, Dictionary<string, object>> current,
             Dictionary<string, Dictionary<string, object>> target)
@@ -1355,50 +1207,6 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
         {
             if (!string.Equals(ReadString(row, "source_type", ""), "world_history_event", StringComparison.OrdinalIgnoreCase)) return true;
             return WorldHistoryEventEmbeddingEligible(row);
-        }
-
-        private static bool InvalidateSaveSyncSemanticVectors(SaveSyncSemanticReconciliationPlan plan,
-            Dictionary<string, object> settings)
-        {
-            if (!ReadBool(settings, "enableSemanticMemory", true) || plan == null || plan.DeleteVectorIds.Count == 0) return true;
-            try
-            {
-                StartManagedSemanticWorker(settings);
-                foreach (List<string> batch in plan.DeleteVectorIds.Select((id, index) => new { id, index })
-                    .GroupBy(x => x.index / 500).Select(group => group.Select(x => x.id).ToList()))
-                {
-                    Dictionary<string, object> request = SemanticProviderRequest(settings);
-                    request["collection"] = SemanticCollection;
-                    request["ids"] = batch;
-                    Dictionary<string, object> response = TryParseJsonObject(PostJsonToUrl(
-                        SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 30000))
-                        ?? new Dictionary<string, object>();
-                    if (!ReadBool(response, "ok", false))
-                        throw new InvalidOperationException(ReadString(response, "error", "Semantic vector invalidation failed."));
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                SemanticWorkerUnavailableUntilUtc = DateTime.UtcNow.AddMinutes(10);
-                SemanticWorkerLastError = "Save Sync semantic invalidation: " + ex.Message;
-                LogOperational("save_sync.semantic_invalidation_failed", new Dictionary<string, object>
-                {
-                    ["error"] = ex.Message,
-                    ["fallback"] = "PostgreSQL full-text retrieval remains authoritative until selective reconciliation succeeds."
-                });
-                return false;
-            }
-        }
-
-        private static void RestoreSaveSyncSnapshotDirectory(string snapshotRoot, string destinationCampaign)
-        {
-            string source = Path.Combine(snapshotRoot, "campaign");
-            if (!Directory.Exists(source)) throw new IOException("Recovery snapshot is missing campaign data.");
-            string incoming = Path.Combine(SaveSyncRoot(), "t", "u" + Guid.NewGuid().ToString("N").Substring(0, 12));
-            Directory.CreateDirectory(Path.GetDirectoryName(incoming));
-            CopyDirectoryTree(source, incoming, null);
-            MoveDirectoryWithRetries(incoming, destinationCampaign);
         }
 
         private static void ClearSaveSyncCaches(string campaignId)

@@ -201,24 +201,6 @@ namespace ReignBetaServer
             return result;
         }
 
-        internal static List<FinalGauntletFixtureV3> MaterializeFactory(
-            IEnumerable<FinalGauntletCaseDescriptor> descriptors,
-            int baseSeed,
-            Func<FinalGauntletCaseDescriptor, Dictionary<string, object>> stateFactory)
-        {
-            List<FinalGauntletFixtureV3> fixtures =
-                new List<FinalGauntletFixtureV3>();
-            int index = 0;
-            foreach (FinalGauntletCaseDescriptor descriptor in
-                descriptors ?? Array.Empty<FinalGauntletCaseDescriptor>())
-                fixtures.Add(Materialize(
-                    descriptor,
-                    unchecked(baseSeed + index++ * 7919),
-                    stateFactory?.Invoke(descriptor)
-                        ?? new Dictionary<string, object>()));
-            return fixtures;
-        }
-
         internal static List<Dictionary<string, object>>
             BuildSyntheticHighVolumeHistory(
                 string ownerHeroId,

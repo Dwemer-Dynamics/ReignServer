@@ -180,20 +180,5 @@ namespace ReignBetaServer
             payload["conversationEffectAcceptance"] = result;
             return result;
         }
-
-        private static Dictionary<string, object> TryCommitFinalConversationEffects(string campaign, string hero,
-            Dictionary<string, object> payload, Dictionary<string, object> motive,
-            Dictionary<string, object> profile, Dictionary<string, object> characteristics,
-            Dictionary<string, object> parsed, string reply)
-        {
-            try { return CommitFinalConversationEffects(campaign, hero, payload, motive, profile, characteristics, parsed, reply, _playerActionGeneration); }
-            catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))
-            {
-                LogOperational("dialogue.final_effect_acceptance_failed", TestDict("campaignId", campaign,
-                    "heroStringId", hero, "correlationId", EnsureCorrelationId(payload), "error", ex.GetType().Name));
-                return TestDict("ok", false, "stage", "final_effect_acceptance", "errorCode", "conversation_effects_stale_or_unsupported",
-                    "error", "The final response could not be accepted against the current negotiation and drink state. No new negotiation, drinking or NPC action was confirmed.");
-            }
-        }
     }
 }

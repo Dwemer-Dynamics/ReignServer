@@ -305,18 +305,6 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> PromptBudgetAction(
-            string section, int before, int after)
-        {
-            return new Dictionary<string, object>
-            {
-                ["section"] = section,
-                ["beforeCharacters"] = before,
-                ["afterCharacters"] = after,
-                ["removedCharacters"] = Math.Max(0, before - after)
-            };
-        }
-
         private static string CompactPromptEvidenceBlock(
             string text, int maximum, string label, bool preferNewest)
         {

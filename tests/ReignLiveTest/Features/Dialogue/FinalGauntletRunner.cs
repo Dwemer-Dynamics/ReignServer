@@ -1211,21 +1211,6 @@ namespace ReignLiveTest
             return modes.ToArray();
         }
 
-        private static string BuildFinalGauntletPlayerPrompt(
-            string caseInstanceId,
-            string requirement,
-            IEnumerable<string> requirementIds,
-            string playerName,
-            string settlementName)
-        {
-            return FinalGauntletRoleplayPrompt(
-                caseInstanceId,
-                requirement,
-                requirementIds,
-                playerName,
-                settlementName);
-        }
-
         private static string RequireGauntletRunId(string runId)
         {
             if (string.IsNullOrWhiteSpace(runId))
