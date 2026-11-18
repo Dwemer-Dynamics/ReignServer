@@ -10,7 +10,15 @@ namespace ReignBetaServer
     {
         private const string JealousyApproachPrompt = @"You requested this meeting because the player has neglected you while giving particular other people attention. You speak FIRST; the player has accepted an invitation, not uttered a greeting or apology. In your first spoken reply, explain that you feel overlooked and NAME the primary rival in the authoritative brief, connecting their repeated attention to your own unmet wish for time. Use the supplied intensity: slight means a gentle request; moderate means clear disappointment; strong means pointed hurt or irritation; huge means deep resentment, still governed by your patience, pride, tact and existing relationship. Use only the individually witnessed days supplied for each rival. Never pool everyone into one rival, invent an affair, romance, promise, private conversation or motive. Do not read numerical scores aloud. Subsequent replies respond to the player without repeating the opening accusation. Return approachOpeningEvidence containing primaryRivalId, severityLevel and rivalDays (a map of any mentioned rival IDs to their exact witnessed day counts).";
 
+        // Owned by campaign migration 2. Callers keep this guard for connections
+        // whose campaign has not completed the migration runner in this process.
         private static void EnsurePlayerApproachSchema(ReignDbConnection c)
+        {
+            if (IsCampaignMigrationReady(c, PlayerApproachSchemaMigrationVersion)) return;
+            ApplyPlayerApproachSchemaDdl(c);
+        }
+
+        private static void ApplyPlayerApproachSchemaDdl(ReignDbConnection c)
         {
             ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS player_attention_events (
 sequence_id BIGSERIAL PRIMARY KEY,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,

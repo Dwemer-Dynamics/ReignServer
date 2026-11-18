@@ -31,7 +31,7 @@ Approved first-party shared portraits belong in the private Reign module at Reig
 
 ## Repository layout
 
-- `ReignServer.csproj` and `src/Modules`: Linux server project and feature modules.
+- `ReignServer.csproj` and `src/Modules`: Linux server project and feature modules; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and each module README.
 - `ui`: Control Center HTML and assets, packaged with each retained runtime version.
 - `prompts`, `profiles`, `database`: AI defaults, narrative profiles and PostgreSQL schema.
 - `services/vector-worker`: Python embedding and vector service.

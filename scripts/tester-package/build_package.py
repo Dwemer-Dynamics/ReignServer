@@ -20,6 +20,8 @@ SUPPORT = ('reignctl', 'reign_versions.py', 'reignserver.service', 'install-reig
            'Start-ReignServer-Wsl.ps1', 'Prepare-LinuxRuntime.py', 'Prepare-MemorySelection.py')
 CLIENT_DLLS={'ArenaOverhaul.1.4.6.dll','JpegLibrary.dll','Reign.Core.Contracts.dll','ReignBeta.dll',
              'System.Buffers.dll','System.Memory.dll','System.Runtime.CompilerServices.Unsafe.dll'}
+# Client assemblies bundled when the build produced them; becomes required once the client ships it.
+OPTIONAL_CLIENT_DLLS={'ReignBeta.Core.dll'}
 HELPER_FILES={'Bannerlord.NativeCharacterImageGenerator.App.exe','Bannerlord.NativeCharacterImageGenerator.runtimeconfig.json',
               'Bannerlord.NativePortraitRenderHost.exe','Bannerlord.NativePortraitRenderHost.exe.config'}
 # Reference outputs of separately installed modules; the release lock must name each module, and none is bundled.
@@ -31,9 +33,9 @@ def select_client_dlls(names, lock):
     modules={e.get('id') for e in lock.get('artifacts',[]) if e.get('role')=='bannerlord-module'}
     selected=set()
     for name in names:
-        if name in CLIENT_DLLS: selected.add(name)
+        if name in CLIENT_DLLS or name in OPTIONAL_CLIENT_DLLS: selected.add(name)
         elif name not in EXTERNAL_DLLS or EXTERNAL_DLLS[name] not in modules: raise ValueError('Unexpected client assembly: '+name)
-    if selected!=CLIENT_DLLS: raise ValueError('Missing required client assembly')
+    if selected-OPTIONAL_CLIENT_DLLS!=CLIENT_DLLS: raise ValueError('Missing required client assembly')
     return selected
 
 def sha(path):

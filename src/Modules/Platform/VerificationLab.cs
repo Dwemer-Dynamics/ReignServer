@@ -649,8 +649,7 @@ namespace ReignBetaServer
                     ? "MBTI is included in dialogue, event, correspondence, diplomacy, relationship, scene, and action decisions while excluded from memory consolidation and portraits."
                     : "One or more MBTI prompt-scope contracts are missing.", null);
 
-            string nativeEditorPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignCharacterEditorCampaignBehavior.cs", "src");
-            string nativeEditorSource = File.Exists(nativeEditorPath) ? File.ReadAllText(nativeEditorPath) : "";
+            string nativeEditorSource = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool nativeTraitSync = new[] { "Valor", "Generosity", "Honor", "Mercy", "Calculating" }
                 .All(name => nativeEditorSource.Contains(name, StringComparison.Ordinal))
                 && nativeEditorSource.Contains("SetTraitLevel", StringComparison.Ordinal);
@@ -659,8 +658,7 @@ namespace ReignBetaServer
                     ? "The existing idempotent Character Editor command path applies all five native Bannerlord personality traits."
                     : "The native Character Editor trait application contract is incomplete.", null);
 
-            string actionEnumPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWorldActionType.cs", "src");
-            List<string> actionNames = DiscoverActionNames(actionEnumPath);
+            List<string> actionNames = DiscoverClientActionNames(clientRoot);
             AddVerificationCheck(checks, "contracts.action_catalog", "contracts", actionNames.Count >= 70, "Discovered " + actionNames.Count + " action enum members.", new Dictionary<string, object> { ["actions"] = actionNames });
 
             List<string> missingPrompts = PromptFileNames.Where(name => !File.Exists(Path.Combine(PromptsDir, name))).ToList();
@@ -854,20 +852,18 @@ namespace ReignBetaServer
 
             string warCouncilPrefab = Path.Combine(guiRoot, "Prefabs", "ReignWarCouncilScreen.xml");
             string warCouncilXml = File.Exists(warCouncilPrefab) ? File.ReadAllText(warCouncilPrefab) : "";
-            string warCouncilVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWarCouncilScreenVM.cs", "src");
-            string warCouncilVm = File.Exists(warCouncilVmPath) ? File.ReadAllText(warCouncilVmPath) : "";
-            string warCouncilManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWarCouncilScreenManager.cs", "src");
-            string warCouncilManager = File.Exists(warCouncilManagerPath) ? File.ReadAllText(warCouncilManagerPath) : "";
-            string warCouncilMapWidgetPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWarCouncilMapWidget.cs", "src");
-            string warCouncilMapWidget = File.Exists(warCouncilMapWidgetPath) ? File.ReadAllText(warCouncilMapWidgetPath) : "";
-            string warCouncilLiveHostPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignLiveInteractionUiCalibrationHost.cs", "src");
-            string warCouncilLiveHost = File.Exists(warCouncilLiveHostPath) ? File.ReadAllText(warCouncilLiveHostPath) : "";
-            string warCouncilArtFactoryPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignEventArtTextureFactory.cs", "src");
-            string warCouncilArtFactory = File.Exists(warCouncilArtFactoryPath) ? File.ReadAllText(warCouncilArtFactoryPath) : "";
-            string warCouncilTextureFactoryPath = VerificationSourceLocator.ResolveUnique(clientRoot, "TextureFactory.cs", "src", "Modules", "Portraits", "AIPortraits");
-            string warCouncilTextureFactory = File.Exists(warCouncilTextureFactoryPath) ? File.ReadAllText(warCouncilTextureFactoryPath) : "";
-            string warCouncilBehaviorPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWarCouncilCampaignBehavior.cs", "src");
-            string warCouncilBehavior = File.Exists(warCouncilBehaviorPath) ? File.ReadAllText(warCouncilBehaviorPath) : "";
+            string warCouncilVm = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string warCouncilVmScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignWarCouncilScreenVM");
+            string warCouncilManager = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string warCouncilMapWidget = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string warCouncilMapWidgetScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignWarCouncilMapWidget");
+            string warCouncilLiveHost = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string warCouncilArtFactoryPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignEventArtTextureFactory.cs");
+            string warCouncilArtFactory = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string warCouncilArtFactoryScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignEventArtTextureFactory");
+            string warCouncilTextureFactoryPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "TextureFactory.cs");
+            string warCouncilTextureFactory = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string warCouncilBehavior = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string warCouncilArt = Path.Combine(guiRoot, "SpriteParts", "ui_reignbeta_war_council");
             byte[] warCouncilChannelProbe = AIPortraits.PngEncoder.EncodeRgba(new byte[] { 201, 37, 11, 255 }, 1, 1);
             byte[] warCouncilSwappedProbe = AIPortraits.PngReencode.SwapRedBlueToPngEncoderFormat(warCouncilChannelProbe);
@@ -887,7 +883,7 @@ namespace ReignBetaServer
                 && warCouncilArtFactory.Contains("Texture texture = isWarCouncilMapAsset", StringComparison.Ordinal)
                 && warCouncilArtFactory.Contains("TextureFactory.GetOrBuildFileRedBlueSwapped(textureKey, imagePath)", StringComparison.Ordinal)
                 && warCouncilArtFactory.Contains("bool isEngineReadyRuntimeAsset = (isWarCouncilRuntimeAsset && !isWarCouncilMapAsset) || isMainMenuLogo", StringComparison.Ordinal)
-                && !warCouncilArtFactory.Contains("TextureFactory.GetOrBuildFileDirect(", StringComparison.Ordinal)
+                && !warCouncilArtFactoryScoped.Contains("TextureFactory.GetOrBuildFileDirect(", StringComparison.Ordinal)
                 && warCouncilTextureFactory.Contains("public static TaleWorlds.TwoDimension.Texture GetOrBuildFileRedBlueSwapped", StringComparison.Ordinal)
                 && warCouncilTextureFactory.Contains("PngReencode.SwapRedBlueToPngEncoderFormat(File.ReadAllBytes(path))", StringComparison.Ordinal)
                 && warCouncilTextureFactory.Contains("string swappedKey = key + \"|red-blue-swapped\"", StringComparison.Ordinal)
@@ -965,8 +961,8 @@ namespace ReignBetaServer
                 && warCouncilMapWidget.Contains("SnapToLordRow", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("ResolveSelectedRowTarget", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("Input.IsKeyDown(InputKey.LeftMouseButton)", StringComparison.Ordinal)
-                && !warCouncilMapWidget.Contains("LordRowHeight = 170f", StringComparison.Ordinal)
-                && !warCouncilMapWidget.Contains("ViewportCenterOffset = 263f", StringComparison.Ordinal);
+                && !warCouncilMapWidgetScoped.Contains("LordRowHeight = 170f", StringComparison.Ordinal)
+                && !warCouncilMapWidgetScoped.Contains("ViewportCenterOffset = 263f", StringComparison.Ordinal);
             AddVerificationCheck(checks, "contracts.war_council_whole_row_scroll", "ui_contracts",
                 warCouncilWholeRowScrollContract,
                 warCouncilWholeRowScrollContract
@@ -1019,7 +1015,7 @@ namespace ReignBetaServer
                 && warCouncilVm.Contains("party?.ActualClan == Clan.PlayerClan", StringComparison.Ordinal)
                 && warCouncilVm.Contains("party?.ActualClan?.Kingdom == playerKingdom", StringComparison.Ordinal)
                 && warCouncilVm.Contains("x.IsMainParty || IsPlayerRealmParty", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("x.IsActive && !x.IsMainParty", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("x.IsActive && !x.IsMainParty", StringComparison.Ordinal)
                 && warCouncilVm.Contains("LordPartyComponent.CreateLordParty", StringComparison.Ordinal)
                 && warCouncilVm.Contains("hero?.Clan?.Kingdom == playerKingdom", StringComparison.Ordinal)
                 && warCouncilVm.Contains("IsPlayerRealmParty(x, playerKingdom)", StringComparison.Ordinal)
@@ -1028,12 +1024,12 @@ namespace ReignBetaServer
                 && warCouncilVm.Contains("SendProductionLetterAsync", StringComparison.Ordinal)
                 && warCouncilVm.Contains("bool sameRoster", StringComparison.Ordinal)
                 && warCouncilVm.Contains("_portraitRevision", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("ScrollFrameImageId", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("settlement_town", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("settlement_castle", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("settlement_village", StringComparison.Ordinal)
-                && !warCouncilArtFactory.Contains("reign_war_council_scroll_frame.png", StringComparison.Ordinal)
-                && !warCouncilArtFactory.Contains("reign_war_settlement_", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("ScrollFrameImageId", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("settlement_town", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("settlement_castle", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("settlement_village", StringComparison.Ordinal)
+                && !warCouncilArtFactoryScoped.Contains("reign_war_council_scroll_frame.png", StringComparison.Ordinal)
+                && !warCouncilArtFactoryScoped.Contains("reign_war_settlement_", StringComparison.Ordinal)
                 && warCouncilArtFactory.Contains("reign_war_council_tile_", StringComparison.Ordinal)
                 && warCouncilArtFactory.Contains(".png", StringComparison.Ordinal)
                 && warCouncilArtFactory.Contains("GetOrBuildFileRedBlueSwapped", StringComparison.Ordinal)
@@ -1041,7 +1037,7 @@ namespace ReignBetaServer
                 && warCouncilTextureFactory.Contains("GetOrBuildFileRedBlueSwapped", StringComparison.Ordinal)
                 && warCouncilTextureFactory.Contains("normalizeForEngine ? NormalizeForEngine(sourceBytes) : sourceBytes", StringComparison.Ordinal)
                 && warCouncilVm.Contains("if (isInMainParty) MobileParty.MainParty.MemberRoster", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("hero.Clan.WarPartyComponents.Count >= hero.Clan.WarPartyLimit", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("hero.Clan.WarPartyComponents.Count >= hero.Clan.WarPartyLimit", StringComparison.Ordinal)
                 && warCouncilXml.Contains("ImageIdentifierWidget", StringComparison.Ordinal)
                 && !warCouncilXml.Contains("PortraitCacheKey=\"@PortraitCacheKey\"", StringComparison.Ordinal)
                 && warCouncilManager.Contains("AutomationFirstMobilizableHeroId", StringComparison.Ordinal)
@@ -1065,26 +1061,26 @@ namespace ReignBetaServer
                  && warCouncilMapWidget.Contains("bool leftPressedThisFrame = leftDown && !_leftWasDown", StringComparison.Ordinal)
                  && warCouncilMapWidget.Contains("if (!leftPressedThisFrame || !AutomationLastPointerInside) return;", StringComparison.Ordinal)
                  && warCouncilMapWidget.Contains("CompleteTracking(vm, screen.X, screen.Y);", StringComparison.Ordinal)
-                 && !warCouncilMapWidget.Contains("Input.DeltaMouseScroll * WheelStep", StringComparison.Ordinal)
+                 && !warCouncilMapWidgetScoped.Contains("Input.DeltaMouseScroll * WheelStep", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("public sealed class ReignWarCouncilMapInputWidget : ButtonWidget", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("Context.CustomInverseScale", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("AutomationHeldFrameCount", StringComparison.Ordinal)
                 && warCouncilLiveHost.Contains("warCouncilMapInputPressCount", StringComparison.Ordinal)
                 && warCouncilLiveHost.Contains("warCouncilMapInputLogicalWidth", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("local.X - vm.MapOffsetX", StringComparison.Ordinal)
-                && !warCouncilMapWidget.Contains("foreach (ReignWarCouncilSettlementMarker settlement", StringComparison.Ordinal)
+                && !warCouncilMapWidgetScoped.Contains("foreach (ReignWarCouncilSettlementMarker settlement", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("HighDefinitionTileGridSize = 4", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("EventImageId = vm.MapImageId", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("EnsureVisibleHighDefinitionTile(vm)", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("if (TryBuildHighDefinitionTile(centerX, centerY, tileWidth, tileHeight)) return;", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("if (TryBuildHighDefinitionTile(x, y, tileWidth, tileHeight)) return;", StringComparison.Ordinal)
-                && !warCouncilMapWidget.Contains("for (int y = 0; y < HighDefinitionTileGridSize; y++)", StringComparison.Ordinal)
+                && !warCouncilMapWidgetScoped.Contains("for (int y = 0; y < HighDefinitionTileGridSize; y++)", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("const float tokenSize = 108f", StringComparison.Ordinal)
                 && warCouncilMapWidget.Contains("map_tile_\" + y + \"_\" + x", StringComparison.Ordinal)
-                && !warCouncilMapWidget.Contains("Text = settlement.Name", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("ApplyDrop(", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("ExecuteRemoveOrder", StringComparison.Ordinal)
-                && !warCouncilVm.Contains("ExecuteToggleOrderMenu", StringComparison.Ordinal)
+                && !warCouncilMapWidgetScoped.Contains("Text = settlement.Name", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("ApplyDrop(", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("ExecuteRemoveOrder", StringComparison.Ordinal)
+                && !warCouncilVmScoped.Contains("ExecuteToggleOrderMenu", StringComparison.Ordinal)
                 && warCouncilBehavior.Contains("IntelligenceSweepIntervalDays", StringComparison.Ordinal)
                 && warCouncilBehavior.Contains("DefaultSkills.Tactics", StringComparison.Ordinal)
                 && warCouncilBehavior.Contains("_reign_warCouncilIntelligence", StringComparison.Ordinal)
@@ -1101,8 +1097,8 @@ namespace ReignBetaServer
 
             string castleChatPrefab = Path.Combine(guiRoot, "Prefabs", "ReignCastleChatScreen.xml");
             string castleChatXml = File.Exists(castleChatPrefab) ? File.ReadAllText(castleChatPrefab) : "";
-            string castleChatVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignPartyChatScreenVM.cs", "src");
-            string castleChatVmSource = File.Exists(castleChatVmPath) ? File.ReadAllText(castleChatVmPath) : "";
+            string castleChatVmPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignPartyChatScreenVM.cs");
+            string castleChatVmSource = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             XmlDocument castleChatDocument = TryParseVerificationXml(castleChatXml);
             XmlElement castleArtViewportElement = FindVerificationXmlElementById(castleChatDocument, "CastleArtViewport");
             XmlElement castleChatShellElement = FindVerificationXmlElementById(castleChatDocument, "CastleChatShell");
@@ -1189,14 +1185,12 @@ namespace ReignBetaServer
                 if (input == null || !VerificationXmlAttributeEquals(input, "MaxLength", "2147483647"))
                     boundedChatComposers.Add(composer.Key);
             }
-            string governmentVmInputPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignGovernmentScreenVM.cs", "src");
-            string governmentHearingInputPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignGovernmentHearingDialogue.cs", "src");
             string courtLifeInputPath = VerificationSourceLocator.ResolveUnique(serverRoot, "CourtLifeDialogue.cs", "src");
             string royalCouncilInputPath = VerificationSourceLocator.ResolveUnique(serverRoot, "RoyalCouncil.cs", "src");
             string rulerDocketInputPath = VerificationSourceLocator.ResolveUnique(serverRoot, "RulerDocketDialogue.cs", "src");
             string correspondenceInputPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Relationships.cs", "src", "Modules", "Relationships");
-            string governmentVmInput = File.Exists(governmentVmInputPath) ? File.ReadAllText(governmentVmInputPath) : "";
-            string governmentHearingInput = File.Exists(governmentHearingInputPath) ? File.ReadAllText(governmentHearingInputPath) : "";
+            string governmentVmInput = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignGovernmentScreenVM");
+            string governmentHearingInput = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignGovernmentCampaignBehavior");
             string courtLifeInput = File.Exists(courtLifeInputPath) ? File.ReadAllText(courtLifeInputPath) : "";
             string royalCouncilInput = File.Exists(royalCouncilInputPath) ? File.ReadAllText(royalCouncilInputPath) : "";
             string rulerDocketInput = File.Exists(rulerDocketInputPath) ? File.ReadAllText(rulerDocketInputPath) : "";
@@ -1251,8 +1245,9 @@ namespace ReignBetaServer
             string previewNativeParityAuditText = File.Exists(previewNativeParityAuditPath) ? File.ReadAllText(previewNativeParityAuditPath) : "";
             string previewCalibrationWorkflowPath = Path.Combine(clientRoot, "tools", "GauntletXmlPreviewer", "calibration_workflow.py");
             string previewCalibrationWorkflowText = File.Exists(previewCalibrationWorkflowPath) ? File.ReadAllText(previewCalibrationWorkflowPath) : "";
-            string uiCalibrationServicePath = Path.Combine(clientRoot, "src", "Modules", "UI", "UI", "Calibration", "ReignUiCalibrationService.cs");
-            string uiCalibrationServiceText = File.Exists(uiCalibrationServicePath) ? File.ReadAllText(uiCalibrationServicePath) : "";
+            string uiCalibrationServicePath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignUiCalibrationService.cs");
+            string uiCalibrationServiceText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string uiCalibrationServiceTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignUiCalibrationService");
             string[] reignPrefabNames = Directory.Exists(Path.Combine(guiRoot, "Prefabs"))
                 ? Directory.GetFiles(Path.Combine(guiRoot, "Prefabs"), "*.xml").Select(Path.GetFileName).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray()
                 : new string[0];
@@ -1320,7 +1315,7 @@ namespace ReignBetaServer
                 && uiCalibrationServiceText.Contains("snapshot.Add(\"prefabSha256\", _loadedPrefabSha256", StringComparison.Ordinal)
                 && uiCalibrationServiceText.Contains("installedPrefabSha256AtCapture", StringComparison.Ordinal)
                 && uiCalibrationServiceText.Contains("supportUiInjected = false", StringComparison.Ordinal)
-                && !uiCalibrationServiceText.Contains("layer.LoadMovie(OverlayMovieName", StringComparison.Ordinal);
+                && !uiCalibrationServiceTextScoped.Contains("layer.LoadMovie(OverlayMovieName", StringComparison.Ordinal);
             AddVerificationCheck(checks, "contracts.gauntlet_xml_previewer_full_inventory_and_edit_bridge", "ui_contracts", previewerContractValid,
                 previewerContractValid
                     ? "Every standalone Reign Gauntlet prefab and source-discovered native Bannerlord augmentation is cataloged for fixture/runtime binding and dual-resolution rendered audits; native base XML, patch provenance, and brush-derived constants are explicit, coherent fixture content remains separate from hash-matched captured state, intuitive parent movement is explicit, selected XML context reaches a workspace-only Codex task, and source-to-installed propagation is guarded and observable."
@@ -1344,8 +1339,9 @@ namespace ReignBetaServer
                     ["server"] = previewServerPath,
                     ["calibrationService"] = uiCalibrationServicePath
                 });
-            string uiCalibrationHostPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignLiveInteractionUiCalibrationHost.cs", "src");
-            string uiCalibrationHostText = File.Exists(uiCalibrationHostPath) ? File.ReadAllText(uiCalibrationHostPath) : "";
+            string uiCalibrationHostPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignLiveInteractionUiCalibrationHost.cs");
+            string uiCalibrationHostText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string uiCalibrationHostTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignLiveInteractionTestHost");
             bool castleChatHarnessValid = uiCatalogText.Contains("\"id\": \"castle-chat\"")
                 && uiCatalogText.Contains("\"movie\": \"ReignCastleChatScreen\"")
                 && uiCatalogText.Contains("ui-open --target castle-chat")
@@ -1369,28 +1365,22 @@ namespace ReignBetaServer
 
             string liveTestProgramPath = Path.Combine(root, "ReignServer", "tests", "ReignLiveTest", "Program.cs");
             string liveTestProgramText = File.Exists(liveTestProgramPath) ? File.ReadAllText(liveTestProgramPath) : "";
-            string correspondenceManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignCorrespondenceScreenManager.cs", "src");
-            string correspondenceManagerText = File.Exists(correspondenceManagerPath) ? File.ReadAllText(correspondenceManagerPath) : "";
-            string individualManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignIndividualChatScreenManager.cs", "src");
-            string individualManagerText = File.Exists(individualManagerPath) ? File.ReadAllText(individualManagerPath) : "";
-            string socialManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventScreenManager.cs", "src");
-            string socialManagerText = File.Exists(socialManagerPath) ? File.ReadAllText(socialManagerPath) : "";
-            string correspondenceVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignCorrespondenceScreenVM.cs", "src");
-            string correspondenceVmText = File.Exists(correspondenceVmPath) ? File.ReadAllText(correspondenceVmPath) : "";
-            string individualVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignIndividualChatScreenVM.cs", "src");
-            string individualVmText = File.Exists(individualVmPath) ? File.ReadAllText(individualVmPath) : "";
-            string socialVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventScreenVM.cs", "src");
-            string socialVmText = File.Exists(socialVmPath) ? File.ReadAllText(socialVmPath) : "";
-            string memoriesManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "MemoriesBookOverlay.cs", "src");
-            string memoriesManagerText = File.Exists(memoriesManagerPath) ? File.ReadAllText(memoriesManagerPath) : "";
-            string memoriesVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "MemoriesBookVM.cs", "src");
-            string memoriesVmText = File.Exists(memoriesVmPath) ? File.ReadAllText(memoriesVmPath) : "";
+            string correspondenceManagerText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string individualManagerText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialManagerText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string correspondenceVmText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string individualVmText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialVmText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string memoriesManagerText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string memoriesVmPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "MemoriesBookVM.cs");
+            string memoriesVmText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string memoriesVmTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "MemoriesBookVM");
             string memoriesPrefabPath = Path.Combine(guiRoot, "Prefabs", "AIPortraitsMemoriesBook.xml");
             string memoriesPrefabText = File.Exists(memoriesPrefabPath) ? File.ReadAllText(memoriesPrefabPath) : "";
-            string eventArtFactoryPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignEventArtTextureFactory.cs", "src");
-            string eventArtFactoryText = File.Exists(eventArtFactoryPath) ? File.ReadAllText(eventArtFactoryPath) : "";
-            string notableManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignNotableGenerationPopupManager.cs", "src");
-            string notableManagerText = File.Exists(notableManagerPath) ? File.ReadAllText(notableManagerPath) : "";
+            string eventArtFactoryPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignEventArtTextureFactory.cs");
+            string eventArtFactoryText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string notableManagerPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignNotableGenerationPopupManager.cs");
+            string notableManagerText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string[] nativeUiCalibrationTargets =
             {
                 "court", "court-petition", "castle-layout", "castle-chat", "ambassador", "economic-report",
@@ -1436,20 +1426,20 @@ namespace ReignBetaServer
                 && !memoriesPrefabText.Contains("MemoryBookAdditionalArgs", StringComparison.Ordinal)
                 && memoriesVmText.Contains("BuildMemorySceneImageId(text)", StringComparison.Ordinal)
                 && memoriesVmText.Contains("\"feast_empire\", \"toasts_and_table_talk\"", StringComparison.Ordinal)
-                && !memoriesVmText.Contains("CharacterImageTextureProvider", StringComparison.Ordinal)
+                && !memoriesVmTextScoped.Contains("CharacterImageTextureProvider", StringComparison.Ordinal)
                 && eventArtFactoryText.Contains("MemorySceneTemplateId = \"memory_scene\"", StringComparison.Ordinal)
                 && eventArtFactoryText.Contains("TryResolveMemoryScenePath", StringComparison.Ordinal)
                 && notableManagerText.Contains("ShowCalibrationFixture()", StringComparison.Ordinal)
                 && notableManagerText.Contains("\"PREPARING CALRADIA\"", StringComparison.Ordinal)
                 && notableManagerText.Contains("\"Generating the notable characters and relationships needed for this campaign.\"", StringComparison.Ordinal)
                 && notableManagerText.Contains("\"Building notable 18 of 42\"", StringComparison.Ordinal)
-                && !uiCalibrationHostText.Contains("\"UI CALIBRATION\"", StringComparison.Ordinal)
-                && !uiCalibrationHostText.Contains("\"calibration-overlay\"", StringComparison.Ordinal)
+                && !uiCalibrationHostTextScoped.Contains("\"UI CALIBRATION\"", StringComparison.Ordinal)
+                && !uiCalibrationHostTextScoped.Contains("\"calibration-overlay\"", StringComparison.Ordinal)
                 && uiCalibrationServiceText.Contains("supportUiInjected = false", StringComparison.Ordinal)
-                && !uiCalibrationServiceText.Contains("layer.LoadMovie(OverlayMovieName", StringComparison.Ordinal)
-                && !uiCalibrationServiceText.Contains("public static bool TrySetExpanded", StringComparison.Ordinal)
-                && !uiCalibrationServiceText.Contains("public static bool TryGetExpanded", StringComparison.Ordinal)
-                && !uiCalibrationServiceText.Contains("public static bool TrySelectWidgetForCapture", StringComparison.Ordinal);
+                && !uiCalibrationServiceTextScoped.Contains("layer.LoadMovie(OverlayMovieName", StringComparison.Ordinal)
+                && !uiCalibrationServiceTextScoped.Contains("public static bool TrySetExpanded", StringComparison.Ordinal)
+                && !uiCalibrationServiceTextScoped.Contains("public static bool TryGetExpanded", StringComparison.Ordinal)
+                && !uiCalibrationServiceTextScoped.Contains("public static bool TrySelectWidgetForCapture", StringComparison.Ordinal);
             AddVerificationCheck(checks, "contracts.native_ui_standalone_fixture_states", "ui_contracts", nativeStandaloneFixtureStatesValid,
                 nativeStandaloneFixtureStatesValid
                     ? "Memory Book uses scene art without a character-provider fallback, Notable Generation opens its approved progress state, and native snapshots remain headless with no calibration support UI."
@@ -1466,8 +1456,8 @@ namespace ReignBetaServer
 
             string ambassadorPrefab = Path.Combine(guiRoot, "Prefabs", "ReignAmbassadorScreen.xml");
             string ambassadorXml = File.Exists(ambassadorPrefab) ? File.ReadAllText(ambassadorPrefab) : "";
-            string ambassadorVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignAmbassadorScreenVM.cs", "src");
-            string ambassadorVmSource = File.Exists(ambassadorVmPath) ? File.ReadAllText(ambassadorVmPath) : "";
+            string ambassadorVmPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignAmbassadorScreenVM.cs");
+            string ambassadorVmSource = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             int ambassadorRosterStart = ambassadorXml.IndexOf("Id=\"AmbassadorRail\"", StringComparison.Ordinal);
             string ambassadorRosterXml = ambassadorRosterStart >= 0 ? ambassadorXml.Substring(ambassadorRosterStart) : string.Empty;
             int ambassadorKingdomLabel = ambassadorRosterXml.IndexOf("Text=\"@KingdomName\"", StringComparison.Ordinal);
@@ -1493,8 +1483,7 @@ namespace ReignBetaServer
             string economicXml = File.Exists(economicPrefab) ? File.ReadAllText(economicPrefab) : "";
             string familyPrefab = Path.Combine(guiRoot, "Prefabs", "ReignFamilyChambersScreen.xml");
             string familyXml = File.Exists(familyPrefab) ? File.ReadAllText(familyPrefab) : "";
-            string familyDomainPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignFamilyChambersDomain.cs", "src");
-            string familyDomainText = File.Exists(familyDomainPath) ? File.ReadAllText(familyDomainPath) : "";
+            string familyDomainText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string spriteDataPath = Path.Combine(guiRoot, "ReignBetaSpriteData.xml");
             string spriteDataText = File.Exists(spriteDataPath) ? File.ReadAllText(spriteDataPath) : "";
             XmlDocument courtDocument = TryParseVerificationXml(courtXml);
@@ -1652,35 +1641,33 @@ namespace ReignBetaServer
                     ["socialTemplateValid"] = VerificationModernChatListTemplateMatches(socialEventChatListElement, "34", "12", "28"),
                     ["wildernessTemplateValid"] = VerificationModernChatListTemplateMatches(wildernessEventChatListElement, "42", "12", "32") });
 
-            string socialEventManagerPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventScreenManager.cs", "src");
-            string socialEventManagerText = File.Exists(socialEventManagerPath) ? File.ReadAllText(socialEventManagerPath) : "";
+            string socialEventManagerText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialEventManagerTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignSocialEventScreenManager");
             bool socialEventOverlayHandoffValid = socialEventManagerText.Contains("EnterExternalOverlayMode()")
                 && socialEventManagerText.Contains("ReignSocialEventScreen : ScreenBase")
                 && socialEventManagerText.Contains("EventLayerOrder = 250")
                 && socialEventManagerText.Contains("ScreenManager.TopScreen != this")
                 && socialEventManagerText.Contains("ScreenManager.FocusedLayer != _gauntletLayer")
-                && !socialEventManagerText.Contains("SetOverlayVisible(false)")
+                && !socialEventManagerTextScoped.Contains("SetOverlayVisible(false)")
                 && socialEventManagerText.Contains("OpenPortraitRequestOverlay");
             AddVerificationCheck(checks, "contracts.social_event_encyclopedia_handoff", "ui_contracts", socialEventOverlayHandoffValid,
                 socialEventOverlayHandoffValid ? "The native Encyclopedia remains above the visible social-event screen until manually closed, then event focus returns." : "Social-event encyclopedia screen handoff is incomplete.", null);
 
-            string socialEventBehaviorPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventsCampaignBehavior.cs", "src");
-            string socialEventBehaviorText = File.Exists(socialEventBehaviorPath) ? File.ReadAllText(socialEventBehaviorPath) : "";
-            string conversationEligibilityPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignConversationEligibility.cs", "src");
-            string conversationEligibilityText = File.Exists(conversationEligibilityPath) ? File.ReadAllText(conversationEligibilityPath) : "";
-            string socialEventRecordPath = VerificationSourceLocator.ResolveUnique(clientRoot, "SocialEventRecord.cs", "src");
-            string socialEventRecordText = File.Exists(socialEventRecordPath) ? File.ReadAllText(socialEventRecordPath) : "";
-            string socialEventSessionPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventSession.cs", "src");
-            string socialEventSessionText = File.Exists(socialEventSessionPath) ? File.ReadAllText(socialEventSessionPath) : "";
+            string socialEventBehaviorText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialEventBehaviorTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignSocialEventsCampaignBehavior");
+            string conversationEligibilityText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialEventRecordText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialEventSessionText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialEventSessionTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignSocialEventSession");
             bool socialEventPlayerExclusionValid = socialEventBehaviorText.Contains("RepairAttendeeRosters()")
-                && !socialEventBehaviorText.Contains("attendees.Insert(0, Hero.MainHero)")
+                && !socialEventBehaviorTextScoped.Contains("attendees.Insert(0, Hero.MainHero)")
                 && socialEventRecordText.Contains("hero != Hero.MainHero")
                 && socialEventSessionText.Contains("hero == Hero.MainHero");
             AddVerificationCheck(checks, "contracts.social_event_player_exclusion", "conversation_modes", socialEventPlayerExclusionValid,
                 socialEventPlayerExclusionValid ? "The player is implicit and excluded from saved, displayed, and active social-event NPC rosters." : "The player can still enter a social-event NPC roster.", null);
 
-            string socialEventVmPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventScreenVM.cs", "src");
-            string socialEventVmText = File.Exists(socialEventVmPath) ? File.ReadAllText(socialEventVmPath) : "";
+            string socialEventVmText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string socialEventVmTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignSocialEventScreenVM");
             string socialEventServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
             string socialEventServerText = File.Exists(socialEventServerPath) ? File.ReadAllText(socialEventServerPath) : "";
             bool approachOpeningValid = socialEventVmText.Contains("public async void ExecuteWaitApproach()")
@@ -1695,8 +1682,7 @@ namespace ReignBetaServer
             string socialEventTurnServerText = File.Exists(socialEventTurnServerPath) ? File.ReadAllText(socialEventTurnServerPath) : "";
             string socialEventApproachServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "SocialEventApproaches.cs", "src");
             string socialEventApproachServerText = File.Exists(socialEventApproachServerPath) ? File.ReadAllText(socialEventApproachServerPath) : "";
-            string socialEventTurnClientPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSocialEventClient.cs", "src");
-            string socialEventTurnClientText = File.Exists(socialEventTurnClientPath) ? File.ReadAllText(socialEventTurnClientPath) : "";
+            string socialEventTurnClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool localFirstRosterValid = socialEventBehaviorText.Contains("MaxEventAttendees = 25")
                 && socialEventBehaviorText.Contains("party.MemberRoster.GetTroopRoster()")
                 && socialEventBehaviorText.Contains("OrderByDescending(x => x.Hero.IsLord)")
@@ -1710,7 +1696,7 @@ namespace ReignBetaServer
             bool persistentGroupValid = socialEventSessionText.Contains("MaxActiveParticipants = 5")
                 && socialEventSessionText.Contains("TurnsPerAutomaticPhase = 7")
                 && socialEventSessionText.Contains("ApplyTurnResolution")
-                && !socialEventSessionText.Contains("_activeHeroStringIds.Clear();")
+                && !socialEventSessionTextScoped.Contains("_activeHeroStringIds.Clear();")
                 && socialEventVmText.Contains("RequestSocialEventTurnAsync")
                 && socialEventVmText.Contains("wanders away from the conversation")
                 && socialEventTurnClientText.Contains("/events/social/turn");
@@ -1737,7 +1723,7 @@ namespace ReignBetaServer
                 && socialEventTurnClientText.Contains("await ReignMainThread.InvokeAsync")
                 && socialEventTurnClientText.Contains("delivered.Contains(heroId)")
                 && socialEventVmText.Contains("ReignObjectResolver.FindHero(reply.HeroStringId)")
-                && !socialEventVmText.Contains("foreach (ReignEventReply reply in turn.ParticipantResults)");
+                && !socialEventVmTextScoped.Contains("foreach (ReignEventReply reply in turn.ParticipantResults)");
             AddVerificationCheck(checks, "contracts.social_event_progressive_client", "conversation_modes", progressiveDeliveryValid,
                 "Social and wilderness event clients await per-speaker main-thread delivery, deduplicate checkpoints and no longer batch transcript display after completion.", null);
 
@@ -1745,18 +1731,12 @@ namespace ReignBetaServer
             string diplomacyDebugServerText = File.Exists(diplomacyDebugServerPath) ? File.ReadAllText(diplomacyDebugServerPath) : "";
             string diplomacyDirectorPath = VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src");
             string diplomacyDirectorText = File.Exists(diplomacyDirectorPath) ? File.ReadAllText(diplomacyDirectorPath) : "";
-            string diplomacyDebugActionsPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaDebugActions.cs", "src");
-            string diplomacyDebugActionsText = File.Exists(diplomacyDebugActionsPath) ? File.ReadAllText(diplomacyDebugActionsPath) : "";
-            string diplomacyBehaviorPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWorldDiplomacyCampaignBehavior.cs", "src");
-            string diplomacyBehaviorText = File.Exists(diplomacyBehaviorPath) ? File.ReadAllText(diplomacyBehaviorPath) : "";
-            string individualRelationPatchPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignIndividualRelationPatches.cs", "src");
-            string individualRelationPatchText = File.Exists(individualRelationPatchPath) ? File.ReadAllText(individualRelationPatchPath) : "";
-            string diplomacyClientPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignDiplomacyServerClient.cs", "src");
-            string diplomacyClientText = File.Exists(diplomacyClientPath) ? File.ReadAllText(diplomacyClientPath) : "";
-            string worldTestClientPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWorldTestClient.cs", "src");
-            string worldTestClientText = File.Exists(worldTestClientPath) ? File.ReadAllText(worldTestClientPath) : "";
-            string settingsPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaSettings.cs", "src");
-            string settingsText = File.Exists(settingsPath) ? File.ReadAllText(settingsPath) : "";
+            string diplomacyDebugActionsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string diplomacyBehaviorText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string individualRelationPatchText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string diplomacyClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string worldTestClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string settingsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool randomDiplomacyDebugValid = socialEventServerText.Contains("/diplomacy/debug/random-event")
                 && diplomacyDebugServerText.Contains("payload[\"debugInitiativeTest\"] = true")
                 && diplomacyDebugServerText.Contains("EvaluateWorldDiplomacy(payload)")
@@ -1876,10 +1856,7 @@ namespace ReignBetaServer
                 worldTestAuthoritativeOverviewValid
                     ? "World Test reads the authoritative current relationship ledger without duplicating pair state from the simulation hot path."
                     : "World Test still duplicates diagnostic pair state from the relationship loop or does not read authoritative current state.", null);
-            string relationshipCampaignPath = VerificationSourceLocator.ResolveUnique(
-                clientRoot, "ReignRelationshipCampaignBehavior.cs", "src");
-            string relationshipCampaignText = File.Exists(relationshipCampaignPath)
-                ? File.ReadAllText(relationshipCampaignPath) : "";
+            string relationshipCampaignText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool realtimeDirectorActionPumpValid =
                 relationshipCampaignText.Contains("TryScheduleRealtimeDirectorActionPoll();")
                 && relationshipCampaignText.Contains("DirectorActionPollIntervalTicks")
@@ -1892,20 +1869,17 @@ namespace ReignBetaServer
                     ? "Lifecycle actions poll, apply, and report on a real-time application tick while campaign time is paused."
                     : "Relationship lifecycle actions still depend on campaign-time polling.", null);
 
-            string portraitClientPath = VerificationSourceLocator.ResolveUnique(clientRoot, "NanoGptClient.cs", "src");
-            string portraitClientText = File.Exists(portraitClientPath) ? File.ReadAllText(portraitClientPath) : "";
-            string portraitContextPath = VerificationSourceLocator.ResolveUnique(clientRoot, "PortraitPromptContext.cs", "src");
-            string portraitContextText = File.Exists(portraitContextPath) ? File.ReadAllText(portraitContextPath) : "";
-            string serverClientPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignServerClient.cs", "src");
-            string serverClientText = File.Exists(serverClientPath) ? File.ReadAllText(serverClientPath) : "";
-            string worldHistoryClientPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWorldHistoryClient.cs", "src");
-            string worldHistoryClientText = File.Exists(worldHistoryClientPath) ? File.ReadAllText(worldHistoryClientPath) : "";
+            string portraitClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string portraitClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "NanoGptClient");
+            string portraitContextText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string serverClientPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignServerClient.cs");
+            string serverClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string serverClientTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignServerClient");
+            string worldHistoryClientText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string liveTestControllerPath = Path.Combine(serverRoot, "tests", "ReignLiveTest", "Program.cs");
             string liveTestControllerText = File.Exists(liveTestControllerPath) ? File.ReadAllText(liveTestControllerPath) : "";
-            string liveTestHostPath = VerificationSourceLocator.ResolveUnique(
-                clientRoot, "ReignLiveInteractionTestHost.cs", "src");
-            string liveTestHostText = File.Exists(liveTestHostPath)
-                ? File.ReadAllText(liveTestHostPath) : "";
+            string liveTestHostText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string liveTestHostTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignLiveInteractionTestHost");
             bool liveNativeSnapshotBoundaryValid = serverClientText.Contains("BuildDialogueRequestPayload(")
                 && serverClientText.Contains("ReignMainThread.InvokeAsync(() =>")
                 && serverClientText.Contains("BuildContextBundles(selectedPulls, speaker, participants, mode)")
@@ -1918,6 +1892,13 @@ namespace ReignBetaServer
                 liveNativeSnapshotBoundaryValid
                     ? "Live dialogue snapshots native state on the campaign thread, bounds accepted commands, reconciles correlations, and refuses force-stop before the active run is terminal."
                     : "Live dialogue native-state isolation or accepted-command recovery is incomplete.", null);
+            // The redundant campaign-match gate must stay out of the heartbeat scheduling and submission members;
+            // other live hosts (the conversation clock) may legitimately check campaign readiness.
+            string liveHeartbeatSchedulerText = VerificationSourceLocator.ReadClientMemberSourceText(
+                    clientRoot, "ReignLiveInteractionTestHost", "ApplicationTick")
+                + "\n\n"
+                + VerificationSourceLocator.ReadClientMemberSourceText(
+                    clientRoot, "ReignLiveInteractionTestHost", "HeartbeatAsync");
             bool liveHeartbeatRecoveryPlaneValid =
                 liveTestHostText.Contains("if (ReignSaveSyncCoordinator.IsAlignmentPending)")
                 && liveTestHostText.Contains("SubmitLiveTestHeartbeatAsync(")
@@ -1925,8 +1906,8 @@ namespace ReignBetaServer
                 && liveTestHostText.Contains("Live interaction heartbeat scheduling request instance=")
                 && liveTestHostText.Contains("Live interaction heartbeat accepted instance=")
                 && liveTestHostText.Contains("settings?.UseLocalServer == false")
-                && !liveTestHostText.Contains("settings == null || !settings.UseLocalServer")
-                && !liveTestHostText.Contains("!ReignSaveSyncCoordinator.IsReadyForCampaign(campaignId)");
+                && !liveTestHostTextScoped.Contains("settings == null || !settings.UseLocalServer")
+                && !liveHeartbeatSchedulerText.Contains("!ReignSaveSyncCoordinator.IsReadyForCampaign(campaignId)");
             AddVerificationCheck(checks, "contracts.live_heartbeat_recovery_control_plane",
                 "conversation_readiness", liveHeartbeatRecoveryPlaneValid,
                 liveHeartbeatRecoveryPlaneValid
@@ -1957,32 +1938,33 @@ namespace ReignBetaServer
 
             string derivativeCorePath = Path.Combine(root, "ReignServer", "shared", "Reign.Shared.Source", "Core", "ReignPortraitDerivativeCore.cs");
             string derivativeCoreText = File.Exists(derivativeCorePath) ? File.ReadAllText(derivativeCorePath) : "";
-            string derivativeServicePath = VerificationSourceLocator.ResolveUnique(clientRoot, "PortraitDerivativeService.cs", "src");
-            string derivativeServiceText = File.Exists(derivativeServicePath) ? File.ReadAllText(derivativeServicePath) : "";
-            string textureFactoryPath = VerificationSourceLocator.ResolveUnique(clientRoot, "TextureFactory.cs", "src");
-            string textureFactoryText = File.Exists(textureFactoryPath) ? File.ReadAllText(textureFactoryPath) : "";
-            string portraitPatchPath = VerificationSourceLocator.ResolveUnique(clientRoot, "PortraitPatch.cs", "src");
-            string portraitPatchText = File.Exists(portraitPatchPath) ? File.ReadAllText(portraitPatchPath) : "";
-			string portraitTextureProviderPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignPortraitTextureProvider.cs", "src");
-			string portraitTextureProviderText = File.Exists(portraitTextureProviderPath) ? File.ReadAllText(portraitTextureProviderPath) : "";
-			string portraitWidgetPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignPortraitWidget.cs", "src");
-			string portraitWidgetText = File.Exists(portraitWidgetPath) ? File.ReadAllText(portraitWidgetPath) : "";
-			string gameMenuPartyPatchPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignGameMenuPartyItemInsertPatch.cs", "src");
-			string gameMenuPartyPatchMarkup = File.Exists(gameMenuPartyPatchPath)
-				? File.ReadAllText(gameMenuPartyPatchPath).Replace("\\\"", "\"") : "";
-			string conversationPortraitPatchPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ConversationPortraitInsertPatch.cs", "src");
-			string conversationPortraitPatchMarkup = File.Exists(conversationPortraitPatchPath)
-				? File.ReadAllText(conversationPortraitPatchPath).Replace("\\\"", "\"") : "";
-			string conversationPortraitMixinPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ConversationPortraitMixin.cs", "src");
-			string conversationPortraitMixinText = File.Exists(conversationPortraitMixinPath)
-				? File.ReadAllText(conversationPortraitMixinPath) : "";
-			string questMemoryBookPatchPath = VerificationSourceLocator.ResolveUnique(clientRoot, "QuestMemoryBookInsertPatch.cs", "src");
-			string questMemoryBookPatchMarkup = File.Exists(questMemoryBookPatchPath)
-				? File.ReadAllText(questMemoryBookPatchPath).Replace("\\\"", "\"") : "";
-			string tavernArtTextureFactoryPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignTavernArtTextureFactory.cs", "src");
-			string tavernArtTextureFactoryText = File.Exists(tavernArtTextureFactoryPath) ? File.ReadAllText(tavernArtTextureFactoryPath) : "";
-			string portraitCachePath = VerificationSourceLocator.ResolveUnique(clientRoot, "PortraitCache.cs", "src");
-			string portraitCacheText = File.Exists(portraitCachePath) ? File.ReadAllText(portraitCachePath) : "";
+            string derivativeServiceText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string textureFactoryPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "TextureFactory.cs");
+            string textureFactoryText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string textureFactoryTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "TextureFactory");
+            string portraitPatchPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "PortraitPatch.cs");
+            string portraitPatchText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string portraitPatchTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "PortraitPatch");
+			string portraitTextureProviderPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignPortraitTextureProvider.cs");
+			string portraitTextureProviderText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+			string portraitTextureProviderTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignPortraitTextureProvider");
+			string portraitWidgetPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignPortraitWidget.cs");
+			string portraitWidgetText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+			string portraitWidgetTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignPortraitWidget");
+			string gameMenuPartyPatchPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignGameMenuPartyItemInsertPatch.cs");
+			string gameMenuPartyPatchMarkup = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignGameMenuPartyItemInsertPatch")
+				.Replace("\\\"", "\"");
+			string conversationPortraitPatchPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ConversationPortraitInsertPatch.cs");
+			string conversationPortraitPatchMarkup = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ConversationPortraitInsertPatch")
+				.Replace("\\\"", "\"");
+			string conversationPortraitMixinPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ConversationPortraitMixin.cs");
+			string conversationPortraitMixinText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+			string conversationPortraitMixinTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ConversationPortraitMixin");
+			string questMemoryBookPatchPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "QuestMemoryBookInsertPatch.cs");
+			string questMemoryBookPatchMarkup = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "QuestMemoryBookInsertPatch")
+				.Replace("\\\"", "\"");
+			string tavernArtTextureFactoryText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+			string portraitCacheText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string derivativeJobsPath = VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitDerivativeJobs.cs", "src");
             string derivativeJobsText = File.Exists(derivativeJobsPath) ? File.ReadAllText(derivativeJobsPath) : "";
             string faceDetectionPath = VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitFaceDetection.cs", "src");
@@ -1991,8 +1973,7 @@ namespace ReignBetaServer
             string partyChatPrefabText = File.Exists(partyChatPrefabPath) ? File.ReadAllText(partyChatPrefabPath) : "";
 			string individualChatPrefabPath = Path.Combine(clientRoot, "GUI", "Prefabs", "ReignIndividualChatScreen.xml");
 			string individualChatPrefabText = File.Exists(individualChatPrefabPath) ? File.ReadAllText(individualChatPrefabPath) : "";
-			string individualChatViewModelPath = Path.Combine(clientRoot, "src", "Modules", "Dialogue", "UI", "ViewModels", "ReignIndividualChatScreenVM.cs");
-			string individualChatViewModelText = File.Exists(individualChatViewModelPath) ? File.ReadAllText(individualChatViewModelPath) : "";
+			string individualChatViewModelText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string controlCenterSource = mbtiProgramSource + controlCenterMarkup;
             bool derivativeContractValid = derivativeCoreText.Contains("CurrentVersion = 3")
                 && derivativeCoreText.Contains("portrait_chest.png")
@@ -2020,12 +2001,14 @@ namespace ReignBetaServer
                 && faceDetectionText.Contains("Microsoft.ML.OnnxRuntime")
                 && faceDetectionText.Contains("PortraitFocusModelSha256")
                 && controlCenterSource.Contains("/portraits/derivatives/build-missing")
-				&& controlCenterSource.Contains("/portraits/derivatives/rebuild-fallback")
+				// The routes are registered in the route table (Program.PortraitsRoutes.cs), not in Program.cs text.
+				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/build-missing")?.Handler != null
+				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/rebuild-fallback")?.Handler != null
                 && controlCenterSource.Contains("Portrait Cache Derivatives");
             AddVerificationCheck(checks, "contracts.portrait_derivative_pipeline", "portraits_images", derivativeContractValid,
                 derivativeContractValid ? "Full-body portrait masters feed atomic face-focused vertical and party-wide thumbnails, high-resolution portraits, and on-demand zoom derivatives; the Control Center exposes the cache builder." : "Portrait derivative pipeline, routing, or Control Center contract is incomplete.", null);
 
-			string portraitBridgeText = File.ReadAllText(VerificationSourceLocator.ResolveUnique(clientRoot, "ReignPortraitBridge.cs", "src"));
+			string portraitBridgeText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
 			bool portraitProductReceiptValid = serverClientText.Contains("portraitProductReceipt")
 				&& serverClientText.Contains("result.FaceFocus = new PortraitFaceFocus")
 				&& portraitServerText.Contains("BuildPortraitProductReceipt")
@@ -2036,7 +2019,7 @@ namespace ReignBetaServer
 				&& portraitCacheText.Contains("recoveredRefreshMode")
 				&& portraitServerText.Contains("productReceipt[\"portraitRefreshMode\"] = refreshMode")
 				&& portraitBridgeText.Contains("new PortraitRequestScope(campaignId, campaignFolder, snapshot)")
-				&& !portraitPatchText.Contains("GeneratePortraitProductAsync")
+				&& !portraitPatchTextScoped.Contains("GeneratePortraitProductAsync")
 				&& portraitCacheText.Contains("CommitPortraitProduct")
 				&& portraitCacheText.Contains("reign-portrait-product-v1")
 				&& portraitCacheText.Contains("PortraitDerivativeCore.BuildRequiredFocusedV2");
@@ -2056,19 +2039,19 @@ namespace ReignBetaServer
 					&& !text.Contains("UseEllipseMask", StringComparison.Ordinal)
 					&& !text.Contains("Reign.Portrait.EllipseMask", StringComparison.Ordinal);
 			});
-			bool portraitRuntimeMaskApiRemoved = !textureFactoryText.Contains("ApplyPresentationEllipseAlphaMask", StringComparison.Ordinal)
-				&& !textureFactoryText.Contains("|ellipse:", StringComparison.Ordinal)
-				&& !portraitPatchText.Contains("IsEllipsePortraitBox", StringComparison.Ordinal)
-				&& !portraitPatchText.Contains("ellipseMask", StringComparison.Ordinal)
-				&& !portraitTextureProviderText.Contains("ellipseMask", StringComparison.Ordinal)
-				&& !portraitWidgetText.Contains("UseEllipseMask", StringComparison.Ordinal)
-				&& !portraitWidgetText.Contains("_useEllipseMask", StringComparison.Ordinal);
+			bool portraitRuntimeMaskApiRemoved = !textureFactoryTextScoped.Contains("ApplyPresentationEllipseAlphaMask", StringComparison.Ordinal)
+				&& !textureFactoryTextScoped.Contains("|ellipse:", StringComparison.Ordinal)
+				&& !portraitPatchTextScoped.Contains("IsEllipsePortraitBox", StringComparison.Ordinal)
+				&& !portraitPatchTextScoped.Contains("ellipseMask", StringComparison.Ordinal)
+				&& !portraitTextureProviderTextScoped.Contains("ellipseMask", StringComparison.Ordinal)
+				&& !portraitWidgetTextScoped.Contains("UseEllipseMask", StringComparison.Ordinal)
+				&& !portraitWidgetTextScoped.Contains("_useEllipseMask", StringComparison.Ordinal);
 			bool portraitProviderNormalizesRectangularAspect = portraitTextureProviderText.Contains(
 				"private readonly float _targetAspect;", StringComparison.Ordinal)
 				&& portraitTextureProviderText.Contains("_targetAspect = targetAspect;", StringComparison.Ordinal)
 				&& portraitTextureProviderText.Contains("TextureFactory.GetOrBuildForAspect(", StringComparison.Ordinal)
 				&& portraitTextureProviderText.Contains("contain: _qualityTier == PortraitQualityTier.Zoom", StringComparison.Ordinal)
-				&& !portraitTextureProviderText.Contains("ContainToAspect", StringComparison.Ordinal)
+				&& !portraitTextureProviderTextScoped.Contains("ContainToAspect", StringComparison.Ordinal)
 				&& portraitWidgetText.Contains("_useFullBody ? AIPortraits.PortraitQualityTier.Zoom", StringComparison.Ordinal);
 			bool portraitApertureRuntimeValid = portraitPrefabMaskApiRemoved
 				&& portraitRuntimeMaskApiRemoved
@@ -2098,9 +2081,9 @@ namespace ReignBetaServer
 			string conversationZoomSceneBlock = VerificationSourceSlice(
 				conversationPortraitPatchMarkup, "AIPortraitsZoomBackdrop", "private readonly XmlDocument");
 			string conversationCoverGeometryMethod = VerificationSourceSlice(
-				conversationPortraitMixinText, "private static void GetCoverCropDimensions", "private void SetZoomAspect");
+				conversationPortraitMixinTextScoped, "private static void GetCoverCropDimensions", "private void SetZoomAspect");
 			string conversationZoomGeometryMethod = VerificationSourceSlice(
-				conversationPortraitMixinText, "private void SetZoomAspect", "private void SetAIInfluenceMemoryAspect");
+				conversationPortraitMixinTextScoped, "private void SetZoomAspect", "private void SetAIInfluenceMemoryAspect");
 			bool conversationCoverGeometryValid = conversationCoverGeometryMethod.Contains("const float plateWidth = 184f;", StringComparison.Ordinal)
 				&& conversationCoverGeometryMethod.Contains("const float plateHeight = 240f;", StringComparison.Ordinal)
 				&& conversationCoverGeometryMethod.Contains("const float overscan = 4f;", StringComparison.Ordinal)
@@ -2669,7 +2652,7 @@ namespace ReignBetaServer
 					: "Player portrait lookup can still fall through to the cross-campaign shared seed cache.", null);
 
             bool stepRemoved = portraitServerText.IndexOf("GenerateNanoGptStep", StringComparison.OrdinalIgnoreCase) < 0
-                && portraitClientText.IndexOf("GenerateStepImageEdit", StringComparison.OrdinalIgnoreCase) < 0
+                && portraitClientTextScoped.IndexOf("GenerateStepImageEdit", StringComparison.OrdinalIgnoreCase) < 0
                 && controlCenterSource.IndexOf("<option value='step-image-edit-2'>", StringComparison.OrdinalIgnoreCase) < 0
                 && controlCenterSource.Contains("NormalizePortraitImageSettings")
                 && controlCenterSource.Contains("foreach (string prefix in ImageProfilePrefixes)")
@@ -2681,8 +2664,7 @@ namespace ReignBetaServer
 			string pngReencodeText = File.Exists(pngReencodePath) ? File.ReadAllText(pngReencodePath) : "";
 			string pngEncoderPath = VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignServer", "shared", "Reign.Shared.Source"), "PngEncoder.cs", "Portraits");
 			string pngEncoderText = File.Exists(pngEncoderPath) ? File.ReadAllText(pngEncoderPath) : "";
-			string captureServicePath = VerificationSourceLocator.ResolveUnique(clientRoot, "PortraitCaptureService.cs", "src");
-			string captureServiceText = File.Exists(captureServicePath) ? File.ReadAllText(captureServicePath) : "";
+			string captureServiceText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
 			bool imageEditSourceValid = pngReencodeText.Contains("ImageEditMinimumDimension = 384")
 				&& pngReencodeText.Contains("ImageEditMaximumDimension = 5000")
 				&& pngReencodeText.Contains("ImageEditMaximumBytes = 10 * 1024 * 1024")
@@ -2797,8 +2779,8 @@ namespace ReignBetaServer
 			byte[] fullResolutionSourcePng = AIPortraits.PngEncoder.EncodeRgba(fullResolutionSourceRgba, 640, 360);
 			byte[] fullResolutionEnginePng = AIPortraits.PngReencode.ToEngineTextureFormat(fullResolutionSourcePng, 0);
 			AIPortraits.PngReencode.DecodeToRgba(fullResolutionEnginePng, out int fullResolutionWidth, out int fullResolutionHeight);
-			int boundedFileTextureCallCount = Regex.Matches(textureFactoryText, @"NormalizeForEngine\(sourceBytes,\s*448\)").Count;
-			int boundedMemoryTextureCallCount = Regex.Matches(textureFactoryText, @"NormalizeForEngine\(array,\s*448\)").Count;
+			int boundedFileTextureCallCount = Regex.Matches(textureFactoryTextScoped, @"NormalizeForEngine\(sourceBytes,\s*448\)").Count;
+			int boundedMemoryTextureCallCount = Regex.Matches(textureFactoryTextScoped, @"NormalizeForEngine\(array,\s*448\)").Count;
 			bool fullResolutionCallersValid = warCouncilArtFactory.Contains("BuildCastleMapImageId", StringComparison.Ordinal)
 				&& warCouncilArtFactory.Contains("BuildCastleSceneImageId", StringComparison.Ordinal)
                 && warCouncilArtFactory.Contains("string textureKey = \"reign_event_art_\"", StringComparison.Ordinal)
@@ -2849,12 +2831,9 @@ namespace ReignBetaServer
 			AddVerificationCheck(checks, "contracts.atlas_wan25_image_edit", "portraits_images", wan25AdapterValid,
 				wan25AdapterValid ? "AtlasCloud Wan 2.5 image edit remains available and uses its protected images/prompt/negative-prompt/seed/size/prompt-expansion payload." : "AtlasCloud Wan 2.5 request adapter is incomplete.", null);
 
-			string portraitSettingsPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaSettings.cs", "src");
-			string portraitSettingsText = File.Exists(portraitSettingsPath) ? File.ReadAllText(portraitSettingsPath) : "";
-			string portraitDebugPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaDebugActions.cs", "src");
-			string portraitDebugText = File.Exists(portraitDebugPath) ? File.ReadAllText(portraitDebugPath) : "";
-			string lordScanPath = VerificationSourceLocator.ResolveUnique(clientRoot, "LordSourceExportService.cs", "src");
-			string lordScanText = File.Exists(lordScanPath) ? File.ReadAllText(lordScanPath) : "";
+			string portraitSettingsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+			string portraitDebugText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+			string lordScanText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
 			bool lordSourceScanValid = portraitSettingsText.Contains("Start Lord Encyclopedia Source Scan")
 				&& portraitSettingsText.Contains("ReignBetaDebugActions.StartLordEncyclopediaSourceScan")
 				&& portraitDebugText.Contains("LordSourceExportService.Start()")
@@ -2864,13 +2843,11 @@ namespace ReignBetaServer
 			AddVerificationCheck(checks, "contracts.lord_encyclopedia_source_scan", "portraits_images", lordSourceScanValid,
 				lordSourceScanValid ? "The MCM can arm a full living-lord Encyclopedia source scan and records clan tier/social station beside each capture." : "Lord Encyclopedia source scan or source metadata contract is incomplete.", null);
 
-            string calendarPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignCalendarService.cs", "src");
-            string calendarText = File.Exists(calendarPath) ? File.ReadAllText(calendarPath) : "";
+            string calendarText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool calendarValid = calendarText.Contains("DaysPerYear = 126") && calendarText.Contains("DaysPerSeason = 31.5") && calendarText.Contains("native 84-day year");
             AddVerificationCheck(checks, "contracts.calendar_126", "contracts", calendarValid, calendarValid ? "126-day year and 31.5-day seasons are encoded in the production calendar prompt." : "Calendar contract is incomplete.", null);
 
-            string saveSyncBehaviorPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignSaveSyncCampaignBehavior.cs", "src");
-            string saveSyncBehaviorText = File.Exists(saveSyncBehaviorPath) ? File.ReadAllText(saveSyncBehaviorPath) : "";
+            string saveSyncBehaviorText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool saveSyncFailureWarningValid = saveSyncBehaviorText.Contains("!result.Equals(\"disabled\", StringComparison.OrdinalIgnoreCase)")
                 && saveSyncBehaviorText.Contains("if (successful && _registrationFailedForCurrentSave)")
                 && saveSyncBehaviorText.Contains("ShowSaveSyncRegistrationFailure(saveName)")
@@ -2883,12 +2860,12 @@ namespace ReignBetaServer
             AddVerificationCheck(checks, "contracts.save_sync_offline_save_warning", "server_lifecycle", saveSyncFailureWarningValid,
                 saveSyncFailureWarningValid ? "A successful native save with an unregistered Reign snapshot opens a modal warning; registered, disabled, and failed native saves do not." : "Save Sync offline-save warning contract is incomplete.", null);
 
-            string popupKeyboardPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignPopupKeyboardPatches.cs", "src");
-            string popupKeyboardText = File.Exists(popupKeyboardPath) ? File.ReadAllText(popupKeyboardPath) : "";
-            string diplomacyPopupPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignDiplomacyAnnouncementScreenManager.cs", "src");
-            string diplomacyPopupText = File.Exists(diplomacyPopupPath) ? File.ReadAllText(diplomacyPopupPath) : "";
-            string subModulePath = VerificationSourceLocator.ResolveUnique(clientRoot, "SubModule.cs", "src/Modules/Platform");
-            string subModuleText = File.Exists(subModulePath) ? File.ReadAllText(subModulePath) : "";
+            string popupKeyboardPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignPopupKeyboardPatches.cs");
+            string popupKeyboardText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string diplomacyPopupPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignDiplomacyAnnouncementScreenManager.cs");
+            string diplomacyPopupText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
+            string subModulePath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "SubModule.cs", "src/Modules/Platform");
+            string subModuleText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             bool popupKeyboardValid = popupKeyboardText.Contains("IsReignCaller()")
                 && popupKeyboardText.Contains("InformationManager.ShowInquiry")
                 && popupKeyboardText.Contains("InformationManager.ShowTextInquiry")
@@ -2956,22 +2933,22 @@ namespace ReignBetaServer
 
             string programSource = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
             string programText = File.Exists(programSource) ? File.ReadAllText(programSource) : "";
-            int routeCount = Regex.Matches(programText, "request\\.Path\\s*==\\s*\"(?<path>/[^\"]+)\"")
-                .Cast<Match>()
-                .Count(match => !match.Groups["path"].Value.StartsWith("/court/", StringComparison.OrdinalIgnoreCase));
+            // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
+            int routeCount = ServerRoutes.Value.Routes
+                .Count(route => route.Match == RouteMatch.Exact && route.Path.Length > 1
+                    && !route.Path.StartsWith("/court/", StringComparison.OrdinalIgnoreCase));
             AddVerificationCheck(checks, "contracts.http_routes", "server_lifecycle", routeCount >= 60, "Discovered " + routeCount + " exact HTTP route handlers.", new Dictionary<string, object> { ["routeCount"] = routeCount });
 
-            string saveDefiner = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaSaveDefiner.cs", "src");
-            string saveText = File.Exists(saveDefiner) ? File.ReadAllText(saveDefiner) : "";
+            string saveText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBetaSaveDefiner");
             int saveTypeCount = Regex.Matches(saveText, "(?:AddClassDefinition|ConstructContainerDefinition)[^\\r\\n]*")
                 .Cast<Match>()
                 .Count(match => !IsExcludedCourtVerificationArtifact(match.Value));
             AddVerificationCheck(checks, "contracts.save_types", "persistence", saveTypeCount >= 5, "Discovered " + saveTypeCount + " save type/container registrations.", new Dictionary<string, object> { ["saveTypeCount"] = saveTypeCount });
 
-            string characterBehaviorPath = VerificationSourceLocator.ResolveUnique(clientRoot, "ReignCharacterEditorCampaignBehavior.cs", "src");
-            string characterBehaviorText = File.Exists(characterBehaviorPath) ? File.ReadAllText(characterBehaviorPath) : "";
+            string characterBehaviorPath = VerificationSourceLocator.DescribeClientSourcePath(clientRoot, "ReignCharacterEditorCampaignBehavior.cs");
+            string characterBehaviorText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignCharacterEditorCampaignBehavior");
             bool noAutomaticProfileUpload = !characterBehaviorText.Contains("StartProfileSync")
-                && !serverClientText.Contains("SynchronizeFixedNobleProfilesAsync");
+                && !serverClientTextScoped.Contains("SynchronizeFixedNobleProfilesAsync");
             AddVerificationCheck(checks, "contracts.no_automatic_character_profile_upload", "character_construction", noAutomaticProfileUpload,
                 "Campaign launch contains no automatic fixed-profile upload path.",
                 new Dictionary<string, object> { ["behaviorPath"] = characterBehaviorPath, ["clientPath"] = serverClientPath });
@@ -3318,8 +3295,7 @@ namespace ReignBetaServer
         {
             ReignShadowWorld world = ReignShadowWorld.Create(seed);
             string root = FindVerificationSourceRoot();
-            string enumPath = string.IsNullOrWhiteSpace(root) ? "" : VerificationSourceLocator.ResolveUnique(Path.Combine(root, "ReignBeta"), "ReignWorldActionType.cs", "src");
-            List<string> actions = DiscoverActionNames(enumPath).Where(x => !x.Equals("Unknown", StringComparison.OrdinalIgnoreCase)).ToList();
+            List<string> actions = DiscoverClientActionNames(string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, "ReignBeta")).Where(x => !x.Equals("Unknown", StringComparison.OrdinalIgnoreCase)).ToList();
             List<string> failures = new List<string>();
             foreach (string action in actions)
             {
@@ -3539,18 +3515,17 @@ namespace ReignBetaServer
             add("campaign.backup_isolation", "server_lifecycle", new[] { "pipeline.campaign_backups", "long_run.five_years" });
             add("campaign.save_sync", "server_lifecycle", new[] { "pipeline.save_sync", "contracts.http_routes" });
 
-            string enumPath = string.IsNullOrWhiteSpace(clientRoot) ? "" : VerificationSourceLocator.ResolveUnique(clientRoot, "ReignWorldActionType.cs", "src");
-            foreach (string action in DiscoverActionNames(enumPath).Where(x => x != "Unknown"))
+            foreach (string action in DiscoverClientActionNames(clientRoot).Where(x => x != "Unknown"))
             {
                 add("action." + ToSnakeCase(action), "actions_trade", new[] { "pipeline.canned_cases", "shadow_world.all_actions" });
             }
 
             List<string> behaviors = new List<string>();
-            string subModulePath = string.IsNullOrWhiteSpace(clientRoot) ? "" : VerificationSourceLocator.ResolveUnique(clientRoot, "SubModule.cs", "src/Modules/Platform");
-            if (File.Exists(subModulePath)) behaviors = Regex.Matches(File.ReadAllText(subModulePath), "new\\s+([A-Za-z0-9_]+CampaignBehavior)\\s*\\(").Cast<Match>().Select(x => x.Groups[1].Value).Where(x => !IsExcludedCourtVerificationArtifact(x)).Distinct().OrderBy(x => x).ToList();
+            string subModuleText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBeta.SubModule");
+            if (subModuleText.Length > 0) behaviors = Regex.Matches(subModuleText, "new\\s+([A-Za-z0-9_]+CampaignBehavior)\\s*\\(").Cast<Match>().Select(x => x.Groups[1].Value).Where(x => !IsExcludedCourtVerificationArtifact(x)).Distinct().OrderBy(x => x).ToList();
             List<string> routes = new List<string>();
-            string programPath = string.IsNullOrWhiteSpace(serverRoot) ? "" : VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
-            if (File.Exists(programPath)) routes = Regex.Matches(File.ReadAllText(programPath), "request\\.Path\\s*==\\s*\"([^\"]+)\"").Cast<Match>().Select(x => x.Groups[1].Value).Where(x => !x.StartsWith("/court/", StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(x => x).ToList();
+            // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
+            routes = ServerRoutes.Value.Routes.Where(route => route.Match == RouteMatch.Exact).Select(route => route.Path).Where(x => !x.StartsWith("/court/", StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(x => x).ToList();
             List<string> guiMovies = string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(Path.Combine(clientRoot, "GUI", "Prefabs")) ? new List<string>() : Directory.GetFiles(Path.Combine(clientRoot, "GUI", "Prefabs"), "*.xml").Where(path => !IsExcludedCourtVerificationArtifact(path)).Select(Path.GetFileNameWithoutExtension).OrderBy(x => x).ToList();
             List<string> prompts = PromptFileNames.Where(x => !IsExcludedCourtVerificationArtifact(x)).OrderBy(x => x).ToList();
             List<string> uncovered = features.Where(row => ReadBool(row, "implemented", false) && ReadStringArray(row, "tests").Count == 0).Select(row => ReadString(row, "id", "")).ToList();
@@ -3884,10 +3859,26 @@ namespace ReignBetaServer
             return "";
         }
 
+        private static List<string> DiscoverClientActionNames(string clientRoot)
+        {
+            string enumText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignWorldActionType");
+            return enumText.Length == 0 ? ActionNamesFallback() : ParseActionNames(enumText);
+        }
+
         private static List<string> DiscoverActionNames(string enumPath)
         {
-            if (!File.Exists(enumPath)) return ActionPromptFileNames.Select(PromptFileToActionFallback).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
-            Match body = Regex.Match(File.ReadAllText(enumPath), "enum\\s+ReignWorldActionType\\s*\\{(?<body>[\\s\\S]*?)\\}");
+            if (!File.Exists(enumPath)) return ActionNamesFallback();
+            return ParseActionNames(File.ReadAllText(enumPath));
+        }
+
+        private static List<string> ActionNamesFallback()
+        {
+            return ActionPromptFileNames.Select(PromptFileToActionFallback).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+        }
+
+        private static List<string> ParseActionNames(string enumText)
+        {
+            Match body = Regex.Match(enumText, "enum\\s+ReignWorldActionType\\s*\\{(?<body>[\\s\\S]*?)\\}");
             if (!body.Success) return new List<string>();
             return Regex.Matches(body.Groups["body"].Value, "^\\s*([A-Za-z][A-Za-z0-9_]*)\\s*=", RegexOptions.Multiline).Cast<Match>().Select(x => x.Groups[1].Value).Distinct().ToList();
         }
@@ -3900,16 +3891,16 @@ namespace ReignBetaServer
 
         private static List<string> DiscoverSettings(string clientRoot)
         {
-            string path = string.IsNullOrWhiteSpace(clientRoot) ? "" : VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaSettings.cs", "src");
-            if (!File.Exists(path)) return new List<string>();
-            return Regex.Matches(File.ReadAllText(path), "public\\s+[A-Za-z0-9_<>?]+\\s+([A-Za-z0-9_]+)\\s*\\{").Cast<Match>().Select(x => x.Groups[1].Value).Distinct().OrderBy(x => x).ToList();
+            string settingsText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBetaSettings");
+            if (settingsText.Length == 0) return new List<string>();
+            return Regex.Matches(settingsText, "public\\s+[A-Za-z0-9_<>?]+\\s+([A-Za-z0-9_]+)\\s*\\{").Cast<Match>().Select(x => x.Groups[1].Value).Distinct().OrderBy(x => x).ToList();
         }
 
         private static List<string> DiscoverSaveTypes(string clientRoot)
         {
-            string path = string.IsNullOrWhiteSpace(clientRoot) ? "" : VerificationSourceLocator.ResolveUnique(clientRoot, "ReignBetaSaveDefiner.cs", "src");
-            if (!File.Exists(path)) return new List<string>();
-            return Regex.Matches(File.ReadAllText(path), "typeof\\(([A-Za-z0-9_]+)\\)").Cast<Match>().Select(x => x.Groups[1].Value).Distinct().OrderBy(x => x).ToList();
+            string saveDefinerText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBetaSaveDefiner");
+            if (saveDefinerText.Length == 0) return new List<string>();
+            return Regex.Matches(saveDefinerText, "typeof\\(([A-Za-z0-9_]+)\\)").Cast<Match>().Select(x => x.Groups[1].Value).Distinct().OrderBy(x => x).ToList();
         }
 
         private static bool IsExcludedCourtVerificationArtifact(string value)

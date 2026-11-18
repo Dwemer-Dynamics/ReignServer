@@ -149,15 +149,17 @@ DELETE FROM memory_restored_sources WHERE restore_generation<>$generation;", par
 
         // Verified no-op load whose context already names this save point in the current
         // generation (otherwise InitializeVerifiedSnapshotMemorySources rewrites it): bind
-        // the load session, and record the snapshot's generation only if none is known.
-        // One statement; the caller restores the clean Save Sync marker afterwards.
+        // the load session and always record the snapshot's own generation. Snapshots are
+        // immutable, so this rewrites the same value normally, and it replaces a value left
+        // stale by an older server build ("" when the snapshot predates it keeps recovery
+        // unproven). One statement; the caller restores the clean Save Sync marker afterwards.
         private static void BindVerifiedNoOpLoadSession(string campaign, string savePointId, string snapshotPoint, string loadSessionId)
         {
             using var connection = OpenCampaignConnection(campaign);
             EnsureMemorySnapshotSourceSchema(connection);
             string source = SnapshotRestoreGeneration(connection, ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotPoint));
             ExecuteSql(connection, @"UPDATE memory_restored_source_context SET load_session_id=$session,
-source_generation=CASE WHEN source_generation='' THEN $source ELSE source_generation END
+source_generation=$source
 WHERE state_id='current' AND save_point_id=$point
 AND restore_generation=(SELECT restore_generation FROM memory_precision_state WHERE state_id='current');",
                 TestDict("session", loadSessionId ?? "", "source", source, "point", savePointId ?? ""));
