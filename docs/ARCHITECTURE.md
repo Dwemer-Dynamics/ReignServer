@@ -58,16 +58,28 @@ flowchart LR
 
 ## Process composition
 
-`internal static partial class Program` (namespace `ReignBetaServer`) is now the Platform core: 58 of the 483 `.cs`
-files under `src/Modules` contribute to it (46 Platform files and the twelve `Program.<Module>Routes.cs` route
-files). Every domain module is its own `internal static partial class <Module>Service`: `DialogueService`,
+`internal static partial class Program` (namespace `ReignBetaServer`) is now the Platform core: 88 of the 513 `.cs`
+files under `src/Modules` contribute to it (66 Platform files, the twelve `Program.<Module>Routes.cs` route files and
+ten `Program.<Area>.cs` handler files in the Characters, Dialogue and Portraits folders). Every domain module is its own `internal static partial class <Module>Service`: `DialogueService`,
 `CharactersService`, `WorldSimulationService`, `RelationshipsService`, `PersistenceService`, `ReputationService`,
 `DiplomacyService`, `CourtService`, `PortraitsService`, `GovernmentService`, `RebellionService` and
 `SpymasterService`. The other exceptions are a few helper types (for example
 `ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes) and the stateless
 helpers in `Platform/ServerCore.cs` (see [Direction](#direction-2026-11-restructuring-programme), steps 3 and 4).
-`src/Modules/Platform/Program.cs` alone is about 27.9k lines and still contains the main dialogue, memory, action
-and portrait request handlers, which call into the services.
+`src/Modules/Platform/Program.cs` is the hub (about 1.3k lines): the core fields, `Main`, `RunServer`, the startup
+helpers, `HandleClient`, the campaign request gate, `RunInteractiveRequest`, `ControlCenterHtml` and `HttpRequest`.
+The rest of the former 27.9k-line file was split verbatim (same class, same members, no renames) into partial files
+of at most about 1,500 lines, grouped by area:
+
+| Folder | `Program.<Area>.cs` files |
+|---|---|
+| Platform | `HttpIngress` (ingress limits, `ReadRequest`, response writers), `CampaignSql` (`OpenCampaignConnection`, campaign schema caches, `ExecuteSql`/`QuerySql`), `CampaignFiles` (campaign directories and JSON file IO), `Settings`, `PromptTemplates`, `DefaultPromptTemplates`, `LlmTransport` (`ChatWithLlm`, provider requests), `ConversationResponses` (structured-response repair, visible-reply sanitising), `LogsAndAudit`, `PipelineTestRunner` and `DefaultTestCases` (the `/tests/*` prompt test cases), and the action pipeline: `DialogueActions`, `ActionGates`, `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`, `ActionQueue` |
+| Dialogue | `MemoryStore` (event ingest, memory APIs and writes, consolidation), `MemoryPacket` (memory packets, knowledge visibility), `MemoryRetrieval`, `ContextPulls`, `DialogueTurns` (`/dialogue/respond`, `/dialogue/history`), `EventConversations` (social events, party chat, generated wilderness plans), `PromptContext` (prompt transcripts and context text) |
+| Characters | `CharacterConstruction` (upserts, portrait roster, construction and enrichment), `CharacterProfiles` (profile upsert, schema, diagnostics, construction prompt and defaults) |
+| Portraits | `PortraitRequests` (the portrait register, status, request and diagnose routes) |
+
+These handlers still call into the module services. Static fields whose initializers depend on other `Program` state
+stay in `Program.cs`, so the type's initialization order is unchanged.
 
 `Main` (`Platform/Program.cs`) runs in this order:
 
@@ -111,7 +123,7 @@ requests; background work checks `InteractiveRequestActiveOrRecent` and defers w
 
 ### Ingress limits
 
-Defined beside `ReadRequest` in `Platform/Program.cs`: request line 8 KiB, headers 64 KiB and 128 fields, identity
+Defined beside `ReadRequest` in `Platform/Program.HttpIngress.cs`: request line 8 KiB, headers 64 KiB and 128 fields, identity
 headers 256 chars, JSON body 64 MiB, support bundle 8 MiB, view-insertion ack 16 KiB, campaign upload up to the
 backup expanded limit, 30 s idle and header budgets, a body budget of 60 s plus 1 MiB/s, 256 concurrent connections,
 and 128 MiB of buffered JSON shared across all connections. Repeated framing or trust headers are refused.
@@ -250,7 +262,7 @@ dependencies on other modules.
 
 | Module | Role |
 |---|---|
-| [Platform](../src/Modules/Platform/README.md) | `Program.cs` entry point and router, settings, providers, Codex runtime, diagnostics, VerificationLab |
+| [Platform](../src/Modules/Platform/README.md) | `Program.cs` entry point and router hub with its `Program.<Area>.cs` partials, settings, providers, Codex runtime, diagnostics, VerificationLab |
 | [Persistence](../src/Modules/Persistence/README.md) | PostgreSQL storage, `reign_meta`, campaign backups, Save Sync |
 | [Characters](../src/Modules/Characters/README.md) | identity, character editor, narratives, NPC lives, notables, tavern house |
 | [Dialogue](../src/Modules/Dialogue/README.md) | conversation pipeline, memory, prompts, gossip, communications, final gauntlet |
@@ -316,7 +328,11 @@ lands.
    (`int, int, int, int`) each build a nested type of their own module, are called only from their own file, and
    their parameter lists cannot convert into each other. What stays `Program` is the Platform core: the entry point,
    `HandleClient` and the route table, settings, the campaign connection and `QuerySql`/`ExecuteSql` state,
-   providers, the main turn handlers in `Program.cs` and the verification lab, plus the module route files.
+   providers, the main turn handlers (now in `Program.<Area>.cs` partial files, see
+   [Process composition](#process-composition)) and the verification lab, plus the module route files. Server
+   source-text contracts read `Program` through `VerificationSourceLocator.ReadServerTypeSourceText(serverRoot,
+   "Program")` (every product file declaring the partial class), so moving members between its files keeps them
+   valid.
 5. Per-campaign versioned migrations: each module's `Ensure*` DDL becomes ordered migrations under one runner,
    following the `reign_meta` pattern, and runtime `Ensure*` calls leave hot paths.
 6. Typed request and response DTOs in `Reign.Core.Contracts` for client-facing routes, module by module.
