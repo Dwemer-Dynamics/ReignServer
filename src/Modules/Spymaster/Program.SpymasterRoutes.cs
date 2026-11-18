@@ -2,6 +2,19 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        // HTTP routes owned by the Spymaster module, in their former router order (see RouteTable.cs).
+        // Legacy(...) routes are still served by the if/else chain in HandleClient.
+        private static void RegisterSpymasterRoutes(ReignRouteTable routes)
+        {
+            routes.Legacy("POST", "/court/spymaster/memory");
+            routes.Legacy("POST", "/court/spymaster/social/status");
+            routes.Legacy("POST", "/court/spymaster/social/apply");
+            routes.Legacy("POST", "/court/spymaster/exposure");
+            routes.Legacy("POST", "/court/spymaster/agents/tick");
+            routes.Legacy("POST", "/court/spymaster/agents/status");
+            routes.Legacy("POST", "/court/spymaster/agents/expose");
+        }
+
         private static bool TryHandleSpymasterRoute(HttpRequest request, out object response)
         {
             response = null;

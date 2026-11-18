@@ -21,6 +21,8 @@ to other modules.
   `PromptEditorPersistence.cs`, `LinuxJsonSerializer.cs`, and the client option sets (`*Options.cs`).
 - Runtime services: `PriorityBackgroundScheduler.cs`, `ReignObservability.cs`, `ServerActivation.cs`,
   `InitializationReadiness.cs`, `SupportBundle.cs`, `ConversationDiagnostics*.cs`, `ConversationResponseParsing.cs`.
+- Routing: `RouteTable.cs` (route table, dispatcher, campaign-gate declarations), `Program.PlatformRoutes.cs` (this
+  module's registrations; every module has its own `Program.<Module>Routes.cs`) and `RouteTableContractSelfTests.cs`.
 - `Testing/reign-xp-options.js` and the `*-contract.mjs` files are Control Center UI contract scripts.
 
 ## Routes

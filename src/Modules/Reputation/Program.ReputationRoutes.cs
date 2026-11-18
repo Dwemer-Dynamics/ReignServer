@@ -5,6 +5,28 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+        // HTTP routes owned by the Reputation module, in their former router order (see RouteTable.cs).
+        // Legacy(...) routes are still served by the if/else chain in HandleClient.
+        private static void RegisterReputationRoutes(ReignRouteTable routes)
+        {
+            routes.Legacy("GET", "/tests/social-balance/manifest");
+            routes.Legacy("POST", "/tests/social-balance/prepare");
+            routes.Legacy("POST", "/tests/social-balance/case/result");
+            routes.Legacy("POST", "/tests/social-balance/snapshot");
+            routes.Legacy("POST", "/tests/social-balance/affinity/set");
+            routes.Legacy("POST", "/tests/social-balance/affair/candidates");
+            routes.Legacy("GET", "/tests/social-balance/status");
+            routes.Legacy("GET", "/tests/social-balance/export");
+            routes.Legacy("POST", "/rumors/submit");
+            routes.Legacy("POST", "/rumors/status");
+            routes.Legacy("POST", "/rumors/correct");
+            routes.Legacy("POST", "/social/catalog");
+            routes.Legacy("GET", "/social/catalog");
+            routes.Post("/character-editor/social/rumor/add", request => CharacterEditorSocialRumorAddApi(request.JsonBody));
+            routes.Post("/character-editor/social/reputation/add", request => CharacterEditorSocialReputationAddApi(request.JsonBody));
+            routes.Post("/character-editor/social/reputation/retry-reason", request => CharacterEditorSocialReasonRetryApi(request.JsonBody));
+        }
+
         private static bool TryHandleReputationRoute(HttpRequest request, out object response)
         {
             response = null;

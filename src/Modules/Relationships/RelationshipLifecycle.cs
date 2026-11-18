@@ -1759,6 +1759,8 @@ VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
             results.AddRange(RunNpcRelationshipPromptSelfTests());
             results.AddRange(RunSharedRelationshipHistorySelfTests());
             results.AddRange(RunConversationRelationshipSelfTests());
+            // Clan conflicts live in Relationships; also run them here so --run-relationship-tests covers their wire contracts.
+            results.AddRange(RunClanConflictSelfTests());
             Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object>
             {
                 ["ok"] = true, ["passed"] = passed, ["suite"] = "relationship_system",
