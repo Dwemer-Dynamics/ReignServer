@@ -5139,7 +5139,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 identitySystemSource.Contains(
                     "ReconcileSocialRelationshipForObserverSubject(")
                 && socialReputationSource.Contains(
-                    "private static void ReconcileSocialRelationshipForObserverSubject(")
+                    "internal static void ReconcileSocialRelationshipForObserverSubject(")
                 && socialReputationSource.Contains(
                     "new[] { subjectId }, worldDay);")
                 && worldRelationshipSource.Contains(
@@ -5382,7 +5382,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && worldDiplomacyDirectorSource.Contains(
                     "MarkDiplomaticRelationshipFeedbackRecorded(campaignId, actionId")
                 && kingdomLeaderDiplomacySource.IndexOf(
-                    "lock (CampaignRelationshipWriteLock(campaignId))",
+                    "lock (Program.CampaignRelationshipWriteLock(campaignId))",
                     StringComparison.Ordinal)
                     < kingdomLeaderDiplomacySource.IndexOf(
                         "SELECT COUNT(*) AS count FROM ruler_diplomatic_incidents",

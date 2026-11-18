@@ -2688,7 +2688,7 @@ namespace ReignBetaServer
                 && portraitClientTextScoped.IndexOf("GenerateStepImageEdit", StringComparison.OrdinalIgnoreCase) < 0
                 && controlCenterSource.IndexOf("<option value='step-image-edit-2'>", StringComparison.OrdinalIgnoreCase) < 0
                 && controlCenterSource.Contains("NormalizePortraitImageSettings")
-                && controlCenterSource.Contains("foreach (string prefix in ImageProfilePrefixes)")
+                && controlCenterSource.Contains("foreach (string prefix in PortraitsService.ImageProfilePrefixes)")
                 && controlCenterSource.Contains("settings[modelKey] = \"gpt-image-1.5\"");
             AddVerificationCheck(checks, "contracts.step_image_edit_removed", "portraits_images", stepRemoved,
                 stepRemoved ? "Step Image Edit 2 adapters and UI selection are removed; saved Step settings migrate to gpt-image-1.5." : "Step Image Edit 2 remains reachable or its settings migration is missing.", null);
@@ -2749,7 +2749,7 @@ namespace ReignBetaServer
                 && nativeGeneratorAppText.Contains("--reign-data-root", StringComparison.Ordinal)
                 && nativeGeneratorAppText.Contains("NativeEngineRenderService", StringComparison.Ordinal)
                 && nativeGeneratorCatalogText.Contains("FindCampaign(moduleRoot, requestedCampaignId, reignDataRoot)", StringComparison.Ordinal)
-                && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", NativeGeneratorPath(DataDir))", StringComparison.Ordinal)
+                && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", NativeGeneratorPath(Program.DataDir))", StringComparison.Ordinal)
                 && serverClientText.Contains("[\"civilianEquipment\"] = BuildPortraitCivilianEquipment(hero)", StringComparison.Ordinal)
                 && serverClientText.Contains("character[\"civilianEquipment\"] as JArray", StringComparison.Ordinal)
                 && clientProjectContractText.Contains("PublishBundledNativePortraitGenerator", StringComparison.Ordinal)
