@@ -663,11 +663,11 @@ namespace ReignBetaServer
             string controlCenterMarkup = File.ReadAllText(Path.Combine(serverRoot, "ui", "index.html"));
             string notableMbtiPath = VerificationSourceLocator.ResolveUnique(serverRoot, "NotableMbtiProfiles.cs", "src");
             string mbtiProgramSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src"));
-            string cachingSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PromptCaching.cs", "src"));
+            string cachingSource = VerificationSourceLocator.ReadSourceFileGroupText(VerificationSourceLocator.ResolveUnique(serverRoot, "PromptCaching.cs", "src"));
             string diplomacySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src"));
             string sceneSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ConversationSceneState.cs", "src"));
-            string memorySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "CategorizedMemory.cs", "src"));
-            string portraitSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src"));
+            string memorySource = VerificationSourceLocator.ReadSourceFileGroupText(VerificationSourceLocator.ResolveUnique(serverRoot, "CategorizedMemory.cs", "src"));
+            string portraitSource = VerificationSourceLocator.ReadSourceFileGroupText(VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src"));
             bool mbtiPromptCoverage = File.Exists(notableMbtiPath)
                 && mbtiProgramSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
                 && cachingSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
@@ -1945,7 +1945,7 @@ namespace ReignBetaServer
                     ? "After Save Sync alignment completes, the live heartbeat reports actual campaign/save identity so guarded enrollment can fail closed on mismatches."
                     : "The live heartbeat can still be suppressed by a redundant client-side campaign match before the guarded server sees actual identity.", null);
             string portraitServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src");
-            string portraitServerText = File.Exists(portraitServerPath) ? File.ReadAllText(portraitServerPath) : "";
+            string portraitServerText = VerificationSourceLocator.ReadSourceFileGroupText(portraitServerPath);
             bool portraitIdentityValid = portraitContextText.Contains("public int? AgeYears")
                 && portraitContextText.Contains("public string Gender")
 				&& portraitContextText.Contains("public int? ClanTier")
@@ -2988,7 +2988,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["behaviorPath"] = characterBehaviorPath, ["clientPath"] = serverClientPath });
 
             string profileLibraryPath = VerificationSourceLocator.ResolveUnique(serverRoot, "CharacterProfileLibrary.cs", "src");
-            string profileLibraryText = File.Exists(profileLibraryPath) ? File.ReadAllText(profileLibraryPath) : "";
+            string profileLibraryText = VerificationSourceLocator.ReadSourceFileGroupText(profileLibraryPath);
             bool noBackgroundWorker = !profileLibraryText.Contains("CharacterEnrichmentWorkerLoop")
                 && !profileLibraryText.Contains("ProcessNextCharacterEnrichment")
                 && programText.Contains("[\"backgroundCharacterEnrichmentEnabled\"] = false");

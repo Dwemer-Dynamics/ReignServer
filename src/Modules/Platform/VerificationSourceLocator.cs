@@ -49,6 +49,22 @@ namespace ReignBetaServer
                 + ": " + string.Join(", ", candidates));
         }
 
+        /// <summary>
+        /// The text of a server source file together with its <c>Name.*.cs</c> partial-class siblings in the same
+        /// folder (ordinal file-name order), so a contract that reads one logical file keeps working when that file is
+        /// split into partial files. Returns an empty string when the path is empty or the file is missing.
+        /// </summary>
+        public static string ReadSourceFileGroupText(string primaryPath)
+        {
+            if (string.IsNullOrWhiteSpace(primaryPath) || !File.Exists(primaryPath)) return string.Empty;
+            string fullPath = Path.GetFullPath(primaryPath);
+            string stem = Path.GetFileNameWithoutExtension(fullPath);
+            IEnumerable<string> siblings = Directory.GetFiles(Path.GetDirectoryName(fullPath), stem + ".*.cs")
+                .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => Path.GetFileName(path), StringComparer.Ordinal);
+            return string.Join("\n\n", new[] { fullPath }.Concat(siblings).Select(File.ReadAllText));
+        }
+
         // Client (ReignBeta) source-text contracts must not depend on which file holds the code. The client source
         // is read once into a snapshot (every src/**/*.cs, ordered by relative path) and checks either search all
         // of it or the files that declare a named type, so behaviour-neutral file moves keep the contracts valid.
