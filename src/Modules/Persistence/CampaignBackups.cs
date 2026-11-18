@@ -2582,7 +2582,7 @@ WHERE table_schema=current_schema()
 
         private static int SafeDirectoryCount(string path) { try { return Directory.Exists(path) ? Directory.EnumerateDirectories(path).Count() : 0; } catch { return 0; } }
         private static int SafeFileCount(string path, string pattern) { try { return string.IsNullOrWhiteSpace(path) || !Directory.Exists(path) ? 0 : Directory.EnumerateFiles(path, pattern, SearchOption.AllDirectories).Count(); } catch { return 0; } }
-        private static void TryDeleteDirectory(string path)
+        internal static void TryDeleteDirectory(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
             ReignPostgreSqlStorage.ClearAllPools();

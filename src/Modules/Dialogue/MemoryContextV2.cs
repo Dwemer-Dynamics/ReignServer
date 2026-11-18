@@ -1453,7 +1453,7 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
                 + letterPart + communicationPart + ") sources;").Single(), "watermark", 0);
         }
 
-        private static bool PrecisionTurnVisible(Dictionary<string,object> turn,string observer,KnowledgeAccessContext knowledge, ReignDbConnection connection = null) =>
+        internal static bool PrecisionTurnVisible(Dictionary<string,object> turn,string observer,KnowledgeAccessContext knowledge, ReignDbConnection connection = null) =>
             ReadString(turn,"status","active") == "active" && !string.IsNullOrWhiteSpace(ConversationTurnTextForRecall(turn))
             && (knowledge == null || MemoryTimeVisible(turn,knowledge,connection)) && (ReadString(turn,"speaker_id","") == observer
             || TextListFromJson(ReadString(turn,"participants_json","[]")).Contains(observer,StringComparer.OrdinalIgnoreCase));

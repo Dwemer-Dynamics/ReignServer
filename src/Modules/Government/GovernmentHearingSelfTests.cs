@@ -6,7 +6,7 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         private static void AddGovernmentHearingSelfTests(Action<string, bool, string, object> add)
         {

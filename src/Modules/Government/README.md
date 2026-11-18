@@ -10,7 +10,11 @@ arrives in each request payload; this module creates no tables of its own.
 ## Main files
 
 `GovernmentSystem.cs` (`GovernmentSpeakerStatement`), `GovernmentHearingDiscussion.cs`, `GovernmentCrownDecision.cs`,
-`GovernmentPaymentOwnership.cs`.
+`GovernmentPaymentOwnership.cs`. These files and the test files below form `internal static partial class
+GovernmentService` (not a `Program` partial); it calls `Program` members with an explicit `Program.` qualifier.
+`Program.GovernmentRoutes.cs` stays part of `Program` and registers the service handlers. The dialogue pipeline calls
+`GovernmentService.BuildGovernmentPrivateConversationPrompt`, `ReserveGovernmentPaymentOwnership` and
+`ValidateGovernmentPaymentOwnership`.
 
 ## Routes
 
@@ -23,7 +27,7 @@ None.
 
 ## Self-tests
 
-`RunGovernmentSystemSelfTests`, VerificationLab suite `government`. Test files compiled into the server:
+`GovernmentService.RunGovernmentSystemSelfTests`, VerificationLab suite `government`. Test files compiled into the server:
 `GovernmentSelfTests.cs`, `GovernmentCrownDecisionSelfTests.cs`, `GovernmentEdictSelfTests.cs`,
 `GovernmentHearingSelfTests.cs`, `GovernmentParticipationSelfTests.cs`, `GovernmentPaymentOwnershipSelfTests.cs`,
 `GovernmentSessionSelfTests.cs`.

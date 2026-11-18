@@ -9,7 +9,7 @@ namespace ReignBetaServer
         private delegate Dictionary<string, object> ConversationSourceAcceptance(
             ReignDbConnection connection, Dictionary<string, object> source);
 
-        private sealed class AcceptedConversationUnit
+        internal sealed class AcceptedConversationUnit
         {
             internal string Campaign, Hero, Player, Location, EventId, EventType, PlayerText, Reply, Generation;
             internal long Timestamp;

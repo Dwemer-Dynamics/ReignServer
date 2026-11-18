@@ -94,7 +94,7 @@ namespace ReignBetaServer
             return Math.Max(newMinimum,Math.Min(newMaximum,(int)Math.Round(newMinimum+position*(newMaximum-newMinimum),MidpointRounding.AwayFromZero)));
         }
 
-        private static bool EnsureTraitPercentageData(Dictionary<string, object> traits, string heroId)
+        internal static bool EnsureTraitPercentageData(Dictionary<string, object> traits, string heroId)
         {
             if(traits==null)return false;
             Dictionary<string,object> foundation=ReadDictionary(traits,"foundationTraits")??ReadDictionary(traits,"hiddenReignTraits");

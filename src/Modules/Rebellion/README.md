@@ -1,7 +1,11 @@
 # Rebellion module (server)
 
 The rebellion director: rebellion movements, memberships, backing requests and recognition, and the negotiated
-action drafts and approvals used by rebellion negotiations. One file, `RebellionDirector.cs`.
+action drafts and approvals used by rebellion negotiations. One file, `RebellionDirector.cs`, which holds
+`internal static partial class RebellionService` (not a `Program` partial; it calls `Program` members with an explicit
+`Program.` qualifier). `Program.RebellionRoutes.cs` stays part of `Program` and registers the service handlers.
+`Program` calls `RebellionService.UpdateNegotiationFromActionReport` and `UpdateRebellionBackingFromActionReport` from
+action reports, and the dialogue pipeline uses its rebellion classifiers.
 
 > Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Testing notes: [RebellionTesting](../../../docs/server/RebellionTesting.md).
@@ -18,7 +22,7 @@ action drafts and approvals used by rebellion negotiations. One file, `Rebellion
 
 ## Self-tests
 
-`RunRebellionSelfTests` (CLI `--run-rebellion-tests`, route `/rebellions/tests`). The VerificationLab `rebellion`
+`RebellionService.RunRebellionSelfTests` (CLI `--run-rebellion-tests`, route `/rebellions/tests`). The VerificationLab `rebellion`
 suite (`RunExtendedRebellionChecks`) lives in `Platform/VerificationLab.cs`.
 
 ## Dependencies

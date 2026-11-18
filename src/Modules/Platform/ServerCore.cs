@@ -5,12 +5,14 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
+using System.Web.Script.Serialization;
 
 namespace ReignBetaServer
 {
     // Shared stateless helpers. Available to every type in the assembly through
     // the global using static above, so call sites stay unqualified.
-    // Only pure helpers belong here: no Program state, campaign caches or settings.
+    // Only stateless helpers belong here: no Program state, campaign caches or settings.
     internal static class ServerCore
     {
         internal static Dictionary<string, object> TestDict(params object[] pairs)
@@ -185,6 +187,133 @@ namespace ReignBetaServer
             }
 
             return "";
+        }
+
+        // Shared JSON serializer (formerly Program.Json). Stateless apart from its fixed limits.
+        internal static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+
+        // JSON parsing and canonical serialization helpers.
+        internal static string UnwrapJsonResponse(string text) => UnwrapJsonResponse(text, out _);
+
+        internal static string UnwrapJsonResponse(string text, out int sourceOffset)
+        {
+            string original = text ?? "";
+            sourceOffset = original.Length - original.TrimStart().Length;
+            string source = original.Trim();
+            if (!source.StartsWith("```", StringComparison.Ordinal)) return source;
+            int line = source.IndexOf('\n');
+            if (line < 0 || !source.EndsWith("```", StringComparison.Ordinal)) return source;
+            string language = source.Substring(3, line - 3).Trim();
+            if (language.Length != 0 && !language.Equals("json", StringComparison.OrdinalIgnoreCase)) return source;
+            string body = source.Substring(line + 1, source.Length - line - 4);
+            sourceOffset += line + 1 + body.Length - body.TrimStart().Length;
+            return body.Trim();
+        }
+
+        // Generic storage/configuration parsing never searches nested values or
+        // quoted JSON for a replacement document. Recovery belongs to the caller.
+        internal static Dictionary<string, object> TryParseStrictJsonObject(string text)
+        {
+            string source = UnwrapJsonResponse(text);
+            if (!source.StartsWith("{", StringComparison.Ordinal)) return null;
+            try
+            {
+                using var document = JsonDocument.Parse(source);
+                if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (document.RootElement.EnumerateObject().Any(property => !names.Add(property.Name))) return null;
+                return Json.Deserialize<Dictionary<string, object>>(source);
+            }
+            catch (Exception ex) when (ex is JsonException || ex is ArgumentException || ex is InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        internal static Dictionary<string, object> TryParseJsonObject(string text) => TryParseStrictJsonObject(text);
+
+        internal static string CanonicalJson(object value)
+        {
+            return Json.Serialize(CanonicalizeJsonValue(value));
+        }
+
+        internal static object CanonicalizeJsonValue(object value)
+        {
+            if (value == null || value is string || value is bool || value is char || value is byte || value is sbyte || value is short || value is ushort || value is int || value is uint || value is long || value is ulong || value is float || value is double || value is decimal) return value;
+            if (value is IDictionary dictionary)
+            {
+                SortedDictionary<string, object> sorted = new SortedDictionary<string, object>(StringComparer.Ordinal);
+                foreach (DictionaryEntry entry in dictionary) sorted[Convert.ToString(entry.Key, CultureInfo.InvariantCulture) ?? ""] = CanonicalizeJsonValue(entry.Value);
+                return sorted;
+            }
+            if (value is IEnumerable enumerable)
+            {
+                List<object> list = new List<object>();
+                foreach (object item in enumerable) list.Add(CanonicalizeJsonValue(item));
+                return list;
+            }
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+        }
+
+        // Stateless PostgreSQL helpers used by QuerySql, ExecuteSql and the transaction paths.
+        internal static bool IsPostgreSqlSchemaMutation(string sql)
+        {
+            string value = (sql ?? string.Empty).TrimStart();
+            return value.StartsWith("CREATE ", StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith("ALTER ", StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith("DROP ", StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith("TRUNCATE ", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static void AcquirePostgreSqlTransactionMutationLock(
+            ReignDbConnection connection,
+            ReignDbTransaction transaction = null)
+        {
+            using (ReignDbCommand command = connection.CreateCommand())
+            {
+                command.CommandText =
+                    "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 9137));";
+                command.CommandTimeout = 180;
+                if (transaction != null)
+                    command.Transaction = transaction;
+                command.ExecuteNonQuery();
+            }
+        }
+
+        internal static bool IsStalePostgreSqlPreparedPlan(Exception exception)
+        {
+            Npgsql.PostgresException postgres = exception as Npgsql.PostgresException;
+            return postgres != null
+                && postgres.SqlState == "0A000"
+                && postgres.MessageText.IndexOf("cached plan",
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static void ResetPostgreSqlPreparedPlans(
+            ReignDbConnection connection)
+        {
+            Npgsql.NpgsqlConnection postgres = connection as Npgsql.NpgsqlConnection;
+            if (postgres != null) postgres.UnprepareAll();
+        }
+
+        internal static bool IsTransientDatabaseContention(Exception exception)
+        {
+            Npgsql.PostgresException postgres = exception as Npgsql.PostgresException;
+            return postgres != null
+                && (postgres.SqlState == Npgsql.PostgresErrorCodes.SerializationFailure
+                    || postgres.SqlState == Npgsql.PostgresErrorCodes.DeadlockDetected
+                    || postgres.SqlState == Npgsql.PostgresErrorCodes.LockNotAvailable);
+        }
+
+        internal static void AddSqlParameters(ReignDbCommand command, Dictionary<string, object> parameters)
+        {
+            foreach (KeyValuePair<string, object> pair in parameters ?? new Dictionary<string, object>())
+            {
+                System.Data.Common.DbParameter parameter = command.CreateParameter();
+                parameter.ParameterName = ReignPostgreSqlDialect.ParameterName(command.Connection, pair.Key);
+                parameter.Value = pair.Value ?? DBNull.Value;
+                command.Parameters.Add(parameter);
+            }
         }
     }
 }

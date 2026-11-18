@@ -12,9 +12,9 @@ namespace ReignBetaServer
         private static void RegisterGovernmentRoutes(ReignRouteTable routes)
         {
 #if !REIGN_EXCLUDE_COURT
-            routes.Post("/government/meeting/speaker-statement", request => RunInteractiveRequest(() => GovernmentSpeakerStatement(request.JsonBody)));
-            routes.Post("/government/hearing/discussion", request => RunInteractiveRequest(() => GovernmentHearingDiscussion(request.JsonBody)));
-            routes.Post("/government/crown/decision", request => RunInteractiveRequest(() => GovernmentCrownDecision(request.JsonBody)));
+            routes.Post("/government/meeting/speaker-statement", request => RunInteractiveRequest(() => GovernmentService.GovernmentSpeakerStatement(request.JsonBody)));
+            routes.Post("/government/hearing/discussion", request => RunInteractiveRequest(() => GovernmentService.GovernmentHearingDiscussion(request.JsonBody)));
+            routes.Post("/government/crown/decision", request => RunInteractiveRequest(() => GovernmentService.GovernmentCrownDecision(request.JsonBody)));
 #endif
         }
     }

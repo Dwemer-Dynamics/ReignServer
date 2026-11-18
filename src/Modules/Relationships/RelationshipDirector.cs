@@ -1148,7 +1148,7 @@ VALUES($id,$route,$status,$a,$b,$ca,$cb,$la,$lb,$day,$score,$aa,$ba,$ra,$rb,$pay
             return ClampDouble(0.15d+0.35d*motivation+0.40d*competence-0.10d,0.05d,0.95d);
         }
 
-        private static Dictionary<string, object> LoadDirectorHeroProfile(string campaignId,string heroId,Dictionary<string, object> snapshot)
+        internal static Dictionary<string, object> LoadDirectorHeroProfile(string campaignId,string heroId,Dictionary<string, object> snapshot)
         {
             Dictionary<string, object> result = snapshot == null ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, object>(snapshot,StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object> stored = ReadJsonObject(CharacterFile(campaignId,heroId,"profile.json"));
@@ -2134,7 +2134,7 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
 
         private static double PlayerConceptionChance(double age){if(age<18d||age>45d)return 0d;return (15d-(age-18d)*(12d/27d))/100d;}
         private static string NormalizePregnancyChoiceToken(string value){return (value??"").Trim().ToLowerInvariant().Replace("-","_").Replace(" ","_");}
-        private static double StableUnit(string seed){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(seed??""));ulong value=BitConverter.ToUInt64(hash,0);return value/(double)ulong.MaxValue;}}
+        internal static double StableUnit(string seed){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(seed??""));ulong value=BitConverter.ToUInt64(hash,0);return value/(double)ulong.MaxValue;}}
         private static double TraitFromProfile(Dictionary<string, object> profile,string key){Dictionary<string, object> direct=ReadDictionary(profile,"foundationTraits")??ReadDictionary(ReadDictionary(profile,"traits"),"foundationTraits")??ReadDictionary(profile,"traits")??new Dictionary<string, object>();return ReadDouble(direct,key,0d);}
         private static double Trait01(Dictionary<string, object> profile,string key){return ClampDouble((TraitFromProfile(profile,key)+2d)/4d,0d,1d);}
 

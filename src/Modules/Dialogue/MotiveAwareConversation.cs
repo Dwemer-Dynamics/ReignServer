@@ -58,7 +58,7 @@ namespace ReignBetaServer
             return value.Length <= MotiveStableCharacterCap ? value : LimitText(value, MotiveStableCharacterCap);
         }
 
-        private static Dictionary<string, object> TraitPercentageSnapshot(Dictionary<string, object> traitDocument)
+        internal static Dictionary<string, object> TraitPercentageSnapshot(Dictionary<string, object> traitDocument)
         {
             Dictionary<string, object> percentages = ReadDictionary(traitDocument, "traitPercentages") ?? new Dictionary<string, object>();
             Dictionary<string, object> foundations = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? new Dictionary<string, object>();
@@ -70,7 +70,7 @@ namespace ReignBetaServer
             }, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> BuildConversationDecisionContext(
+        internal static Dictionary<string, object> BuildConversationDecisionContext(
             string campaignId,
             string mode,
             string subjectId,
@@ -211,7 +211,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static Dictionary<string, object> BuildGovernmentDecisionContext(
+        internal static Dictionary<string, object> BuildGovernmentDecisionContext(
             Dictionary<string, object> payload)
         {
             Dictionary<string, object> political = ReadDictionary(
@@ -855,7 +855,7 @@ namespace ReignBetaServer
             }).ToList();
         }
 
-        private static string BuildConversationDecisionPrompt(Dictionary<string, object> context)
+        internal static string BuildConversationDecisionPrompt(Dictionary<string, object> context)
             => BuildConversationDecisionPromptCore(context)
                 + AgreementPaymentHistoryPrompt(ReadDictionary(context, "fulfilledPaymentHistory"));
 

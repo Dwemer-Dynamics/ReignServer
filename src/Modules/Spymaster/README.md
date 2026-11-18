@@ -8,8 +8,10 @@ out together with Court when `ExcludeCourt=true`.
 
 ## Main files
 
-- `Program.SpymasterRoutes.cs`: `TryHandleSpymasterRoute`, called from the `HandleClient` chain.
-- `SpymasterSystem.cs`: the handlers and schema. Shared game-free rules are in
+- `Program.SpymasterRoutes.cs`: `TryHandleSpymasterRoute`, called from the `HandleClient` chain. It stays part of
+  `Program` and calls the `SpymasterService` handlers.
+- `SpymasterSystem.cs`: the handlers and schema, in `internal static partial class SpymasterService` (not a `Program`
+  partial). It calls `Program` members with an explicit `Program.` qualifier. Shared game-free rules are in
   `shared/Reign.Shared.Source/Core/ReignSpymasterCore.cs`.
 
 ## Routes
@@ -24,8 +26,8 @@ All `POST`, each wrapped in Court's `CapitalCourtApi`: `/court/spymaster/memory`
 
 ## Self-tests
 
-`RunSpymasterSystemSelfTests`, VerificationLab suite `spymaster`. Test file compiled into the server:
-`SpymasterSystemSelfTests.cs`.
+`SpymasterService.RunSpymasterSystemSelfTests`, VerificationLab suite `spymaster`. Test file compiled into the server:
+`SpymasterSystemSelfTests.cs` (also part of `SpymasterService`).
 
 ## Dependencies
 

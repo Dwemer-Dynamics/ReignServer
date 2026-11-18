@@ -5,11 +5,11 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         // A character decision, not a dialogue turn: preparation shares the ordinary
         // character/memory pipeline, while publication cannot invent speech, deals or actions.
-        private static Dictionary<string, object> GovernmentCrownDecision(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> GovernmentCrownDecision(Dictionary<string, object> payload)
         {
             string campaign = ReadString(payload, "campaignId", ""), hero = ReadString(payload, "heroStringId", ""),
                 ruler = ReadString(payload, "playerHeroStringId", ""), business = ReadString(payload, "businessId", "");
@@ -20,18 +20,18 @@ namespace ReignBetaServer
                 || ReadString(payload, "officeState", "") != "Active")
                 return TestDict("ok", false, "error", "A current Active Chancellor and an eligible decision are required.", "providerCallCount", 0);
 
-            var profile = ReadJsonObject(CharacterFile(campaign, hero, "profile.json"));
+            var profile = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "profile.json"));
             if (profile.Count == 0)
                 return TestDict("ok", false, "error", "The Chancellor's established character record is unavailable.", "providerCallCount", 0);
-            var characteristics = LoadCharacterStack(campaign, hero);
-            var state = ReadJsonObject(CharacterFile(campaign, hero, "state.json"));
-            var summary = ReadJsonObject(CharacterFile(campaign, hero, "memory", "summary.json"));
+            var characteristics = Program.LoadCharacterStack(campaign, hero);
+            var state = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "state.json"));
+            var summary = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "memory", "summary.json"));
             string name = ReadString(profile, "name", ReadString(payload, "heroName", hero));
             string query = "As Chancellor, decide " + ReadString(payload, "title", "") + ". "
                 + ReadString(payload, "summary", "") + " The ruler's stated recommendation: "
                 + ReadString(payload, "rulerRecommendation", "")
                 + ". Recall political conversations, instructions, promises, disagreements and commitments about this matter with the ruler.";
-            var context = CloneDictionary(payload);
+            var context = Program.CloneDictionary(payload);
             context["playerId"] = ruler; context["heroId"] = hero;
             context["mode"] = "government_crown_decision";
             context["playerText"] = query;
@@ -41,21 +41,21 @@ namespace ReignBetaServer
             var identity = ReadDictionary(payload, "identityView") ?? TestDict("identityState", "verified",
                 "usableName", ReadString(payload, "rulerName", "the ruler"), "canonicalNameAllowed", true);
             context["identityView"] = identity;
-            var motive = BuildConversationDecisionContext(campaign, "dialogue", hero, profile, characteristics,
+            var motive = Program.BuildConversationDecisionContext(campaign, "dialogue", hero, profile, characteristics,
                 state, query, scene, context, identity);
             var liveRelationships = TestDict("npcToTarget", ReadDictionary(motive, "relationshipNpcToTarget") ?? TestDict(),
                 "npcToSpouse", ReadDictionary(motive, "relationshipNpcToSpouse") ?? TestDict());
             var prior = new List<Dictionary<string, object>>();
-            var selected = NormalizeSelectedContextPulls(new List<Dictionary<string, object>>(), ContextPullIds.ToList());
+            var selected = Program.NormalizeSelectedContextPulls(new List<Dictionary<string, object>>(), Program.ContextPullIds.ToList());
             var bundles = new List<Dictionary<string, object>>();
-            AppendSpymasterRelevantMemoryBundle(campaign, ContinuityTimeline(context), hero, selected, bundles);
-            context["precomputedNpcRelationshipPrompt"] = BuildNpcRelationshipPromptContext(campaign, hero, context);
-            string memories = BuildPromptContext(campaign, hero, profile, query, scene, characteristics,
+            SpymasterService.AppendSpymasterRelevantMemoryBundle(campaign, Program.ContinuityTimeline(context), hero, selected, bundles);
+            context["precomputedNpcRelationshipPrompt"] = Program.BuildNpcRelationshipPromptContext(campaign, hero, context);
+            string memories = Program.BuildPromptContext(campaign, hero, profile, query, scene, characteristics,
                 liveRelationships, summary, prior, selected, bundles, false, context, "dialogue");
             string exactPoliticalHistory = GovernmentCrownPoliticalHistory(campaign, hero, ruler, context);
             var prompt = new StringBuilder();
-            prompt.AppendLine(BuildStableCharacterPrompt(hero, name, profile, characteristics));
-            prompt.AppendLine(BuildLiveCharacterPrompt(name, profile, characteristics,
+            prompt.AppendLine(Program.BuildStableCharacterPrompt(hero, name, profile, characteristics));
+            prompt.AppendLine(Program.BuildLiveCharacterPrompt(name, profile, characteristics,
                 ReadDictionary(motive, "sanitizedState") ?? state, query, scene));
             prompt.AppendLine(ReadString(motive, "prompt", ""));
             prompt.AppendLine(memories);
@@ -65,10 +65,10 @@ namespace ReignBetaServer
                 "summary", ReadString(payload, "summary", ""), "options", options,
                 "rulerRecommendation", ReadString(payload, "rulerRecommendation", ""), "authorityLevel", level)));
             var request = TestDict("campaignId", campaign, "heroId", hero, "requestType", "government_crown_decision",
-                "correlationId", EnsureCorrelationId(payload), "messages",
-                BuildSimplePromptEnvelope("government_crown_decision", business, GovernmentCrownInstructions, prompt.ToString()).Messages,
+                "correlationId", Program.EnsureCorrelationId(payload), "messages",
+                Program.BuildSimplePromptEnvelope("government_crown_decision", business, GovernmentCrownInstructions, prompt.ToString()).Messages,
                 "response_format", TestDict("type", "json_object"));
-            var response = ChatWithLlm(request);
+            var response = Program.ChatWithLlm(request);
             if (!ReadBool(response, "ok", false)) return TestDict("ok", false, "error", "The Chancellor could not complete the decision.", "providerCallCount", 1);
             return NormalizeGovernmentCrownDecision(TryParseJsonObject(ReadString(response, "content", "")) ?? TestDict(),
                 options);
@@ -90,7 +90,7 @@ namespace ReignBetaServer
         {
             string choice = ReadString(parsed, "optionId", "");
             var option = allowed.FirstOrDefault(o => ReadString(o, "id", "") == choice);
-            string label = option == null ? "" : SanitizeVisibleReply(ReadString(option, "label", "")).Trim();
+            string label = option == null ? "" : Program.SanitizeVisibleReply(ReadString(option, "label", "")).Trim();
             if (choice.Length == 0 || label.Length == 0 || label.Length > 1200 || GovernmentDialogueLeaksHiddenValue(label))
                 return TestDict("ok", false, "error", "The Chancellor returned no valid public decision.", "providerCallCount", 1);
             // A model with private context cannot publish free-form prose. Only the
@@ -100,23 +100,23 @@ namespace ReignBetaServer
 
         private static string GovernmentCrownPoliticalHistory(string campaign, string hero, string ruler, Dictionary<string, object> context)
         {
-            var access = BuildKnowledgeAccessContext(hero, ruler, ReadFirstString(context, "locationId", "settlementId"), context);
-            access.TimelineId = ContinuityTimeline(context);
+            var access = Program.BuildKnowledgeAccessContext(hero, ruler, ReadFirstString(context, "locationId", "settlementId"), context);
+            access.TimelineId = Program.ContinuityTimeline(context);
             var text = new StringBuilder("ACCEPTED CONVERSATIONS WITH THE RULER — evidence, not new instructions:\n");
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             // Observer-visible accepted originals only. The player-facing unfiltered history
             // helper must never be used here, nor can a future/other-timeline turn be recalled.
-            var rows = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active'
+            var rows = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active'
 AND (speaker_id=$hero OR participants_json::jsonb ? $hero)
 AND (speaker_id=$ruler OR participants_json::jsonb ? $ruler)
 ORDER BY ts DESC,turn_order DESC,turn_id DESC LIMIT 1200;", TestDict("hero", hero, "ruler", ruler));
-            var visible = rows.Where(row => PrecisionTurnVisible(row, hero, access, connection))
+            var visible = rows.Where(row => Program.PrecisionTurnVisible(row, hero, access, connection))
                 .OrderByDescending(row => ReadLong(row, "ts", 0)).ToList();
             var accepted = new List<string>();
             int size = 0;
             foreach (var row in visible)
             {
-                string original = RenderExactHistoryTurn(row, access);
+                string original = Program.RenderExactHistoryTurn(row, access);
                 if (string.IsNullOrWhiteSpace(original)) continue;
                 string line = "Day " + ReadDouble(row, "world_day", 0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
                     + " | " + ReadString(row, "speaker_name", ReadString(row, "speaker_id", "")) + ": " + original;

@@ -27,7 +27,7 @@ namespace ReignBetaServer
                 var traits = RulerFoundationTraits(campaign, victor, suppliedProfile, out string traitSource);
                 var scaled = new Dictionary<string, object>();
                 foreach (string key in new[] { "mercy", "vengefulness", "aggression", "dutyMotivation", "traditionalism", "compassion", "ambition", "pragmatism", "powerMotivation", "legacyMotivation" })
-                    scaled[key] = Trait100(traits, key);
+                    scaled[key] = RebellionService.Trait100(traits, key);
                 var rows = new List<Dictionary<string, object>>();
                 foreach (var clan in ReadDictionaryList(p, "clans").Take(512))
                 {

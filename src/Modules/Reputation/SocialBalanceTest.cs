@@ -557,7 +557,7 @@ ORDER BY created_ts,signal_id;", new Dictionary<string, object>
             string runId = ReadString(enrollment, "runId", "");
             Dictionary<string, object> result = ReadDictionary(command, "result")
                 ?? new Dictionary<string, object>();
-            Dictionary<string, object> rebellionTests = RunRebellionSelfTests();
+            Dictionary<string, object> rebellionTests = RebellionService.RunRebellionSelfTests();
             List<Dictionary<string, object>> testRows = ReadDictionaryList(rebellionTests, "tests");
             List<string> failedTests = testRows.Where(row => !ReadBool(row, "passed", false))
                 .Select(row => ReadFirstString(row, "caseId", "name", "id"))

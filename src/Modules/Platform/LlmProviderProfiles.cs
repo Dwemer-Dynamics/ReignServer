@@ -69,7 +69,7 @@ namespace ReignBetaServer
             return clearKeys;
         }
 
-        private static Dictionary<string, object> BuildChatRequestBody(Dictionary<string, object> settings,
+        internal static Dictionary<string, object> BuildChatRequestBody(Dictionary<string, object> settings,
             Dictionary<string, object> payload, List<Dictionary<string, object>> messages, string model)
         {
             var body = new Dictionary<string, object> { ["model"] = model, ["messages"] = messages,

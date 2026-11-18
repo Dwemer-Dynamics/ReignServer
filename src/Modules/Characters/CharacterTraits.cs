@@ -24,7 +24,7 @@ namespace ReignBetaServer
             "emotionalPattern", "moralBoundaries", "underPressure", "internalContradictions"
         };
 
-        private static readonly string[] CoreTraitKeys =
+        internal static readonly string[] CoreTraitKeys =
         {
             "curiosity", "ambition", "honesty", "compassion", "courage", "discipline", "sociability", "emotionalStability", "pride", "patience",
             "socialTrust", "flirtatiousness", "authorityRespect", "assertiveness", "tact", "loyalty", "vengefulness",
@@ -38,7 +38,7 @@ namespace ReignBetaServer
             "courage", "mercy", "generosity"
         };
 
-        private static Dictionary<string, object> BuildTraitDocument(Dictionary<string, object> hero)
+        internal static Dictionary<string, object> BuildTraitDocument(Dictionary<string, object> hero)
         {
             hero = hero ?? new Dictionary<string, object>();
             Dictionary<string, object> native = ReadDictionary(hero, "traits") ?? new Dictionary<string, object>();
@@ -511,7 +511,7 @@ namespace ReignBetaServer
             return text.Substring(0, maximum).TrimEnd();
         }
 
-        private static int PersonalityTraitPercentage(Dictionary<string, object> traits, string key)
+        internal static int PersonalityTraitPercentage(Dictionary<string, object> traits, string key)
         {
             Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
             if (percentages.ContainsKey(key)) return Math.Max(0, Math.Min(100, ReadInt(percentages, key, 50)));
