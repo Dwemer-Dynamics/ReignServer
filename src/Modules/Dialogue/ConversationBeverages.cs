@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string BeverageCatalogueVersion = "reign-beverages-v1";
         private enum DrinkAlcohol { Unknown, No, Yes, VariantRequired }

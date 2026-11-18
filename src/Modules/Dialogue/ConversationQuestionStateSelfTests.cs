@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunConversationQuestionStateAssertions()
         {
@@ -23,11 +23,11 @@ namespace ReignBetaServer
             var laterQuestion = TestDict("eventId", "ira_response", "role", "npc", "sessionId", "shared", "beatId", "beat_12",
                 "sequence", 12L, "worldDay", 5d);
             Check("floor_input_cannot_answer_same_beat_other_event", QuestionSourceOrder(floorAnswer, laterQuestion) == "before");
-            var unknownAnswer = CloneDictionary(floorAnswer); unknownAnswer.Remove("groupInputStage"); unknownAnswer.Remove("beatId");
+            var unknownAnswer = Program.CloneDictionary(floorAnswer); unknownAnswer.Remove("groupInputStage"); unknownAnswer.Remove("beatId");
             Check("unstored_alias_is_unknown_not_infinitely_later", QuestionSourceOrder(unknownAnswer, laterQuestion) == "unknown");
-            var laterAnswer = CloneDictionary(floorAnswer); laterAnswer["beatId"] = "beat_13"; laterAnswer["sequence"] = 13L;
+            var laterAnswer = Program.CloneDictionary(floorAnswer); laterAnswer["beatId"] = "beat_13"; laterAnswer["sequence"] = 13L;
             Check("actual_later_beat_answer_is_valid", QuestionSourceOrder(laterAnswer, laterQuestion) == "after");
-            var otherSession = CloneDictionary(floorAnswer); otherSession["sessionId"] = "other"; otherSession["sequence"] = 13L;
+            var otherSession = Program.CloneDictionary(floorAnswer); otherSession["sessionId"] = "other"; otherSession["sequence"] = 13L;
             Check("same_beat_string_in_other_session_is_not_same_stage", QuestionSourceOrder(otherSession, laterQuestion) == "after");
             var sameEventQuestion = TestDict("eventId", "same", "sourceAlias", "current_npc");
             Check("same_event_player_still_precedes_npc", QuestionSourceOrder(TestDict("eventId", "same", "sourceAlias", "current_player"), sameEventQuestion) == "before");
@@ -35,7 +35,7 @@ namespace ReignBetaServer
             {
                 ConversationStartApi(TestDict("campaignId", campaign, "timelineId", "question_timeline", "sessionId", "question_session",
                     "npcId", "npc", "playerId", "player", "worldDay", 5d, "ts", 1L));
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationContinuitySchema(connection);
                     void Turn(string id, string eventId, string who, string text, int order, long timestamp) =>
@@ -56,7 +56,7 @@ namespace ReignBetaServer
                     CaptureContinuityReadSnapshot(connection, payload, "npc");
                     Turn("plan_answer", "answer_event", "player", answer, 2, 3L);
                     Turn("plan_ack", "answer_event", "npc", ack, 3, 4L);
-                    var resolved = CloneDictionary(proposed);
+                    var resolved = Program.CloneDictionary(proposed);
                     resolved["evidenceQuote"] = ack; resolved["expectedRevision"] = 99;
                     resolved["questionState"] = TestDict("question", TestDict("turnId", "plan_question", "speakerId", "npc", "quote", question),
                         "addresseeIds", new[] { "player" }, "answerState", "answered",
@@ -65,7 +65,7 @@ namespace ReignBetaServer
                     var accepted = StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "answer_event", ack,
                         new List<Dictionary<string, object>> { resolved }, 4L);
                     Check("answered_and_unconvincing_can_both_persist", ReadStringList(accepted, "applied").Contains("question_plan")
-                        && ReadString(QuerySql(connection, "SELECT status FROM conversation_continuity WHERE record_id='question_plan';").Single(), "status", "") == "resolved", accepted);
+                        && ReadString(Program.QuerySql(connection, "SELECT status FROM conversation_continuity WHERE record_id='question_plan';").Single(), "status", "") == "resolved", accepted);
                     var next = new Dictionary<string, object>(payload);
                     var required = new List<string>();
                     string prompt = BuildQuestionContinuityPrompt(connection, next, "npc", "player", required);
@@ -73,19 +73,19 @@ namespace ReignBetaServer
                         && prompt.Contains("linked answer state=answered") && prompt.Contains("unconvincing") && required.Contains("question_plan"), prompt);
                     Check("missing_original_is_not_claimed_accurate", ReadString(ReadDictionary(next, "questionStateEvidence"), "coverage", "") == "selected_originals_verified");
 
-                    var wrongActor = CloneDictionary(resolved); wrongActor["id"] = "";
+                    var wrongActor = Program.CloneDictionary(resolved); wrongActor["id"] = "";
                     ReadDictionaryList(ReadDictionary(wrongActor, "questionState"), "answers")[0]["speakerId"] = "npc";
                     Check("wrong_answer_actor_rejected", PrepareQuestionContinuityWrite(connection, wrongActor, payload, "npc", "player", "answer_event", ack) == "question_answer_source_unverified");
-                    var preceding = CloneDictionary(resolved); preceding["id"] = "";
+                    var preceding = Program.CloneDictionary(resolved); preceding["id"] = "";
                     ReadDictionary(preceding, "questionState")["answers"] = new[] { TestDict("turnId", "old_answer", "speakerId", "player", "quote", "We could first secure the old bridge.") };
                     Check("old_answer_cannot_answer_later_question", PrepareQuestionContinuityWrite(connection, preceding, payload, "npc", "player", "answer_event", ack) == "question_answer_precedes_question");
-                    var noAnswer = CloneDictionary(resolved); noAnswer["id"] = "";
+                    var noAnswer = Program.CloneDictionary(resolved); noAnswer["id"] = "";
                     ReadDictionary(noAnswer, "questionState")["answers"] = new List<Dictionary<string, object>>();
                     Check("asserting_answer_without_source_rejected", PrepareQuestionContinuityWrite(connection, noAnswer, payload, "npc", "player", "answer_event", ack) == "question_answer_required");
 
                     const string detail = "Which town would we approach first?";
                     Turn("town_question", "detail_event", "npc", detail, 4, 5L);
-                    var moving = CloneDictionary(proposed);
+                    var moving = Program.CloneDictionary(proposed);
                     moving["evidenceQuote"] = detail;
                     moving["questionState"] = TestDict("question", TestDict("turnId", "town_question", "speakerId", "npc", "quote", detail),
                         "addresseeIds", new[] { "player" }, "answerState", "unanswered", "answers", new List<Dictionary<string, object>>(),
@@ -95,14 +95,14 @@ namespace ReignBetaServer
                     ReadDictionary(moving, "questionState")["followUpTo"] = "question_plan";
                     Check("narrower_followup_has_distinct_identity", PrepareQuestionContinuityWrite(connection, moving, payload, "npc", "player", "detail_event", detail) == ""
                         && ReadString(moving, "id", "") != "question_plan");
-                    var refusedReopen = CloneDictionary(resolved);
+                    var refusedReopen = Program.CloneDictionary(resolved);
                     ReadDictionary(refusedReopen, "questionState")["question"] = TestDict("turnId", "plan_question", "speakerId", "npc", "quote", question);
                     ReadDictionary(refusedReopen, "questionState")["answers"] = new List<Dictionary<string, object>>();
                     ReadDictionary(refusedReopen, "questionState")["answerState"] = "unanswered";
                     ReadDictionary(refusedReopen, "questionState")["evaluation"] = "unassessed";
                     Check("repetition_does_not_reopen_answered_question", PrepareQuestionContinuityWrite(connection, refusedReopen, payload, "npc", "player", "detail_event", ack) == "answered_question_requires_explicit_reopening");
 
-                    var unseen = CloneDictionary(proposed); unseen["id"] = "";
+                    var unseen = Program.CloneDictionary(proposed); unseen["id"] = "";
                     ReadDictionary(unseen, "questionState")["question"] = TestDict("turnId", "plan_question", "speakerId", "npc", "quote", question);
                     ReadDictionary(unseen, "questionState")["addresseeIds"] = new[] { "absent_npc" };
                     Check("absent_actor_is_not_obliged_to_answer", PrepareQuestionContinuityWrite(connection, unseen, payload, "npc", "player", "question_event", question) == "question_addressee_unverified");
@@ -116,7 +116,7 @@ namespace ReignBetaServer
                     var contentEvidence = TestDict("requiredContent", new[] { TestDict("id", "qa", "text", content, "hash", PromptHash(content)) });
                     Check("source_id_without_answer_content_fails_coverage", MissingContinuityContent("question_plan", contentEvidence).Contains("qa"));
                     Check("complete_content_survives_provider_serialization", MissingContinuityContent(Json.Serialize(new[] { TestDict("role", "system", "content", content) }), contentEvidence, true).Count == 0);
-                    var alteredEvidence = CloneDictionary(contentEvidence);
+                    var alteredEvidence = Program.CloneDictionary(contentEvidence);
                     ReadDictionaryList(alteredEvidence, "requiredContent")[0]["text"] = "question_plan only";
                     Check("tampered_content_hash_fails_coverage", MissingContinuityContent("question_plan only", alteredEvidence).Contains("qa"));
                     string rawIdentityContent = "question_id: Michael asked how.  \r\nPlayer answered with caravans.\r\nNPC acknowledged the answer.";
@@ -147,20 +147,20 @@ namespace ReignBetaServer
                     Check("new_question_does_not_grant_player_a_turn", sameBeat.Contains("none yet") && !sameBeat.Contains("Unresolved questions:"), sameBeat);
                     UpdateSharedGroupConversationState(campaign, group, "npc_b", "Speaker B", "I prefer to listen to that answer first.", "group_questions", 21L, "group_event_2");
                     Check("last_npc_does_not_erase_prior_question", BuildSharedGroupConversationPrompt(campaign, group, "npc", new List<Dictionary<string, object>>(), "I have described our plan.").Contains(question));
-                    long revision = ReadLong(QuerySql(connection, "SELECT revision FROM group_conversation_state WHERE session_id='group_questions';").Single(), "revision", 0);
+                    long revision = ReadLong(Program.QuerySql(connection, "SELECT revision FROM group_conversation_state WHERE session_id='group_questions';").Single(), "revision", 0);
                     UpdateSharedGroupConversationState(campaign, group, "npc", "Speaker A", "A retried response must not replace delivered speech.", "group_questions", 22L, "group_retry");
-                    Check("retry_does_not_add_delivery_or_state_revision", ReadLong(QuerySql(connection, "SELECT revision FROM group_conversation_state WHERE session_id='group_questions';").Single(), "revision", 0) == revision
-                        && QuerySql(connection, "SELECT * FROM group_conversation_contributions WHERE session_id='group_questions' AND role='npc';").Count == 2);
+                    Check("retry_does_not_add_delivery_or_state_revision", ReadLong(Program.QuerySql(connection, "SELECT revision FROM group_conversation_state WHERE session_id='group_questions';").Single(), "revision", 0) == revision
+                        && Program.QuerySql(connection, "SELECT * FROM group_conversation_contributions WHERE session_id='group_questions' AND role='npc';").Count == 2);
                     group["sceneTurnId"] = "group_beat_2";
                     group["repairStatus"] = TestDict("allChecksCleared", false);
                     UpdateSharedGroupConversationState(campaign, group, "npc", "Speaker A", "Plain failed repair without punctuation", "group_questions", 23L, "group_failed");
-                    Check("repeated_player_words_in_new_beat_are_not_deduplicated", QuerySql(connection,
+                    Check("repeated_player_words_in_new_beat_are_not_deduplicated", Program.QuerySql(connection,
                         "SELECT * FROM group_conversation_contributions WHERE session_id='group_questions' AND role='player';").Count == 2);
-                    Check("structured_repair_failure_is_authority", ReadString(QuerySql(connection,
+                    Check("structured_repair_failure_is_authority", ReadString(Program.QuerySql(connection,
                         "SELECT validation_status FROM group_conversation_contributions WHERE source_event_id='group_failed';").Single(), "validation_status", "") == "visible_failed_repair");
                     group["sceneTurnId"] = "group_beat_3"; group["repairStatus"] = TestDict("allChecksCleared", true);
                     UpdateSharedGroupConversationState(campaign, group, "npc", "Speaker A", "A successful structured result.,", "group_questions", 24L, "group_success");
-                    Check("punctuation_cannot_override_structured_success", ReadString(QuerySql(connection,
+                    Check("punctuation_cannot_override_structured_success", ReadString(Program.QuerySql(connection,
                         "SELECT validation_status FROM group_conversation_contributions WHERE source_event_id='group_success';").Single(), "validation_status", "") == "accepted_speech");
                     string laterBeat = BuildSharedGroupConversationPrompt(campaign, group, "npc_b", new List<Dictionary<string, object>>(), "I have described our plan.");
                     Check("later_player_opportunity_is_not_evasion_verdict", laterBeat.Contains("later player contribution exists") && laterBeat.Contains("does not classify it as unanswered"), laterBeat);
@@ -193,9 +193,9 @@ namespace ReignBetaServer
                         && requestPrompt.Contains(requestAnswer) && requestPrompt.Contains("direct_information_request") && requestPrompt.Contains("unconvincing"), requestPrompt);
                     var requestLink = TestDict("relatedTurnId", "information_request", "relationKind", "answer", "relatedQuote", request);
                     Check("answer_link_supports_information_requests", ConversationContinuityLinkError(connection, requestLink, "npc", "question_timeline", 5d) == "");
-                    var requestRow = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='information_request';").Single();
+                    var requestRow = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='information_request';").Single();
                     Check("retrieval_keeps_information_request_with_next_answer", ExpandPrecisionQuestionContext(connection,
-                        new[] { requestRow }.ToList(), BuildKnowledgeAccessContext("npc", "player", "", requestPayload))
+                        new[] { requestRow }.ToList(), Program.BuildKnowledgeAccessContext("npc", "player", "", requestPayload))
                         .Any(row => ReadString(row, "turn_id", "") == "information_answer"));
                     var requestFrames = GroupSpokenQuestionFrames("*He sits back.*\n\n" + conditionalRequest, "request_source", "npc", "same_beat", new List<string> { "npc", "player" });
                     Check("group_conditional_request_retains_original_words", requestFrames.Count == 1 && ReadString(requestFrames[0], "quote", "") == conditionalRequest
@@ -255,16 +255,16 @@ namespace ReignBetaServer
                     Check("nominal_answer_retained_in_next_read", ReadStringList(nominalAnswered, "applied").Contains("nominal_question_record")
                         && nominalPrompt.Contains(nominalQuestion) && nominalPrompt.Contains(nominalAnswer)
                         && nominalPrompt.Contains("linked answer state=answered"), nominalAnswered);
-                    var nominalRow = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='nominal_question';").Single();
+                    var nominalRow = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='nominal_question';").Single();
                     Check("nominal_retrieval_keeps_adjacent_answer", ExpandPrecisionQuestionContext(connection,
-                        new[] { nominalRow }.ToList(), BuildKnowledgeAccessContext("npc", "player", "", nominalPayload))
+                        new[] { nominalRow }.ToList(), Program.BuildKnowledgeAccessContext("npc", "player", "", nominalPayload))
                         .Any(row => ReadString(row, "turn_id", "") == "nominal_answer"));
 
-                    ExecuteSql(connection, "UPDATE conversation_turns SET text='The source was changed.' WHERE turn_id='plan_answer';");
+                    Program.ExecuteSql(connection, "UPDATE conversation_turns SET text='The source was changed.' WHERE turn_id='plan_answer';");
                     string changed = BuildQuestionContinuityPrompt(connection, next, "npc", "player", new List<string>());
                     Check("changed_source_cannot_certify_old_summary", !changed.Contains(answer)
                         && ReadString(ReadDictionary(next, "questionStateEvidence"), "coverage", "") == "incomplete"
-                        && QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='question_plan';").Count == 1, changed);
+                        && Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='question_plan';").Count == 1, changed);
                 }
             }
             catch (Exception ex) { Check("suite_exception", false, ex.ToString()); }
@@ -288,7 +288,7 @@ namespace ReignBetaServer
             {
                 ConversationStartApi(TestDict("campaignId", campaign, "timelineId", "review_timeline", "sessionId", "review_session",
                     "npcId", "npc", "playerId", "player", "worldDay", 5d, "ts", 1L));
-                using var connection = OpenCampaignConnection(campaign);
+                using var connection = Program.OpenCampaignConnection(campaign);
                 EnsureConversationContinuitySchema(connection);
                 int order = 0;
                 void Turn(string id, string who, string text, Dictionary<string, object> context = null, List<string> audience = null) =>
@@ -304,7 +304,7 @@ namespace ReignBetaServer
                 var initial = StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "z_original_event", question,
                     new[] { write }.ToList(), 201L);
                 Check("original_published_before_question_write", ReadStringList(initial, "applied").Contains("review_question"), initial);
-                Dictionary<string, object> Row() => QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='review_question';").Single();
+                Dictionary<string, object> Row() => Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='review_question';").Single();
                 string before = Json.Serialize(Row());
                 Turn("other_npc", "other", "I am listening.");
                 string npcOnly = BuildQuestionContinuityPrompt(connection, payload, "npc", "player", new());
@@ -317,9 +317,9 @@ namespace ReignBetaServer
                 Turn("foreign_branch", "player", "FOREIGN_BRANCH_SECRET", new Dictionary<string, object>(payload) { ["timelineId"] = "foreign" });
                 Turn("private_turn", "player", "PRIVATE_SECRET", audience: new List<string> { "player", "other" });
                 Turn("future_day", "player", "FUTURE_DAY_SECRET");
-                ExecuteSql(connection, "UPDATE conversation_turns SET world_day=6 WHERE turn_id='future_day';");
+                Program.ExecuteSql(connection, "UPDATE conversation_turns SET world_day=6 WHERE turn_id='future_day';");
                 Turn("future_time", "player", "FUTURE_TIME_SECRET");
-                ExecuteSql(connection, "UPDATE conversation_turns SET ts=9000 WHERE turn_id='future_time';");
+                Program.ExecuteSql(connection, "UPDATE conversation_turns SET ts=9000 WHERE turn_id='future_time';");
                 payload["memoryAsOfTimestamp"] = 1000L;
                 var omitted = StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "omitted", "Let us walk.", new(), 250L);
                 string prompt = BuildQuestionContinuityPrompt(connection, payload, "npc", "player", new());
@@ -339,53 +339,53 @@ namespace ReignBetaServer
                 past = new Dictionary<string, object>(payload) { ["memoryAsOfAcceptedSequence"] = ReadLong(original, "sequence", 0) };
                 Check("sequence_cutoff_excludes_later_turns", !BuildQuestionContinuityPrompt(connection, past, "npc", "player", new()).Contains(answer));
 
-                var update = CloneDictionary(write);
+                var update = Program.CloneDictionary(write);
                 update["evidenceQuote"] = ack; update["expectedRevision"] = 1;
                 update["questionState"] = TestDict("addresseeIds", new[] { "player" }, "answerState", "answered",
                     "answers", new[] { TestDict("turnId", "a_answer", "speakerId", "player", "quote", answer) }, "evaluation", "unconvincing", "followUpTo", "");
-                var omittedAddressees = CloneDictionary(update);
+                var omittedAddressees = Program.CloneDictionary(update);
                 ReadDictionary(omittedAddressees, "questionState").Remove("addresseeIds");
                 ReadDictionary(omittedAddressees, "questionState")["question"] = TestDict("turnId", "", "speakerId", "", "quote", "");
                 Check("empty_placeholder_and_omitted_addressees_bind_original", PrepareQuestionContinuityWrite(connection, omittedAddressees, payload, "npc", "player", "ack_event", ack) == ""
                     && ReadStringList(ReadDictionary(omittedAddressees, "questionState"), "addresseeIds").SequenceEqual(new[] { "player" }));
-                var emptyAddressees = CloneDictionary(update);
+                var emptyAddressees = Program.CloneDictionary(update);
                 ReadDictionary(emptyAddressees, "questionState")["addresseeIds"] = new string[0];
                 Check("explicit_empty_addressees_still_rejected", PrepareQuestionContinuityWrite(connection, emptyAddressees, payload, "npc", "player", "ack_event", ack) == "question_addressee_unverified");
-                var eventAlias = CloneDictionary(update);
+                var eventAlias = Program.CloneDictionary(update);
                 ReadDictionaryList(ReadDictionary(eventAlias, "questionState"), "answers")[0]["turnId"] = "a_answer_event";
                 Check("exact_visible_exchange_alias_binds_canonical_turn", PrepareQuestionContinuityWrite(connection, eventAlias, payload, "npc", "player", "ack_event", ack) == ""
                     && ReadString(ReadDictionaryList(ReadDictionary(eventAlias, "questionState"), "answers")[0], "turnId", "") == "a_answer");
                 Turn("ambiguous_alias", "player", answer);
-                ExecuteSql(connection, "UPDATE conversation_turns SET event_id='a_answer_event' WHERE turn_id='ambiguous_alias';");
-                var ambiguousAlias = CloneDictionary(update);
+                Program.ExecuteSql(connection, "UPDATE conversation_turns SET event_id='a_answer_event' WHERE turn_id='ambiguous_alias';");
+                var ambiguousAlias = Program.CloneDictionary(update);
                 ReadDictionaryList(ReadDictionary(ambiguousAlias, "questionState"), "answers")[0]["turnId"] = "a_answer_event";
                 Check("ambiguous_exchange_alias_still_rejected", PrepareQuestionContinuityWrite(connection, ambiguousAlias, payload, "npc", "player", "ack_event", ack) == "question_answer_source_unverified");
-                ExecuteSql(connection, "UPDATE conversation_turns SET status='inactive' WHERE turn_id='ambiguous_alias';");
-                var redundantAnswer = CloneDictionary(update);
+                Program.ExecuteSql(connection, "UPDATE conversation_turns SET status='inactive' WHERE turn_id='ambiguous_alias';");
+                var redundantAnswer = Program.CloneDictionary(update);
                 redundantAnswer["relationKind"] = "answer"; redundantAnswer["relatedTurnId"] = "a_answer"; redundantAnswer["relatedQuote"] = answer;
                 Check("validated_answer_relation_binds_original_question", PrepareQuestionContinuityWrite(connection, redundantAnswer, payload, "npc", "player", "ack_event", ack) == ""
                     && ConversationContinuityLinkError(connection, redundantAnswer, "npc", "review_timeline", 5d) == ""
                     && !redundantAnswer.ContainsKey("relatedTurnId")
                     && ReadString(ReadDictionary(redundantAnswer, "questionAnswerLinkNormalization"), "questionTurnId", "") == "z_original");
-                var unrelatedLink = CloneDictionary(update);
+                var unrelatedLink = Program.CloneDictionary(update);
                 unrelatedLink["relationKind"] = "answer"; unrelatedLink["relatedTurnId"] = "later_no_limit"; unrelatedLink["relatedQuote"] = "There is nothing I would exclude.";
                 Check("unvalidated_answer_relation_keeps_generic_guard", PrepareQuestionContinuityWrite(connection, unrelatedLink, payload, "npc", "player", "ack_event", ack) == ""
                     && ConversationContinuityLinkError(connection, unrelatedLink, "npc", "review_timeline", 5d) == "related_source_not_question");
-                var substitution = CloneDictionary(update);
+                var substitution = Program.CloneDictionary(update);
                 ReadDictionary(substitution, "questionState")["question"] = TestDict("turnId", "reasked_question", "speakerId", "npc", "quote", "What would you actually do for me?");
                 Check("real_reask_cannot_replace_original_identity", PrepareQuestionContinuityWrite(connection, substitution, payload, "npc", "player", "ack_event", ack) == "question_identity_changed");
-                var unknown = CloneDictionary(update); unknown["id"] = "unknown";
+                var unknown = Program.CloneDictionary(update); unknown["id"] = "unknown";
                 string unknownError = PrepareQuestionContinuityWrite(connection, unknown, payload, "npc", "player", "ack_event", ack);
                 Check("unknown_and_other_owner_updates_fail_equally", unknownError == "question_source_unverified"
-                    && PrepareQuestionContinuityWrite(connection, CloneDictionary(update), payload, "other", "player", "ack_event", ack) == unknownError);
+                    && PrepareQuestionContinuityWrite(connection, Program.CloneDictionary(update), payload, "other", "player", "ack_event", ack) == unknownError);
                 var branch = new Dictionary<string, object>(payload) { ["timelineId"] = "different_branch" };
-                Check("bound_update_cannot_cross_branch", PrepareQuestionContinuityWrite(connection, CloneDictionary(update), branch, "npc", "player", "ack_event", ack) == unknownError);
+                Check("bound_update_cannot_cross_branch", PrepareQuestionContinuityWrite(connection, Program.CloneDictionary(update), branch, "npc", "player", "ack_event", ack) == unknownError);
                 var rewind = new Dictionary<string, object>(payload) { ["worldDay"] = 4d };
-                Check("bound_update_cannot_cross_rewind", PrepareQuestionContinuityWrite(connection, CloneDictionary(update), rewind, "npc", "player", "ack_event", ack) == unknownError);
-                var wrongActor = CloneDictionary(update);
+                Check("bound_update_cannot_cross_rewind", PrepareQuestionContinuityWrite(connection, Program.CloneDictionary(update), rewind, "npc", "player", "ack_event", ack) == unknownError);
+                var wrongActor = Program.CloneDictionary(update);
                 ReadDictionaryList(ReadDictionary(wrongActor, "questionState"), "answers")[0]["speakerId"] = "npc";
                 Check("bound_update_still_checks_answer_actor", PrepareQuestionContinuityWrite(connection, wrongActor, payload, "npc", "player", "ack_event", ack) == "question_answer_source_unverified");
-                var noSource = CloneDictionary(update);
+                var noSource = Program.CloneDictionary(update);
                 ReadDictionary(noSource, "questionState")["answers"] = new List<Dictionary<string, object>>();
                 Check("bound_update_cannot_invent_answer", PrepareQuestionContinuityWrite(connection, noSource, payload, "npc", "player", "ack_event", ack) == "question_answer_required");
                 Turn("ack", "npc", ack);
@@ -406,7 +406,7 @@ namespace ReignBetaServer
                 // original is disclosed, never clipped or promoted to an answer.
                 foreach (string id in new[] { "review_duplicate_a", "review_duplicate_b" })
                 {
-                    var duplicate = CloneDictionary(write); duplicate["id"] = id;
+                    var duplicate = Program.CloneDictionary(write); duplicate["id"] = id;
                     StoreAcceptedConversationContinuity(connection, payload, "npc", "player", "z_original_event", question,
                         new[] { duplicate }.ToList(), 201L);
                 }
@@ -417,8 +417,8 @@ namespace ReignBetaServer
                 Check("oversized_original_is_disclosed_without_clipping", boundedPrompt.Contains("Original not expanded within the shared review budget: oversized_review")
                     && !boundedPrompt.Contains("OVERSIZED_BEGIN") && !boundedPrompt.Contains("OVERSIZED_END"));
                 Check("shared_review_has_fixed_character_budget", boundedPrompt.Length < 20000);
-                ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed source.' WHERE turn_id='z_original';");
-                var withoutOriginal = CloneDictionary(update); ReadDictionary(withoutOriginal, "questionState").Remove("question");
+                Program.ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed source.' WHERE turn_id='z_original';");
+                var withoutOriginal = Program.CloneDictionary(update); ReadDictionary(withoutOriginal, "questionState").Remove("question");
                 Check("bound_update_rechecks_original_hash", PrepareQuestionContinuityWrite(connection, withoutOriginal, payload, "npc", "player", "later_event", ack) == unknownError);
                 foreach (string request in new[] { "Name the thing you would not risk.", "Give me one thing you would not risk for me." })
                     Check("limit_request_" + PromptHash(request).Substring(0, 8), ConversationInformationRequestForm(request, request) == "direct_information_request");

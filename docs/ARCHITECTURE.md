@@ -58,17 +58,16 @@ flowchart LR
 
 ## Process composition
 
-`internal static partial class Program` (namespace `ReignBetaServer`) is now the Platform core plus Dialogue: 245 of
-the 483 `.cs` files under `src/Modules` contribute to it (46 Platform files, 188 Dialogue files and the eleven
-`Program.<Module>Routes.cs` route files). For those files, module folders are a file layout, not a type or namespace
-boundary; any of them can call any private static member. Every other domain module is its own
-`internal static partial class <Module>Service`: `CharactersService`, `WorldSimulationService`, `RelationshipsService`,
-`PersistenceService`, `ReputationService`, `DiplomacyService`, `CourtService`, `PortraitsService`, `GovernmentService`,
-`RebellionService` and `SpymasterService`. The other exceptions are a few helper types (for example
+`internal static partial class Program` (namespace `ReignBetaServer`) is now the Platform core: 58 of the 483 `.cs`
+files under `src/Modules` contribute to it (46 Platform files and the twelve `Program.<Module>Routes.cs` route
+files). Every domain module is its own `internal static partial class <Module>Service`: `DialogueService`,
+`CharactersService`, `WorldSimulationService`, `RelationshipsService`, `PersistenceService`, `ReputationService`,
+`DiplomacyService`, `CourtService`, `PortraitsService`, `GovernmentService`, `RebellionService` and
+`SpymasterService`. The other exceptions are a few helper types (for example
 `ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes) and the stateless
 helpers in `Platform/ServerCore.cs` (see [Direction](#direction-2026-11-restructuring-programme), steps 3 and 4).
-`src/Modules/Platform/Program.cs` alone is about 27.9k lines and still contains much of the core dialogue, memory,
-action and portrait request handling.
+`src/Modules/Platform/Program.cs` alone is about 27.9k lines and still contains the main dialogue, memory, action
+and portrait request handlers, which call into the services.
 
 `Main` (`Platform/Program.cs`) runs in this order:
 
@@ -299,10 +298,11 @@ lands.
    callable unqualified from every type. Helpers that touch `Program` state (`QuerySql`, `ExecuteSql`, campaign
    connections, settings) stay in `Program`. Every overload of a moved name moves with it, so no method group is split.
 4. The `partial class Program` is split per module into `<Module>Service` and `<Module>Store` classes, leaf modules
-   first. Mostly landed: Spymaster (`SpymasterService`), Rebellion (`RebellionService`), Government
+   first. Landed for every domain module: Spymaster (`SpymasterService`), Rebellion (`RebellionService`), Government
    (`GovernmentService`), Diplomacy (`DiplomacyService`), Court (`CourtService`), Portraits (`PortraitsService`),
    Reputation (`ReputationService`), Characters (`CharactersService`), WorldSimulation (`WorldSimulationService`),
-   Relationships (`RelationshipsService`) and Persistence (`PersistenceService`) are their own
+   Relationships (`RelationshipsService`), Persistence (`PersistenceService`) and Dialogue (`DialogueService`) are
+   their own
    `internal static partial class`es, in their existing files. They
    call back into `Program` with explicit `Program.` qualifiers; `Program` and the other modules call them as
    `<Module>Service.X`, and the members used across that boundary are `internal` (every overload of a name together).
@@ -314,10 +314,9 @@ lands.
    cleanly without moving code between files, so there is no `<Module>Store` yet. One method group stays split on
    purpose: the private `V` factories in `CharactersService` (`string, int, bool`) and `RelationshipsService`
    (`int, int, int, int`) each build a nested type of their own module, are called only from their own file, and
-   their parameter lists cannot convert into each other. Still `Program` partials: Dialogue (188 files, about 2.1k
-   members, referenced about 15k times from the rest of the server, so its split is a separate step) and the
-   Platform core, which stays `Program`: the entry point, `HandleClient` and the route table, settings, the campaign
-   connection and `QuerySql`/`ExecuteSql` state, providers and the verification lab.
+   their parameter lists cannot convert into each other. What stays `Program` is the Platform core: the entry point,
+   `HandleClient` and the route table, settings, the campaign connection and `QuerySql`/`ExecuteSql` state,
+   providers, the main turn handlers in `Program.cs` and the verification lab, plus the module route files.
 5. Per-campaign versioned migrations: each module's `Ensure*` DDL becomes ordered migrations under one runner,
    following the `reign_meta` pattern, and runtime `Ensure*` calls leave hot paths.
 6. Typed request and response DTOs in `Reign.Core.Contracts` for client-facing routes, module by module.

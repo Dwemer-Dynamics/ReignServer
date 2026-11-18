@@ -5,9 +5,9 @@ using System.Reflection;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>> RunFinalConversationGauntletModelSelfTests()
+        internal static List<Dictionary<string, object>> RunFinalConversationGauntletModelSelfTests()
         {
             List<Dictionary<string, object>> checks = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, message) =>
@@ -159,7 +159,7 @@ namespace ReignBetaServer
                     && recordAttempt != null
                     && loadRun != null)
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
                         ensureSchema.Invoke(null, new object[] { connection });
                         FinalGauntletCaseDescriptor scheduled =
@@ -270,7 +270,7 @@ AND attempt_number=1;";
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
 
             return checks;

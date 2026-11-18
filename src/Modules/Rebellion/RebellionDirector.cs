@@ -1486,7 +1486,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
             Dictionary<string, object> characteristics = string.IsNullOrWhiteSpace(heroId)
                 ? new Dictionary<string, object>()
                 : Program.LoadCharacterStack(campaignId, heroId);
-            Dictionary<string, object> reignTraits = Program.TraitPercentageSnapshot(
+            Dictionary<string, object> reignTraits = DialogueService.TraitPercentageSnapshot(
                 ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>());
             Dictionary<string, object> nativeTraits =
                 ReadDictionary(hero, "traits") ?? new Dictionary<string, object>();

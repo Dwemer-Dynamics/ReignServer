@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const int MotiveStableCharacterCap = 1000;
         private const int MotiveLiveContextCap = 1800;
@@ -55,7 +55,7 @@ namespace ReignBetaServer
                 ["cc"] = ReadBool(courtCharacter, "available", false) ? ReadString(courtCharacter, "cellId", "") : "unavailable"
             };
             string value = "PRIVATE MOTIVE VECTOR 0..100 (t=43 foundation traits,g=7 court groups,cc=fixed Court Character; -1=unavailable):" + CanonicalJson(compact);
-            return value.Length <= MotiveStableCharacterCap ? value : LimitText(value, MotiveStableCharacterCap);
+            return value.Length <= MotiveStableCharacterCap ? value : Program.LimitText(value, MotiveStableCharacterCap);
         }
 
         internal static Dictionary<string, object> TraitPercentageSnapshot(Dictionary<string, object> traitDocument)
@@ -65,7 +65,7 @@ namespace ReignBetaServer
             return CharactersService.CoreTraitKeys.ToDictionary(key => key, key =>
             {
                 if (percentages.ContainsKey(key)) return (object)Clamp(ReadInt(percentages, key, 50), 0, 100);
-                int level = Clamp(TraitInt(foundations, key), -2, 2);
+                int level = Clamp(Program.TraitInt(foundations, key), -2, 2);
                 return (object)(50 + level * 20);
             }, StringComparer.OrdinalIgnoreCase);
         }
@@ -193,7 +193,7 @@ namespace ReignBetaServer
                 ["scene"] = scene,
                 ["romance"] = romance,
                 ["requiredEvidenceKeys"] = evidenceKeys,
-                ["identityView"] = CloneDictionary(
+                ["identityView"] = Program.CloneDictionary(
                     identityView ?? new Dictionary<string, object>()),
                 ["latestPlayerText"] = playerText ?? "",
                 ["sanitizedState"] = sanitizedState,
@@ -201,7 +201,7 @@ namespace ReignBetaServer
                     payload, "mustAccountForPriorSpeaker", false),
                 ["groupTurnResponses"] = priorGroupTurns
                     .Skip(Math.Max(0, priorGroupTurns.Count - 5))
-                    .Select(CloneDictionary)
+                    .Select(Program.CloneDictionary)
                     .ToList()
             };
             result["conversationAgency"] = BuildConversationAgencyContext(campaignId, subjectId, targetId, payload, profile, characteristics, result);
@@ -237,25 +237,25 @@ namespace ReignBetaServer
             {
                 ["authoritative"] = ReadBool(government,
                     "authoritative", true),
-                ["institution"] = LimitText(ReadString(government,
+                ["institution"] = Program.LimitText(ReadString(government,
                     "institution", ""), 48),
                 ["authorityLevel"] = ReadInt(government,
                     "authorityLevel", 0),
-                ["stanceCategory"] = LimitText(ReadString(government,
+                ["stanceCategory"] = Program.LimitText(ReadString(government,
                     "stanceCategory", "divided"), 24),
-                ["dominantPartyName"] = LimitText(ReadString(government,
+                ["dominantPartyName"] = Program.LimitText(ReadString(government,
                     "dominantPartyName", ""), 48),
                 ["ownMembership"] = new Dictionary<string, object>
                 {
                     ["isMember"] = ReadBool(membership,
                         "isMember", false),
-                    ["seatSource"] = LimitText(ReadString(membership,
+                    ["seatSource"] = Program.LimitText(ReadString(membership,
                         "seatSource", ""), 36),
-                    ["partyName"] = LimitText(ReadString(membership,
+                    ["partyName"] = Program.LimitText(ReadString(membership,
                         "partyName", ""), 48),
                     ["partyPlanks"] = ReadStringList(membership,
                             "partyPlanks")
-                        .Take(4).Select(item => LimitText(item, 32))
+                        .Take(4).Select(item => Program.LimitText(item, 32))
                         .ToList(),
                     ["isPartySpeaker"] = ReadBool(membership,
                         "isPartySpeaker", false),
@@ -276,7 +276,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> opportunity)
         {
             Dictionary<string, object> sanitized =
-                CloneDictionary(
+                Program.CloneDictionary(
                     state ?? new Dictionary<string, object>());
             identityView = identityView
                 ?? new Dictionary<string, object>();
@@ -354,11 +354,11 @@ namespace ReignBetaServer
             if (payload == null || string.IsNullOrWhiteSpace(targetId)
                 || ReadDictionary(payload, "opportunitySnapshot") != null
                 || ReadDictionary(payload, "playerOpportunitySnapshot") != null) return;
-            Dictionary<string, object> targetProfile = ReadJsonObject(CharacterFile(campaignId, targetId, "profile.json"));
+            Dictionary<string, object> targetProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "profile.json"));
             if (targetProfile.Count == 0
                 && CharactersService.LoadCharacterProfileLibrary().TryGetValue(targetId, out Dictionary<string, object> shipped))
-                targetProfile = CloneDictionary(ReadDictionary(shipped, "sourceFacts") ?? shipped);
-            Dictionary<string, object> targetCharacteristics = LoadCharacterStack(campaignId, targetId);
+                targetProfile = Program.CloneDictionary(ReadDictionary(shipped, "sourceFacts") ?? shipped);
+            Dictionary<string, object> targetCharacteristics = Program.LoadCharacterStack(campaignId, targetId);
             Dictionary<string, object> observer = OpportunityProfileSnapshot(subjectProfile, subjectCharacteristics);
             Dictionary<string, object> target = OpportunityProfileSnapshot(targetProfile, targetCharacteristics);
             if (target.Count == 0) return;
@@ -376,12 +376,12 @@ namespace ReignBetaServer
         private static Dictionary<string, object> OpportunityProfileSnapshot(
             Dictionary<string, object> profile, Dictionary<string, object> characteristics)
         {
-            Dictionary<string, object> result = CloneDictionary(profile ?? new Dictionary<string, object>());
+            Dictionary<string, object> result = Program.CloneDictionary(profile ?? new Dictionary<string, object>());
             characteristics = characteristics ?? new Dictionary<string, object>();
             Dictionary<string, object> wealth = ReadDictionary(characteristics, "wealth");
             Dictionary<string, object> appearance = ReadDictionary(characteristics, "appearance");
-            if (wealth != null && wealth.Count > 0) result["wealth"] = CloneDictionary(wealth);
-            if (appearance != null && appearance.Count > 0) result["appearance"] = CloneDictionary(appearance);
+            if (wealth != null && wealth.Count > 0) result["wealth"] = Program.CloneDictionary(wealth);
+            if (appearance != null && appearance.Count > 0) result["appearance"] = Program.CloneDictionary(appearance);
             return result;
         }
 
@@ -419,7 +419,7 @@ namespace ReignBetaServer
 
             Dictionary<string, double> targetAxes = AbsoluteOpportunityAxes(target, identityKnown, true);
             Dictionary<string, double> observerAxes = AbsoluteOpportunityAxes(observer, true, false);
-            Dictionary<string, double> relative = targetAxes.Keys.ToDictionary(key => key, key => ClampDouble(50d + targetAxes[key] - observerAxes[key], 0d, 100d), StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, double> relative = targetAxes.Keys.ToDictionary(key => key, key => Program.ClampDouble(50d + targetAxes[key] - observerAxes[key], 0d, 100d), StringComparer.OrdinalIgnoreCase);
             Dictionary<string, double> importance = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
                 ["wealth"] = 0.15d + 0.65d * Trait01FromPercent(p, "wealthMotivation") + 0.35d * Trait01FromPercent(p, "greed"),
@@ -438,9 +438,9 @@ namespace ReignBetaServer
             Dictionary<string, double> opportunityGains = relative
                 .ToDictionary(
                     pair => pair.Key,
-                    pair => ClampDouble(
+                    pair => Program.ClampDouble(
                         Math.Max(0d, pair.Value - 50d) / 50d
-                        * ClampDouble(
+                        * Program.ClampDouble(
                             0.45d + 2.75d * normalizedImportance[pair.Key],
                             0.45d, 1d),
                         0d, 1d),
@@ -510,7 +510,7 @@ namespace ReignBetaServer
             double visibleAttractiveness = ReadDouble(appearance, "attractiveness", ReadDouble(data, "visibleAttractiveness", 50d));
             double gold = Math.Max(0d, ReadDouble(wealth, "gold", 0d));
             double clanGold = Math.Max(0d, ReadDouble(wealth, "clanGold", 0d));
-            double clanTier = ClampDouble(ReadDouble(wealth, "clanTier", ReadDouble(data, "clanTier", 0d)), 0d, 6d);
+            double clanTier = Program.ClampDouble(ReadDouble(wealth, "clanTier", ReadDouble(data, "clanTier", 0d)), 0d, 6d);
             double renown = Math.Max(0d, ReadDouble(wealth, "clanRenown", ReadDouble(data, "renown", 0d)));
             double fiefs = Math.Max(0d, ReadDouble(wealth, "clanFiefCount", ReadDouble(data, "fiefCount", 0d)));
             double influence = Math.Max(0d, ReadDouble(data, "influence", 0d));
@@ -521,17 +521,17 @@ namespace ReignBetaServer
             bool economicCapacityKnown = ReadBool(
                 wealth, "economicCapacityKnown", identityKnown);
 
-            double publicWealth = ClampDouble(15d * Math.Log10(1d + gold / 250d) + 12d * Math.Log10(1d + clanGold / 2500d), 0d, 100d);
-            double publicPower = ClampDouble(clanTier * 11d + Math.Min(22d, fiefs * 7d) + Math.Min(12d, influence / 100d) + (ruler ? 18d : 0d), 0d, 100d);
-            double publicPrestige = ClampDouble(clanTier * 8d + Math.Min(40d, renown / 25d) + (ruler ? 15d : 0d), 0d, 100d);
-            double publicProtection = ClampDouble(clanTier * 8d + Math.Min(28d, partyStrength / 12d) + Math.Min(28d, clanStrength / 80d) + Math.Min(12d, leadership / 20d), 0d, 100d);
-            double publicDynasty = ClampDouble(clanTier * 10d + Math.Min(25d, fiefs * 8d) + Math.Min(15d, leadership / 20d) + (ruler ? 15d : 0d), 0d, 100d);
+            double publicWealth = Program.ClampDouble(15d * Math.Log10(1d + gold / 250d) + 12d * Math.Log10(1d + clanGold / 2500d), 0d, 100d);
+            double publicPower = Program.ClampDouble(clanTier * 11d + Math.Min(22d, fiefs * 7d) + Math.Min(12d, influence / 100d) + (ruler ? 18d : 0d), 0d, 100d);
+            double publicPrestige = Program.ClampDouble(clanTier * 8d + Math.Min(40d, renown / 25d) + (ruler ? 15d : 0d), 0d, 100d);
+            double publicProtection = Program.ClampDouble(clanTier * 8d + Math.Min(28d, partyStrength / 12d) + Math.Min(28d, clanStrength / 80d) + Math.Min(12d, leadership / 20d), 0d, 100d);
+            double publicDynasty = Program.ClampDouble(clanTier * 10d + Math.Min(25d, fiefs * 8d) + Math.Min(15d, leadership / 20d) + (ruler ? 15d : 0d), 0d, 100d);
             if (target && (!identityKnown || !economicCapacityKnown))
             {
-                publicWealth = ClampDouble(0.65d * visibleStatus + 0.35d * ReadDouble(wealth, "visibleWealthScore", visibleStatus), 0d, 100d);
+                publicWealth = Program.ClampDouble(0.65d * visibleStatus + 0.35d * ReadDouble(wealth, "visibleWealthScore", visibleStatus), 0d, 100d);
                 publicPower = visibleStatus;
                 publicPrestige = visibleStatus;
-                publicProtection = ClampDouble(0.65d * visibleStatus + 0.35d * Math.Min(100d, partyStrength / 10d), 0d, 100d);
+                publicProtection = Program.ClampDouble(0.65d * visibleStatus + 0.35d * Math.Min(100d, partyStrength / 10d), 0d, 100d);
                 publicDynasty = visibleStatus;
             }
             return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
@@ -569,22 +569,22 @@ namespace ReignBetaServer
                 + 0.10d * Trait01FromPercent(p, "compassion")
                 + 0.05d * Trait01FromPercent(p, "shame")
                 + 0.10d * CourtGroup01(characteristics, "honor"));
-            double benefit = ClampDouble(ReadDouble(opportunity, "relativeBenefit", 50d), 0d, 100d);
-            double bestOpportunityGain = ClampDouble(
+            double benefit = Program.ClampDouble(ReadDouble(opportunity, "relativeBenefit", 50d), 0d, 100d);
+            double bestOpportunityGain = Program.ClampDouble(
                 ReadDouble(opportunity, "bestOpportunityGain", 0d), 0d, 1d);
             string bestOpportunityAxis = ReadString(
                 opportunity, "bestOpportunityAxis", "");
-            double exposure = ClampDouble(ReadDouble(scene, "exposure", 0.5d), 0d, 1d);
+            double exposure = Program.ClampDouble(ReadDouble(scene, "exposure", 0.5d), 0d, 1d);
             double tact = Trait01FromPercent(p, "tact");
-            double safety = 100d * ClampDouble(1d - exposure * (1d - 0.65d * tact), 0d, 1d);
+            double safety = 100d * Program.ClampDouble(1d - exposure * (1d - 0.65d * tact), 0d, 1d);
             Dictionary<string, object> courtCharacter =
                 CourtService.CourtCharacterDecisionSnapshot(characteristics, opportunity);
-            double courtPropensity = ClampDouble(ReadDouble(
+            double courtPropensity = Program.ClampDouble(ReadDouble(
                 courtCharacter, "manipulationPropensity", 0d), 0d, 1d);
-            double courtGain = ClampDouble(ReadDouble(
+            double courtGain = Program.ClampDouble(ReadDouble(
                 courtCharacter, "gainStrength", bestOpportunityGain), 0d, 1d);
             double courtFit = courtPropensity * courtGain;
-            double score = ClampDouble(
+            double score = Program.ClampDouble(
                 0.48d * drive
                 + 0.14d * benefit
                 + 0.10d * safety
@@ -694,37 +694,37 @@ namespace ReignBetaServer
             Dictionary<string, object> snapshot = ReadDictionary(payload, "opportunitySnapshot") ?? ReadDictionary(payload, "playerOpportunitySnapshot") ?? new Dictionary<string, object>();
             Dictionary<string, object> target = ReadDictionary(snapshot, "target") ?? ReadDictionary(payload, "playerIdentity") ?? new Dictionary<string, object>();
             Dictionary<string, object> targetAppearance = ReadDictionary(target, "appearance") ?? target;
-            double directional = ClampDouble(ReadDouble(relationship, "directionalAffinity",
+            double directional = Program.ClampDouble(ReadDouble(relationship, "directionalAffinity",
                 ReadDouble(relationship, "nativeRelation", 0d)), -100d, 100d);
             double relationPositive = Math.Max(0d, directional) / 100d;
             double relationNegative = Math.Max(0d, -directional) / 100d;
             Dictionary<string, object> lifecycle = ReadDictionary(relationship, "lifecycle") ?? new Dictionary<string, object>();
             bool establishedLovers = ReadBool(lifecycle, "lovers", false);
             bool activeAffair = ReadBool(lifecycle, "activeAffair", false);
-            double visibleAttractive = ClampDouble(ReadDouble(targetAppearance, "attractiveness", ReadDouble(target, "visibleAttractiveness", 50d)) / 100d, 0d, 1d);
+            double visibleAttractive = Program.ClampDouble(ReadDouble(targetAppearance, "attractiveness", ReadDouble(target, "visibleAttractiveness", 50d)) / 100d, 0d, 1d);
             double genuine = 100d * (0.50d * relationPositive + 0.20d * Trait01FromPercent(p, "flirtatiousness")
                 + 0.10d * Trait01FromPercent(p, "sociability") + 0.20d * visibleAttractive);
             if (establishedLovers) genuine += 20d;
             genuine -= 40d * relationNegative;
-            genuine = ClampDouble(genuine, 0d, 100d);
+            genuine = Program.ClampDouble(genuine, 0d, 100d);
             double baseGenuine = genuine;
 
-            double benefit = ClampDouble(ReadDouble(opportunity, "relativeBenefit", 50d) / 100d, 0d, 1d);
+            double benefit = Program.ClampDouble(ReadDouble(opportunity, "relativeBenefit", 50d) / 100d, 0d, 1d);
             double strategicDisposition = 0.50d * Trait01FromPercent(p, "flirtatiousness") + 0.20d * Trait01FromPercent(p, "pragmatism") + 0.15d * Trait01FromPercent(p, "tact") + 0.10d * Trait01FromPercent(p, "confidence") + 0.05d * Trait01FromPercent(p, "riskTolerance");
-            double strategic = ClampDouble(100d * benefit * strategicDisposition, 0d, 100d);
+            double strategic = Program.ClampDouble(100d * benefit * strategicDisposition, 0d, 100d);
             double baseStrategic = strategic;
             Dictionary<string, object> courtCharacter = CourtService.CourtCharacterDecisionSnapshot(characteristics, opportunity);
             double courtStrategicBoost = ReadDouble(courtCharacter, "strategicBoost", 0d);
-            strategic = ClampDouble(strategic + courtStrategicBoost, 0d, 100d);
+            strategic = Program.ClampDouble(strategic + courtStrategicBoost, 0d, 100d);
 
             bool nativeMarried = !string.IsNullOrWhiteSpace(ReadString(profile, "spouseId", ""));
             string householdStatus = nativeMarried ? "" : CharactersService.CommonerNarrativeMaritalStatus(profile);
             bool married = nativeMarried || householdStatus == "married" || householdStatus == "separated";
-            double spouseDirectional = ClampDouble(ReadDouble(spouseRelationship, "directionalAffinity",
+            double spouseDirectional = Program.ClampDouble(ReadDouble(spouseRelationship, "directionalAffinity",
                 ReadDouble(spouseRelationship, "nativeRelation", 0d)), -100d, 100d);
             Dictionary<string, object> spouseLifecycle = ReadDictionary(spouseRelationship, "lifecycle") ?? new Dictionary<string, object>();
             double maritalDiscontent = married
-                ? ClampDouble(Math.Max(0d, -spouseDirectional)
+                ? Program.ClampDouble(Math.Max(0d, -spouseDirectional)
                     + (ReadBool(spouseLifecycle, "estranged", false) || householdStatus == "separated" ? 35d : 0d)
                     + (ReadBool(spouseLifecycle, "activeAffair", false) ? 20d : 0d), 0d, 100d)
                 : 0d;
@@ -732,8 +732,8 @@ namespace ReignBetaServer
             double fire = 100d * (0.30d * Trait01FromPercent(p, "flirtatiousness") + 0.20d * Trait01FromPercent(p, "impulsiveness") + 0.15d * Trait01FromPercent(p, "riskTolerance") + 0.10d * Trait01FromPercent(p, "confidence") + 0.10d * socialPressure + 0.15d * (maritalDiscontent / 100d));
             double personalResistance = 100d * (0.18d * Trait01FromPercent(p, "loyalty") + 0.16d * Trait01FromPercent(p, "dutyMotivation") + 0.14d * Trait01FromPercent(p, "discipline") + 0.10d * Trait01FromPercent(p, "traditionalism") + 0.10d * Trait01FromPercent(p, "shame") + 0.10d * CourtGroup01(characteristics, "judgment") + 0.08d * Trait01FromPercent(p, "religionMotivation") + 0.07d * Trait01FromPercent(p, "familyMotivation") + 0.07d * CourtGroup01(characteristics, "honor"));
             Dictionary<string, object> scene = ConversationSceneSnapshot(mode, payload);
-            double exposure = ClampDouble(ReadDouble(scene, "exposure", 0.5d), 0d, 1d) * 100d;
-            double spouseBond = married ? ClampDouble(Math.Max(0d, spouseDirectional) + 20d, 0d, 100d) : 0d;
+            double exposure = Program.ClampDouble(ReadDouble(scene, "exposure", 0.5d), 0d, 1d) * 100d;
+            double spouseBond = married ? Program.ClampDouble(Math.Max(0d, spouseDirectional) + 20d, 0d, 100d) : 0d;
             double resistance = married ? 0.50d * personalResistance + 0.35d * spouseBond + 0.15d * exposure : 0.70d * personalResistance + 0.30d * exposure;
             Dictionary<string, object> suitability = ReadDictionary(snapshot, "suitability") ?? new Dictionary<string, object>();
             bool adults = ReadBool(suitability, "adults", ReadDouble(profile, "age", 0d) >= 18d && ReadDouble(target, "age", 0d) >= 18d);
@@ -748,15 +748,15 @@ namespace ReignBetaServer
 
             double stronger = Math.Max(genuine, strategic), weaker = Math.Min(genuine, strategic);
             double existingInterest = stronger + 0.25d * weaker;
-            double fireContribution = fire * ClampDouble(existingInterest / 100d, 0d, 1d) * 0.25d;
+            double fireContribution = fire * Program.ClampDouble(existingInterest / 100d, 0d, 1d) * 0.25d;
             double approach = RomanticApproachModifier(playerText);
-            double receptivity = ClampDouble(50d + existingInterest + fireContribution + Math.Min(20d, maritalDiscontent * 0.20d)
+            double receptivity = Program.ClampDouble(50d + existingInterest + fireContribution + Math.Min(20d, maritalDiscontent * 0.20d)
                 + approach - resistance + continuityReceptivityBonus, 0d, 100d);
             string band = receptivity < 25d ? "offended_or_firm_rejection" : receptivity < 45d ? "deflection_or_boundary" : receptivity < 60d ? "ambiguous_testing" : receptivity < 80d ? "receptive_escalation" : "ready_reciprocity";
             string presentation = genuine >= strategic + 15d ? "sincere" : strategic >= genuine + 15d ? "calculated" : "mixed";
             double concealment = 100d * (0.35d * Trait01FromPercent(p, "tact") + 0.25d * Trait01FromPercent(p, "pragmatism") + 0.20d * Trait01FromPercent(p, "confidence") + 0.20d * (1d - Trait01FromPercent(p, "honesty")));
             string disclosure = presentation != "calculated" ? "not_applicable" : concealment >= 67d ? "concealed" : concealment >= 40d ? "leaks_through" : "explicit_bargain";
-            double initiativeScore = ClampDouble(0.55d * receptivity + 0.20d * CourtGroup100(characteristics, "boldness") + 0.15d * ReadInt(p, "flirtatiousness", 50) + 0.10d * socialPressure * 100d
+            double initiativeScore = Program.ClampDouble(0.55d * receptivity + 0.20d * CourtGroup100(characteristics, "boldness") + 0.15d * ReadInt(p, "flirtatiousness", 50) + 0.10d * socialPressure * 100d
                 + ReadDouble(courtCharacter, "initiativeBoost", 0d), 0d, 100d);
             double chance = initiativeScore < 45d ? 0d : initiativeScore < 60d ? 0.25d : initiativeScore < 75d ? 0.50d : initiativeScore < 90d ? 0.75d : 0.90d;
             double worldDay = ReadDouble(payload, "worldDay", 0d);
@@ -809,7 +809,7 @@ namespace ReignBetaServer
             if (acceptedPrivate) privateScene = true;
             bool coercive = ReadBool(supplied, "coercive", false) || ReadBool(payload, "coercive", false) || ReadBool(payload, "playerIsCaptive", false) || ReadBool(payload, "speakerIsCaptive", false);
             double defaultExposure = privateScene ? 0.10d : m == "social_event" || m == "party_chat" ? 0.85d : 0.45d;
-            double exposure = ClampDouble(ReadDouble(supplied, "exposure", defaultExposure + Math.Min(0.15d, witnesses.Count * 0.03d)), 0d, 1d);
+            double exposure = Program.ClampDouble(ReadDouble(supplied, "exposure", defaultExposure + Math.Min(0.15d, witnesses.Count * 0.03d)), 0d, 1d);
             if (acceptedPrivate) exposure = Math.Min(exposure, .10d + Math.Min(.15d, witnesses.Count * .03d));
             return new Dictionary<string, object> { ["private"] = privateScene, ["exposure"] = Math.Round(exposure, 2), ["witnessIds"] = witnesses, ["witnessCount"] = witnesses.Count, ["coercive"] = coercive };
         }
@@ -865,7 +865,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> domains = ReadDictionaryList(context, "activeDomains");
             Dictionary<string, object> scores = new Dictionary<string, object>(ReadDictionary(context, "highlightedScores") ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> opportunity = CloneDictionary(ReadDictionary(context, "opportunity") ?? new Dictionary<string, object>());
+            Dictionary<string, object> opportunity = Program.CloneDictionary(ReadDictionary(context, "opportunity") ?? new Dictionary<string, object>());
             Dictionary<string, object> relationship = ReadDictionary(context, "relationshipNpcToTarget") ?? new Dictionary<string, object>();
             Dictionary<string, object> spouseRelationship = ReadDictionary(context, "relationshipNpcToSpouse") ?? new Dictionary<string, object>();
             Dictionary<string, object> romance = ReadDictionary(context, "romance") ?? new Dictionary<string, object>();
@@ -893,14 +893,14 @@ namespace ReignBetaServer
                 {
                     ["score"] = ReadDouble(manipulation, "score", 0d),
                     ["recommended"] = ReadBool(manipulation, "recommended", false),
-                    ["posture"] = LimitText(ReadString(manipulation, "posture", ""), 28),
-                    ["preferredTactic"] = LimitText(ReadString(manipulation, "preferredTactic", ""), 40),
-                    ["expectedConduct"] = LimitText(ReadString(manipulation, "expectedConduct", ""), 48),
-                    ["bestAxis"] = LimitText(ReadString(
+                    ["posture"] = Program.LimitText(ReadString(manipulation, "posture", ""), 28),
+                    ["preferredTactic"] = Program.LimitText(ReadString(manipulation, "preferredTactic", ""), 40),
+                    ["expectedConduct"] = Program.LimitText(ReadString(manipulation, "expectedConduct", ""), 48),
+                    ["bestAxis"] = Program.LimitText(ReadString(
                         manipulation, "bestOpportunityAxis", ""), 16),
                     ["bestGain"] = ReadDouble(
                         manipulation, "bestOpportunityGain", 0d),
-                    ["wealthBasis"] = LimitText(ReadString(
+                    ["wealthBasis"] = Program.LimitText(ReadString(
                         manipulation, "wealthEvidenceBasis", ""), 36),
                     ["courtFit"] = ReadDouble(
                         manipulation, "courtOpportunityFit", 0d)
@@ -991,9 +991,9 @@ namespace ReignBetaServer
 
             // This final schema contains only fixed-size numeric, boolean, enum, and bounded identifier fields.
             // It preserves every decision-critical axis while guaranteeing valid JSON instead of slicing text.
-            compact["d"] = domains.Take(3).Select(x => LimitText(ReadString(x, "id", ""), 32)).ToList();
+            compact["d"] = domains.Take(3).Select(x => Program.LimitText(ReadString(x, "id", ""), 32)).ToList();
             compact["s"] = ReadDictionary(compact, "s").Take(6)
-                .ToDictionary(x => LimitText(x.Key, 32), x => x.Value, StringComparer.OrdinalIgnoreCase);
+                .ToDictionary(x => Program.LimitText(x.Key, 32), x => x.Value, StringComparer.OrdinalIgnoreCase);
             compact["r"] = MinimalRelationshipForMotivePrompt(relationship);
             if (hasSpouse) compact["sr"] = MinimalRelationshipForMotivePrompt(spouseRelationship);
             compact["o"] = MinimalOpportunityForMotivePrompt(opportunity);
@@ -1013,12 +1013,12 @@ namespace ReignBetaServer
                 new Dictionary<string, object>
                 {
                     ["d"] = domains.Take(2)
-                        .Select(x => LimitText(
+                        .Select(x => Program.LimitText(
                             ReadString(x, "id", ""), 24))
                         .ToList(),
                     ["s"] = ReadDictionary(compact, "s").Take(4)
                         .ToDictionary(
-                            x => LimitText(x.Key, 24),
+                            x => Program.LimitText(x.Key, 24),
                             x => x.Value,
                             StringComparer.OrdinalIgnoreCase),
                     ["r"] = new Dictionary<string, object>
@@ -1050,20 +1050,20 @@ namespace ReignBetaServer
                             "targetClanTierKnown", false)
                                 ? ReadInt(opportunity,
                                     "clanTierDelta", 0) : 0,
-                        ["relativeClanTierBand"] = LimitText(
+                        ["relativeClanTierBand"] = Program.LimitText(
                             ReadString(opportunity,
                                 "relativeClanTierBand",
                                 "unverified_identity"), 28),
                         ["relativeBenefit"] = Math.Round(
                             ReadDouble(opportunity,
                                 "relativeBenefit", 0d), 1),
-                        ["bestOpportunityAxis"] = LimitText(
+                        ["bestOpportunityAxis"] = Program.LimitText(
                             ReadString(opportunity,
                                 "bestOpportunityAxis", ""), 16),
                         ["bestOpportunityGain"] = Math.Round(
                             ReadDouble(opportunity,
                                 "bestOpportunityGain", 0d), 3),
-                        ["wealthEvidenceBasis"] = LimitText(
+                        ["wealthEvidenceBasis"] = Program.LimitText(
                             ReadString(opportunity,
                                 "wealthEvidenceBasis", ""), 32),
                         ["economicCapacityKnown"] = ReadBool(
@@ -1072,7 +1072,7 @@ namespace ReignBetaServer
                     },
                     ["cc"] = new Dictionary<string, object>
                     {
-                        ["cell"] = LimitText(ReadString(
+                        ["cell"] = Program.LimitText(ReadString(
                             courtCharacter, "cellId", ""), 28),
                         ["h"] = ReadInt(courtCharacter,
                             "honorLevel", 0),
@@ -1089,7 +1089,7 @@ namespace ReignBetaServer
                             "supportsManipulation", false),
                         ["tactics"] = ReadStringList(
                             courtCharacter, "tacticIds").Take(4)
-                            .Select(x => LimitText(x, 24)).ToList()
+                            .Select(x => Program.LimitText(x, 24)).ToList()
                     },
                     ["scene"] = CompactMotiveScenePrompt(
                         ReadDictionary(context, "scene")
@@ -1103,9 +1103,9 @@ namespace ReignBetaServer
                 {
                     ["recommended"] = ReadBool(
                         manipulation, "recommended", false),
-                    ["preferredTactic"] = LimitText(ReadString(
+                    ["preferredTactic"] = Program.LimitText(ReadString(
                         manipulation, "preferredTactic", ""), 32),
-                    ["expectedConduct"] = LimitText(ReadString(
+                    ["expectedConduct"] = Program.LimitText(ReadString(
                         manipulation, "expectedConduct", ""), 40),
                     ["score"] = Math.Round(ReadDouble(
                         manipulation, "score", 0d), 1)
@@ -1124,9 +1124,9 @@ namespace ReignBetaServer
                         romance, "strategicInterest", 0d), 1),
                     ["receptivity"] = Math.Round(ReadDouble(
                         romance, "receptivity", 0d), 1),
-                    ["posture"] = LimitText(ReadString(
+                    ["posture"] = Program.LimitText(ReadString(
                         romance, "posture", ""), 28),
-                    ["presentation"] = LimitText(ReadString(
+                    ["presentation"] = Program.LimitText(ReadString(
                         romance, "presentation", ""), 18),
                     ["hardConstraints"] =
                         new Dictionary<string, object>
@@ -1174,8 +1174,8 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> minimalCompact = new Dictionary<string, object>
                 {
-                    ["cell"] = LimitText(ReadString(courtCharacter, "cellId", ""), 28),
-                    ["title"] = LimitText(ReadString(courtCharacter, "title", ""), 40),
+                    ["cell"] = Program.LimitText(ReadString(courtCharacter, "cellId", ""), 28),
+                    ["title"] = Program.LimitText(ReadString(courtCharacter, "title", ""), 40),
                     ["gain"] = Math.Round(ReadDouble(courtCharacter, "gainStrength", 0d), 2),
                     ["weight"] = ReadDouble(courtCharacter, "matchingTacticWeight", 1d),
                     ["propensity"] = ReadDouble(
@@ -1184,7 +1184,7 @@ namespace ReignBetaServer
                         courtCharacter, "supportsManipulation", false),
                     ["strategicBoost"] = ReadDouble(courtCharacter, "strategicBoost", 0d),
                     ["tactics"] = ReadStringList(courtCharacter, "tacticIds").Take(4)
-                        .Select(x => LimitText(x, 24)).ToList()
+                        .Select(x => Program.LimitText(x, 24)).ToList()
                 };
                 Dictionary<string, object> activeScheme =
                     ReadDictionary(courtCharacter, "activeScheme");
@@ -1193,13 +1193,13 @@ namespace ReignBetaServer
                     minimalCompact["scheme"] =
                         new Dictionary<string, object>
                         {
-                            ["id"] = LimitText(ReadFirstString(
+                            ["id"] = Program.LimitText(ReadFirstString(
                                 activeScheme, "schemeId",
                                 "plotId", "id"), 40),
-                            ["kind"] = LimitText(ReadFirstString(
+                            ["kind"] = Program.LimitText(ReadFirstString(
                                 activeScheme, "kind",
                                 "type"), 28),
-                            ["status"] = LimitText(ReadString(
+                            ["status"] = Program.LimitText(ReadString(
                                 activeScheme, "status", ""), 20)
                         };
                 }
@@ -1212,8 +1212,8 @@ namespace ReignBetaServer
             }
             Dictionary<string, object> compact = new Dictionary<string, object>
             {
-                ["cell"] = LimitText(ReadString(courtCharacter, "cellId", ""), 28),
-                ["title"] = LimitText(ReadString(courtCharacter, "title", ""), 40),
+                ["cell"] = Program.LimitText(ReadString(courtCharacter, "cellId", ""), 28),
+                ["title"] = Program.LimitText(ReadString(courtCharacter, "title", ""), 40),
                 ["h"] = ReadInt(courtCharacter, "honorLevel", 0),
                 ["b"] = ReadInt(courtCharacter, "boldnessLevel", 0),
                 ["gain"] = Math.Round(ReadDouble(courtCharacter, "gainStrength", 0d), 2),
@@ -1224,9 +1224,9 @@ namespace ReignBetaServer
                     courtCharacter, "supportsManipulation", false),
                 ["strategicBoost"] = ReadDouble(courtCharacter, "strategicBoost", 0d),
                 ["tactics"] = ReadStringList(courtCharacter, "tacticIds").Take(8)
-                    .Select(x => LimitText(x, 28)).ToList(),
+                    .Select(x => Program.LimitText(x, 28)).ToList(),
                 ["actions"] = ReadStringList(courtCharacter, "preferredActions").Take(4)
-                    .Select(x => LimitText(x, 70)).ToList(),
+                    .Select(x => Program.LimitText(x, 70)).ToList(),
                 ["scheme"] = ReadDictionary(courtCharacter, "activeScheme") ?? new Dictionary<string, object>(),
                 ["fixed"] = true
             };
@@ -1246,23 +1246,23 @@ namespace ReignBetaServer
             {
                 ["nativeRelation"] = ReadInt(relationship, "nativeRelation", 0),
                 ["directionalAffinity"] = ReadInt(relationship, "directionalAffinity", ReadInt(relationship, "nativeRelation", 0)),
-                ["perceptionTag"] = LimitText(ReadString(relationship, "perceptionTag", "neutral"), 40),
-                ["observerMbti"] = LimitText(ReadString(relationship, "observerMbti", ""), 12),
-                ["targetMbti"] = LimitText(ReadString(relationship, "targetMbti", ""), 12),
+                ["perceptionTag"] = Program.LimitText(ReadString(relationship, "perceptionTag", "neutral"), 40),
+                ["observerMbti"] = Program.LimitText(ReadString(relationship, "observerMbti", ""), 12),
+                ["targetMbti"] = Program.LimitText(ReadString(relationship, "targetMbti", ""), 12),
                 ["compatibilityChance"] = ReadInt(relationship, "compatibilityChance", 0),
-                ["lifecycleTags"] = ReadStringList(relationship, "lifecycleTags").Take(8).Select(x => LimitText(x, 40)).ToList(),
+                ["lifecycleTags"] = ReadStringList(relationship, "lifecycleTags").Take(8).Select(x => Program.LimitText(x, 40)).ToList(),
                 ["recentIncidentCount"] = incidents.Count
             };
             compact["recentIncidents"] = includeIncidentSummaries
                 ? (object)incidents.Take(3).Select(item => new Dictionary<string, object>
                 {
-                    ["kind"] = LimitText(ReadString(item, "kind", ""), 40),
+                    ["kind"] = Program.LimitText(ReadString(item, "kind", ""), 40),
                     ["worldDay"] = Math.Round(ReadDouble(item, "worldDay", ReadDouble(item, "world_day", 0d)), 2),
-                    ["summary"] = LimitText(ReadString(item, "summary", ""), 120)
+                    ["summary"] = Program.LimitText(ReadString(item, "summary", ""), 120)
                 }).ToList()
                 : incidents.Take(3).Select(item => new Dictionary<string, object>
                 {
-                    ["kind"] = LimitText(ReadString(item, "kind", ""), 32),
+                    ["kind"] = Program.LimitText(ReadString(item, "kind", ""), 32),
                     ["worldDay"] = Math.Round(ReadDouble(item, "worldDay", ReadDouble(item, "world_day", 0d)), 2)
                 }).ToList();
             return compact;
@@ -1275,7 +1275,7 @@ namespace ReignBetaServer
             {
                 ["nativeRelation"] = ReadInt(relationship, "nativeRelation", 0),
                 ["directionalAffinity"] = ReadInt(relationship, "directionalAffinity", ReadInt(relationship, "nativeRelation", 0)),
-                ["lifecycleTags"] = ReadStringList(relationship, "lifecycleTags").Take(3).Select(x => LimitText(x, 20)).ToList()
+                ["lifecycleTags"] = ReadStringList(relationship, "lifecycleTags").Take(3).Select(x => Program.LimitText(x, 20)).ToList()
             };
         }
 
@@ -1300,23 +1300,23 @@ namespace ReignBetaServer
             Dictionary<string, object> compact =
                 new Dictionary<string, object>
             {
-                ["identityBasis"] = LimitText(ReadString(opportunity, "identityBasis", "visible_presentation_only"), 32),
+                ["identityBasis"] = Program.LimitText(ReadString(opportunity, "identityBasis", "visible_presentation_only"), 32),
                 ["targetClanTierKnown"] = targetClanTierKnown,
                 ["clanTierDelta"] = targetClanTierKnown
                     ? ReadInt(opportunity, "clanTierDelta", 0) : 0,
-                ["relativeClanTierBand"] = LimitText(ReadString(
+                ["relativeClanTierBand"] = Program.LimitText(ReadString(
                     opportunity, "relativeClanTierBand",
                     "unverified_identity"), 28),
                 ["relativeBenefit"] = Math.Round(ReadDouble(opportunity, "relativeBenefit", 50d), 1),
-                ["bestOpportunityAxis"] = LimitText(ReadString(
+                ["bestOpportunityAxis"] = Program.LimitText(ReadString(
                     opportunity, "bestOpportunityAxis", ""), 16),
                 ["bestOpportunityGain"] = Math.Round(ReadDouble(
                     opportunity, "bestOpportunityGain", 0d), 3),
-                ["wealthEvidenceBasis"] = LimitText(ReadString(
+                ["wealthEvidenceBasis"] = Program.LimitText(ReadString(
                     opportunity, "wealthEvidenceBasis", ""), 36),
                 ["economicCapacityKnown"] = ReadBool(
                     opportunity, "economicCapacityKnown", false),
-                ["axes"] = axes.Take(5).ToDictionary(x => LimitText(x.Key, 24), x => x.Value, StringComparer.OrdinalIgnoreCase)
+                ["axes"] = axes.Take(5).ToDictionary(x => Program.LimitText(x.Key, 24), x => x.Value, StringComparer.OrdinalIgnoreCase)
             };
             if (targetClanTierKnown)
             {
@@ -1340,21 +1340,21 @@ namespace ReignBetaServer
                 ["genuine"] = ReadDouble(romance, "genuineInterest", 0d), ["strategic"] = ReadDouble(romance, "strategicInterest", 0d),
                 ["fire"] = ReadDouble(romance, "firePressure", 0d), ["maritalDiscontent"] = ReadDouble(romance, "maritalDiscontent", 0d),
                 ["resistance"] = ReadDouble(romance, "resistance", 0d), ["receptivity"] = ReadDouble(romance, "receptivity", 0d),
-                ["posture"] = LimitText(ReadString(romance, "posture", ""), 36), ["presentation"] = LimitText(ReadString(romance, "presentation", ""), 20),
-                ["calculationDisclosure"] = LimitText(ReadString(romance, "calculationDisclosure", ""), 24), ["married"] = ReadBool(romance, "married", false),
+                ["posture"] = Program.LimitText(ReadString(romance, "posture", ""), 36), ["presentation"] = Program.LimitText(ReadString(romance, "presentation", ""), 20),
+                ["calculationDisclosure"] = Program.LimitText(ReadString(romance, "calculationDisclosure", ""), 24), ["married"] = ReadBool(romance, "married", false),
                 ["continuity"] = new Dictionary<string, object>
                 {
                     ["eligible"] = ReadBool(continuity, "eligible", false),
-                    ["route"] = LimitText(ReadString(continuity, "route", ""), 24),
-                    ["stage"] = LimitText(ReadString(continuity, "stage", ""), 24),
-                    ["motiveChannel"] = LimitText(ReadString(continuity, "motiveChannel", ""), 16)
+                    ["route"] = Program.LimitText(ReadString(continuity, "route", ""), 24),
+                    ["stage"] = Program.LimitText(ReadString(continuity, "stage", ""), 24),
+                    ["motiveChannel"] = Program.LimitText(ReadString(continuity, "motiveChannel", ""), 16)
                 },
                 ["initiative"] = new Dictionary<string, object>
                 {
                     ["eligible"] = ReadBool(initiative, "eligible", false),
                     ["recommended"] = ReadBool(initiative, "recommended", false),
                     ["cooldownBlocked"] = ReadBool(cooldown, "blocked", false),
-                    ["cooldownReason"] = LimitText(ReadString(cooldown, "reason", ""), 36)
+                    ["cooldownReason"] = Program.LimitText(ReadString(cooldown, "reason", ""), 36)
                 },
                 ["hardConstraints"] = new Dictionary<string, object>
                 {
@@ -1362,7 +1362,7 @@ namespace ReignBetaServer
                     ["nativeSuitable"] = ReadBool(hardConstraints, "nativeSuitable", false),
                     ["closeKin"] = ReadBool(hardConstraints, "closeKin", false),
                     ["coercive"] = ReadBool(hardConstraints, "coercive", false),
-                    ["consentRule"] = LimitText(ReadString(hardConstraints, "consentRule", "Normal consent and game-action constraints still apply."), 100)
+                    ["consentRule"] = Program.LimitText(ReadString(hardConstraints, "consentRule", "Normal consent and game-action constraints still apply."), 100)
                 }
             };
             if (!minimal)
@@ -1383,11 +1383,11 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ConversationMotiveCooldown(string campaignId, string subjectId, string targetId, string sessionId, double worldDay, bool continuity)
         {
             if (continuity || string.IsNullOrWhiteSpace(subjectId) || string.IsNullOrWhiteSpace(targetId)) return new Dictionary<string, object> { ["blocked"] = false, ["reason"] = continuity ? "mutual_romantic_continuity" : "untracked" };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationMotiveSchema(connection);
-                Dictionary<string, object> sameSession = QuerySql(connection, "SELECT * FROM conversation_motive_cooldowns WHERE subject_id=$subject AND target_id=$target AND kind='romantic_advance' AND session_id=$session LIMIT 1;", new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["session"] = sessionId ?? "" }).FirstOrDefault();
-                Dictionary<string, object> recent = QuerySql(connection, "SELECT * FROM conversation_motive_cooldowns WHERE subject_id=$subject AND target_id=$target AND kind='romantic_advance' ORDER BY world_day DESC LIMIT 1;", new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
+                Dictionary<string, object> sameSession = Program.QuerySql(connection, "SELECT * FROM conversation_motive_cooldowns WHERE subject_id=$subject AND target_id=$target AND kind='romantic_advance' AND session_id=$session LIMIT 1;", new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["session"] = sessionId ?? "" }).FirstOrDefault();
+                Dictionary<string, object> recent = Program.QuerySql(connection, "SELECT * FROM conversation_motive_cooldowns WHERE subject_id=$subject AND target_id=$target AND kind='romantic_advance' ORDER BY world_day DESC LIMIT 1;", new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
                 bool sessionBlocked = sameSession != null;
                 bool dayBlocked = recent != null && worldDay - ReadDouble(recent, "world_day", 0d) < 3d;
                 return new Dictionary<string, object> { ["blocked"] = sessionBlocked || dayBlocked, ["reason"] = sessionBlocked ? "one_unsolicited_advance_per_session" : dayBlocked ? "three_day_target_cooldown" : "available", ["lastDay"] = recent == null ? -1d : ReadDouble(recent, "world_day", 0d) };
@@ -1396,14 +1396,14 @@ namespace ReignBetaServer
 
         internal static void EnsureConversationMotiveSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_motive_cooldowns (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_motive_cooldowns (
 cooldown_id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, target_id TEXT NOT NULL, kind TEXT NOT NULL,
 session_id TEXT NOT NULL DEFAULT '', world_day REAL NOT NULL DEFAULT 0, created_ts INTEGER NOT NULL,
 UNIQUE(subject_id,target_id,kind,session_id));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_motive_cooldown_pair ON conversation_motive_cooldowns(subject_id,target_id,kind,world_day DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_motive_cooldown_pair ON conversation_motive_cooldowns(subject_id,target_id,kind,world_day DESC);");
         }
 
-        private static Dictionary<string, object> ApplyConversationMotiveOutcome(string campaignId, Dictionary<string, object> context, Dictionary<string, object> payload, string visibleReply, string privateIntent, string decisionId, Dictionary<string, object> decisionBrief)
+        internal static Dictionary<string, object> ApplyConversationMotiveOutcome(string campaignId, Dictionary<string, object> context, Dictionary<string, object> payload, string visibleReply, string privateIntent, string decisionId, Dictionary<string, object> decisionBrief)
         {
             if (context == null || context.Count == 0) return new Dictionary<string, object>();
             Dictionary<string, object> romance = ReadDictionary(context, "romance") ?? new Dictionary<string, object>();
@@ -1416,25 +1416,25 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             string session = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId", "eventId", "socialEventId"), ReadString(context, "mode", "dialogue") + ":" + Math.Floor(day).ToString(CultureInfo.InvariantCulture));
             if (actedRomantically && ReadBool(initiative, "recommended", false))
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureConversationMotiveSchema(connection);
-                    ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_motive_cooldowns(cooldown_id,subject_id,target_id,kind,session_id,world_day,created_ts) VALUES($id,$subject,$target,'romantic_advance',$session,$day,$ts);", new Dictionary<string, object> { ["id"] = "mcd_" + Guid.NewGuid().ToString("N"), ["subject"] = subjectId, ["target"] = targetId, ["session"] = session, ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                    Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_motive_cooldowns(cooldown_id,subject_id,target_id,kind,session_id,world_day,created_ts) VALUES($id,$subject,$target,'romantic_advance',$session,$day,$ts);", new Dictionary<string, object> { ["id"] = "mcd_" + Guid.NewGuid().ToString("N"), ["subject"] = subjectId, ["target"] = targetId, ["session"] = session, ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
             }
             bool calculated = romanceRelevant && ReadString(romance, "presentation", "") == "calculated";
             if (actedRomantically && calculated)
             {
-                AppendJsonLineToPath(CharacterFile(campaignId, subjectId, "memory", "memories.jsonl"), new Dictionary<string, object> { ["id"] = "mem_" + Guid.NewGuid().ToString("N"), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = "private_intention", ["visibility"] = "private", ["subjectId"] = subjectId, ["targetId"] = targetId, ["summary"] = "A calculated romantic approach was considered or acted upon for strategic benefit.", ["sourceDecisionId"] = decisionId ?? "" });
+                Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, subjectId, "memory", "memories.jsonl"), new Dictionary<string, object> { ["id"] = "mem_" + Guid.NewGuid().ToString("N"), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = "private_intention", ["visibility"] = "private", ["subjectId"] = subjectId, ["targetId"] = targetId, ["summary"] = "A calculated romantic approach was considered or acted upon for strategic benefit.", ["sourceDecisionId"] = decisionId ?? "" });
             }
             Dictionary<string, object> scene = ReadDictionary(context, "scene") ?? new Dictionary<string, object>();
             List<string> witnesses = ReadStringList(scene, "witnessIds");
             Dictionary<string, object> scores = ReadDictionary(context, "highlightedScores") ?? new Dictionary<string, object>();
-            double exposureRisk = ClampDouble(ReadDouble(scene, "exposure", 0d) * (0.50d + 0.20d * (1d - ReadDouble(scores, "tact", 50d) / 100d) + 0.20d * (1d - ReadDouble(scores, "judgment", 50d) / 100d) + 0.20d * ReadDouble(scores, "impulsiveness", 50d) / 100d), 0d, 1d);
+            double exposureRisk = Program.ClampDouble(ReadDouble(scene, "exposure", 0d) * (0.50d + 0.20d * (1d - ReadDouble(scores, "tact", 50d) / 100d) + 0.20d * (1d - ReadDouble(scores, "judgment", 50d) / 100d) + 0.20d * ReadDouble(scores, "impulsiveness", 50d) / 100d), 0d, 1d);
             bool exposed = actedRomantically && witnesses.Count > 0 && RelationshipsService.StableUnit((decisionId ?? "") + "|exposure") < exposureRisk;
             if (exposed)
             {
-                StoreWorldMemoryEvent(new Dictionary<string, object> { ["campaignId"] = campaignId, ["eventId"] = "romance_exposure_" + decisionId, ["eventType"] = "romantic_attempt_witnessed", ["worldDay"] = day, ["summary"] = "Witnesses observed a potentially compromising romantic exchange.", ["participants"] = new List<string> { subjectId, targetId }, ["known_by"] = witnesses, ["visibility"] = "witnessed_private", ["importance"] = 0.65d, ["source"] = "motive_aware_conversation" }, "motive_aware_conversation");
+                Program.StoreWorldMemoryEvent(new Dictionary<string, object> { ["campaignId"] = campaignId, ["eventId"] = "romance_exposure_" + decisionId, ["eventType"] = "romantic_attempt_witnessed", ["worldDay"] = day, ["summary"] = "Witnesses observed a potentially compromising romantic exchange.", ["participants"] = new List<string> { subjectId, targetId }, ["known_by"] = witnesses, ["visibility"] = "witnessed_private", ["importance"] = 0.65d, ["source"] = "motive_aware_conversation" }, "motive_aware_conversation");
             }
             Dictionary<string, object> scheme = CourtService.PersistCourtCharacterSchemeFromOutcome(
                 campaignId, context, payload, visibleReply, decisionBrief, decisionId, actedRomantically, calculated);
@@ -1461,7 +1461,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                     RegexOptions.IgnoreCase);
         }
 
-        private static Dictionary<string, object> AugmentDecisionBriefWithMotiveEvidence(Dictionary<string, object> brief, Dictionary<string, object> context)
+        internal static Dictionary<string, object> AugmentDecisionBriefWithMotiveEvidence(Dictionary<string, object> brief, Dictionary<string, object> context)
         {
             brief = brief ?? new Dictionary<string, object>();
             if (context == null) return brief;
@@ -1473,7 +1473,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             brief["modelConstraints"] = modelConstraints;
             if (modelGoals.Count == 0)
             {
-                string decision = LimitText(ReadString(brief, "decision", ""), 240);
+                string decision = Program.LimitText(ReadString(brief, "decision", ""), 240);
                 brief["goals"] = new List<string>
                 {
                     string.IsNullOrWhiteSpace(decision)
@@ -1609,7 +1609,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             return "none";
         }
 
-        private static Dictionary<string, object> DialogueValidationRepairCharacterContext(
+        internal static Dictionary<string, object> DialogueValidationRepairCharacterContext(
             Dictionary<string, object> request)
         {
             Dictionary<string, object> envelope = ReadDictionary(
@@ -1659,11 +1659,11 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                             ReadDictionary(motive, "politicalRiskPosture"),
                             "immediateLethalDanger", false)
                     },
-                ["characterFoundation"] = LimitText(characterFoundation, 8000)
+                ["characterFoundation"] = Program.LimitText(characterFoundation, 8000)
             };
         }
 
-        private static string MarkRepairedVisibleText(
+        internal static string MarkRepairedVisibleText(
             string value, bool revalidationCleared)
         {
             string text = (value ?? string.Empty).TrimEnd();
@@ -1677,7 +1677,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             return text + (revalidationCleared ? ".." : ".,");
         }
 
-        private static bool MarkRepairedVisibleResponse(
+        internal static bool MarkRepairedVisibleResponse(
             Dictionary<string, object> parsed, bool revalidationCleared, string category = "validation_correction")
         {
             if (parsed == null) return false;
@@ -2189,7 +2189,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 Dictionary<string, object> context)
         {
             Dictionary<string, object> safe =
-                CloneDictionary(parsed ?? new Dictionary<string, object>());
+                Program.CloneDictionary(parsed ?? new Dictionary<string, object>());
             Dictionary<string, object> opportunity =
                 ReadDictionary(context, "opportunity")
                 ?? new Dictionary<string, object>();
@@ -2400,7 +2400,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 .Concat(ReadDictionaryList(
                     parsed, "relationship_assessments"))
                 .Take(8)
-                .Select(CloneDictionary)
+                .Select(Program.CloneDictionary)
                 .ToList();
             foreach (Dictionary<string, object> assessment in assessments)
             {
@@ -2439,7 +2439,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             safe["stateUpdates"] = new Dictionary<string, object>();
 
             Dictionary<string, object> result =
-                CloneDictionary(llm ?? new Dictionary<string, object>());
+                Program.CloneDictionary(llm ?? new Dictionary<string, object>());
             result["ok"] = true;
             result["content"] = Json.Serialize(safe);
             result["deterministicIdentityFallback"] = true;
@@ -2634,7 +2634,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             // summaries routinely use phrases such as "physical threat" or
             // "physical confrontation", which are not romantic authorization
             // and must not trigger a costly full-prompt safety repair.
-            return ContainsAny(
+            return Program.ContainsAny(
                 (text ?? "").ToLowerInvariant(),
                 "kiss",
                 "sexual",
@@ -2736,7 +2736,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 && Math.Abs(ReadDouble(courtSeductionPosture, "strategicInterest", 0d)
                     - ReadDouble(courtSeductionPosture, "baseStrategicInterest", 0d) - 20d) < 0.01d
                 && Math.Abs(ReadDouble(ReadDictionary(courtSeductionPosture, "initiative"), "score", 0d)
-                    - ClampDouble(
+                    - Program.ClampDouble(
                         0.55d * ReadDouble(courtSeductionPosture, "receptivity", 0d)
                         + 0.20d * CourtGroup100(courtSeductionTraits, "boldness")
                         + 0.15d * ReadInt(TraitPercentageSnapshot(courtSeductionTraitDocument), "flirtatiousness", 50)
@@ -2832,7 +2832,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 &&Math.Abs(tierSixAxes["power"]-66d)<.001d&&Math.Abs(tierSixAxes["dynasty"]-60d)<.001d,
                 "Known identity exposes the exact native clan-tier ladder to relative power, prestige, protection, and dynasty evaluation.");
             Dictionary<string, object> peerOpportunity =
-                CloneDictionary(recognized);
+                Program.CloneDictionary(recognized);
             peerOpportunity["observerClanTier"] = 5;
             peerOpportunity["targetClanTier"] = 5;
             peerOpportunity["clanTierDelta"] = 0;
@@ -3197,7 +3197,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                     "memoryWrites").Count == 0,
                 "A repeated provider contradiction produces a concise, conversational sovereign- and settlement-aware fallback and suppresses contaminated writes.");
             Dictionary<string, object> groupedFallbackContext =
-                CloneDictionary(sovereignContext);
+                Program.CloneDictionary(sovereignContext);
             groupedFallbackContext["subjectId"] =
                 "reign_court_town_A6_child_1";
             groupedFallbackContext["mustAccountForPriorSpeaker"] =
@@ -3718,7 +3718,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 }).ToList()
             };
             Dictionary<string, object> pathologicalCourtCharacter =
-                CloneDictionary(
+                Program.CloneDictionary(
                     ReadDictionary(capContext, "courtCharacter")
                     ?? new Dictionary<string, object>());
             pathologicalCourtCharacter["activeScheme"] =
@@ -3910,7 +3910,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunMotiveAwareConversationSelfTests()
+        internal static List<Dictionary<string, object>> RunMotiveAwareConversationSelfTests()
         {
             Dictionary<string, object> report = MotiveAwareConversationSelfTests();
             List<Dictionary<string, object>> rows = ReadDictionaryList(report, "cases").Select(row => new Dictionary<string, object>
@@ -3945,20 +3945,20 @@ UNIQUE(subject_id,target_id,kind,session_id));");
 #endif
 
         private static double InitiativeChanceForTest(double score) { return score < 45d ? 0d : score < 60d ? .25d : score < 75d ? .5d : score < 90d ? .75d : .9d; }
-        private static double Trait01FromPercent(Dictionary<string, object> percentages, string key) { return ClampDouble(ReadDouble(percentages, key, 50d) / 100d, 0d, 1d); }
-        private static double CourtGroup100(Dictionary<string, object> characteristics, string key) { return ClampDouble(ReadDouble(ReadDictionary(ReadDictionary(characteristics, "traits"), "courtVirtues") ?? new Dictionary<string, object>(), key, 50d), 0d, 100d); }
+        private static double Trait01FromPercent(Dictionary<string, object> percentages, string key) { return Program.ClampDouble(ReadDouble(percentages, key, 50d) / 100d, 0d, 1d); }
+        private static double CourtGroup100(Dictionary<string, object> characteristics, string key) { return Program.ClampDouble(ReadDouble(ReadDictionary(ReadDictionary(characteristics, "traits"), "courtVirtues") ?? new Dictionary<string, object>(), key, 50d), 0d, 100d); }
         private static double CourtGroup01(Dictionary<string, object> characteristics, string key) { return CourtGroup100(characteristics, key) / 100d; }
         private static double RomanticPressure01(Dictionary<string, object> characteristics, Dictionary<string, object> relationship, Dictionary<string, object> payload, string text)
         {
             double explicitPressure = ReadDouble(payload, "romanticSocialPressure", ReadDouble(ReadDictionary(characteristics, "pressure"), "romanticOrSocialRisk", 0d)) / 100d;
-            double wording = ContainsAny((text ?? "").ToLowerInvariant(), "kiss", "flirt", "seduc", "desire", "attract", "lover", "affair", "marry") ? 0.65d : 0d;
-            return ClampDouble(Math.Max(wording, explicitPressure), 0d, 1d);
+            double wording = Program.ContainsAny((text ?? "").ToLowerInvariant(), "kiss", "flirt", "seduc", "desire", "attract", "lover", "affair", "marry") ? 0.65d : 0d;
+            return Program.ClampDouble(Math.Max(wording, explicitPressure), 0d, 1d);
         }
         private static double RomanticApproachModifier(string text)
         {
             string lower = (text ?? "").ToLowerInvariant();
-            if (ContainsAny(lower, "threat", "force", "or else", "execute", "kill you")) return -35d;
-            if (ContainsAny(lower, "kiss", "flirt", "desire", "attract", "beautiful", "handsome", "love")) return 5d;
+            if (Program.ContainsAny(lower, "threat", "force", "or else", "execute", "kill you")) return -35d;
+            if (Program.ContainsAny(lower, "kiss", "flirt", "desire", "attract", "beautiful", "handsome", "love")) return 5d;
             return 0d;
         }
     }

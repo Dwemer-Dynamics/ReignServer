@@ -377,8 +377,8 @@ namespace ReignBetaServer
                 }
             };
             Dictionary<string, object> governmentDecision =
-                Program.BuildGovernmentDecisionContext(governmentDecisionPayload);
-            string governmentDecisionPrompt = Program.BuildConversationDecisionPrompt(
+                DialogueService.BuildGovernmentDecisionContext(governmentDecisionPayload);
+            string governmentDecisionPrompt = DialogueService.BuildConversationDecisionPrompt(
                 new Dictionary<string, object>
                 {
                     ["activeDomains"] = new List<Dictionary<string, object>>(),

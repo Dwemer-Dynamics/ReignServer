@@ -143,7 +143,7 @@ WHERE sender_id=$sender AND recipient_id=$player AND source=$source AND reason=$
                                 string senderName = ReadString(candidate, "name", senderId);
                                 string playerName = ReadString(payload, "playerName", "Player");
                                 var actionPayload = new Dictionary<string, object> { ["recipient"] = ReadDictionary(candidate, "profile") };
-                                if (Program.UsesStructuredActions(candidate))
+                                if (DialogueService.UsesStructuredActions(candidate))
                                 {
                                     actionPayload["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                                     actionPayload["structuredActionContext"] = ReadDictionary(candidate, "structuredActionContext");

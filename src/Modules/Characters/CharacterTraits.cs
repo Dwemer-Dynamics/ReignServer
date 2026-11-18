@@ -421,10 +421,10 @@ namespace ReignBetaServer
             Dictionary<string, object> traitDocument = ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>();
             Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? new Dictionary<string, object>();
             if (traits.Count == 0) return string.Empty;
-            List<Dictionary<string, object>> domains = Program.SelectMotiveDomains(playerText, sceneContext,
+            List<Dictionary<string, object>> domains = DialogueService.SelectMotiveDomains(playerText, sceneContext,
                 new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>());
             List<string> selected = domains
-                .Select(item => Program.MotiveDomainDefinitions.FirstOrDefault(domain => domain.Id == ReadString(item, "id", "")))
+                .Select(item => DialogueService.MotiveDomainDefinitions.FirstOrDefault(domain => domain.Id == ReadString(item, "id", "")))
                 .Where(domain => domain != null)
                 .SelectMany(domain => domain.TraitKeys)
                 .Where(key => traits.ContainsKey(key))

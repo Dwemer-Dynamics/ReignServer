@@ -12,7 +12,7 @@ namespace ReignBetaServer
         private const string CharacterLifeStateSchema = "reign-character-life-state-v1";
 
         private static bool IsLastingCharacterDecision(Dictionary<string, object> decision) =>
-            Program.AgencyAccepted(ReadString(decision, "disposition", ""))
+            DialogueService.AgencyAccepted(ReadString(decision, "disposition", ""))
             && (ReadString(decision, "topic", "") == "allegiance"
                 || ReadString(decision, "stakes", "ordinary") == "life_changing");
 
@@ -20,8 +20,8 @@ namespace ReignBetaServer
             string owner, string peer, string sourceId, string sourceHash, string timeline)
         {
             string disposition = ReadString(decision, "disposition", ""), topic = ReadString(decision, "topic", "");
-            bool accepted = Program.AgencyAccepted(disposition);
-            return TestDict("schema", CharacterLifeStateSchema, "id", "life_decision_" + Program.PromptHash(sourceId + "|" + ReadString(decision, "id", "")),
+            bool accepted = DialogueService.AgencyAccepted(disposition);
+            return TestDict("schema", CharacterLifeStateSchema, "id", "life_decision_" + DialogueService.PromptHash(sourceId + "|" + ReadString(decision, "id", "")),
                 "stateKey", "decision:" + ReadString(decision, "id", ""), "ownerId", owner, "peerId", peer,
                 "timelineId", timeline, "sourceId", sourceId, "sourceHash", sourceHash, "sourceKind", "accepted_decision",
                 "revision", ReadInt(decision, "revision", 1), "worldDay", ReadDouble(decision, "worldDay", 0),
@@ -75,23 +75,23 @@ ORDER BY n.receipt_id;",
                 var sources = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE speaker_id=$owner
 AND (turn_id=$turn OR turn_id=$npcTurn OR event_id=$turn OR exchange_id=$turn) ORDER BY turn_order;",
                     TestDict("owner", owner, "turn", turn, "npcTurn", turn + "_npc"));
-                var source = sources.FirstOrDefault(s => Program.PrecisionTurnVisible(s, owner, access, connection)
-                    && reply.Length > 0 && Program.AgencyContainsExactQuote(Program.ConversationTurnTextForRecall(s), reply));
+                var source = sources.FirstOrDefault(s => DialogueService.PrecisionTurnVisible(s, owner, access, connection)
+                    && reply.Length > 0 && DialogueService.AgencyContainsExactQuote(DialogueService.ConversationTurnTextForRecall(s), reply));
                 Dictionary<string, object> letter = null;
                 if (source == null && WorldSimulationService.TableExists(connection, "letters"))
                 {
                     letter = Program.QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$owner AND (letter_id=$turn OR 'turn_letter_'||letter_id=$turn);",
                         TestDict("owner", owner, "turn", turn)).FirstOrDefault();
-                    if (letter == null || !Program.LetterVisibleToObserver(connection, letter, owner, access, out _)
-                        || reply.Length == 0 || !Program.AgencyContainsExactQuote(ReadString(letter, "body", ""), reply)) continue;
+                    if (letter == null || !DialogueService.LetterVisibleToObserver(connection, letter, owner, access, out _)
+                        || reply.Length == 0 || !DialogueService.AgencyContainsExactQuote(ReadString(letter, "body", ""), reply)) continue;
                 }
                 if (source == null && letter == null) continue;
                 string decisionQuote = ReadString(decision, "replyQuote", "");
-                if (decisionQuote.Length > 0 && !Program.AgencyContainsExactQuote(reply, decisionQuote)) continue;
+                if (decisionQuote.Length > 0 && !DialogueService.AgencyContainsExactQuote(reply, decisionQuote)) continue;
                 var transition = CharacterDecisionTransition(decision, owner, ReadString(row, "peer_id", ""),
                     source != null ? ReadString(source, "turn_id", "") : ReadString(letter, "letter_id", ""),
-                    source != null ? Program.MemorySpecialistSourceHash(source) : Program.LetterContentHash(letter),
-                    source != null ? FirstNonEmpty(ReadString(source, "timeline_id", ""), ReadString(TryParseJsonObject(ReadString(source, "payload_json", "{}")), "timelineId", ""), access.TimelineId) : Program.LetterSourceTimeline(letter));
+                    source != null ? DialogueService.MemorySpecialistSourceHash(source) : DialogueService.LetterContentHash(letter),
+                    source != null ? FirstNonEmpty(ReadString(source, "timeline_id", ""), ReadString(TryParseJsonObject(ReadString(source, "payload_json", "{}")), "timelineId", ""), access.TimelineId) : DialogueService.LetterSourceTimeline(letter));
                 transition["receiptId"] = ReadString(row, "receipt_id", "");
                 transition["lastingAcceptance"] = IsLastingCharacterDecision(decision);
                 transition["decisionQuote"] = decisionQuote;
@@ -127,9 +127,9 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
                 if (id.Length == 0 || summary.Length == 0) continue;
                 if (!DateTimeOffset.TryParse(ReadString(row, "created_utc", ""), CultureInfo.InvariantCulture,
                         DateTimeStyles.AssumeUniversal, out var created) || created.ToUnixTimeSeconds() > access.AsOfTimestamp) continue;
-                result.Add(TestDict("schema", CharacterLifeStateSchema, "id", "life_native_" + Program.PromptHash(owner + "|" + id),
+                result.Add(TestDict("schema", CharacterLifeStateSchema, "id", "life_native_" + DialogueService.PromptHash(owner + "|" + id),
                     "stateKey", "native:" + id, "ownerId", owner, "peerId", "", "timelineId", access.TimelineId,
-                    "sourceId", id, "sourceHash", Program.MemorySourceHash(new[] { row }), "sourceKind", "native_confirmed",
+                    "sourceId", id, "sourceHash", DialogueService.MemorySourceHash(new[] { row }), "sourceKind", "native_confirmed",
                     "revision", 1, "worldDay", ReadDouble(row, "world_day", 0), "kind", ReadString(row, "event_type", ""),
                     "status", "completed_life_event", "subject", summary, "knownBy", new[] { owner },
                     "executionConfirmed", true, "authority", "completed_native_event", "personalMeaning", "not_inferred"));
@@ -208,7 +208,7 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
             {
                 string id = ReadString(row, "sourceId", "");
                 sourceIds.Add(id);
-                text.AppendLine(Program.RenderContinuityRecord(id, "dynamic_character_life_state", owner, "", ReadDouble(row, "worldDay", 0),
+                text.AppendLine(DialogueService.RenderContinuityRecord(id, "dynamic_character_life_state", owner, "", ReadDouble(row, "worldDay", 0),
                     120, true, FormatCharacterLifeTransition(row, false)));
             }
             return text.ToString();

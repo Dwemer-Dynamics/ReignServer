@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Only a server route can opt into this delivery policy. Serialized flags
         // from a client/model are never a receipt and never authorize an action.
@@ -13,7 +13,7 @@ namespace ReignBetaServer
         private static readonly ConditionalWeakTable<Dictionary<string, object>, SinglePassConversationReceipt> SinglePassConversations = new();
         internal static bool IsSinglePassConversation(Dictionary<string, object> payload) =>
             payload != null && SinglePassConversations.TryGetValue(payload, out _);
-        private static void BeginSinglePassConversation(Dictionary<string, object> payload) =>
+        internal static void BeginSinglePassConversation(Dictionary<string, object> payload) =>
             SinglePassConversations.GetValue(payload, _ => new SinglePassConversationReceipt());
 
         internal static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
@@ -21,7 +21,7 @@ namespace ReignBetaServer
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             BeginSinglePassConversation(payload);
-            return PrepareSinglePassConversationResponse((responder ?? ChatWithLlm)(request), mode, allowQuiet);
+            return PrepareSinglePassConversationResponse((responder ?? Program.ChatWithLlm)(request), mode, allowQuiet);
         }
 
         // Decode the one authored answer. No judge, rewrite, missing-metadata
@@ -30,13 +30,13 @@ namespace ReignBetaServer
             string mode, bool allowQuiet = false)
         {
             if (!ReadBool(result, "ok", false)) return EnsureConversationDelivery(result, allowQuiet);
-            var response = CloneDictionary(result);
+            var response = Program.CloneDictionary(result);
             string content = ReadString(response, "content", "");
             var parsed = TryParseStrictJsonObject(content);
             bool speechOnly = false;
             if (parsed == null)
             {
-                var envelope = ReadConversationResponseEnvelope(content);
+                var envelope = Program.ReadConversationResponseEnvelope(content);
                 // Only a complete outer reply string is eligible. Never search
                 // nested/private fields, broken strings or duplicate documents.
                 if (envelope.Truncated && envelope.Error.Length == 0 && envelope.ReplyStart >= 0)
@@ -61,10 +61,10 @@ namespace ReignBetaServer
             }
             parsed[letter ? "body" : "reply"] = visible;
             var speechView = parsed;
-            if (letter) { speechView = CloneDictionary(parsed); speechView["reply"] = visible; }
-            response = RejectProviderReservedSpeech(response, speechView);
+            if (letter) { speechView = Program.CloneDictionary(parsed); speechView["reply"] = visible; }
+            response = Program.RejectProviderReservedSpeech(response, speechView);
             if (!ReadBool(response, "ok", false)) return EnsureConversationDelivery(response, allowQuiet);
-            parsed = CompleteConversationStructuredResponse(parsed, NormalizeLookup(mode).Replace(' ', '_'), out var fields);
+            parsed = Program.CompleteConversationStructuredResponse(parsed, Program.NormalizeLookup(mode).Replace(' ', '_'), out var fields);
             // Missing consent stays missing. The independent action protocol checks
             // participants, proposal identity, terms, resources and replay receipts.
             response["content"] = Json.Serialize(parsed);

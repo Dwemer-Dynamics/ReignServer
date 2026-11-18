@@ -7,13 +7,13 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Process-owned delivery plan. A payload field or model-provided source ID
         // cannot authorize deleting evidence from a prompt. Registered copies are
         // complete required transcript/reference records, before receipt capture.
         private static readonly ConditionalWeakTable<Dictionary<string, object>, Dictionary<string, string>> PromptDeliveredSources = new();
-        private static readonly ConditionalWeakTable<Dictionary<string, object>, List<Dictionary<string, object>>> PromptStatementSources = new();
+        internal static readonly ConditionalWeakTable<Dictionary<string, object>, List<Dictionary<string, object>>> PromptStatementSources = new();
         private const int RequiredConversationTailCount = 30;
 
         internal static Dictionary<string, string> PlannedPromptSources(Dictionary<string, object> context) =>
@@ -49,7 +49,7 @@ namespace ReignBetaServer
             return matches.Count == 1 ? matches[0] : null;
         }
 
-        private static void BindPromptTranscriptSources(string campaign, string observer, Dictionary<string, object> context,
+        internal static void BindPromptTranscriptSources(string campaign, string observer, Dictionary<string, object> context,
             List<Dictionary<string, object>> lines)
         {
             var supplied = PromptDeliveredSources.GetValue(context, _ => new(StringComparer.Ordinal));
@@ -71,10 +71,10 @@ namespace ReignBetaServer
                 .Append(ReadFirstString(context, "sceneTurnId", "turnId", "exchangeId", "contributionId"))
                 .Where(id => id.Length > 0).Distinct().ToList();
             if (PlayerInputSources.TryGetValue(context, out var input) && input.SourceId.Length > 0) ids.Add(input.SourceId);
-            using var connection = OpenCampaignConnection(campaign);
-            var access = BuildKnowledgeAccessContext(observer, ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId"), "", context);
+            using var connection = Program.OpenCampaignConnection(campaign);
+            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(context, "playerHeroStringId", "mainHeroStringId", "playerId"), "", context);
             if (access.PlayerIdentityUnknown || ReadBool(context, "officialMemoryFirewall", false)) return;
-            var candidates = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active' AND
+            var candidates = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE status='active' AND
 (turn_id IN (SELECT jsonb_array_elements_text(CAST($ids AS jsonb)))
 OR exchange_id IN (SELECT jsonb_array_elements_text(CAST($exchanges AS jsonb)))) ORDER BY ts DESC,turn_order DESC LIMIT 512;",
                 TestDict("ids", Json.Serialize(ids), "exchanges", Json.Serialize(exchanges)))
@@ -121,7 +121,7 @@ OR exchange_id IN (SELECT jsonb_array_elements_text(CAST($exchanges AS jsonb))))
                 statements.Add(TestDict("turnId", ReadString(row, "turn_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
                     "eventId", ReadString(row, "event_id", ""), "originalSourceHash", PromptHash(ConversationTurnTextForRecall(row)),
                     "timestamp", ReadLong(row, "ts", 0), "acceptedSequence", ReadLong(row, "accepted_sequence", 0),
-                    "text", SanitizeUnknownIdentityEvidenceText(CommitmentVisibleSourceText(row, access), access)));
+                    "text", Program.SanitizeUnknownIdentityEvidenceText(CommitmentVisibleSourceText(row, access), access)));
             }
             catch (Exception error)
             {
@@ -133,7 +133,7 @@ OR exchange_id IN (SELECT jsonb_array_elements_text(CAST($exchanges AS jsonb))))
             finally { SetMemoryTranscriptContext(context, lines); }
         }
 
-        private static string MemoryProjectedTranscriptHash(Dictionary<string, object> row, KnowledgeAccessContext knowledge)
+        private static string MemoryProjectedTranscriptHash(Dictionary<string, object> row, Program.KnowledgeAccessContext knowledge)
         {
             string rendered = RenderExactHistoryTurn(row, knowledge);
             int boundary = rendered.IndexOf(": ", StringComparison.Ordinal);

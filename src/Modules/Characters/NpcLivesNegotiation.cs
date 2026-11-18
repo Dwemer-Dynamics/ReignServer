@@ -30,7 +30,7 @@ namespace ReignBetaServer
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return;
             using var c = Program.OpenCampaignConnection(campaign);
-            var state = ReadNpcLives(c, campaign, Program.ContinuityTimeline(payload));
+            var state = ReadNpcLives(c, campaign, DialogueService.ContinuityTimeline(payload));
             if (!IsDuplicateNpcStoryDuelProposal(state, hero, player, payload, decision)) return;
             // Reject the whole proposed bundle; silently retaining only some terms
             // would change the NPC's offer. No consent or story evidence is granted.
@@ -53,7 +53,7 @@ namespace ReignBetaServer
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return;
             using var c = Program.OpenCampaignConnection(campaign);
-            var state = ReadNpcLives(c, campaign, Program.ContinuityTimeline(payload));
+            var state = ReadNpcLives(c, campaign, DialogueService.ContinuityTimeline(payload));
             // The saved request owns this turn. An omitted or wrong model-supplied
             // assessment must not bypass the guard or publish an invented promise.
             var leave = state.Leaves.FirstOrDefault(l => l.HeroId == hero && l.Status == "discussing");
@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 : "My personal request is still unresolved. We can discuss it or review the current terms; nothing has been agreed by changing the subject.";
             // A fixed result is deliberately rendered as a complete reply. Keeping
             // arbitrary adjacent prose could retain a contradictory promise.
-            reply = Program.RenderGroundedSceneHeading(payload, hero, parsed, sentence);
+            reply = DialogueService.RenderGroundedSceneHeading(payload, hero, parsed, sentence);
             // Everything inferred from the discarded draft must be discarded too.
             // The accepted argument is the only permitted effect of this repair.
             parsed.Clear();

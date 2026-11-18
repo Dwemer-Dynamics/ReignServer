@@ -5,9 +5,9 @@ using System.Reflection;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             RunFinalConversationGauntletEvidenceSelfTests()
         {
             List<Dictionary<string, object>> checks =
@@ -21,8 +21,8 @@ namespace ReignBetaServer
             string correlation = "corr-evidence";
             try
             {
-                string auditPath = CampaignFile(campaignId, "audit", "audit.jsonl");
-                AppendJsonLineToPath(auditPath, new Dictionary<string, object>
+                string auditPath = Program.CampaignFile(campaignId, "audit", "audit.jsonl");
+                Program.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
                 {
                     ["correlationId"] = correlation,
                     ["phase"] = "prompt.built",
@@ -51,7 +51,7 @@ namespace ReignBetaServer
                         }
                     }
                 });
-                AppendJsonLineToPath(auditPath, new Dictionary<string, object>
+                Program.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
                 {
                     ["correlationId"] = correlation,
                     ["phase"] = "llm.response",
@@ -69,7 +69,7 @@ namespace ReignBetaServer
                         ["retryNumber"] = 1
                     }
                 });
-                AppendJsonLineToPath(auditPath, new Dictionary<string, object>
+                Program.AppendJsonLineToPath(auditPath, new Dictionary<string, object>
                 {
                     ["correlationId"] = correlation,
                     ["phase"] = "action.validation",
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                PersistenceService.TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             return checks;
         }

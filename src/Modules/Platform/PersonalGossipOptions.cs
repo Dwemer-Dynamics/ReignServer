@@ -8,18 +8,18 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly Dictionary<string, string> PersonalGossipChanceLabels = new Dictionary<string, string> {
+        internal static readonly Dictionary<string, string> PersonalGossipChanceLabels = new Dictionary<string, string> {
             ["share"] = "Sharing a conversation", ["negative"] = "Choosing malicious gossip",
             ["disclosure"] = "Disclosing details or an impression", ["distortion"] = "Malicious exaggeration",
             ["retell"] = "Retelling something heard", ["raise"] = "Bringing gossip up with you"
         };
-        private static string GossipAdjustmentKey(string stage) => "personalGossip" + char.ToUpperInvariant(stage[0]) + stage.Substring(1) + "Adjustment";
+        internal static string GossipAdjustmentKey(string stage) => "personalGossip" + char.ToUpperInvariant(stage[0]) + stage.Substring(1) + "Adjustment";
         private static bool ValidGossipAdjustment(object value) =>
             (value is byte || value is short || value is int || value is long || value is float || value is double || value is decimal)
             && double.IsFinite(Convert.ToDouble(value, CultureInfo.InvariantCulture))
             && Convert.ToDouble(value, CultureInfo.InvariantCulture) >= -100 && Convert.ToDouble(value, CultureInfo.InvariantCulture) <= 100
             && Convert.ToDouble(value, CultureInfo.InvariantCulture) % 1 == 0;
-        private static string ValidatePersonalGossipOptions(Dictionary<string, object> incoming)
+        internal static string ValidatePersonalGossipOptions(Dictionary<string, object> incoming)
         {
             foreach (var pair in incoming ?? new Dictionary<string, object>())
             {
@@ -31,7 +31,7 @@ namespace ReignBetaServer
             }
             return "";
         }
-        private static Dictionary<string, object> PersonalGossipChanceOptions(Dictionary<string, object> settings)
+        internal static Dictionary<string, object> PersonalGossipChanceOptions(Dictionary<string, object> settings)
         {
             var result = new Dictionary<string, object>();
             foreach (string stage in PersonalGossipChanceLabels.Keys)
@@ -39,9 +39,9 @@ namespace ReignBetaServer
                     ? Convert.ToInt32(value, CultureInfo.InvariantCulture) : 0;
             return result;
         }
-        private static int GossipAdjustedChance(int basis, string stage, Dictionary<string, object> policy) =>
-            GossipPercent(basis + ReadInt(ReadDictionary(policy, "chanceAdjustments"), stage, 0));
-        private static string PersonalGossipOptionsHtml()
+        internal static int GossipAdjustedChance(int basis, string stage, Dictionary<string, object> policy) =>
+            DialogueService.GossipPercent(basis + ReadInt(ReadDictionary(policy, "chanceAdjustments"), stage, 0));
+        internal static string PersonalGossipOptionsHtml()
         {
             var html = new StringBuilder(@"<div class='xpOptions' id='personalGossipOptions'><h3>Personal gossip</h3>
 <label class='xpRow'><input type='checkbox' id='personalGossipEnabled' checked onchange='renderPersonalGossipOptions()'> Enable personal gossip</label>
@@ -58,7 +58,7 @@ namespace ReignBetaServer
 <button type='button' id='resetPersonalGossipOptions' onclick='resetPersonalGossipOptions()'>Reset to standard chances</button> <button type='button' id='savePersonalGossipOptions' disabled onclick='savePersonalGossipOptions()'>Save gossip options</button>
 <div id='personalGossipOptionsStatus' role='status' aria-live='polite'></div></div>").ToString();
         }
-        private static string PersonalGossipOptionsScript() => "const personalGossipChanceIds=" + Json.Serialize(PersonalGossipChanceLabels.Keys.Select(GossipAdjustmentKey).ToArray()) + @";
+        internal static string PersonalGossipOptionsScript() => "const personalGossipChanceIds=" + Json.Serialize(PersonalGossipChanceLabels.Keys.Select(GossipAdjustmentKey).ToArray()) + @";
 ids.push('personalGossipEnabled',...personalGossipChanceIds);boolIds.add('personalGossipEnabled');
 let personalGossipOptionsLoaded=false,personalGossipOptionsSaving=false;
 function renderPersonalGossipOptions(){const enabled=document.getElementById('personalGossipEnabled').checked;personalGossipChanceIds.forEach(id=>{const el=document.getElementById(id),n=Number(el.value);el.disabled=!enabled||personalGossipOptionsSaving;document.getElementById(id+'Value').textContent=n===0?'Standard':(n>0?'+':'')+n+' pp';el.setAttribute('aria-valuetext',n===0?'Standard chance':(n>0?'plus ':'minus ')+Math.abs(n)+' percentage points');});document.getElementById('personalGossipEnabled').disabled=personalGossipOptionsSaving;document.getElementById('resetPersonalGossipOptions').disabled=personalGossipOptionsSaving;}

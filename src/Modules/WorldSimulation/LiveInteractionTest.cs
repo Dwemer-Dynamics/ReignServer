@@ -152,7 +152,7 @@ namespace ReignBetaServer
                 Program.WriteJsonObject(LiveTestRuntimePath(campaignId), payload);
                 Program.WriteJsonObject(LiveTestLatestRuntimePath(), payload);
                 Dictionary<string, object> arm = Program.ReadJsonObject(LiveTestArmPath());
-                if (Program.TryRenewPersonalGossipConversationLease(active, payload, DateTimeOffset.UtcNow, IsLiveTestArmed(arm)))
+                if (DialogueService.TryRenewPersonalGossipConversationLease(active, payload, DateTimeOffset.UtcNow, IsLiveTestArmed(arm)))
                     SaveLiveTestRun(active);
                 return new Dictionary<string, object>
                 {
@@ -336,7 +336,7 @@ namespace ReignBetaServer
                     ["gauntletRunId"] = ReadString(payload, "gauntletRunId", ""),
                     ["caseInstanceId"] = ReadString(payload, "caseInstanceId", ""),
                     ["gauntletCorrelationId"] = ReadString(payload, "correlationId", ""),
-                    ["buildVersion"] = Program.CurrentConversationBuildVersion(),
+                    ["buildVersion"] = DialogueService.CurrentConversationBuildVersion(),
                     ["seed"] = ReadLong(payload, "seed", 0),
                     ["presentation"] = NormalizeLiveTestPresentation(ReadString(payload, "presentation", "headless")),
                     ["effects"] = NormalizeLiveTestEffects(ReadString(payload, "effects", "guarded")),
@@ -915,7 +915,7 @@ namespace ReignBetaServer
                     List<string> activeDomains = ReadStringList(brief, "activeDomains");
                     bool romanceRelevant = activeDomains.Contains("romance", StringComparer.OrdinalIgnoreCase);
                     string visible = FirstNonEmpty(ReadString(reply, "text", ""), ReadString(raw, "reply", ""));
-                    bool romanticLanguage = Program.ConversationReplyContainsRomanticAction(visible);
+                    bool romanticLanguage = DialogueService.ConversationReplyContainsRomanticAction(visible);
                     bool romanticDetected = ReadBool(motiveOutcome, "romanticActionDetected", false);
                     return ReadStringList(brief, "goals").Count > 0
                         && ReadStringList(brief, "constraints").Count > 0
@@ -961,7 +961,7 @@ namespace ReignBetaServer
                             && observerTier >= 0 && observerTier <= 6
                             && targetTier >= 0 && targetTier <= 6
                             && delta == targetTier - observerTier
-                            && tierBand.Equals(Program.RelativeClanTierBand(delta), StringComparison.OrdinalIgnoreCase);
+                            && tierBand.Equals(DialogueService.RelativeClanTierBand(delta), StringComparison.OrdinalIgnoreCase);
                         int expectedObserverTier = ReadInt(
                             requested,
                             "expectedObserverClanTier",
@@ -1544,7 +1544,7 @@ namespace ReignBetaServer
                         return fieldsMatch
                             && authorityInternallyConsistent
                             && !staleLabel
-                            && !Program.VerifiedIdentityGroundingContradiction(
+                            && !DialogueService.VerifiedIdentityGroundingContradiction(
                                 parsed,
                                 new Dictionary<string, object>
                                 {
@@ -1595,7 +1595,7 @@ namespace ReignBetaServer
                         int observed = ReadInt(conduct,
                             "defianceTier", -1);
                         return ReadString(posture, "model", "")
-                                == Program.PoliticalRiskModel
+                                == DialogueService.PoliticalRiskModel
                             && maximum >= 0 && observed >= 0
                             && observed <= maximum
                             && ReadStringList(conduct,
@@ -1701,7 +1701,7 @@ namespace ReignBetaServer
                     .Select(text => new
                     {
                         Text = text,
-                        Claims = Program.VisibleReplyClaimsCompletedWorldAction(
+                        Claims = DialogueService.VisibleReplyClaimsCompletedWorldAction(
                             text, out string match),
                         Match = match
                     })
@@ -1722,7 +1722,7 @@ namespace ReignBetaServer
             if (failures.Any(row => string.Equals(ReadString(row, "commandId", ""), commandId, StringComparison.OrdinalIgnoreCase)))
             {
                 foreach (string correlationId in ReadStringList(command, "correlationIds"))
-                    Program.ScheduleReplayCorpusCapture(ReadString(run, "campaignId", ""), correlationId);
+                    DialogueService.ScheduleReplayCorpusCapture(ReadString(run, "campaignId", ""), correlationId);
             }
         }
 
@@ -1911,7 +1911,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
                     && summary != null
                     && summaryId.Equals(reportedSummaryId, StringComparison.OrdinalIgnoreCase)
                     && ReadString(summary, "summary_type", "").Equals("scene", StringComparison.OrdinalIgnoreCase)
-                    && Program.MemoryLaneIds.Contains(ReadString(summary, "memory_lane", ""), StringComparer.OrdinalIgnoreCase)
+                    && DialogueService.MemoryLaneIds.Contains(ReadString(summary, "memory_lane", ""), StringComparer.OrdinalIgnoreCase)
                     && turnCount > 0
                     && ReadInt(summary, "event_count", 0) == distinctExchanges
                     && sourceLinks >= turnCount + 1
@@ -1983,7 +1983,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
             try
             {
                 List<Dictionary<string, object>> qualificationRuns =
-                    Program.LoadConversationReadinessRuns(campaignId, qualificationId);
+                    DialogueService.LoadConversationReadinessRuns(campaignId, qualificationId);
                 List<string> sessionIds = qualificationRuns
                     .SelectMany(item => ReadDictionaryList(item, "commands"))
                     .Where(item =>
@@ -2012,8 +2012,8 @@ ORDER BY updated_ts DESC LIMIT 1;",
 
                 using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    Program.EnsureMemoryBackgroundWorkSchema(connection);
-                    Program.EnsureSemanticMemorySchema(connection);
+                    DialogueService.EnsureMemoryBackgroundWorkSchema(connection);
+                    DialogueService.EnsureSemanticMemorySchema(connection);
                     foreach (string sessionId in sessionIds)
                     {
                         Dictionary<string, object> session = Program.QuerySql(connection,
@@ -2131,7 +2131,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
 
                 summaryIds = summaryIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 Dictionary<string, object> semantic = semanticEnabled
-                    ? Program.WaitForNpcDialogueAuditEmbeddings(campaignId, summaryIds, 12000)
+                    ? DialogueService.WaitForNpcDialogueAuditEmbeddings(campaignId, summaryIds, 12000)
                     : new Dictionary<string, object>
                     {
                         ["disabled"] = true, ["expected"] = summaryIds.Count,
@@ -2412,7 +2412,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
                         RelationshipsService.EnsureConversationRelationshipSchema(connection);
-                        Program.EnsureWorldHistoryLieDetectionSchema(connection);
+                        DialogueService.EnsureWorldHistoryLieDetectionSchema(connection);
                         foreach (KeyValuePair<string, List<Dictionary<string, object>>> occurrence in auditByReceipt)
                         {
                             Dictionary<string, object> stored = Program.QuerySql(connection,
@@ -3010,7 +3010,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                         if (!string.Equals(
                                 ReadString(envelope,
                                     "npcRelationshipPromptBlockHash", ""),
-                                Program.PromptHash(relationshipBlock),
+                                DialogueService.PromptHash(relationshipBlock),
                                 StringComparison.OrdinalIgnoreCase))
                             errors.Add("relationship prompt proof hash mismatch: "
                                 + correlationId);
@@ -3337,7 +3337,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 {
                     string leftText = ReadString(active[left], "text", "");
                     string rightText = ReadString(active[right], "text", "");
-                    double similarity = Program.RoleplayTextSimilarity(
+                    double similarity = DialogueService.RoleplayTextSimilarity(
                         leftText, rightText);
                     if (similarity < 0.72d) continue;
                     evidence = FirstNonEmpty(
@@ -3788,23 +3788,23 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             gossipEnrollment["recoveryCheckpointVerified"] = true; gossipEnrollment["disposableSaveName"] = "Baseline";
             add("personal_gossip_baseline", NormalizeLiveTestCommand(gossipRun, gossipInput) == null, "Protected baseline cannot be enrolled as gossip Current.");
             bool badPhase = false;
-            try { Program.ValidatePersonalGossipTestCase(TestDict("caseId", "self", "phase", "snapshot", "draws", TestDict("share", 1))); }
+            try { DialogueService.ValidatePersonalGossipTestCase(TestDict("caseId", "self", "phase", "snapshot", "draws", TestDict("share", 1))); }
             catch (ArgumentException) { badPhase = true; }
             add("personal_gossip_wrong_phase", badPhase, "Observation cannot smuggle fixture controls.");
-            add("personal_gossip_draw_default", Program.GossipDecisionRoll(TestDict(), "self", "share") == Program.GossipRoll("self", "share")
-                && Program.GossipDecisionDraw(TestDict(), "self", "friendly_recipient") == Program.GossipDraw("self", "friendly_recipient"), "No fixture preserves the exact production draw.");
-            add("personal_gossip_saved_control", Program.GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 1))), "self", "share") == 1
-                && Program.GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 0))), "self", "share") == Program.GossipRoll("self", "share"), "Only bounded persisted stage values are accepted.");
+            add("personal_gossip_draw_default", DialogueService.GossipDecisionRoll(TestDict(), "self", "share") == DialogueService.GossipRoll("self", "share")
+                && DialogueService.GossipDecisionDraw(TestDict(), "self", "friendly_recipient") == DialogueService.GossipDraw("self", "friendly_recipient"), "No fixture preserves the exact production draw.");
+            add("personal_gossip_saved_control", DialogueService.GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 1))), "self", "share") == 1
+                && DialogueService.GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 0))), "self", "share") == DialogueService.GossipRoll("self", "share"), "Only bounded persisted stage values are accepted.");
             var gossipNow = DateTimeOffset.UtcNow;
             var gossipJournal = TestDict("activeSaveName", "Current", "gameInstanceId", "one", "restoreGeneration", 0L, "memoryRestoreGeneration", "before");
             var gossipRuntime = TestDict("activeSaveName", "Current", "gameInstanceId", "one");
-            add("personal_gossip_control_generation", Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow, gossipNow)
-                && !Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "after", gossipNow, gossipNow)
-                && !Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 1, "before", gossipNow, gossipNow),
+            add("personal_gossip_control_generation", DialogueService.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow, gossipNow)
+                && !DialogueService.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "after", gossipNow, gossipNow)
+                && !DialogueService.GossipTestControlsMatch(gossipJournal, gossipRuntime, 1, "before", gossipNow, gossipNow),
                 "A server restart cannot resurrect uncaptured controls after a persisted restore, even if the process counter returns to zero.");
-            add("personal_gossip_control_scope", !Program.GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Baseline", "gameInstanceId", "one"), 0, "before", gossipNow, gossipNow)
-                && !Program.GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Current", "gameInstanceId", "other"), 0, "before", gossipNow, gossipNow)
-                && !Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow.AddHours(-13), gossipNow),
+            add("personal_gossip_control_scope", !DialogueService.GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Baseline", "gameInstanceId", "one"), 0, "before", gossipNow, gossipNow)
+                && !DialogueService.GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Current", "gameInstanceId", "other"), 0, "before", gossipNow, gossipNow)
+                && !DialogueService.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow.AddHours(-13), gossipNow),
                 "Captured saved decisions are separate; uncaptured controls expire and cannot cross Current or native instance.");
             add("structured_action_enrollment", structuredCommand != null && ReferenceEquals(structuredCommand["enrollment"], structuredEnrollment)
                 && NormalizeLiveTestCommand(fakeRun, structuredInput) == null,
@@ -4216,24 +4216,24 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && LiveTestGameInstanceTimestamp("game-20260724163141-anything") == "20260724163141",
                 "A fresh newer campaign host owns the heartbeat lease; delayed heartbeats from an older overlapping launch cannot replace it or interrupt its commands.");
             add("readiness_gates",
-                Program.ConversationReadinessGates.ContainsKey("structural_pipeline")
-                && Program.ConversationReadinessGates.Values.All(gate => gate.Item1 <= 40)
-                && Program.ConversationReadinessGates["structural_pipeline"].Item1 == 40
-                && Math.Abs(Program.ConversationReadinessGates["structural_pipeline"].Item2 - 1d) < 0.0001
-                && Program.ConversationReadinessGates.ContainsKey("dynamic_characteristics")
-                && Program.ConversationReadinessGates["dynamic_characteristics"].Item2 >= 0.95
-                && Program.ConversationReadinessGates.ContainsKey("clan_tier_recognition")
-                && Program.ConversationReadinessGates["clan_tier_recognition"].Item1 == 30
-                && Program.ConversationReadinessGates.ContainsKey("manipulation_capabilities")
-                && Program.ConversationReadinessGates["manipulation_capabilities"].Item1 == 40,
+                DialogueService.ConversationReadinessGates.ContainsKey("structural_pipeline")
+                && DialogueService.ConversationReadinessGates.Values.All(gate => gate.Item1 <= 40)
+                && DialogueService.ConversationReadinessGates["structural_pipeline"].Item1 == 40
+                && Math.Abs(DialogueService.ConversationReadinessGates["structural_pipeline"].Item2 - 1d) < 0.0001
+                && DialogueService.ConversationReadinessGates.ContainsKey("dynamic_characteristics")
+                && DialogueService.ConversationReadinessGates["dynamic_characteristics"].Item2 >= 0.95
+                && DialogueService.ConversationReadinessGates.ContainsKey("clan_tier_recognition")
+                && DialogueService.ConversationReadinessGates["clan_tier_recognition"].Item1 == 30
+                && DialogueService.ConversationReadinessGates.ContainsKey("manipulation_capabilities")
+                && DialogueService.ConversationReadinessGates["manipulation_capabilities"].Item1 == 40,
                 "Readiness promotion requires the declared fixed samples and deterministic or 95-percent pass gates, including 30 clan-tier probes.");
             add("readiness_completed_run_eligibility",
-                Program.ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "completed" })
-                && !Program.ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "running" })
-                && Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "cancelled" })
-                && Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "interrupted" })
-                && Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "failed" })
-                && !Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "running" }),
+                DialogueService.ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "completed" })
+                && !DialogueService.ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "running" })
+                && DialogueService.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "cancelled" })
+                && DialogueService.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "interrupted" })
+                && DialogueService.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "failed" })
+                && !DialogueService.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "running" }),
                 "Only completed qualification runs contribute samples; cancelled, interrupted, and failed runs remain explicit clean-window failures.");
             List<Dictionary<string, object>> judgeExpected = new List<Dictionary<string, object>>
             {
@@ -4243,12 +4243,12 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             List<Dictionary<string, object>> judgeRecovered = new List<Dictionary<string, object>>();
             HashSet<string> judgeExpectedIds = new HashSet<string>(
                 new[] { "C1", "C2" }, StringComparer.OrdinalIgnoreCase);
-            Program.MergeConversationReadinessJudgeCases(judgeRecovered,
+            DialogueService.MergeConversationReadinessJudgeCases(judgeRecovered,
                 new[] { new Dictionary<string, object> { ["caseId"] = "C2", ["personalityConsistency"] = 0.9d } },
                 judgeExpectedIds);
             List<Dictionary<string, object>> judgeMissing =
-                Program.MissingConversationReadinessJudgeCases(judgeExpected, judgeRecovered);
-            Program.MergeConversationReadinessJudgeCases(judgeRecovered,
+                DialogueService.MissingConversationReadinessJudgeCases(judgeExpected, judgeRecovered);
+            DialogueService.MergeConversationReadinessJudgeCases(judgeRecovered,
                 new[] { new Dictionary<string, object> { ["caseId"] = "C1", ["personalityConsistency"] = 0.95d } },
                 judgeExpectedIds);
             add("readiness_judge_partial_batch_recovery",
@@ -4270,11 +4270,11 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 new Dictionary<string, object> { ["commandId"] = "categorized", ["assertion"] = "personalityRubric", ["passed"] = true }
             };
             add("readiness_assertions_are_category_specific",
-                !Program.ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "dynamic_characteristics")
-                && Program.ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "personality_consistency"),
+                !DialogueService.ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "dynamic_characteristics")
+                && DialogueService.ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "personality_consistency"),
                 "A Dynamic Characteristics miss does not incorrectly lower the personality score or another unrelated readiness category.");
             add("readiness_blinded_rubric_is_mandatory",
-                !Program.ConversationReadinessCommandPassed(categorizedCommand,
+                !DialogueService.ConversationReadinessCommandPassed(categorizedCommand,
                     categorizedAssertions.Where(row => !ReadString(row, "assertion", "")
                         .Equals("personalityRubric", StringComparison.OrdinalIgnoreCase)).ToList(),
                     new List<Dictionary<string, object>>(), "personality_consistency"),
@@ -4290,7 +4290,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     }
                 };
             add("readiness_relationship_history_rubric_is_mandatory",
-                !Program.ConversationReadinessCommandPassed(
+                !DialogueService.ConversationReadinessCommandPassed(
                     categorizedCommand,
                     relationshipHistoryAssertions,
                     new List<Dictionary<string, object>>(),
@@ -4415,7 +4415,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                         }
                 };
             add("political_authority_assertion_fixture_is_grounded",
-                !Program.VerifiedIdentityGroundingContradiction(
+                !DialogueService.VerifiedIdentityGroundingContradiction(
                     LiveTestCurrentModelOutput(
                         ReadDictionary(
                             authorityEvidenceReply,
@@ -4449,7 +4449,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             };
             add("political_authority_accepts_settlement_room_headings",
                 groundedRoomHeadings.All(reply =>
-                    !Program.VerifiedIdentityGroundingContradiction(
+                    !DialogueService.VerifiedIdentityGroundingContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] = reply
@@ -4457,7 +4457,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                         verifiedAuthorityContext)),
                 "A heading that names the verified settlement remains grounded when a room or sub-location follows a dash or comma.");
             add("political_authority_rejects_conflicting_settlement_heading",
-                Program.VerifiedIdentityGroundingContradiction(
+                DialogueService.VerifiedIdentityGroundingContradiction(
                     new Dictionary<string, object>
                     {
                         ["reply"] =
@@ -4466,13 +4466,13 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     verifiedAuthorityContext),
                 "A heading that unambiguously names a different settlement still contradicts the verified current location.");
             add("political_authority_accepts_no_one_as_zero_wars",
-                !Program.ContainsContradictoryCurrentWarCount(
+                !DialogueService.ContainsContradictoryCurrentWarCount(
                     "Battania is at war with the Western Empire; fen Niabar is at war with no one.",
                     0)
-                && !Program.ContainsContradictoryCurrentWarCount(
+                && !DialogueService.ContainsContradictoryCurrentWarCount(
                     "Fen Niabar is at war with none.",
                     0)
-                && Program.ContainsContradictoryCurrentWarCount(
+                && DialogueService.ContainsContradictoryCurrentWarCount(
                     "Fen Niabar is at war with one kingdom.",
                     0),
                 "Natural zero-war phrases must not be parsed as one war, while a real one-war contradiction still fails.");
@@ -4483,7 +4483,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             historicalIdentityEnvelope["conversationSceneState"] =
                 "Earlier in this scene, before the introduction, the observer called the player the armed stranger and could not verify a sovereign office.";
             add("political_authority_assertion_ignores_historical_input_context",
-                !Program.VerifiedIdentityGroundingContradiction(
+                !DialogueService.VerifiedIdentityGroundingContradiction(
                     LiveTestCurrentModelOutput(
                         historicalIdentityEnvelope),
                     new Dictionary<string, object>
@@ -4493,7 +4493,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                                 historicalIdentityEnvelope,
                                 "identityView")
                     })
-                && Program.VerifiedIdentityGroundingContradiction(
+                && DialogueService.VerifiedIdentityGroundingContradiction(
                     new Dictionary<string, object>
                     {
                         ["reply"] =

@@ -5,13 +5,13 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static Dictionary<string, object> ConversationQualificationRelationshipFixtureApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -28,9 +28,9 @@ namespace ReignBetaServer
             }
 
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                ReadJsonObject(ConversationReadinessStatePath(campaignId));
+                Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             string qualificationId = ReadString(state, "qualificationId", "");
             string requestedQualificationId =
                 ReadString(payload, "qualificationId", qualificationId);
@@ -82,10 +82,10 @@ namespace ReignBetaServer
             string pairKey = RelationshipsService.AmbientPairKey(firstId, secondId);
             Dictionary<string, object> before;
             Dictionary<string, object> after;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                before = QuerySql(connection,
+                before = Program.QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey })
                     .FirstOrDefault();
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                     state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
                     // Persist the recovery manifest before touching relationship
                     // state so an interrupted qualification can still restore it.
-                    WriteJsonObject(
+                    Program.WriteJsonObject(
                         ConversationReadinessStatePath(campaignId), state);
                 }
 
@@ -146,14 +146,14 @@ namespace ReignBetaServer
                         connection, campaignId, secondId, firstId,
                         secondDelta, worldDay, "qualification_fixture",
                         ReadString(payload, "timelineId", "main"));
-                after = QuerySql(connection,
+                after = Program.QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey })
                     .FirstOrDefault();
             }
 
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {
                 ["ok"] = after != null,
@@ -181,12 +181,12 @@ namespace ReignBetaServer
                 observerIsA ? "affinity_a_to_b" : "affinity_b_to_a", 0);
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             ConversationQualificationBenefitFixtureApi(
                 Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -202,9 +202,9 @@ namespace ReignBetaServer
                 };
 
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                ReadJsonObject(
+                Program.ReadJsonObject(
                     ConversationReadinessStatePath(campaignId));
             string qualificationId =
                 ReadString(state, "qualificationId", "");
@@ -231,9 +231,9 @@ namespace ReignBetaServer
             {
                 int removed = 0;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
-                    EnsureMemorySchema(connection);
+                    Program.EnsureMemorySchema(connection);
                     foreach (Dictionary<string, object> fixture in fixtures)
                     {
                         if (ReadBool(fixture, "restored", false))
@@ -242,7 +242,7 @@ namespace ReignBetaServer
                             ReadString(fixture, "eventId", "");
                         if (!string.IsNullOrWhiteSpace(fixtureEventId))
                         {
-                            ExecuteSql(connection,
+                            Program.ExecuteSql(connection,
                                 @"DELETE FROM events
 WHERE event_id=$id
 AND event_type='verified_qualification_property_transfer';",
@@ -261,7 +261,7 @@ AND event_type='verified_qualification_property_transfer';",
                     fixtures;
                 state["updatedUtc"] =
                     DateTimeOffset.UtcNow.ToString("o");
-                WriteJsonObject(
+                Program.WriteJsonObject(
                     ConversationReadinessStatePath(campaignId), state);
                 return new Dictionary<string, object>
                 {
@@ -318,7 +318,7 @@ AND event_type='verified_qualification_property_transfer';",
                 state["updatedUtc"] =
                     DateTimeOffset.UtcNow.ToString("o");
                 // Persist recovery metadata before creating the evidence row.
-                WriteJsonObject(
+                Program.WriteJsonObject(
                     ConversationReadinessStatePath(campaignId), state);
             }
 
@@ -332,10 +332,10 @@ AND event_type='verified_qualification_property_transfer';",
                 + " a life-changing fully furnished city home from "
                 + giverId + ".";
             using (ReignDbConnection connection =
-                OpenCampaignConnection(campaignId))
+                Program.OpenCampaignConnection(campaignId))
             {
-                EnsureMemorySchema(connection);
-                ExecuteSql(connection, @"INSERT INTO events(
+                Program.EnsureMemorySchema(connection);
+                Program.ExecuteSql(connection, @"INSERT INTO events(
 event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
 witnesses_json,about_entities_json,known_by_json,visibility,importance,
 source_reliability,confidence,payload_json,embedding_status,created_utc)
@@ -393,7 +393,7 @@ known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
                 ReadDictionaryList(state, "relationshipQualificationFixtures");
             int restored = 0;
             List<string> errors = new List<string>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 foreach (Dictionary<string, object> fixture in fixtures)
@@ -407,16 +407,16 @@ known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
                             ?? new Dictionary<string, object>();
                         if (!ReadBool(fixture, "originalExists", false))
                         {
-                            ExecuteSql(connection,
+                            Program.ExecuteSql(connection,
                                 "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                                 new Dictionary<string, object> { ["pair"] = pairKey });
-                            ExecuteSql(connection,
+                            Program.ExecuteSql(connection,
                                 "DELETE FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                                 new Dictionary<string, object> { ["pair"] = pairKey });
                         }
                         else
                         {
-                            ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 affinity_a_to_b=$ab,affinity_b_to_a=$ba,tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,
 shared_tag=$shared,projected_native_relation=$projected,
 native_action_pending=1,native_action_id=$action,updated_ts=$ts
@@ -434,7 +434,7 @@ WHERE pair_key=$pair;",
                                     ["action"] = "native_target:" + pairKey,
                                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                                 });
-                            ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                            Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
 attempt_count,claimed_ts,last_error,updated_ts,revision)
 VALUES($pair,$a,$b,$target,0,'pending',$day,-1000,0,0,'',$ts,1)
@@ -467,13 +467,13 @@ updated_ts=$ts;",
                     }
                     catch (Exception ex)
                     {
-                        errors.Add(pairKey + ": " + LimitText(ex.Message, 300));
+                        errors.Add(pairKey + ": " + Program.LimitText(ex.Message, 300));
                     }
                 }
             }
             state["relationshipQualificationFixtures"] = fixtures;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {
                 ["ok"] = errors.Count == 0,
@@ -484,12 +484,12 @@ updated_ts=$ts;",
             };
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             ConversationQualificationManipulationFixtureApi(
                 Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -504,9 +504,9 @@ updated_ts=$ts;",
                 };
 
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                ReadJsonObject(ConversationReadinessStatePath(campaignId));
+                Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             string qualificationId = ReadString(state, "qualificationId", "");
             if (state.Count == 0
                 || !qualificationId.Equals(
@@ -538,7 +538,7 @@ updated_ts=$ts;",
 
             string playerId = ReadFirstString(
                 payload, "playerHeroId", "subjectHeroId");
-            string playerName = LimitText(
+            string playerName = Program.LimitText(
                 ReadString(payload, "playerName", ""), 80);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<string> targetIds = ReadStringList(payload, "targetHeroIds")
@@ -556,7 +556,7 @@ updated_ts=$ts;",
                         "playerHeroId, playerName, and targetHeroIds are required."
                 };
 
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             Dictionary<string, Dictionary<string, object>>
                 targetSnapshots =
                     ReadDictionaryList(payload, "targetSnapshots")
@@ -591,7 +591,7 @@ updated_ts=$ts;",
             if (!verifyIdentity)
             {
                 Dictionary<string, object> cached =
-                    ReadJsonObject(profileCachePath);
+                    Program.ReadJsonObject(profileCachePath);
                 List<Dictionary<string, object>> cachedTargets =
                     ReadDictionaryList(cached, "targets");
                 if (ReadString(cached, "cacheKey", "").Equals(
@@ -625,7 +625,7 @@ updated_ts=$ts;",
                 List<Dictionary<string, object>> identityFixtures =
                     ReadDictionaryList(state, "manipulationIdentityFixtures");
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     CharactersService.EnsureIdentitySchema(connection);
                     Dictionary<string, object> subject =
@@ -679,7 +679,7 @@ updated_ts=$ts;",
                         DateTimeOffset.UtcNow.ToString("o");
                     // Persist the recovery manifest before changing identity
                     // state. A profile-only scan never creates a fixture.
-                    WriteJsonObject(
+                    Program.WriteJsonObject(
                         ConversationReadinessStatePath(campaignId), state);
                     foreach (string targetId in targetIds)
                     {
@@ -703,12 +703,12 @@ updated_ts=$ts;",
             int materializedBaselineCount = 0;
             foreach (string targetId in targetIds)
             {
-                string traitsPath = CharacterFile(
+                string traitsPath = Program.CharacterFile(
                     campaignId, targetId, "traits.json");
-                Dictionary<string, object> profile = ReadJsonObject(
-                    CharacterFile(campaignId, targetId, "profile.json"));
+                Dictionary<string, object> profile = Program.ReadJsonObject(
+                    Program.CharacterFile(campaignId, targetId, "profile.json"));
                 Dictionary<string, object> traits =
-                    ReadJsonObject(traitsPath);
+                    Program.ReadJsonObject(traitsPath);
                 if ((profile.Count == 0 || traits.Count == 0)
                     && targetSnapshots.TryGetValue(
                         targetId,
@@ -727,14 +727,14 @@ updated_ts=$ts;",
                                 runtimeProfile,
                                 false,
                                 false);
-                            profile = ReadJsonObject(
-                                CharacterFile(
+                            profile = Program.ReadJsonObject(
+                                Program.CharacterFile(
                                     campaignId,
                                     targetId,
                                     "profile.json"));
                             if (profile.Count == 0)
                                 profile = runtimeProfile;
-                            traits = ReadJsonObject(traitsPath);
+                            traits = Program.ReadJsonObject(traitsPath);
                             if (traits.Count > 0)
                                 materializedBaselineCount++;
                         }
@@ -763,7 +763,7 @@ updated_ts=$ts;",
                                 profile,
                                 false,
                                 false);
-                            traits = ReadJsonObject(traitsPath);
+                            traits = Program.ReadJsonObject(traitsPath);
                         }
                         else
                         {
@@ -776,7 +776,7 @@ updated_ts=$ts;",
                         traits, profile, targetId))
                 {
                     if (verifyIdentity)
-                        WriteJsonObject(traitsPath, traits);
+                        Program.WriteJsonObject(traitsPath, traits);
                 }
                 Dictionary<string, object> percentages =
                     TraitPercentageSnapshot(traits);
@@ -859,7 +859,7 @@ updated_ts=$ts;",
                 .ToList();
             if (!verifyIdentity)
             {
-                WriteJsonObject(
+                Program.WriteJsonObject(
                     profileCachePath,
                     new Dictionary<string, object>
                     {
@@ -872,7 +872,7 @@ updated_ts=$ts;",
                         ["targets"] = rows
                     });
             }
-            WriteAudit(
+            Program.WriteAudit(
                 campaignId, correlationId, "server", "qualification",
                 "qualification.fixture.manipulation", playerId, "", "",
                 "completed", 0,
@@ -966,7 +966,7 @@ updated_ts=$ts;",
                 ReadDictionaryList(state, "manipulationIdentityFixtures");
             int restored = 0;
             List<string> errors = new List<string>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 CharactersService.EnsureIdentitySchema(connection);
                 foreach (Dictionary<string, object> fixture in fixtures)
@@ -978,7 +978,7 @@ updated_ts=$ts;",
                     string subject = ReadString(fixture, "subjectId", "");
                     try
                     {
-                        ExecuteSql(connection, @"DELETE FROM identity_evidence
+                        Program.ExecuteSql(connection, @"DELETE FROM identity_evidence
 WHERE observer_id=$observer AND subject_id=$subject
 AND source='qualification_manipulation_fixture';",
                             new Dictionary<string, object>
@@ -991,7 +991,7 @@ AND source='qualification_manipulation_fixture';",
                             ?? new Dictionary<string, object>();
                         if (!ReadBool(fixture, "originalExists", false))
                         {
-                            ExecuteSql(connection, @"DELETE FROM acquaintances
+                            Program.ExecuteSql(connection, @"DELETE FROM acquaintances
 WHERE observer_id=$observer AND subject_id=$subject;",
                                 new Dictionary<string, object>
                                 {
@@ -1001,7 +1001,7 @@ WHERE observer_id=$observer AND subject_id=$subject;",
                         }
                         else
                         {
-                            ExecuteSql(connection, @"INSERT OR REPLACE INTO acquaintances(
+                            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO acquaintances(
 observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,
 verification_source,source_entity_id,confidence,first_met_day,last_met_day,
 encounter_count,last_encounter_id,recognition_attempts,last_recognition_result,
@@ -1058,13 +1058,13 @@ $resultEncounter,$payload,$updated);",
                     catch (Exception ex)
                     {
                         errors.Add(observer + "->" + subject + ": "
-                            + LimitText(ex.Message, 300));
+                            + Program.LimitText(ex.Message, 300));
                     }
                 }
             }
             state["manipulationIdentityFixtures"] = fixtures;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            WriteJsonObject(
+            Program.WriteJsonObject(
                 ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {

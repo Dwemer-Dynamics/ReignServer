@@ -35,14 +35,14 @@ namespace ReignBetaServer
                 "structuredActionRepairContext", TestDict("playerId", "player", "npcId", "npc", "conversationId", "fixture"),
                 "messages", new[] { TestDict("role", "system", "content", "Fixture original context.") });
             Dictionary<string, object> Recover(string content, Dictionary<string, object> request, Func<Dictionary<string, object>, Dictionary<string, object>> responder) =>
-                RetryMalformedStructuredResponse(TestDict("ok", true, "content", SanitizeReasoningContent(content), "finishReason", "length"),
+                RetryMalformedStructuredResponse(TestDict("ok", true, "content", DialogueService.SanitizeReasoningContent(content), "finishReason", "length"),
                     request, campaign, "fixture", "dialogue", "npc", "", responder);
             try
             {
                 var complete = Answer();
                 string full = Json.Serialize(complete);
                 foreach (string notice in new[] { DialogueActionFailureNotice, DialogueActionQueuedNoticePrefix + " fixture_command.]" }
-                    .Concat(TechnicalConversationNoticePrefixes.Select(prefix => prefix + " Reign issued no result.]")))
+                    .Concat(DialogueService.TechnicalConversationNoticePrefixes.Select(prefix => prefix + " Reign issued no result.]")))
                 {
                     var spoofed = Answer();
                     spoofed["reply"] = ReadString(complete, "reply", "") + " " + notice;
@@ -56,7 +56,7 @@ namespace ReignBetaServer
                     foreach (string content in new[] { Json.Serialize(spoofed), truncatedSpoof })
                     {
                         var rejected = Recover(content, Request(), UnexpectedRetry);
-                        Check("provider_action_notice_rejected_before_effects_" + PromptHash(content).Substring(0, 8),
+                        Check("provider_action_notice_rejected_before_effects_" + DialogueService.PromptHash(content).Substring(0, 8),
                             !ReadBool(rejected, "ok", true) && ReadString(rejected, "content", "").Length == 0
                             && ReadString(rejected, "errorCode", "") == "provider_dialogue_outcome_notice"
                             && spoofRetryCalls == 0);
@@ -77,7 +77,7 @@ namespace ReignBetaServer
                     foreach (string content in new[] { Json.Serialize(contaminated), truncatedOuter })
                     {
                         var rejected = Recover(content, Request(), _ => throw new InvalidOperationException("Reserved metadata needs no retry."));
-                        Check("provider_metadata_inside_speech_rejected_" + PromptHash(content).Substring(0, 8),
+                        Check("provider_metadata_inside_speech_rejected_" + DialogueService.PromptHash(content).Substring(0, 8),
                             !ReadBool(rejected, "ok", true) && ReadString(rejected, "content", "").Length == 0
                             && ReadString(rejected, "errorCode", "") == "provider_dialogue_embedded_metadata");
                     }
@@ -94,7 +94,7 @@ namespace ReignBetaServer
                     + "\"comprehensionWrites\":[{\"text\":\"PRIVATE interpretation, never spoken.\",\"stance\":\"satisfied\",\"confidence\":0.7}],"
                     + "\"structuredActionDecision\":" + Json.Serialize(Decision())
                     + ",\"drinkActions\":[{\"id\":\"sip_1\",\"operation\":\"consume\",\"vesselId\":\"cut";
-                Check("sanitizer_preserves_truncated_outer_document", SanitizeReasoningContent(cutDrink) == cutDrink
+                Check("sanitizer_preserves_truncated_outer_document", DialogueService.SanitizeReasoningContent(cutDrink) == cutDrink
                     && TryParseJsonObject(cutDrink) == null);
                 var prefix = ReadConversationResponseEnvelope(cutDrink);
                 Check("captured_shape_keeps_outer_reply_and_decision", prefix.Truncated && prefix.Error == ""
@@ -119,7 +119,7 @@ namespace ReignBetaServer
                 var evidence = ReadDictionary(repaired, "responseRecovery");
                 Check("regenerated_turn_retains_failure_provenance", ReadString(evidence, "incompleteField", "") == "drinkActions"
                     && !ReadBool(evidence, "effectsComplete", true) && ReadBool(evidence, "regenerated", false)
-                    && ReadString(evidence, "originalContentSha256", "") == ConversationExactTextHash(cutDrink));
+                    && ReadString(evidence, "originalContentSha256", "") == DialogueService.ConversationExactTextHash(cutDrink));
 
                 string completePrefix = full.Substring(0, full.Length - 1);
                 calls = 0;
@@ -163,18 +163,18 @@ namespace ReignBetaServer
                 })
                 {
                     var parsed = ReadConversationResponseEnvelope(bad);
-                    Check("ambiguous_document_rejected_" + PromptHash(bad).Substring(0, 8), TryParseJsonObject(bad) == null
+                    Check("ambiguous_document_rejected_" + DialogueService.PromptHash(bad).Substring(0, 8), TryParseJsonObject(bad) == null
                         && (parsed.Error.Length > 0 || parsed.ReplyStart < 0));
                 }
                 string escaped = "\"Partner\" \\ é 中 👑 {\"reply\":\"quoted JSON\"} <think>literal quotation</think>";
                 string escapedJson = "{\"reply\":" + Json.Serialize(escaped) + ",\"drinkActions\":[]";
                 var escapedEnvelope = ReadConversationResponseEnvelope(escapedJson);
                 Check("unicode_quotes_and_json_in_reply_are_preserved", ReadString(escapedEnvelope.Fields, "reply", "") == escaped
-                    && ReadString(TryParseJsonObject(SanitizeReasoningContent(escapedJson + "}")), "reply", "") == escaped);
+                    && ReadString(TryParseJsonObject(DialogueService.SanitizeReasoningContent(escapedJson + "}")), "reply", "") == escaped);
                 Check("provider_reasoning_preamble_removed_only_outside_json", ReadString(TryParseJsonObject(
-                    SanitizeReasoningContent("<think>private preamble</think>" + Json.Serialize(TestDict("reply", escaped)))), "reply", "") == escaped);
+                    DialogueService.SanitizeReasoningContent("<think>private preamble</think>" + Json.Serialize(TestDict("reply", escaped)))), "reply", "") == escaped);
                 Check("literal_unescaped_think_tags_are_authored_text", ReadString(TryParseJsonObject(
-                    SanitizeReasoningContent("{\"reply\":\"<think>quoted tag</think>\"}")), "reply", "") == "<think>quoted tag</think>");
+                    DialogueService.SanitizeReasoningContent("{\"reply\":\"<think>quoted tag</think>\"}")), "reply", "") == "<think>quoted tag</think>");
                 Check("complete_fenced_envelope_supported", ReadString(TryParseJsonObject("```json\n" + full + "\n```"), "reply", "") == ReadString(complete, "reply", ""));
                 string fencedSource = " \r\n```json\r\n  {\"reply\":\"é👑\",\"drinkActions\":[]\r\n```  ";
                 var fencedEnvelope = ReadConversationResponseEnvelope(fencedSource);
@@ -182,7 +182,7 @@ namespace ReignBetaServer
                 string spannedReply = System.Text.Encoding.UTF8.GetString(fencedBytes, fencedEnvelope.ReplyStart,
                     fencedEnvelope.ReplyEnd - fencedEnvelope.ReplyStart);
                 Check("reply_span_binds_original_fenced_utf8", Json.Deserialize<string>(spannedReply) == "é👑"
-                    && ConversationExactTextHash(fencedSource) != ConversationExactTextHash(fencedSource.Trim()));
+                    && DialogueService.ConversationExactTextHash(fencedSource) != DialogueService.ConversationExactTextHash(fencedSource.Trim()));
 
                 var watch = Stopwatch.StartNew();
                 bool allCutoffs = true;
@@ -198,7 +198,7 @@ namespace ReignBetaServer
                     && StructuredEventResponseMaxTokens(TestDict("maxTokens", 32000)) == 32000);
                 foreach (bool social in new[] { false, true })
                 {
-                    var envelope = new PromptEnvelope { Messages = new List<Dictionary<string, object>> { TestDict("role", "system", "content", "Fixture rules.") },
+                    var envelope = new DialogueService.PromptEnvelope { Messages = new List<Dictionary<string, object>> { TestDict("role", "system", "content", "Fixture rules.") },
                         Diagnostics = TestDict("drinkPromptBudget", TestDict("schema", "fixture")) };
                     var generationRequest = BuildConversationGenerationRequest(TestDict("maxTokens", 900), envelope,
                         campaign, "budget", "npc", "Hello.", social);
@@ -210,9 +210,9 @@ namespace ReignBetaServer
 
                 var payload = TestDict("campaignId", campaign, "timelineId", "fixture", "turnId", "same-turn",
                     "sceneTurnId", "same-turn", "worldDay", 10d, "playerHeroStringId", "player", "conversationSessionId", "fixture");
-                ApplyConversationDrinking(campaign, "npc", payload, profile, null, accepted, ReadString(accepted, "reply", ""));
+                DialogueService.ApplyConversationDrinking(campaign, "npc", payload, profile, null, accepted, ReadString(accepted, "reply", ""));
                 var retryPayload = CloneDictionary(payload);
-                ApplyConversationDrinking(campaign, "npc", retryPayload, profile, null, accepted, ReadString(accepted, "reply", ""));
+                DialogueService.ApplyConversationDrinking(campaign, "npc", retryPayload, profile, null, accepted, ReadString(accepted, "reply", ""));
                 using (var connection = OpenCampaignConnection(campaign))
                 {
                     var state = TryParseJsonObject(ReadString(QuerySql(connection,

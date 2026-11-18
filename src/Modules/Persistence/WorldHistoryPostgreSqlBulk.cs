@@ -126,7 +126,7 @@ namespace ReignBetaServer
                         entities, locationName)),
                 Source = source,
                 IsComplete = ReadBool(item, "isComplete", true) && (eventType != "public_announcement"
-                    || source == "reign_public_news" && Program.ValidPublicWorldHistory(TestDict("event_type", eventType,
+                    || source == "reign_public_news" && DialogueService.ValidPublicWorldHistory(TestDict("event_type", eventType,
                         "dissemination_class", dissemination, "world_day", worldDay, "payload_json", payloadJson))),
                 Checksum = ReadFirstString(item, "checksum", "hash"),
                 PayloadJson = payloadJson,
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                 dissemination = "participants";
                 rules.RemoveAll(rule => ReadString(rule, "audienceType", "") != "entity");
             }
-            bool publicTournament = Program.IsPublicTournamentHistory(eventType, dissemination);
+            bool publicTournament = DialogueService.IsPublicTournamentHistory(eventType, dissemination);
             if (eventType == "public_announcement" && dissemination == "major_world")
             {
                 rules.Add(new Dictionary<string, object> { ["audienceType"] = "global", ["audienceId"] = "all",
@@ -166,7 +166,7 @@ namespace ReignBetaServer
             }
             if (rules.Count > 0)
             {
-                if (publicTournament) rules.Add(Program.PublicTournamentKnowledgeRule(day));
+                if (publicTournament) rules.Add(DialogueService.PublicTournamentKnowledgeRule(day));
                 return rules;
             }
 
@@ -211,7 +211,7 @@ namespace ReignBetaServer
                 });
             }
             if (publicTournament)
-                rules.Add(Program.PublicTournamentKnowledgeRule(day));
+                rules.Add(DialogueService.PublicTournamentKnowledgeRule(day));
             else if (string.Equals(dissemination, "major_world",
                 StringComparison.OrdinalIgnoreCase))
             {

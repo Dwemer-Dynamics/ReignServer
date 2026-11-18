@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
 
         // Use the native conversation boundary, not mutable per-actor prose or
         // hourly caches. Roleplay time jumps/resets remain explicit selector data.
-        internal static string ChatViewWardrobeSceneKey(Dictionary<string, object> request) => Program.PromptHash(CanonicalJson(TestDict(
+        internal static string ChatViewWardrobeSceneKey(Dictionary<string, object> request) => DialogueService.PromptHash(CanonicalJson(TestDict(
             "location", ReadFirstString(request, "locationId", "settlementId"),
             "room", ReadString(request, "castleRoomName", ""), "interface", ReadString(request, "sceneInterface", ""))));
 
@@ -40,9 +40,9 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
             if (originalId.Length == 0) return text;
             var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='source_only' AND speaker_id=$speaker;",
                 TestDict("id", originalId, "speaker", ReadString(row, "speaker_id", ""))).SingleOrDefault();
-            if (original == null || access != null && !Program.MemoryTimeVisible(original, access, connection))
+            if (original == null || access != null && !DialogueService.MemoryTimeVisible(original, access, connection))
                 throw new InvalidDataException("The original wardrobe evidence is unavailable in this timeline.");
-            Program.OriginalConversationSourceIntegrity(original);
+            DialogueService.OriginalConversationSourceIntegrity(original);
             return ReadString(original, "text", "");
         }
 
@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
                 int start = text.IndexOf(quote, StringComparison.Ordinal);
                 if (start < 0 || text.IndexOf(quote, start + 1, StringComparison.Ordinal) >= 0)
                 { rejected.Add("invented_or_ambiguous_quote"); continue; }
-                evidence.Add(TestDict("turnId", ReadString(source, "turn_id", ""), "sourceHash", Program.PromptHash(text),
+                evidence.Add(TestDict("turnId", ReadString(source, "turn_id", ""), "sourceHash", DialogueService.PromptHash(text),
                     "start", start, "length", quote.Length, "quote", quote, "characterIds", ids));
             }
             string payload = Json.Serialize(TestDict("contract", ChatViewWardrobeContract, "evidence", evidence, "rejected", rejected));
@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_view_wardrobe_session ON chat_view_wardrobe_evide
             }
             Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_wardrobe_evidence(entry_id,session_id,timeline_id,source_hash,payload_json)
 VALUES($id,$session,$timeline,$hash,$payload);", TestDict("id", turn, "session", session,
-                "timeline", Program.ContinuityTimeline(request), "hash", Program.PromptHash(ReadString(reply, "text", "")), "payload", payload));
+                "timeline", DialogueService.ContinuityTimeline(request), "hash", DialogueService.PromptHash(ReadString(reply, "text", "")), "payload", payload));
             return TestDict("status", "recorded", "evidenceCount", evidence.Count, "rejected", rejected);
         }
 
@@ -108,7 +108,7 @@ ORDER BY t.turn_order DESC LIMIT 4097;", TestDict("session", session, "first", f
             bool incompleteBoundary = false;
             foreach (var row in prior)
             {
-                if (!Program.MemoryTimeVisible(row, access, connection)
+                if (!DialogueService.MemoryTimeVisible(row, access, connection)
                     || !Program.TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)) continue;
                 if (ReadString(row, "frame_json", "").Length == 0) { incompleteBoundary = true; break; }
                 if (ChatViewWardrobeFrameScope(TryParseJsonObject(ReadString(row, "frame_json", "{}"))) != scope) break;
@@ -131,7 +131,7 @@ WHERE e.session_id=$session AND t.turn_order>=$minimum AND t.turn_order<$first O
                 {
                     frozen = TestDict("turnId", sourceId, "exchangeId", ReadString(source, "exchange_id", ""),
                         "turnOrder", ReadInt(source, "turn_order", 0), "role", ReadString(source, "role", ""),
-                        "speakerId", ReadString(source, "speaker_id", ""), "text", text, "sourceHash", Program.PromptHash(text),
+                        "speakerId", ReadString(source, "speaker_id", ""), "text", text, "sourceHash", DialogueService.PromptHash(text),
                         "frame", TryParseJsonObject(ReadString(source, "frame_json", "{}")), "wardrobeActorIds", ids);
                     sources[sourceId] = frozen;
                 }
@@ -141,7 +141,7 @@ WHERE e.session_id=$session AND t.turn_order>=$minimum AND t.turn_order<$first O
             foreach (var entry in entries)
             {
                 if (!byId.TryGetValue(ReadString(entry, "entry_id", ""), out var reply)) continue;
-                if (Program.PromptHash(ReadString(reply, "text", "")) != ReadString(entry, "source_hash", ""))
+                if (DialogueService.PromptHash(ReadString(reply, "text", "")) != ReadString(entry, "source_hash", ""))
                     throw new InvalidDataException("Retained clothing evidence no longer matches its accepted response.");
                 covered++;
                 var data = TryParseJsonObject(ReadString(entry, "payload_json", "{}"));
@@ -153,7 +153,7 @@ WHERE e.session_id=$session AND t.turn_order>=$minimum AND t.turn_order<$first O
                     string text = ChatViewWardrobeOriginalText(connection, source, access);
                     string quote = ReadString(item, "quote", "");
                     int start = ReadInt(item, "start", -1);
-                    if (Program.PromptHash(text) != ReadString(item, "sourceHash", "") || start < 0 || start > text.Length - quote.Length
+                    if (DialogueService.PromptHash(text) != ReadString(item, "sourceHash", "") || start < 0 || start > text.Length - quote.Length
                         || text.Substring(start, quote.Length) != quote) throw new InvalidDataException("Retained clothing quotation failed its source check.");
                     var ids = ReadStringList(item, "characterIds");
                     FreezeSource(source, ids);

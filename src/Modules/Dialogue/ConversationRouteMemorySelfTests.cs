@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunConversationRouteMemorySelfTests()
         {
@@ -20,16 +20,16 @@ namespace ReignBetaServer
                     "playerHeroStringId", "player", "playerName", "Player", "turnId", turn, "sceneTurnId", turn,
                     "playerText", "Remember the old mill beside the orchard?", "participants", new[] { "npc", "player" },
                     "speaker", TestDict("heroStringId", "npc", "name", "Mira", "age", 32d));
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     ReadMemoryPrecisionState(connection);
-                    ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                    Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','{""timelineId"":""route_branch""}');", TestDict("campaign", campaign));
                     InsertConversationTurn(connection, "mill_question", "old_mill", "mill_exchange", 0, "mill_exchange", "npc", "npc", "Mira",
                         "Which place would you choose beside the orchard?", "in_person", 10d, 1, "", new List<string> { "npc", "player" }, Payload("old"));
                     InsertConversationTurn(connection, "mill_answer", "old_mill", "mill_exchange", 1, "mill_exchange", "player", "player", "Player",
                         "The old mill beside the orchard is my choice.", "in_person", 10d, 2, "", new List<string> { "npc", "player" }, Payload("old"));
-                    ExecuteSql(connection, "CREATE TABLE route_atomic_fixture(id TEXT PRIMARY KEY);");
+                    Program.ExecuteSql(connection, "CREATE TABLE route_atomic_fixture(id TEXT PRIMARY KEY);");
                 }
                 string captured = ""; int calls = 0;
                 Dictionary<string, object> Writer(Dictionary<string, object> input)
@@ -42,8 +42,8 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 }
                 int SourceCount(string channel)
                 {
-                    using var connection = OpenCampaignConnection(campaign);
-                    return ReadInt(QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns WHERE channel=$channel;",
+                    using var connection = Program.OpenCampaignConnection(campaign);
+                    return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_turns WHERE channel=$channel;",
                         TestDict("channel", channel)).Single(), "n", 0);
                 }
                 var court = Payload("court_1");
@@ -89,9 +89,9 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 Check("child_replay_preserves_emotion_intent_without_provider", calls == afterChild
                     && ReadString(childReplay, "emotion", "") == "curious" && ReadString(childReplay, "intent", "") == "answer"
                     && ReadInt(childReplay, "providerCallCount", -1) == 0 && SourceCount("family_chambers_child") == 2);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    string memory = ReadString(QuerySql(connection, "SELECT summary FROM childhood_experiences WHERE hero_id='child';").Single(), "summary", "");
+                    string memory = ReadString(Program.QuerySql(connection, "SELECT summary FROM childhood_experiences WHERE hero_id='child';").Single(), "summary", "");
                     Check("child_memory_is_actual_speech_not_model_invention", memory.Contains("Player said or visibly did:")
                         && memory.Contains("I remember your choice of the old mill.") && !memory.Contains("MUST-NOT-BE-STORED"));
                 }
@@ -110,14 +110,14 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                     bool failed = false, invisible = false;
                     try
                     {
-                        PublishRouteConversation(context, accepted, "Mira", connection => ExecuteSql(connection, "INSERT INTO route_atomic_fixture(id) VALUES('fault');"),
+                        PublishRouteConversation(context, accepted, "Mira", connection => Program.ExecuteSql(connection, "INSERT INTO route_atomic_fixture(id) VALUES('fault');"),
                             actual => { if (actual != phase) return; invisible = SourceCount("route_atomic") == 0; throw new InvalidOperationException("Injected route fault."); });
                     }
                     catch (InvalidOperationException) { failed = true; }
-                    using var connection = OpenCampaignConnection(campaign);
+                    using var connection = Program.OpenCampaignConnection(campaign);
                     Check("source_and_route_rollback_" + phase, failed && invisible && SourceCount("route_atomic") == 0
-                        && ReadInt(QuerySql(connection, "SELECT COUNT(*) AS n FROM route_atomic_fixture;").Single(), "n", 0) == 0
-                        && ReadInt(QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_route_acceptance WHERE unit_id=$unit;",
+                        && ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM route_atomic_fixture;").Single(), "n", 0) == 0
+                        && ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM conversation_route_acceptance WHERE unit_id=$unit;",
                             TestDict("unit", context.Unit)).Single(), "n", 0) == 0);
                 }
                 AdvanceMemoryRestoreGeneration(campaign);
@@ -126,7 +126,7 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 catch (InvalidOperationException) { stale = true; }
                 Check("pre_restore_route_cannot_publish", stale && SourceCount("route_atomic") == 0);
                 Check("ordinary_routes_use_expected_writer_calls", calls == 5);
-                var enabled = CloneDictionary(settings);
+                var enabled = Program.CloneDictionary(settings);
                 enabled["highMemoryMode"] = true; enabled["memoryCheckerModel"] = "obsolete-checker";
                 enabled["memoryEvidenceModel"] = "obsolete-analyst"; enabled["memoryFinalCheckEnabled"] = true;
                 var checkedPetition = Payload("retired_settings_petition");
@@ -146,8 +146,8 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 var replaySingle = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("route_receipt_replay_adds_no_calls", purposes.Count == 1 && ReadInt(replaySingle, "providerCallCount", -1) == 0
                     && ReadString(replaySingle, "reply", "") == ReadString(acceptedSingle, "reply", ""));
-                using (var connection = OpenCampaignConnection(campaign))
-                    ExecuteSql(connection, "UPDATE conversation_route_acceptance SET accepted_reply_hash='changed' WHERE accepted_reply_hash=$hash;",
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    Program.ExecuteSql(connection, "UPDATE conversation_route_acceptance SET accepted_reply_hash='changed' WHERE accepted_reply_hash=$hash;",
                         TestDict("hash", PromptHash(ReadString(acceptedSingle, "reply", ""))));
                 var corruptReplay = CourtService.RulerPetitionRespond(checkedPetition, enabled, SingleWriter);
                 Check("mismatched_route_receipt_rejected_without_provider", !ReadBool(corruptReplay, "ok", true) && purposes.Count == 1);
@@ -158,7 +158,7 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 // Live providers return authored speech. Historical engine notices
                 // are covered by the immutable-source recovery tests, and must not
                 // be injected as provider output through the retired repair path.
-                var recovered = GenerateRouteConversation(recoveryContext, CloneDictionary(request), "No native effects.", 800,
+                var recovered = GenerateRouteConversation(recoveryContext, Program.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", safeQuestion))));
                 string recoveredReply = ReadString(TryParseJsonObject(ReadString(recovered, "content", "")), "reply", "");
                 Check("single_pass_keeps_usable_route_dialogue", ReadBool(recovered, "ok", false)
@@ -169,7 +169,7 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                 var nextContext = PrepareRouteConversationMemory(nextPayload, "npc", "recovery_route",
                     "recovery_session", "recovery_2", new[] { "npc" }, settingsOverride: settings);
                 string nextPrompt = "";
-                var next = GenerateRouteConversation(nextContext, CloneDictionary(request), "No native effects.", 800, input =>
+                var next = GenerateRouteConversation(nextContext, Program.CloneDictionary(request), "No native effects.", 800, input =>
                 {
                     nextPrompt = string.Join("\n", ReadDictionaryList(input, "messages").Select(m => ReadString(m, "content", "")));
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "The east gate, then.")));
@@ -180,18 +180,18 @@ VALUES('old_mill',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','
                     && SourceCount("recovery_route") == 4);
                 var emptyContext = PrepareRouteConversationMemory(Payload("empty_retry"), "npc", "empty_recovery",
                     "empty_session", "empty_retry", new[] { "npc" }, settingsOverride: settings);
-                var empty = GenerateRouteConversation(emptyContext, CloneDictionary(request), "No native effects.", 800,
+                var empty = GenerateRouteConversation(emptyContext, Program.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", "{}"));
                 Check("empty_generation_retains_only_player_input", !ReadBool(empty, "ok", true)
                     && ReadBool(ReadDictionary(empty, "conversationRecovery"), "canContinue", false)
                     && SourceCount("empty_recovery") == 1
                     && ReadString(ReadDictionary(empty, "inputRecovery"), "status", "") == "player_input_retained");
-                using (var connection = OpenCampaignConnection(campaign))
-                    Check("failed_generation_has_no_npc_or_acceptance", !QuerySql(connection,
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    Check("failed_generation_has_no_npc_or_acceptance", !Program.QuerySql(connection,
                         "SELECT * FROM conversation_turns WHERE channel='empty_recovery' AND role='npc';").Any()
-                        && !QuerySql(connection, "SELECT * FROM conversation_route_acceptance WHERE unit_id=$id;",
+                        && !Program.QuerySql(connection, "SELECT * FROM conversation_route_acceptance WHERE unit_id=$id;",
                             TestDict("id", emptyContext.Unit)).Any());
-                var retried = GenerateRouteConversation(emptyContext, CloneDictionary(request), "No native effects.", 800,
+                var retried = GenerateRouteConversation(emptyContext, Program.CloneDictionary(request), "No native effects.", 800,
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "We can discuss the gate."))));
                 if (ReadBool(retried, "ok", false)) PublishRouteConversation(emptyContext, "We can discuss the gate.", "Mira", _ => { });
                 Check("same_route_can_retry_after_empty_generation", ReadBool(retried, "ok", false)

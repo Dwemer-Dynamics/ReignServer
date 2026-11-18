@@ -15,7 +15,7 @@ namespace ReignBetaServer
             using var connection = OpenCampaignConnection(campaignId);
             int ordinal = 0;
             foreach (var turn in turns)
-                InsertConversationTurn(connection, ReadString(turn, "turn_id", ""), session, ReadString(turn, "event_id", ""), ++ordinal,
+                DialogueService.InsertConversationTurn(connection, ReadString(turn, "turn_id", ""), session, ReadString(turn, "event_id", ""), ++ordinal,
                     ReadString(turn, "exchange_id", ""), ReadString(turn, "role", ""), ReadString(turn, "speaker_id", ""), ReadString(turn, "speaker_name", ""),
                     ReadString(turn, "text", ""), "in_person", 0d, ReadLong(turn, "ts", 0), "town_test", new List<string> { "npc_a", "main_hero" },
                     TryParseJsonObject(ReadString(turn, "payload_json", "{}")));
@@ -29,8 +29,8 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             results.AddRange(RunConversationDiagnosticsSelfTests());
             results.AddRange(RunConversationResponseParsingSelfTests());
-            results.AddRange(RunGroupConversationTurnOrderSelfTests());
-            results.AddRange(RunGroupConversationFloorSelfTests());
+            results.AddRange(DialogueService.RunGroupConversationTurnOrderSelfTests());
+            results.AddRange(DialogueService.RunGroupConversationFloorSelfTests());
             results.AddRange(RunPromptEditorPersistenceTests());
             results.AddRange(RunReignXpOptionsSelfTests());
             results.AddRange(RunRouteTableContractSelfTests());
@@ -208,8 +208,8 @@ namespace ReignBetaServer
                     new Dictionary<string, object> { ["speaker_name"] = "NPC B", ["text"] = "The road east is unsafe." },
                     new Dictionary<string, object> { ["speaker_name"] = "NPC C", ["text"] = "I disagree; the southern bridge is worse." }
                 };
-                string groupPrompt = BuildSharedGroupConversationPrompt(campaignId, groupPayload, "npc_a", lines, "What do all of you think?");
-                UpdateSharedGroupConversationState(campaignId, groupPayload, "npc_a", "NPC A", "NPC B is right about the eastern road. NPC C, why is the bridge worse?", "group_test", 100);
+                string groupPrompt = DialogueService.BuildSharedGroupConversationPrompt(campaignId, groupPayload, "npc_a", lines, "What do all of you think?");
+                DialogueService.UpdateSharedGroupConversationState(campaignId, groupPayload, "npc_a", "NPC A", "NPC B is right about the eastern road. NPC C, why is the bridge worse?", "group_test", 100);
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
                     Dictionary<string, object> state = QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id='group_test';").FirstOrDefault();
@@ -228,7 +228,7 @@ namespace ReignBetaServer
                     };
                     List<Dictionary<string, object>> canonicalTranscript = CanonicalizePromptTranscript(duplicateTranscript, 30);
                     add("canonical_transcript_deduplicates_turn_ids", canonicalTranscript.Count == 2
-                        && canonicalTranscript.Select(PromptTranscriptIdentity).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2,
+                        && canonicalTranscript.Select(DialogueService.PromptTranscriptIdentity).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2,
                         "Prompt assembly renders each stable conversation turn once.", canonicalTranscript);
 
                     List<Dictionary<string, object>> eventHistoryFixture = new List<Dictionary<string, object>>();
@@ -246,10 +246,10 @@ namespace ReignBetaServer
                             };
                             string playerWords = "HISTORY_" + beat + "_player";
                             string npcWords = "HISTORY_" + beat + "_" + speakerId;
-                            var accepted = StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
+                            var accepted = DialogueService.StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
                                 "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
                                 "history_roundtrip", 100);
-                            var acceptedRetry = StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
+                            var acceptedRetry = DialogueService.StoreSocialEventConversationExchange(campaignId, eventPayload, speakerId, "player",
                                 "player", speakerId, playerWords, npcWords, "history_" + beat + "_" + speakerId,
                                 "history_roundtrip", 100);
                             retryReturnsSameSourceIds &= ReadStringList(accepted, "turnIds").SequenceEqual(ReadStringList(acceptedRetry, "turnIds"));
@@ -410,7 +410,7 @@ namespace ReignBetaServer
                         ["playerHeroStringId"] = "main_hero",
                         ["conversationSceneState"] = new Dictionary<string, object> { ["participants"] = addressedProfiles }
                     };
-                    string roleBlock = BuildInteractionRoleAttribution(rolePayload, "npc_witness", "Mostiros the Slicer", "the armed stranger");
+                    string roleBlock = DialogueService.BuildInteractionRoleAttribution(rolePayload, "npc_witness", "Mostiros the Slicer", "the armed stranger");
                     List<Dictionary<string, object>> rejectedRoleWrites = new List<Dictionary<string, object>>();
                     List<Dictionary<string, object>> safeRoleWrites = FilterConversationRoleMisattributions(
                         new List<Dictionary<string, object>>
@@ -506,7 +506,7 @@ namespace ReignBetaServer
                             }
                         }
                     };
-                    string kinshipBlock = BuildInteractionRoleAttribution(kinshipPayload, "npc_b", "Othenes", "Rhovarion");
+                    string kinshipBlock = DialogueService.BuildInteractionRoleAttribution(kinshipPayload, "npc_b", "Othenes", "Rhovarion");
                     add("group_kinship_uses_native_links_only",
                         !kinshipBlock.Contains("Aevysara", StringComparison.Ordinal)
                         && !kinshipBlock.Contains("actual_father_a", StringComparison.Ordinal)
@@ -643,9 +643,9 @@ namespace ReignBetaServer
                         ["campaignId"] = campaignId, ["factKey"] = "bridge_condition", ["subjectId"] = "bridge_east", ["predicate"] = "condition",
                         ["claim"] = "The eastern bridge is intact.", ["believer"] = "npc_a", ["known_by"] = new List<string> { "npc_a" }, ["confidence"] = 0.8d
                     };
-                    string firstId = UpsertTemporalAssertion(connection, campaignId, "evt_1", "belief_1", "belief", first, 100);
+                    string firstId = DialogueService.UpsertTemporalAssertion(connection, campaignId, "evt_1", "belief_1", "belief", first, 100);
                     Dictionary<string, object> second = new Dictionary<string, object>(first) { ["claim"] = "The eastern bridge has collapsed.", ["confidence"] = 0.95d };
-                    string secondId = UpsertTemporalAssertion(connection, campaignId, "evt_2", "belief_2", "belief", second, 200);
+                    string secondId = DialogueService.UpsertTemporalAssertion(connection, campaignId, "evt_2", "belief_2", "belief", second, 200);
                     List<Dictionary<string, object>> versions = QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE fact_key=(SELECT fact_key FROM temporal_knowledge_assertions WHERE assertion_id=$id) ORDER BY observed_ts;", new Dictionary<string, object> { ["id"] = secondId });
                     add("temporal_belief_versions", versions.Count == 2 && ReadLong(versions[0], "valid_to_ts", 0) == 200
                         && ReadString(versions[1], "supersedes_assertion_id", "") == firstId,
@@ -976,14 +976,14 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     ["activeHeroIds"] = new List<string> { "npc_a", "npc_b" },
                     ["attendees"] = new List<Dictionary<string, object>>()
                 };
-                StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_a", "player", "Player", "NPC A",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_a", "player", "Player", "NPC A",
                     "At the east gate I put a violet ribbon beneath the map and shared an oatcake.",
                     "I remember the violet ribbon and oatcake.", "social_source_a", "social_memory_event", 300);
-                StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_b", "player", "Player", "NPC B",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, socialRequest, "npc_b", "player", "Player", "NPC B",
                     "At the east gate I put a violet ribbon beneath the map and shared an oatcake.",
                     "NPC A is right about both details.", "social_source_b", "social_memory_event", 301);
                 var currentSessionHistory = CanonicalizePromptTranscript(
-                    ReadCurrentSessionDialogueLines(campaignId, "social_event_social_memory_event", 30), 30);
+                    DialogueService.ReadCurrentSessionDialogueLines(campaignId, "social_event_social_memory_event", 30), 30);
                 add("individual_history_reader_keeps_shared_exchange_speakers",
                     currentSessionHistory.Count == 3
                     && currentSessionHistory.Count(row => ReadString(row, "role", "") == "npc") == 2,
@@ -992,7 +992,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
                     ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=302 WHERE session_id='social_event_social_memory_event';");
-                    exactSocialHistory = SearchExactConversationHistory(connection, "npc_b", "Reconstruct our prior group discussion.",
+                    exactSocialHistory = DialogueService.SearchExactConversationHistory(connection, "npc_b", "Reconstruct our prior group discussion.",
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 10000, null, "", 30);
                     int playerTurns = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM conversation_turns
 WHERE session_id='social_event_social_memory_event' AND role='player';").FirstOrDefault(), "count", 0);
@@ -1088,12 +1088,12 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                             ReadString(unsafeClanMemory, "summary", "")),
                         ["safe"] = sanitizedPreference
                     });
-                string protectedNpcHistoryLine = RenderExactHistoryTurn(new Dictionary<string, object>
+                string protectedNpcHistoryLine = DialogueService.RenderExactHistoryTurn(new Dictionary<string, object>
                 {
                     ["role"] = "npc", ["speaker_name"] = "NPC A", ["world_day"] = 42d,
                     ["text"] = "You are a clan leader with no fiefs and little gold."
                 }, unknownIdentityKnowledge);
-                string protectedPlayerHistoryLine = RenderExactHistoryTurn(new Dictionary<string, object>
+                string protectedPlayerHistoryLine = DialogueService.RenderExactHistoryTurn(new Dictionary<string, object>
                 {
                     ["role"] = "player", ["speaker_name"] = "Canonical Player", ["world_day"] = 42d,
                     ["text"] = "I prefer blue ribbons and claim that I own no fiefs."
@@ -1111,7 +1111,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["npcLine"] = protectedNpcHistoryLine,
                         ["playerLine"] = protectedPlayerHistoryLine
                     });
-                Dictionary<string, object> unknownSceneSummary = CreateConversationSceneSummary(
+                Dictionary<string, object> unknownSceneSummary = DialogueService.CreateConversationSceneSummary(
                     campaignId,
                     new Dictionary<string, object>
                     {
@@ -1182,13 +1182,13 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "playerIdentityKnown", true),
                     "Scene summaries preserve the same unknown-identity boundary as the live prompt, preventing storage and rolling arcs from laundering unavailable player status.",
                     unknownSceneSummary);
-                StoreSocialEventConversationExchange(campaignId, recallRequest, "npc_b", "player", "Player", "NPC B",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, recallRequest, "npc_b", "player", "Player", "NPC B",
                     "Reconstruct our prior group discussion without guessing.",
                     "It happened at a roadside camp with dried meat.", "social_recall_source", "social_recall_event", 400);
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
                     ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=402 WHERE session_id='social_event_social_recall_event';");
-                    Dictionary<string, object> protectedHistory = SearchExactConversationHistory(connection, "npc_b",
+                    Dictionary<string, object> protectedHistory = DialogueService.SearchExactConversationHistory(connection, "npc_b",
                         "Reconstruct our prior group discussion without guessing.",
                         new Dictionary<string, object> { ["primaryLane"] = "exact_history", ["needsExactTranscript"] = true }, 14000, null, "", 30);
                     string protectedText = ReadString(protectedHistory, "text", "");
@@ -1202,10 +1202,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                 {
                     ["eventId"] = "social_recall_audit_event", ["sceneTurnId"] = "social_recall_audit_turn_1"
                 };
-                StoreSocialEventConversationExchange(campaignId, recallAuditRequest, "npc_b", "player", "Player", "NPC B",
+                DialogueService.StoreSocialEventConversationExchange(campaignId, recallAuditRequest, "npc_b", "player", "Player", "NPC B",
                     "Recall the immediately preceding group conversation without inventing details.",
                     "The violet ribbon was under the map.", "social_recall_audit_source", "social_recall_audit_event", 500);
-                Dictionary<string, object> recallAuditFinish = ConversationFinishApi(new Dictionary<string, object>
+                Dictionary<string, object> recallAuditFinish = DialogueService.ConversationFinishApi(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["sessionId"] = "social_event_social_recall_audit_event",
                     ["worldDay"] = 42d, ["ts"] = 502L
@@ -1337,67 +1337,67 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     && ReadInt(conversationProjectionCounts, "durable_memory_embedding_jobs", -1) == 2,
                     "Every active original turn enters semantic discovery without vectorizing duplicate source events; explicit author and audience-safe memories each enter once. Canonical originals remain authoritative.",
                     conversationProjectionCounts);
-                Dictionary<string, object> broadRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> broadRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Reconstruct our prior group discussion without guessing.", new Dictionary<string, object>());
-                add("broad_recent_recall_detection", LooksLikeMostRecentConversationRecall("Reconstruct our prior group discussion without guessing.")
+                add("broad_recent_recall_detection", DialogueService.LooksLikeMostRecentConversationRecall("Reconstruct our prior group discussion without guessing.")
                     && ReadBool(broadRecallRoute, "needsExactTranscript", false)
                     && ReadStringList(broadRecallRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase),
                     "Natural requests for an earlier group discussion force the authoritative recent raw-turn window.", broadRecallRoute);
-                Dictionary<string, object> exactRestatementRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> exactRestatementRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Paraphrase the blue-token fact without losing its exact name, color, or storage place.", new Dictionary<string, object>());
                 add("exact_fact_restatement_detection",
-                    LooksLikeExactFactRestatement("Paraphrase the blue-token fact without losing its exact name, color, or storage place.")
-                    && LooksLikeExactFactRestatement("You once heard me describe a keepsake: what was its exact name, color, and location?")
+                    DialogueService.LooksLikeExactFactRestatement("Paraphrase the blue-token fact without losing its exact name, color, or storage place.")
+                    && DialogueService.LooksLikeExactFactRestatement("You once heard me describe a keepsake: what was its exact name, color, and location?")
                     && ReadBool(exactRestatementRoute, "needsExactTranscript", false)
                     && ReadString(exactRestatementRoute, "primaryLane", "") == "exact_history"
-                    && IsPureConversationRecallRequest("Paraphrase the blue-token fact without losing its exact name, color, or storage place."),
+                    && DialogueService.IsPureConversationRecallRequest("Paraphrase the blue-token fact without losing its exact name, color, or storage place."),
                     "Natural requests to preserve exact facts route to targeted source history and remain recall-only even without explicit remember/recall keywords.",
                     exactRestatementRoute);
                 const string multiSceneRecallText = "Reconstruct our two closed conversations without guessing. At the group supper, what did each speaker say? In the later private exchange, what identity distinction did you make?";
-                Dictionary<string, object> multiSceneRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> multiSceneRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     multiSceneRecallText, new Dictionary<string, object>());
                 List<Dictionary<string, object>> multiSceneContextPulls = DeterministicContextPullSelection("dialogue",
                     multiSceneRecallText, "", ContextPullIds.ToList());
                 add("multi_scene_closed_conversation_recall_detection",
-                    LooksLikeMostRecentConversationRecall(multiSceneRecallText)
+                    DialogueService.LooksLikeMostRecentConversationRecall(multiSceneRecallText)
                     && ReadBool(multiSceneRecallRoute, "needsExactTranscript", false)
                     && ReadStringList(multiSceneRecallRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase)
                     && multiSceneContextPulls.Any(row => ReadString(row, "id", "") == "relevant_memory"),
                     "Explicit reconstruction of multiple closed conversations selects relevant memory and the source-bearing exact-history window.",
                     new Dictionary<string, object> { ["route"] = multiSceneRecallRoute, ["contextPulls"] = multiSceneContextPulls });
-                Dictionary<string, object> precedingRecallRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> precedingRecallRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Recall the immediately preceding group conversation without inventing details.", new Dictionary<string, object>());
-                add("preceding_group_recall_detection", LooksLikeMostRecentConversationRecall("Recall the immediately preceding group conversation without inventing details.")
+                add("preceding_group_recall_detection", DialogueService.LooksLikeMostRecentConversationRecall("Recall the immediately preceding group conversation without inventing details.")
                     && ReadBool(precedingRecallRoute, "needsExactTranscript", false)
                     && ReadStringList(precedingRecallRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase),
                     "Natural preceding-group wording also forces the authoritative recent raw-turn window.", precedingRecallRoute);
-                Dictionary<string, object> precedingObservationRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> precedingObservationRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     "Begin by recalling the preceding low-salience observation, then recover one much older detail.", new Dictionary<string, object>());
-                add("preceding_observation_recall_detection", LooksLikeMostRecentConversationRecall("Begin by recalling the preceding low-salience observation, then recover one much older detail.")
+                add("preceding_observation_recall_detection", DialogueService.LooksLikeMostRecentConversationRecall("Begin by recalling the preceding low-salience observation, then recover one much older detail.")
                     && ReadBool(precedingObservationRoute, "needsExactTranscript", false)
                     && ReadStringList(precedingObservationRoute, "selectedLanes").Contains("exact_history", StringComparer.OrdinalIgnoreCase),
                     "Natural recall wording around a preceding observation also forces authoritative raw history.", precedingObservationRoute);
                 const string noCommitmentScene = "Purios counted seven open conversations on a clay disk. Menor compared the marks with counting planks, while Mystesa discussed maintaining connections.";
-                Dictionary<string, object> noCommitmentRoute = BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
+                Dictionary<string, object> noCommitmentRoute = DialogueService.BuildMemoryRetrievalRoute(new Dictionary<string, object>(),
                     noCommitmentScene, new Dictionary<string, object>());
                 add("scene_lane_uses_word_boundaries_and_interpersonal_fallback",
                     ReadDouble(ReadDictionary(noCommitmentRoute, "scores"), "commitments_and_plots", -1d) == 0d
-                    && SelectConversationSceneMemoryLane(noCommitmentRoute) == "interpersonal_history",
+                    && DialogueService.SelectConversationSceneMemoryLane(noCommitmentRoute) == "interpersonal_history",
                     "The cue 'plan' cannot match the word 'planks', and an ordinary closed conversation without a stronger lane cue is stored as interpersonal history.",
                     noCommitmentRoute);
                 const string mixedRecallDisclosure = "Recall our prior group conversation without guessing. A new low-salience detail for later is that I set a cedar pin with two shallow grooves beside an empty clay cup.";
                 add("mixed_recall_preserves_new_player_source",
-                    LooksLikeMostRecentConversationRecall(mixedRecallDisclosure)
-                    && !IsPureConversationRecallRequest(mixedRecallDisclosure)
-                    && IsPureConversationRecallRequest("Recall our prior group conversation without guessing.")
-                    && IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing."),
+                    DialogueService.LooksLikeMostRecentConversationRecall(mixedRecallDisclosure)
+                    && !DialogueService.IsPureConversationRecallRequest(mixedRecallDisclosure)
+                    && DialogueService.IsPureConversationRecallRequest("Recall our prior group conversation without guessing.")
+                    && DialogueService.IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing."),
                     "A mixed recall-and-disclosure turn still receives exact history but is not quarantined as a recall-only source.",
                     new Dictionary<string, object>
                     {
-                        ["mixedRoutesHistory"] = LooksLikeMostRecentConversationRecall(mixedRecallDisclosure),
-                        ["mixedIsRecallOnly"] = IsPureConversationRecallRequest(mixedRecallDisclosure),
-                        ["pureIsRecallOnly"] = IsPureConversationRecallRequest("Recall our prior group conversation without guessing."),
-                        ["priorNewDetailIsRecallOnly"] = IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing.")
+                        ["mixedRoutesHistory"] = DialogueService.LooksLikeMostRecentConversationRecall(mixedRecallDisclosure),
+                        ["mixedIsRecallOnly"] = DialogueService.IsPureConversationRecallRequest(mixedRecallDisclosure),
+                        ["pureIsRecallOnly"] = DialogueService.IsPureConversationRecallRequest("Recall our prior group conversation without guessing."),
+                        ["priorNewDetailIsRecallOnly"] = DialogueService.IsPureConversationRecallRequest("Reconstruct the new low-salience detail from the most recent supper scene without guessing.")
                     });
                 const string askedToRememberRecall = "Earlier I asked you to remember a blue glass token. What was its exact name, color, and where did I say I keep it?";
                 Dictionary<string, object> exactRecallParsed = new Dictionary<string, object>
@@ -1427,10 +1427,10 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     new Dictionary<string, object> { ["role"] = "user", ["content"] = askedToRememberRecall }
                 };
                 List<Dictionary<string, object>> exactRecallRepairs;
-                string exactRecallReply = RepairVisibleExactRecallIdentifiers(
+                string exactRecallReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall, "Selca. Blue. Under a cedar box.", exactRecallParsed, exactRecallMessages, out exactRecallRepairs);
                 List<Dictionary<string, object>> ungroundedRecallRepairs;
-                string ungroundedRecallReply = RepairVisibleExactRecallIdentifiers(
+                string ungroundedRecallReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall, "Selca. Blue. Under a cedar box.", exactRecallParsed,
                     new List<Dictionary<string, object>>
                     {
@@ -1438,7 +1438,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     },
                     out ungroundedRecallRepairs);
                 List<Dictionary<string, object>> privateOmissionRepairs;
-                string privateOmissionReply = RepairVisibleExactRecallIdentifiers(
+                string privateOmissionReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall,
                     "It was blue and kept beneath the cedar box, but the exact name escapes me.",
                     new Dictionary<string, object>
@@ -1454,7 +1454,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     exactRecallMessages,
                     out privateOmissionRepairs);
                 List<Dictionary<string, object>> ambiguousRecallRepairs;
-                string ambiguousRecallReply = RepairVisibleExactRecallIdentifiers(
+                string ambiguousRecallReply = DialogueService.RepairVisibleExactRecallIdentifiers(
                     askedToRememberRecall,
                     "It was blue and beneath the cedar box, but I cannot safely give the exact name.",
                     new Dictionary<string, object>(),
@@ -1469,8 +1469,8 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     },
                     out ambiguousRecallRepairs);
                 add("asked_to_remember_recall_quarantine_and_visible_precision",
-                    LooksLikeMostRecentConversationRecall(askedToRememberRecall)
-                    && IsPureConversationRecallRequest(askedToRememberRecall)
+                    DialogueService.LooksLikeMostRecentConversationRecall(askedToRememberRecall)
+                    && DialogueService.IsPureConversationRecallRequest(askedToRememberRecall)
                     && exactRecallReply.Contains("Selca-49", StringComparison.Ordinal)
                     && exactRecallRepairs.Count == 1
                     && privateOmissionReply.Contains("Selca-49", StringComparison.Ordinal)
@@ -1493,9 +1493,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["ungroundedRepairs"] = ungroundedRecallRepairs
                     });
                 Dictionary<string, string> promptDefaults = DefaultPromptTemplates();
-                string dialogueUserPrompt = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
+                string dialogueUserPrompt = DialogueService.BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
                 string dialogueRecallPrompt = promptDefaults["dialogue_live_turn_template.txt"];
-                string eventUserPrompt = BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
+                string eventUserPrompt = DialogueService.BuildDialogueGlobalPrefix(true, false, new List<Dictionary<string, object>>());
                 string eventRecallPrompt = promptDefaults["event_live_turn_template.txt"];
                 Dictionary<string, object> recallGroundingChecks = new Dictionary<string, object>
                 {
@@ -1514,7 +1514,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     recallGroundingChecks.Values.All(value => value is bool passed && passed),
                     "Every production dialogue surface forbids false autobiographical recall while requiring a newly disclosed low-impact anecdote to become stable soft canon.",
                     recallGroundingChecks);
-                string factBoundaryPrompt = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
+                string factBoundaryPrompt = DialogueService.BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>());
                 add("current_world_fact_boundary_prompt_contract",
                     factBoundaryPrompt.Contains("Plausibility is not evidence", StringComparison.Ordinal)
                     && factBoundaryPrompt.Contains("Never invent current weather", StringComparison.Ordinal)
@@ -1525,13 +1525,13 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     "The production prompt forbids atmospheric prose from fabricating unsupported current weather, economy, security, garrison, or nearby-world facts.",
                     factBoundaryPrompt);
                 add("qualification_prompt_latency_uses_p95",
-                    PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d) == 95
-                    && CurrentConversationBuildVersion().Contains("+mvid.", StringComparison.Ordinal),
+                    DialogueService.PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d) == 95
+                    && DialogueService.CurrentConversationBuildVersion().Contains("+mvid.", StringComparison.Ordinal),
                     "Qualification enforces the stated aggregate p95 prompt-construction gate and identifies the exact deployed build by module version id.",
                     new Dictionary<string, object>
                     {
-                        ["p95"] = PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d),
-                        ["buildVersion"] = CurrentConversationBuildVersion()
+                        ["p95"] = DialogueService.PercentileNearestRank(Enumerable.Range(1, 100).Select(value => (long)value).ToList(), 0.95d),
+                        ["buildVersion"] = DialogueService.CurrentConversationBuildVersion()
                     });
                 string qualificationSourceRoot = FindVerificationSourceRoot();
                 string qualificationClientRoot = string.IsNullOrWhiteSpace(qualificationSourceRoot)
@@ -2339,7 +2339,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["timing"] = new Dictionary<string, object> { ["promptBuildMs"] = 80, ["promptChars"] = 12000, ["totalMs"] = 1200 }
                     }
                 };
-                Dictionary<string, object> evaluation = EvaluateReplayCorpusCase(replay);
+                Dictionary<string, object> evaluation = DialogueService.EvaluateReplayCorpusCase(replay);
                 add("replay_evaluator", ReadBool(evaluation, "passed", false), "Replay cases evaluate grounding, group awareness, prohibited knowledge, and latency without a provider call.", evaluation);
                 Dictionary<string, object> oversizedReplay = new Dictionary<string, object>(replay)
                 {
@@ -2349,7 +2349,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["timing"] = new Dictionary<string, object> { ["promptBuildMs"] = 80, ["promptChars"] = 15001, ["totalMs"] = 1200 }
                     }
                 };
-                Dictionary<string, object> oversizedEvaluation = EvaluateReplayCorpusCase(oversizedReplay);
+                Dictionary<string, object> oversizedEvaluation = DialogueService.EvaluateReplayCorpusCase(oversizedReplay);
                 add("replay_evaluator_prompt_character_budget",
                     !ReadBool(oversizedEvaluation, "passed", true)
                     && ReadStringList(oversizedEvaluation, "failures")
@@ -2366,7 +2366,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         }
                     }
                 };
-                Dictionary<string, object> missingContextEvaluation = EvaluateReplayCorpusCase(missingContextReplay);
+                Dictionary<string, object> missingContextEvaluation = DialogueService.EvaluateReplayCorpusCase(missingContextReplay);
                 add("replay_evaluator_required_context_pull",
                     !ReadBool(missingContextEvaluation, "passed", true)
                     && ReadStringList(missingContextEvaluation, "failures")
@@ -2395,7 +2395,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["reply"] = "The aversion is simple: when people tell me they are fair before they have acted, I stop listening to what they say and watch what they take."
                     }
                 };
-                Dictionary<string, object> dynamicRecallEvaluation = EvaluateReplayCorpusCase(dynamicRecallReplay);
+                Dictionary<string, object> dynamicRecallEvaluation = DialogueService.EvaluateReplayCorpusCase(dynamicRecallReplay);
                 Dictionary<string, object> missingDynamicRecallReplay = new Dictionary<string, object>(dynamicRecallReplay)
                 {
                     ["responseEvidence"] = new Dictionary<string, object>
@@ -2403,7 +2403,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["reply"] = "The roads near the settlement are busy today."
                     }
                 };
-                Dictionary<string, object> missingDynamicRecallEvaluation = EvaluateReplayCorpusCase(missingDynamicRecallReplay);
+                Dictionary<string, object> missingDynamicRecallEvaluation = DialogueService.EvaluateReplayCorpusCase(missingDynamicRecallReplay);
                 add("replay_evaluator_dynamic_characteristic_recall",
                     ReadBool(dynamicRecallEvaluation, "passed", false)
                     && !ReadBool(missingDynamicRecallEvaluation, "passed", true)
@@ -2415,7 +2415,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["grounded"] = dynamicRecallEvaluation,
                         ["unrelated"] = missingDynamicRecallEvaluation
                     });
-                string boundedReplayPath = ReplayCorpusCasePath(campaignId, "replay_" + new string('r', 220));
+                string boundedReplayPath = DialogueService.ReplayCorpusCasePath(campaignId, "replay_" + new string('r', 220));
                 add("replay_corpus_bounded_path", Path.GetFileName(boundedReplayPath).Length < 40,
                     "Automatic replay filenames remain below legacy Windows path limits even with long correlation ids.", boundedReplayPath);
 
@@ -2785,8 +2785,8 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 List<Dictionary<string, object>> immediateAnswerRecallPulls = PruneContextPullSelection(immediateAnswerRecall,
                     DeterministicContextPullSelection("dialogue", immediateAnswerRecall, "Current settlement: Danustica", ContextPullIds.ToList()));
                 add("pure_answer_recall_cannot_refresh_live_native_context",
-                    LooksLikeMostRecentConversationRecall(immediateAnswerRecall)
-                    && IsPureConversationRecallRequest(immediateAnswerRecall)
+                    DialogueService.LooksLikeMostRecentConversationRecall(immediateAnswerRecall)
+                    && DialogueService.IsPureConversationRecallRequest(immediateAnswerRecall)
                     && immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "nearby_lord_parties")
                     && !immediateAnswerRecallPulls.Any(x => ReadString(x, "id", "") == "current_settlement_facts")
@@ -2873,7 +2873,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "relevant_memory")
                     && !recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "check_inventory_appearance")
                     && !recordsCupRecallSelected.Any(x => ReadString(x, "id", "") == "appraise_trade_offer")
-                    && IsPureConversationRecallRequest(recordsCupRecall),
+                    && DialogueService.IsPureConversationRecallRequest(recordsCupRecall),
                     "A records-based question about a completed historical gift selects memory, not current inventory/appraisal, and remains an audit-only recall probe.",
                     recordsCupRecallSelected);
                 const string nameAndBoxFollowup = "Before we continue, my name is Rhovarion. Honoratus, answer Menor's prior point that the box is nothing to you until I give you a reason. Keep the cup attributed to my earlier claim.";
@@ -3346,7 +3346,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 add("action_status_audit_repair_persists_without_resurrecting_handover",
                     repairedCache.Any(row => ReadString(row, "id", "") == repairActionId
                         && ReadString(row, "status", "") == "completed")
-                    && !repairedCache.Any(row => DurableConversationAction(ReadString(row, "id", "")))
+                    && !repairedCache.Any(row => DialogueService.DurableConversationAction(ReadString(row, "id", "")))
                     && !repairedQueue.Any(row => ReadString(row, "id", "") == "pa_rolled_back_reconciliation_fixture"),
                     "Ordinary action recovery persists its terminal queue status and excludes stale player handover cache rows absent from PostgreSQL.", repairedCache);
                 add("provider_middleware_status", ReadBool(ProviderMiddlewareStatus(), "ok", false), "Provider middleware exposes circuit, concurrency, idempotency, and latency state.", ProviderMiddlewareStatus());
@@ -3367,7 +3367,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 ReignPostgreSqlStorage.ClearAllPools();
                 PersistenceService.TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "campaign")));
             }
-            foreach (Dictionary<string, object> continuityTest in RunRoleplayContinuitySelfTests())
+            foreach (Dictionary<string, object> continuityTest in DialogueService.RunRoleplayContinuitySelfTests())
             {
                 add("roleplay_" + ReadString(continuityTest, "id", "contract"),
                     ReadBool(continuityTest, "passed", false),

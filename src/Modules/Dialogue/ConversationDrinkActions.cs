@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string PrivateDrinkActionMode = "private_actions_v1";
         private const int MaxPrivateDrinkActions = 16;
@@ -85,7 +85,7 @@ namespace ReignBetaServer
             bool lockScene = false)
         {
             string turn = ReadString(payload, "timelineId", "main") + ":" + ReadFirstString(payload, "turnId", "sceneTurnId", "correlationId");
-            var stored = TryParseJsonObject(ReadString(QuerySql(connection,
+            var stored = TryParseJsonObject(ReadString(Program.QuerySql(connection,
                 "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;", TestDict("hero", hero)).SingleOrDefault(), "state_json", "{}"));
             double hour = IntoxicationWorldHour(payload);
             var state = RecoverIntoxication(stored, IntoxicationEndurance(profile, characteristics), hour);
@@ -281,7 +281,7 @@ namespace ReignBetaServer
             parsed.Remove("structuredActionDecision");
         }
 
-        private static string ApplyConversationDrinking(string campaign, string hero, Dictionary<string, object> payload,
+        internal static string ApplyConversationDrinking(string campaign, string hero, Dictionary<string, object> payload,
             Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> parsed,
             string reply, bool persist = true)
         {
@@ -291,15 +291,15 @@ namespace ReignBetaServer
                 || ReadBool(payload, "governmentCertificationMemoryIsolation", false)
                 || ReadFirstString(payload, "turnId", "sceneTurnId", "correlationId").Length == 0) return reply;
             lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureIntoxicationSchema(connection);
                 using var transaction = connection.BeginTransaction();
                 var args = TestDict("hero", hero, "turn", ReadString(payload, "timelineId", "main") + ":"
                     + ReadFirstString(payload, "turnId", "sceneTurnId", "correlationId"));
-                ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
-                QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args);
-                var previous = QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).SingleOrDefault();
+                Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
+                Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args);
+                var previous = Program.QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).SingleOrDefault();
                 var receipt = previous != null ? TryParseJsonObject(ReadString(previous, "receipt_json", "{}"))
                     : PreparePrivateDrinkReceipt(connection, hero, payload, profile, characteristics, parsed, reply, lockScene: persist);
                 if (ReadBool(receipt, "suppressedCommitments", false)) SuppressPrivateDrinkCommitments(parsed);
@@ -307,8 +307,8 @@ namespace ReignBetaServer
                     receipt["commitState"] = "committed"; receipt["acceptedReplyHash"] = PromptHash(reply);
                     args["state"] = Json.Serialize(ReadDictionary(receipt, "state")); args["receipt"] = Json.Serialize(receipt);
                     CommitDrinkScene(connection, receipt);
-                    ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
-                    ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
+                    Program.ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
+                    Program.ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
                 }
                 if (persist) transaction.Commit(); else transaction.Rollback();
                 payload["intoxicationReceipt"] = receipt;

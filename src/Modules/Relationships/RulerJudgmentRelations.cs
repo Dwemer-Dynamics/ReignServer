@@ -9,7 +9,7 @@ namespace ReignBetaServer
     {
         internal static Dictionary<string, object> RulerRelationsApi(string operation, Dictionary<string, object> p)
         {
-            string campaign = ReadString(p, "campaignId", ""), timeline = Program.ContinuityTimeline(p);
+            string campaign = ReadString(p, "campaignId", ""), timeline = DialogueService.ContinuityTimeline(p);
             double day = ReadDouble(p, "worldDay", -1);
             string victor = ReadString(p, "victorId", ""), prisoner = ReadString(p, "prisonerId", "");
             if (campaign.Length == 0 || !ReignRulerPolicy.Finite(day) || day < 0)
@@ -54,7 +54,7 @@ namespace ReignBetaServer
                     return TestDict("ok", false, "error", "Relationship participants are required.");
             }
             Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS relationship_ruler_receipts(timeline_id TEXT NOT NULL,operation_id TEXT NOT NULL,terms_hash TEXT NOT NULL,PRIMARY KEY(timeline_id,operation_id));");
-            string hash = Program.PromptHash(CanonicalJson(deltas));
+            string hash = DialogueService.PromptHash(CanonicalJson(deltas));
             using var transaction = c.BeginTransaction();
             var prior = Program.QuerySql(c, "SELECT terms_hash FROM relationship_ruler_receipts WHERE timeline_id=$timeline AND operation_id=$id;", TestDict("timeline", timeline, "id", id)).FirstOrDefault();
             if (prior != null)

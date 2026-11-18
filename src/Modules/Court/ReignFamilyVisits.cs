@@ -297,7 +297,7 @@ AND kingdom_id=(SELECT kingdom_id FROM identity_roster WHERE hero_id=$player) OR
                 if (ReadInt(member, "neglected", 0) == 0) return;
                 var llm = Program.ChatWithLlm(new Dictionary<string, object> { ["campaignId"] = campaign, ["requestType"] = "family_reconciliation",
                     ["temperature"] = 0d, ["maxTokens"] = 500,
-                    ["messages"] = Program.BuildSimplePromptEnvelope("family_reconciliation", "classify",
+                    ["messages"] = DialogueService.BuildSimplePromptEnvelope("family_reconciliation", "classify",
                         "Classify an actual completed family exchange. Never decide or invent consent. Return JSON only.",
                         "Player: " + playerText + "\nFamily member: " + reply + "\nRecent context: " + Json.Serialize(ReadDictionaryList(payload, "groupTranscript").Skip(Math.Max(0, ReadDictionaryList(payload, "groupTranscript").Count - 8)).ToList())
                         + "\nReturn {accepted:false,playerQuote:'',npcQuote:''}. Classify whether reconciliation is accepted NOW, not whether trust or affection has fully recovered. "

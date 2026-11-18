@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal const string PoliticalRiskModel = "reign_political_risk_v1";
 
@@ -391,7 +391,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> identityView,
                 Dictionary<string, object> payload)
         {
-            Dictionary<string, object> stored = CloneDictionary(
+            Dictionary<string, object> stored = Program.CloneDictionary(
                 ReadDictionary(state, "politicalAddressConvention")
                 ?? new Dictionary<string, object>());
             if (stored.Count == 0)
@@ -425,8 +425,8 @@ namespace ReignBetaServer
                     ? "explicit_player_revocation"
                     : "explicit_player_permission"
             };
-            stored = CloneDictionary(update);
-            stored["pendingUpdate"] = CloneDictionary(update);
+            stored = Program.CloneDictionary(update);
+            stored["pendingUpdate"] = Program.CloneDictionary(update);
             return stored;
         }
 
@@ -594,7 +594,7 @@ namespace ReignBetaServer
                 originalRequest, "model", "");
             if (!string.IsNullOrWhiteSpace(requestedModel))
                 repairRequest["model"] = requestedModel;
-            Dictionary<string, object> repairedLlm = ChatWithLlm(repairRequest);
+            Dictionary<string, object> repairedLlm = Program.ChatWithLlm(repairRequest);
             Dictionary<string, object> repairedJson = TryParseJsonObject(
                 ReadString(repairedLlm, "content", ""));
             string repairedReply = ReadFirstString(
@@ -659,7 +659,7 @@ namespace ReignBetaServer
                 llm["content"] = Json.Serialize(parsed);
             llm["politicalConductEnforcement"] = evidence;
             if (writeRepairAudit)
-                WriteAudit(campaignId, correlationId, "server", auditMode,
+                Program.WriteAudit(campaignId, correlationId, "server", auditMode,
                     "llm.political_conduct_repair", heroId, "", eventId,
                     !usableRepair && !markedFailure ? "failed"
                         : revalidationCleared ? "completed"
@@ -886,7 +886,7 @@ namespace ReignBetaServer
                 @"\s+", " ").Trim();
         }
 
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             RunPoliticalDangerPostureSelfTests()
         {
             List<Dictionary<string, object>> rows =
@@ -1172,7 +1172,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object>
                 {
                     ["politicalAddressConvention"] =
-                        CloneDictionary(ReadDictionary(grant,
+                        Program.CloneDictionary(ReadDictionary(grant,
                             "pendingAddressConvention"))
                 };
             Dictionary<string, object> revoke = BuildPoliticalRiskPosture(

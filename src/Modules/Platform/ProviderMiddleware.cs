@@ -11,7 +11,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private sealed class ProviderState
+        internal sealed class ProviderState
         {
             public readonly object Gate = new object();
             public readonly int MaxConcurrency;
@@ -30,7 +30,7 @@ namespace ReignBetaServer
         }
 
         private sealed class ProviderCachedResponse { public string Response; public DateTime ExpiresUtc; }
-        private static readonly object ProviderMiddlewareLock = new object();
+        internal static readonly object ProviderMiddlewareLock = new object();
         private static readonly Dictionary<string, ProviderState> ProviderStates = new Dictionary<string, ProviderState>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, ProviderCachedResponse> ProviderResponses = new Dictionary<string, ProviderCachedResponse>(StringComparer.Ordinal);
 
@@ -39,7 +39,7 @@ namespace ReignBetaServer
             Action<string> contentDelta = null, Func<bool> canceled = null)
         {
             string providerKey = NormalizeLookup(apiUrl) + "|" + NormalizeLookup(model);
-            string responseKey = PromptHash(providerKey + "|" + (correlationId ?? "") + "|" + requestJson);
+            string responseKey = DialogueService.PromptHash(providerKey + "|" + (correlationId ?? "") + "|" + requestJson);
             ProviderState state;
             lock (ProviderMiddlewareLock)
             {
@@ -231,7 +231,7 @@ namespace ReignBetaServer
             lock (state.Gate) { state.ActiveCount = Math.Max(0, state.ActiveCount - 1); Monitor.PulseAll(state.Gate); }
         }
 
-        private static ProviderState GetProviderStateLocked(string key, Dictionary<string, object> settings)
+        internal static ProviderState GetProviderStateLocked(string key, Dictionary<string, object> settings)
         {
             if (!ProviderStates.TryGetValue(key, out ProviderState state))
             {

@@ -335,7 +335,7 @@ namespace ReignBetaServer
 
         // Legacy admission for callers without ownership to release: on refusal the callback never
         // runs and the returned task is already canceled.
-        private static Task EnqueuePriorityBackgroundWork(string name, string priority, Action work)
+        internal static Task EnqueuePriorityBackgroundWork(string name, string priority, Action work)
         {
             if (work == null) return Task.FromResult(true);
             TryEnqueuePriorityBackgroundWork(name, priority, work, null, out Task completion);

@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal const string GroupConversationParticipationGuidance =
             "PARTICIPATION DECISION: Decide for yourself whether to speak or remain quiet using your personality, relationships, goals, remembered invitations and commitments, current setting, observable player actions and actual attributed contributions. "
@@ -17,9 +17,9 @@ namespace ReignBetaServer
             + "Return participation=quiet with an empty reply if you have no worthwhile contribution, would merely repeat a reply or naturally choose to listen. "
             + "An earlier quiet response or a later queue position is not evidence that anyone spoke, answered, agreed or refused.";
 
-        private static void EnsureGroupConversationStateSchema(ReignDbConnection connection)
+        internal static void EnsureGroupConversationStateSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS group_conversation_state (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS group_conversation_state (
 session_id TEXT PRIMARY KEY,
 campaign_id TEXT NOT NULL,
 mode TEXT NOT NULL DEFAULT '',
@@ -32,7 +32,7 @@ topics_json TEXT NOT NULL DEFAULT '[]',
 state_json TEXT NOT NULL DEFAULT '{}',
 revision INTEGER NOT NULL DEFAULT 0,
 updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS group_conversation_contributions (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS group_conversation_contributions (
 contribution_id TEXT PRIMARY KEY,
 session_id TEXT NOT NULL,
 speaker_id TEXT NOT NULL DEFAULT '',
@@ -41,17 +41,17 @@ role TEXT NOT NULL DEFAULT '',
 text TEXT NOT NULL DEFAULT '',
 addressed_ids_json TEXT NOT NULL DEFAULT '[]',
 ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_session ON group_conversation_contributions(session_id,ts,contribution_id);");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "scene_turn_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "audience_json", "TEXT NOT NULL DEFAULT '[]'");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "validation_status", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "delivery_order", "BIGINT NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "timeline_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "world_day", "REAL NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "group_conversation_contributions", "source_event_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "group_conversation_state", "timeline_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "group_conversation_state", "world_day", "REAL NOT NULL DEFAULT 0");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_beat ON group_conversation_contributions(session_id,scene_turn_id,ts);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_session ON group_conversation_contributions(session_id,ts,contribution_id);");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "scene_turn_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "audience_json", "TEXT NOT NULL DEFAULT '[]'");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "validation_status", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "delivery_order", "BIGINT NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "timeline_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "world_day", "REAL NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_contributions", "source_event_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_state", "timeline_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "group_conversation_state", "world_day", "REAL NOT NULL DEFAULT 0");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_beat ON group_conversation_contributions(session_id,scene_turn_id,ts);");
         }
 
         internal static string GroupConversationSessionId(Dictionary<string, object> payload)
@@ -77,7 +77,7 @@ ts INTEGER NOT NULL);" );
 
         private static bool IsSharedGroupConversation(Dictionary<string, object> payload)
         {
-            string mode = NormalizeLookup(ReadString(payload, "mode", ReadString(payload, "requestType", "")));
+            string mode = Program.NormalizeLookup(ReadString(payload, "mode", ReadString(payload, "requestType", "")));
             return mode.Contains("party chat")
                 || mode.Contains("social event")
                 || mode.Contains("wilderness event")
@@ -94,15 +94,15 @@ ts INTEGER NOT NULL);" );
             var delivered = new List<Dictionary<string, object>>();
             if (!string.IsNullOrWhiteSpace(sessionId))
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    stored = QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id=$id AND timeline_id=$timeline AND world_day<=$day LIMIT 1;",
+                    stored = Program.QuerySql(connection, "SELECT * FROM group_conversation_state WHERE session_id=$id AND timeline_id=$timeline AND world_day<=$day LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = sessionId, ["timeline"] = ContinuityTimeline(payload), ["day"] = ReadDouble(payload, "worldDay", 0d) }).FirstOrDefault() ?? new Dictionary<string, object>();
-                    if (!TextListFromJson(ReadString(stored,"participant_ids_json","[]")).Contains(currentSpeakerId,StringComparer.OrdinalIgnoreCase))
+                    if (!Program.TextListFromJson(ReadString(stored,"participant_ids_json","[]")).Contains(currentSpeakerId,StringComparer.OrdinalIgnoreCase))
                         stored = new Dictionary<string,object>();
                     string beat = ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId");
                     if (beat.Length > 0)
-                        delivered = QuerySql(connection, @"SELECT * FROM group_conversation_contributions
+                        delivered = Program.QuerySql(connection, @"SELECT * FROM group_conversation_contributions
 WHERE session_id=$id AND scene_turn_id=$beat AND role='npc' AND text<>'' AND speaker_id<>$observer
 AND timeline_id=$timeline AND world_day<=$day
 AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY delivery_order,ts,contribution_id;",
@@ -150,7 +150,7 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
                         "Question by " + ReadString(question, "speakerId", "") + " [" + ReadString(question, "id", "")
                         + "]: " + ReadString(question, "quote", "") + " | Player opportunity: " + GroupPlayerAnswerOpportunity(question, payload, newestText)
                         + ". Check linked answer state and the exact intervening dialogue; this inventory does not classify it as unanswered."));
-                List<string> topics = MemoryQueryTerms(ObserverConversationText(ReadString(stored, "last_text", ""), lastSpeakerId, currentSpeakerId));
+                List<string> topics = Program.MemoryQueryTerms(ObserverConversationText(ReadString(stored, "last_text", ""), lastSpeakerId, currentSpeakerId));
                 if (topics.Count > 0) builder.AppendLine("Active topic terms: " + string.Join(", ", topics.Take(8)));
             }
             builder.AppendLine("Only delivered contributions establish who has answered this player turn. Queue position, an empty reply or a pending request never establishes an answer.");
@@ -180,11 +180,11 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
         {
             string id = GroupPlayerInputEventId(payload);
             if (id.Length == 0 || !IsSharedGroupConversation(payload) || !WorldSimulationService.TableExists(connection, "conversation_turns")) return null;
-            var row = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND session_id=$session
+            var row = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND session_id=$session
 AND exchange_id=$beat AND speaker_id=$player AND role='player' AND text=$text AND status='active' ORDER BY turn_order LIMIT 1;",
                 TestDict("event", id, "session", GroupConversationSessionId(payload),
                     "beat", ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId"), "player", player, "text", text)).FirstOrDefault();
-            return row != null && PrecisionTurnVisible(row, observer, BuildKnowledgeAccessContext(observer, player, "", payload), connection) ? row : null;
+            return row != null && PrecisionTurnVisible(row, observer, Program.BuildKnowledgeAccessContext(observer, player, "", payload), connection) ? row : null;
         }
 
         // This frame is derived from stored input and delivered, observer-visible
@@ -194,7 +194,7 @@ AND exchange_id=$beat AND speaker_id=$player AND role='player' AND text=$text AN
         {
             // Default-off until current-profile budget, native-header parity and
             // independent accuracy evidence qualify this optional prompt change.
-            return ReadBool(settings ?? LoadSettings(), "enableObservedGroupTurnStageFrame", false)
+            return ReadBool(settings ?? Program.LoadSettings(), "enableObservedGroupTurnStageFrame", false)
                 ? BuildObservedGroupTurnStage(campaign, payload, observer, playerText) : null;
         }
 
@@ -202,10 +202,10 @@ AND exchange_id=$beat AND speaker_id=$player AND role='player' AND text=$text AN
         {
             if (string.IsNullOrWhiteSpace(campaign) || !IsSharedGroupConversation(payload)) return null;
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             var input = ObservedGroupPlayerInput(connection, payload, observer, player, playerText);
             if (input == null || !WorldSimulationService.TableExists(connection, "group_conversation_contributions")) return null;
-            var delivered = QuerySql(connection, @"SELECT contribution_id,speaker_id,delivery_order FROM group_conversation_contributions
+            var delivered = Program.QuerySql(connection, @"SELECT contribution_id,speaker_id,delivery_order FROM group_conversation_contributions
 WHERE session_id=$session AND scene_turn_id=$beat AND role='npc' AND text<>''
 AND validation_status IN ('accepted_speech','visible_failed_repair')
 AND timeline_id=$timeline AND world_day<=$day AND " + MemoryJsonContainsSql("audience_json", "$observer")
@@ -242,18 +242,18 @@ AND timeline_id=$timeline AND world_day<=$day AND " + MemoryJsonContainsSql("aud
             var questionFrames = repairFailed ? new List<Dictionary<string, object>>() : GroupSpokenQuestionFrames(reply, contributionId, npcId, beat, participants);
             List<string> questions = questionFrames.Select(q => ReadString(q, "quote", "")).ToList();
             string observableReply = ObserverConversationText(reply, npcId, "");
-            List<string> topics = MemoryQueryTerms(observableReply).Take(8).ToList();
+            List<string> topics = Program.MemoryQueryTerms(observableReply).Take(8).ToList();
             Dictionary<string, object> snapshot = new Dictionary<string, object>
             {
                 ["lastSpeakerId"] = npcId, ["lastSpeakerName"] = npcName, ["lastText"] = observableReply,
                 ["questionFrames"] = questionFrames, ["topics"] = topics, ["participantIds"] = participants
             };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             using (ReignDbTransaction transaction = connection.BeginTransaction())
             {
-                ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));",
+                Program.ExecuteSql(connection, "SELECT pg_advisory_xact_lock(hashtextextended($key,0));",
                     TestDict("key", "group_state|" + campaignId + "|" + timeline + "|" + sessionId));
-                var inserted = QuerySql(connection, @"INSERT INTO group_conversation_contributions
+                var inserted = Program.QuerySql(connection, @"INSERT INTO group_conversation_contributions
 (contribution_id,session_id,speaker_id,speaker_name,role,text,addressed_ids_json,ts,scene_turn_id,audience_json,validation_status,delivery_order,timeline_id,world_day,source_event_id)
 VALUES($id,$session,$speaker,$name,'npc',$text,$addressed,$ts,$beat,$audience,$validation,
 (SELECT COALESCE(MAX(delivery_order),0)+1 FROM group_conversation_contributions WHERE session_id=$session),$timeline,$day,$event)
@@ -263,7 +263,7 @@ ON CONFLICT(contribution_id) DO NOTHING RETURNING contribution_id;", new Diction
                     ["audience"] = Json.Serialize(participants), ["validation"] = repairFailed ? "visible_failed_repair" : "accepted_speech",
                     ["timeline"] = timeline, ["day"] = ReadDouble(payload, "worldDay", 0d), ["event"] = acceptedEventId });
                 if (inserted.Count == 0) { transaction.Commit(); return; }
-                var old = QuerySql(connection, "SELECT state_json FROM group_conversation_state WHERE session_id=$id AND timeline_id=$timeline AND world_day<=$day;",
+                var old = Program.QuerySql(connection, "SELECT state_json FROM group_conversation_state WHERE session_id=$id AND timeline_id=$timeline AND world_day<=$day;",
                     TestDict("id", sessionId, "timeline", timeline, "day", ReadDouble(payload, "worldDay", 0d))).FirstOrDefault();
                 snapshot["speakingFloorPlans"] = ReadDictionaryList(TryParseJsonObject(ReadString(old, "state_json", "{}")), "speakingFloorPlans");
                 questionFrames = ReadDictionaryList(TryParseJsonObject(ReadString(old, "state_json", "{}")), "questionFrames")
@@ -274,7 +274,7 @@ ON CONFLICT(contribution_id) DO NOTHING RETURNING contribution_id;", new Diction
                 string playerName = ReadString(payload, "playerName", "Player");
                 if (!string.IsNullOrWhiteSpace(playerText) && !ReadBool(payload, "suppressPlayerTranscript", false))
                 {
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO group_conversation_contributions
+                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO group_conversation_contributions
 (contribution_id,session_id,speaker_id,speaker_name,role,text,addressed_ids_json,ts,scene_turn_id,audience_json,validation_status,timeline_id,world_day)
 VALUES($id,$session,$speaker,$name,'player',$text,'[]',$ts,$beat,$audience,'accepted_speech',$timeline,$day);", new Dictionary<string, object>
                     {
@@ -283,7 +283,7 @@ VALUES($id,$session,$speaker,$name,'player',$text,'[]',$ts,$beat,$audience,'acce
                         ["beat"] = beat, ["audience"] = Json.Serialize(participants), ["timeline"] = timeline, ["day"] = ReadDouble(payload, "worldDay", 0d)
                     });
                 }
-                ExecuteSql(connection, @"INSERT INTO group_conversation_state
+                Program.ExecuteSql(connection, @"INSERT INTO group_conversation_state
 (session_id,campaign_id,mode,participant_ids_json,last_speaker_id,last_speaker_name,last_text,open_questions_json,topics_json,state_json,revision,updated_ts,timeline_id,world_day)
 VALUES($session,$campaign,$mode,$participants,$speaker,$name,$text,$questions,$topics,$state,1,$ts,$timeline,$day)
 ON CONFLICT(session_id) DO UPDATE SET participant_ids_json=$participants,last_speaker_id=$speaker,last_speaker_name=$name,

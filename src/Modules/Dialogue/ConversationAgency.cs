@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ConversationAgencyContract =
             "NPC RESOLVE AND NEGOTIATION — authoritative private contract\n"
@@ -47,7 +47,7 @@ namespace ReignBetaServer
 
         internal static void EnsureConversationAgencySchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_negotiations (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_negotiations (
 record_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,
 topic TEXT NOT NULL,object_id TEXT NOT NULL,revision INTEGER NOT NULL,payload_json TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_negotiation_identity ON conversation_negotiations(timeline_id,owner_id,peer_id,topic,object_id);
@@ -59,7 +59,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
         private static List<Dictionary<string, object>> ReadConversationNegotiations(ReignDbConnection connection, string timeline, string owner, string peer)
         {
             if (!WorldSimulationService.TableExists(connection, "conversation_negotiations")) return new List<Dictionary<string, object>>();
-            return QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer ORDER BY record_id;",
+            return Program.QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer ORDER BY record_id;",
                 new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer })
                 .Select(row => TryParseJsonObject(ReadString(row, "payload_json", "{}"))).Where(row => row != null).ToList();
         }
@@ -95,37 +95,37 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 ["objectIds"] = AgencySuppliedObjectIds(payload, profile)
             };
             if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(owner) && !string.IsNullOrWhiteSpace(peer))
-                using (var connection = OpenCampaignConnection(campaignId))
+                using (var connection = Program.OpenCampaignConnection(campaignId))
                 {
                     context["records"] = ReadConversationNegotiations(connection, ContinuityTimeline(payload), owner, peer);
                     if (ReadBool(opportunity, "targetClanTierKnown", false))
                     {
                         var publicHistory = LoadKnownWorldHistoryForDialogue(connection, ContinuityTimeline(payload),
-                            ReadDouble(payload, "worldDay", 0d), BuildKnowledgeAccessContext(owner, peer,
+                            ReadDouble(payload, "worldDay", 0d), Program.BuildKnowledgeAccessContext(owner, peer,
                                 ReadFirstString(payload, "locationId", "settlementId"), payload), "", null, null, true);
                         facts["player.knownTournamentWins"] = publicHistory.Select(row => ReadInt(row, "documentedPlayerTournamentWins", 0)).DefaultIfEmpty(0).Max();
                     }
                     // Existing dated shared milestones, not an invented trust counter or the length of today's speech.
                     facts["relationship.sharedHistory"] = WorldSimulationService.TableExists(connection, "conversation_continuity")
-                        ? QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer AND kind='relationship' AND status<>'invalidated';",
+                        ? Program.QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer AND kind='relationship' AND status<>'invalidated';",
                             new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count : 0;
                     if (WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"))
                         facts["relationship.sharedHistory"] = ReadInt(facts, "relationship.sharedHistory", 0)
-                            + QuerySql(connection, "SELECT receipt_id FROM conversation_relationship_receipts WHERE timeline_id=$timeline AND observer_id=$owner AND target_id=$peer AND status='applied' AND valence='positive' AND severity_tier<>'routine';",
+                            + Program.QuerySql(connection, "SELECT receipt_id FROM conversation_relationship_receipts WHERE timeline_id=$timeline AND observer_id=$owner AND target_id=$peer AND status='applied' AND valence='positive' AND severity_tier<>'routine';",
                                 new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count;
                     if (Regex.IsMatch(ReadString(context, "playerText", ""), @"\b(?:blackmail|expose|secret|evidence|scandal|betray|affair)\b", RegexOptions.IgnoreCase)
                         && WorldSimulationService.TableExists(connection, "memories"))
                     {
-                        var knowledge = BuildKnowledgeAccessContext(owner, peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
-                        var memories = QuerySql(connection, "SELECT * FROM memories WHERE owner_id=$owner AND world_day<=$day AND status='active' ORDER BY ts DESC LIMIT 32;",
+                        var knowledge = Program.BuildKnowledgeAccessContext(owner, peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
+                        var memories = Program.QuerySql(connection, "SELECT * FROM memories WHERE owner_id=$owner AND world_day<=$day AND status='active' ORDER BY ts DESC LIMIT 32;",
                             new Dictionary<string, object> { ["owner"] = owner, ["day"] = ReadDouble(payload, "worldDay", 0d) });
-                        foreach (var memory in memories.Where(m => KnowledgeRowVisibleToNpc("memories", m, knowledge, connection))
+                        foreach (var memory in memories.Where(m => Program.KnowledgeRowVisibleToNpc("memories", m, knowledge, connection))
                             .Where(m => Regex.IsMatch(ReadString(m, "summary", ""), @"\b(?:secret|scandal|betray|affair|bribe|crime|murder|treason)\w*\b", RegexOptions.IgnoreCase)).Take(4))
                         {
                             var source = TryParseJsonObject(ReadString(memory, "payload_json", "{}"));
                             if (ReadString(source, "timelineId", ContinuityTimeline(payload)) != ContinuityTimeline(payload)) continue;
                             facts["evidence." + ReadString(memory, "memory_id", "")] = new Dictionary<string, object>
-                            { ["summary"] = LimitText(ReadString(memory, "summary", ""), 350), ["confidence"] = ReadDouble(memory, "confidence", 0.5d),
+                            { ["summary"] = Program.LimitText(ReadString(memory, "summary", ""), 350), ["confidence"] = ReadDouble(memory, "confidence", 0.5d),
                                 ["source"] = ReadString(memory, "source", ""), ["worldDay"] = ReadDouble(memory, "world_day", 0d) };
                         }
                     }
@@ -238,8 +238,8 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 ["gold"] = Math.Max(0d, ReadDouble(terms, "gold", 0d)),
                 ["durationDays"] = Math.Max(0d, ReadDouble(terms, "durationDays", 0d)),
                 ["paymentDeferred"] = ReadBool(terms, "paymentDeferred", false),
-                ["benefit"] = LimitText(ReadString(terms, "benefit", ""), 400),
-                ["conditions"] = LimitText(ReadString(terms, "conditions", ""), 400)
+                ["benefit"] = Program.LimitText(ReadString(terms, "benefit", ""), 400),
+                ["conditions"] = Program.LimitText(ReadString(terms, "conditions", ""), 400)
             };
         }
 
@@ -345,7 +345,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             if (proposals.Count > 4) issues.Add("Split this compound negotiation into at most four clear outcomes.");
             var gate = ReadDictionary(parsed, "actionGate");
             string gateTopic = AgencyTopicForAction(ReadString(gate, "intent", ""));
-            if (gateTopic.Length > 0 && ActionGateShouldPlan(gate)
+            if (gateTopic.Length > 0 && Program.ActionGateShouldPlan(gate)
                 && !proposals.Any(p => ReadString(p, "topic", "") == gateTopic && AgencyAccepted(ReadString(p, "disposition", ""))))
                 issues.Add("This voluntary action requires an explicit matching accepted proposalDecision.");
             var conception = ReadDictionary(parsed, "conceptionGate");
@@ -384,7 +384,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 var unsupportedKeys = ReadStringList(proposal, "evidenceKeys").Where(k => !facts.ContainsKey(k)).ToList();
                 if (unsupportedKeys.Count > 0)
                 { issues.Add("Decision evidence must refer to supplied facts; unsupported evidenceKeys: "
-                    + string.Join(", ", unsupportedKeys.Take(8).Select(k => LimitText(k, 160))) + "."); continue; }
+                    + string.Join(", ", unsupportedKeys.Take(8).Select(k => Program.LimitText(k, 160))) + "."); continue; }
                 if (AgencyRefused(disposition) && (objections.Count == 0 || string.IsNullOrWhiteSpace(ReadString(proposal, "reason", ""))))
                 { issues.Add("Record the actual decisive objection and reason for a refusal."); continue; }
                 if (ReadDouble(ReadDictionary(proposal, "terms"), "gold", 0d) < 0d
@@ -399,7 +399,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 {
                     double number = ReadDouble(terms, term, 0d);
                     if (number > 0d && number != ReadDouble(ReadDictionary(previous, "terms"), term, -1d)
-                        && !(term == "gold" ? ExtractMoneyAmount(quote, -1) == number
+                        && !(term == "gold" ? Program.ExtractMoneyAmount(quote, -1) == number
                             : AgencyQuotedDuration(quote, number, ReadDictionary(context, "campaignCalendar"))))
                         issues.Add("New numeric " + term + " terms must be grounded in the exact current player offer; ask for an explicit amount if unclear.");
                 }
@@ -429,12 +429,12 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 // Never lower the rejected price/scope baseline by submitting trivial or worse offers.
                 if (previous == null || material || !priorRefusal)
                 {
-                    next["subject"] = LimitText(ReadString(proposal, "subject", topic), 160);
+                    next["subject"] = Program.LimitText(ReadString(proposal, "subject", topic), 160);
                     next["tactic"] = ReadString(proposal, "tactic", "appeal");
                     next["disposition"] = disposition; next["terms"] = terms;
                     next["objections"] = objections.Distinct().ToList();
-                    next["reason"] = LimitText(ReadString(proposal, "reason", ""), 500);
-                    next["reconsideration"] = LimitText(ReadString(proposal, "reconsideration", ""), 500);
+                    next["reason"] = Program.LimitText(ReadString(proposal, "reason", ""), 500);
+                    next["reconsideration"] = Program.LimitText(ReadString(proposal, "reconsideration", ""), 500);
                     next["facts"] = new Dictionary<string, object>(facts);
                     next["stakes"] = ReadString(proposal, "stakes", "ordinary");
                 }
@@ -485,13 +485,13 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             EnsureConversationAgencySchema(connection);
             string timeline = ReadString(context, "timelineId", "main"), owner = ReadString(context, "ownerId", ""), peer = ReadString(context, "peerId", "");
             string receiptId = "negturn_" + PromptHash(timeline + "|" + owner + "|" + peer + "|" + turnId);
-            if (ownsTransaction) ExecuteSql(connection, "BEGIN;");
+            if (ownsTransaction) Program.ExecuteSql(connection, "BEGIN;");
             try
             {
-                var prior = QuerySql(connection, "SELECT payload_json FROM conversation_negotiation_turns WHERE receipt_id=$id;", new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
+                var prior = Program.QuerySql(connection, "SELECT payload_json FROM conversation_negotiation_turns WHERE receipt_id=$id;", new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                 if (prior != null)
                 {
-                    if (ownsTransaction) ExecuteSql(connection, "ROLLBACK;");
+                    if (ownsTransaction) Program.ExecuteSql(connection, "ROLLBACK;");
                     var receipt = TryParseJsonObject(ReadString(prior, "payload_json", "{}"));
                     receipt["replayed"] = true;
                     return receipt;
@@ -501,7 +501,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     ["records"] = ReadConversationNegotiations(connection, timeline, owner, peer)
                 };
                 var evaluation = EvaluateConversationAgency(parsed, current);
-                if (!ReadBool(evaluation, "ok", false)) { if (ownsTransaction) ExecuteSql(connection, "ROLLBACK;"); return evaluation; }
+                if (!ReadBool(evaluation, "ok", false)) { if (ownsTransaction) Program.ExecuteSql(connection, "ROLLBACK;"); return evaluation; }
                 foreach (var next in ReadDictionaryList(evaluation, "updates"))
                 {
                     string id = ReadString(next, "id", "");
@@ -511,27 +511,27 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                         ["topic"] = ReadString(next, "topic", ""), ["object"] = ReadString(next, "objectId", ""), ["revision"] = revision,
                         ["expected"] = revision - 1, ["payload"] = Json.Serialize(next) };
                     if (revision == 1)
-                        ExecuteSql(connection, "INSERT INTO conversation_negotiations(record_id,timeline_id,owner_id,peer_id,topic,object_id,revision,payload_json) VALUES($id,$timeline,$owner,$peer,$topic,$object,$revision,$payload);", args);
+                        Program.ExecuteSql(connection, "INSERT INTO conversation_negotiations(record_id,timeline_id,owner_id,peer_id,topic,object_id,revision,payload_json) VALUES($id,$timeline,$owner,$peer,$topic,$object,$revision,$payload);", args);
                     else
-                        ExecuteSql(connection, "UPDATE conversation_negotiations SET revision=$revision,payload_json=$payload WHERE record_id=$id AND revision=$expected;", args);
-                    var observed = QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE record_id=$id;", args).FirstOrDefault();
+                        Program.ExecuteSql(connection, "UPDATE conversation_negotiations SET revision=$revision,payload_json=$payload WHERE record_id=$id AND revision=$expected;", args);
+                    var observed = Program.QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE record_id=$id;", args).FirstOrDefault();
                     if (ReadString(observed, "payload_json", "") != Json.Serialize(next)) throw new InvalidOperationException("Negotiation changed while the reply was being committed.");
                 }
                 evaluation["receiptId"] = receiptId;
                 evaluation["commitState"] = "committed";
                 evaluation["acceptedReplyHash"] = PromptHash(ReadFirstString(parsed, "reply", "body"));
                 evaluation["reply"] = ReadFirstString(parsed, "reply", "body");
-                var acceptedResponse = CloneDictionary(parsed);
+                var acceptedResponse = Program.CloneDictionary(parsed);
                 RemovePrivateReasoningFields(acceptedResponse);
                 acceptedResponse.Remove("conversationAgencyReceipt");
                 acceptedResponse.Remove("motiveDecision");
                 evaluation["response"] = acceptedResponse;
-                ExecuteSql(connection, "INSERT INTO conversation_negotiation_turns(receipt_id,timeline_id,owner_id,peer_id,turn_id,payload_json) VALUES($id,$timeline,$owner,$peer,$turn,$payload);",
+                Program.ExecuteSql(connection, "INSERT INTO conversation_negotiation_turns(receipt_id,timeline_id,owner_id,peer_id,turn_id,payload_json) VALUES($id,$timeline,$owner,$peer,$turn,$payload);",
                     new Dictionary<string, object> { ["id"] = receiptId, ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer, ["turn"] = turnId, ["payload"] = Json.Serialize(evaluation) });
-                if (ownsTransaction) ExecuteSql(connection, "COMMIT;");
+                if (ownsTransaction) Program.ExecuteSql(connection, "COMMIT;");
                 return evaluation;
             }
-            catch { if (ownsTransaction) ExecuteSql(connection, "ROLLBACK;"); throw; }
+            catch { if (ownsTransaction) Program.ExecuteSql(connection, "ROLLBACK;"); throw; }
         }
 
         private static string AgencyEvidenceKey(string value, Dictionary<string, object> facts)
@@ -558,7 +558,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
         {
             if (parsed.ContainsKey("proposalDecisions") || ReadDictionaryList(context, "records").Count == 0) return false;
             var gate = ReadDictionary(parsed, "actionGate");
-            if (ActionGateShouldPlan(gate) || ReadDictionaryList(parsed, "suggestedActions").Count > 0
+            if (Program.ActionGateShouldPlan(gate) || ReadDictionaryList(parsed, "suggestedActions").Count > 0
                 || ReadDictionaryList(parsed, "obligationWrites").Count > 0
                 || ReadDictionaryList(parsed, "continuityWrites").Count > 0
                 || ReadBool(ReadDictionary(parsed, "conceptionGate"), "needed", false)) return false;
@@ -609,7 +609,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             var supported = ReadStringList(decision, "evidenceKeys").Select(k => AgencyEvidenceKey(k, facts))
                 .Where(facts.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
             if (supported.Count == 0) return false;
-            var terms = CloneDictionary(ReadDictionary(previous, "terms"));
+            var terms = Program.CloneDictionary(ReadDictionary(previous, "terms"));
             terms["conditions"] = "";
             decision["disposition"] = "undecided";
             decision["subject"] = "Workshop partnership terms";
@@ -629,7 +629,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             Dictionary<string, object> context)
         {
             var proposals = ReadDictionaryList(parsed, "proposalDecisions");
-            if (proposals.Count != 1 || ActionGateShouldPlan(ReadDictionary(parsed, "actionGate"))
+            if (proposals.Count != 1 || Program.ActionGateShouldPlan(ReadDictionary(parsed, "actionGate"))
                 || ReadDictionaryList(parsed, "suggestedActions").Count > 0
                 || ReadDictionaryList(parsed, "memoryWrites").Count > 0
                 || ReadDictionaryList(parsed, "relationshipAssessments").Count > 0) return false;
@@ -651,13 +651,13 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             var supported = ReadStringList(proposal, "evidenceKeys").Select(k => AgencyEvidenceKey(k, facts))
                 .Where(facts.ContainsKey).Distinct(StringComparer.Ordinal).ToList();
             if (supported.Count == 0) return false;
-            var pending = CloneDictionary(proposal);
+            var pending = Program.CloneDictionary(proposal);
             pending["disposition"] = "conditional";
             pending["engagement"] = "clarify";
             pending["subject"] = ReadString(previous, "subject", "");
-            pending["terms"] = CloneDictionary(ReadDictionary(previous, "terms"));
+            pending["terms"] = Program.CloneDictionary(ReadDictionary(previous, "terms"));
             pending["objections"] = ReadStringList(previous, "objections");
-            pending["reason"] = LimitText(ReadString(previous, "reason", "")
+            pending["reason"] = Program.LimitText(ReadString(previous, "reason", "")
                 + " The latest statement was acknowledged; the other recorded conditions remain pending.", 500);
             pending["reconsideration"] = ReadString(previous, "reconsideration", "");
             pending["evidenceKeys"] = supported;
@@ -668,7 +668,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
         internal static Dictionary<string, object> VisibleFailedRepairWithoutEffects(Dictionary<string, object> parsed,
             string failureClass = "action_verification")
         {
-            var visible = CloneDictionary(parsed);
+            var visible = Program.CloneDictionary(parsed);
             string notice = failureClass switch
             {
                 "continuity_evidence" => "[Dialogue continuity evidence could not be verified. No new memory or world change is confirmed.]",
@@ -751,8 +751,8 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
         {
             foreach (var source in new[] { repair, original })
             {
-                if (source == null || !ConversationStructuredObjectHasUsableVisibleReply(source)) continue;
-                var safeSource = CloneDictionary(source);
+                if (source == null || !Program.ConversationStructuredObjectHasUsableVisibleReply(source)) continue;
+                var safeSource = Program.CloneDictionary(source);
                 if (unsafeVisibleClaims != null && unsafeVisibleClaims.Count > 0)
                 {
                     string reply = ReadFirstString(safeSource, "reply", "body", "response");
@@ -762,11 +762,11 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     else if (safeSource.ContainsKey("body")) safeSource["body"] = reply;
                     else safeSource["response"] = reply;
                 }
-                var complete = CompleteConversationStructuredResponse(safeSource,
-                    NormalizeLookup(mode).Replace(' ', '_'), out _);
+                var complete = Program.CompleteConversationStructuredResponse(safeSource,
+                    Program.NormalizeLookup(mode).Replace(' ', '_'), out _);
                 string content = Json.Serialize(complete);
-                if (!StructuredResponseIsComplete(content, mode)
-                    || !ConversationVisibleReplyPassesRequestQualityGate(content, request, mode)) continue;
+                if (!Program.StructuredResponseIsComplete(content, mode)
+                    || !Program.ConversationVisibleReplyPassesRequestQualityGate(content, request, mode)) continue;
                 llm["ok"] = true;
                 llm["content"] = Json.Serialize(VisibleFailedRepairWithoutEffects(complete,
                     ReadString(llm, "technicalFailureClass", "dialogue_validation")));
@@ -797,7 +797,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             TryKeepPendingAgencyCondition(parsed, context);
             var evaluation = EvaluateConversationAgency(parsed, context);
             var diagnosticAgencyIssues = ReadStringList(evaluation, "issues").ToList();
-            DiagnosticValidation("Check negotiation metadata", ReadBool(evaluation, "ok", false), diagnosticAgencyIssues, parsed);
+            Program.DiagnosticValidation("Check negotiation metadata", ReadBool(evaluation, "ok", false), diagnosticAgencyIssues, parsed);
             bool repaired = false;
             bool metadataOnly = diagnosticAgencyIssues.Count > 0 && diagnosticAgencyIssues.All(i =>
                 i.StartsWith("Negotiation requires exact", StringComparison.Ordinal) || i.StartsWith("Decision evidence", StringComparison.Ordinal)
@@ -823,18 +823,18 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     }
                 };
                 string model = ReadString(request, "model", ""); if (model.Length > 0) repairRequest["model"] = model;
-                var response = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
+                var response = responder == null ? Program.ChatWithLlm(repairRequest) : responder(repairRequest);
                 var candidate = ReadBool(response, "ok", false) ? TryParseJsonObject(ReadString(response, "content", "")) : null;
                 if (metadataOnly) candidate = ApplyAgencyMetadataPatch(parsed, candidate);
-                if (candidate != null && ConversationStructuredObjectHasUsableVisibleReply(candidate))
-                    candidate = CompleteConversationStructuredResponse(candidate,
-                        NormalizeLookup(mode).Replace(' ', '_'), out _);
+                if (candidate != null && Program.ConversationStructuredObjectHasUsableVisibleReply(candidate))
+                    candidate = Program.CompleteConversationStructuredResponse(candidate,
+                        Program.NormalizeLookup(mode).Replace(' ', '_'), out _);
                 var checkedCandidate = candidate == null ? null : EvaluateConversationAgency(candidate, context);
-                DiagnosticValidation("Recheck negotiation repair", checkedCandidate != null && ReadBool(checkedCandidate, "ok", false),
+                Program.DiagnosticValidation("Recheck negotiation repair", checkedCandidate != null && ReadBool(checkedCandidate, "ok", false),
                     checkedCandidate == null ? new List<string> { "The repair did not return a usable JSON candidate." } : ReadStringList(checkedCandidate, "issues"), candidate);
                 if (checkedCandidate != null && ReadBool(checkedCandidate, "ok", false)
                     && (!metadataOnly || ReadFirstString(candidate, "reply", "body") == ReadFirstString(parsed, "reply", "body"))
-                    && StructuredResponseIsComplete(Json.Serialize(candidate), mode)
+                    && Program.StructuredResponseIsComplete(Json.Serialize(candidate), mode)
                     && (validateRepair == null || validateRepair(candidate)))
                 {
                     CarryConversationRepairState(parsed, candidate);
@@ -845,8 +845,8 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 {
                     // The original reply passed the earlier visible/continuity gates. Return its
                     // dialogue with the failed-repair marker, but discard every proposed effect.
-                    if (!StructuredResponseIsComplete(Json.Serialize(parsed), mode)
-                        || !ConversationStructuredObjectHasUsableVisibleReply(parsed))
+                    if (!Program.StructuredResponseIsComplete(Json.Serialize(parsed), mode)
+                        || !Program.ConversationStructuredObjectHasUsableVisibleReply(parsed))
                     {
                         llm["ok"] = false; llm["errorCode"] = "conversation_agency_repair_unusable";
                         llm["error"] = "The NPC decision could not be reconciled with the current negotiation. No usable reply was available.";
@@ -858,7 +858,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     llm["content"] = Json.Serialize(visible);
                     llm["conversationAgency"] = new Dictionary<string, object> { ["accepted"] = false,
                         ["visibleFailure"] = true, ["visibleRepairMarker"] = ".,", ["issues"] = ReadStringList(evaluation, "issues") };
-                    WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "",
+                    Program.WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "",
                         "completed_with_revalidation_override", 0,
                         "The agency repair failed; the marked original reply was returned without negotiation or authorized action effects.",
                         ReadDictionary(llm, "conversationAgency"));
@@ -866,7 +866,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 }
             }
             if (repaired)
-                WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "", "completed", 0,
+                Program.WriteAudit(campaignId, correlationId, "server", mode, "llm.agency_repair", heroId, "", "", "completed", 0,
                     "The negotiation metadata repair passed revalidation.", new Dictionary<string, object> {
                         ["issues"] = diagnosticAgencyIssues, ["accepted"] = true, ["remaining"] = ReadStringList(evaluation, "issues") });
             if (!persist)
@@ -882,7 +882,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 try
                 {
                     lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))
-                        using (var connection = OpenCampaignConnection(campaignId)) evaluation = CommitConversationAgency(connection, parsed, context, turn);
+                        using (var connection = Program.OpenCampaignConnection(campaignId)) evaluation = CommitConversationAgency(connection, parsed, context, turn);
                 }
                 catch (Exception)
                 {
@@ -897,7 +897,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                     return llm;
                 }
             }
-            if (ReadBool(evaluation, "replayed", false)) parsed = CloneDictionary(ReadDictionary(evaluation, "response"));
+            if (ReadBool(evaluation, "replayed", false)) parsed = Program.CloneDictionary(ReadDictionary(evaluation, "response"));
             parsed["conversationAgencyReceipt"] = evaluation;
             payload["conversationAgencyReceipt"] = evaluation;
             llm["conversationAgency"] = new Dictionary<string, object>
@@ -909,7 +909,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             return llm;
         }
 
-        private static Dictionary<string, object> ConversationAgencyReplayResponse(Dictionary<string, object> llm, string heroId)
+        internal static Dictionary<string, object> ConversationAgencyReplayResponse(Dictionary<string, object> llm, string heroId)
         {
             var parsed = TryParseJsonObject(ReadString(llm, "content", "{}"));
             return new Dictionary<string, object>
@@ -940,7 +940,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             if (posture != null && ReadStringList(ClassifyPoliticalConduct(ReadString(view, "reply", ""), posture, motive), "violations").Count > 0) return false;
             var hard = ReadDictionary(ReadDictionary(motive, "romance"), "hardConstraints");
             var gate = ReadDictionary(view, "actionGate");
-            if (hard != null && ActionGateShouldPlan(gate) && ContainsRomanticAuthorizationLanguage(ReadString(gate, "intent", ""))
+            if (hard != null && Program.ActionGateShouldPlan(gate) && ContainsRomanticAuthorizationLanguage(ReadString(gate, "intent", ""))
                 && (ReadBool(hard, "coercive", false) || !ReadBool(hard, "adults", true) || !ReadBool(hard, "nativeSuitable", true) || ReadBool(hard, "closeKin", false))) return false;
             return true;
         }

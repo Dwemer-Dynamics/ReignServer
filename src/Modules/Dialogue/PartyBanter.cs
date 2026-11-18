@@ -11,10 +11,10 @@ using ReignBeta.Shared.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string BanterRules = "Write a brief medieval party exchange. JSONL only, no fences: {\"speakerId\":\"supplied id\",\"text\":\"spoken words\",\"reactions\":[]}. All selected characters speak before anyone repeats; vary speakers. Start with a personal opinion or question, not a recital of the topic. Give even an abstract topic a concrete preference or practical point. Each reply picks up something the other actually said and adds a question, objection, admission or tease. Prefer 1-2 short sentences, sometimes just a few words; caps are ceilings, not targets. Vary rhythm and voice from the supplied personality; avoid chains of metaphors, maxims, polished speeches, repeated paraphrases and automatic agreement. Joke, argue, comfort, flirt or be cutting as personality and directed feelings support; liking, hostility and attraction need not be mutual. Rank affects confidence, deference and boundaries without constant titles. Usually omit direct address. Never say my lord, my lady, milord or milady. If needed use knownAs only when nameKnown; formalAddress is an occasional ruler address, not a line prefix. Friendship does not grant unknown names or secrets. Only supplied shared facts support past events; unsupplied details must stay preferences or hypotheticals. No narrator, player speech, tools, mechanical actions, violence, invented events, promises or possessions. Finish naturally within both caps. Optional reactions: {\"observer\":\"id\",\"target\":\"id\",\"source\":1,\"quote\":\"exact target words\",\"valence\":\"positive|negative\",\"tier\":\"routine|meaningful|hostile\",\"act\":\"kindness|humor|affection|insult|threat\",\"reason\":\"brief actual reaction\"}. source is the one-based earlier/current line spoken by target. Only a clear change in observer's feelings earns a reaction; neutral mention, ordinary disagreement and participation earn nothing. Never punish a kind target for observer's own hostility. At most one reaction per ordered NPC pair; no numeric affinity changes.";
-        private const string BanterTopicSeeds = @"travel|the road's mud
+        internal const string BanterTopicSeeds = @"travel|the road's mud
 travel|a stubborn headwind
 travel|choosing a dry campsite
 travel|the rhythm of marching
@@ -80,17 +80,17 @@ events|something amusing about the supplied shared encounter";
         // Injected only by isolated self-tests; production always uses the canonical provider adapter.
         private static Func<Dictionary<string, object>, Action<string>, Func<bool>, Dictionary<string, object>> BanterTestProvider;
 
-        internal static void EnsureBanterSchema(ReignDbConnection c) => ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conversation_banter_episodes (
+        internal static void EnsureBanterSchema(ReignDbConnection c) => Program.ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conversation_banter_episodes (
 session_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,payload_json TEXT NOT NULL,updated_ts BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_banter_timeline ON conversation_banter_episodes(timeline_id,updated_ts);");
 
         internal static string BanterGeneration(ReignDbConnection c) => ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
         private static Dictionary<string, object> ReadBanter(ReignDbConnection c, string id) => TryParseJsonObject(ReadString(
-            QuerySql(c, "SELECT payload_json FROM conversation_banter_episodes WHERE session_id=$id;", TestDict("id", id)).FirstOrDefault(), "payload_json", "{}")) ?? TestDict();
-        internal static void WriteBanter(ReignDbConnection c, Dictionary<string, object> e) => ExecuteSql(c, @"INSERT INTO conversation_banter_episodes(session_id,timeline_id,payload_json,updated_ts)
+            Program.QuerySql(c, "SELECT payload_json FROM conversation_banter_episodes WHERE session_id=$id;", TestDict("id", id)).FirstOrDefault(), "payload_json", "{}")) ?? TestDict();
+        internal static void WriteBanter(ReignDbConnection c, Dictionary<string, object> e) => Program.ExecuteSql(c, @"INSERT INTO conversation_banter_episodes(session_id,timeline_id,payload_json,updated_ts)
 VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_ts=EXCLUDED.updated_ts;",
             TestDict("id", ReadString(e, "sessionId", ""), "timeline", ReadString(e, "timelineId", ""), "payload", Json.Serialize(e), "ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
-        private static List<Dictionary<string, object>> RecentBanter(ReignDbConnection c, string timeline) => QuerySql(c,
+        private static List<Dictionary<string, object>> RecentBanter(ReignDbConnection c, string timeline) => Program.QuerySql(c,
             "SELECT payload_json FROM conversation_banter_episodes WHERE timeline_id=$timeline ORDER BY COALESCE((payload_json::jsonb->>'createdUtc')::bigint,updated_ts) DESC,updated_ts DESC LIMIT 64;", TestDict("timeline", timeline))
             .Select(row => TryParseJsonObject(ReadString(row, "payload_json", "{}")) ?? TestDict()).ToList();
         private static bool BanterActive(Dictionary<string, object> e) => new[] { "generating", "ready", "delivering" }.Contains(ReadString(e, "state", ""));
@@ -103,7 +103,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
             double day = ReadDouble(p, "worldDay", -1);
             if (campaign.Length == 0 || timeline.Length == 0 || !double.IsFinite(day) || day < 0) return TestDict("ok", false, "error", "Banter requires a current campaign, timeline and clock.");
             using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
-            using var c = OpenCampaignConnection(campaign); EnsureBanterSchema(c);
+            using var c = Program.OpenCampaignConnection(campaign); EnsureBanterSchema(c);
             string generation = BanterGeneration(c);
             if (operation == "context")
             {
@@ -122,7 +122,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
                 }
                 var active = recent.FirstOrDefault(BanterActive);
                 var latest = active ?? recent.FirstOrDefault();
-                return TestDict("ok", true, "generation", generation, "options", BanterOptions(LoadSettings()), "episode", latest == null ? null : BanterPublic(campaign, latest),
+                return TestDict("ok", true, "generation", generation, "options", Program.BanterOptions(Program.LoadSettings()), "episode", latest == null ? null : BanterPublic(campaign, latest),
                     "endedDay", recent.Where(x => !BanterActive(x)).Select(x => ReadDouble(x, "endedDay", -1)).DefaultIfEmpty(-1).Max());
             }
             if (ReadString(p, "generation", "") != generation) return TestDict("ok", false, "errorCode", "banter_stale_generation");
@@ -132,7 +132,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
                 return TestDict("ok", false, "errorCode", "banter_missing_or_stale");
             if (operation == "status")
             {
-                if (BanterActive(e) && !ReadBool(LoadSettings(), "banterEnabled", true)) FinishBanter(c, campaign, e, day, "disabled", p);
+                if (BanterActive(e) && !ReadBool(Program.LoadSettings(), "banterEnabled", true)) FinishBanter(c, campaign, e, day, "disabled", p);
                 return BanterPublic(campaign, e);
             }
             if (operation == "accept") return AcceptBanter(c, campaign, e, p);
@@ -150,16 +150,16 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
         private static List<Dictionary<string, object>> BanterRoster(Dictionary<string, object> p)
         {
             string player = ReadString(p, "playerHeroStringId", ""), party = ReadString(p, "partyId", "");
-            return ReadDictionaryList(p, "heroes").Where(h => CharacterIdFrom(h).Length > 0 && CharacterIdFrom(h) != player
+            return ReadDictionaryList(p, "heroes").Where(h => Program.CharacterIdFrom(h).Length > 0 && Program.CharacterIdFrom(h) != player
                 && !string.IsNullOrWhiteSpace(ReadString(h, "name", "")) && ReadBool(h, "isAlive", false)
                 && !ReadBool(h, "isChild", false) && ReadDouble(h, "age", 0) >= 18 && !ReadBool(h, "isPrisoner", false)
                 && party.Length > 0 && ReadFirstString(h, "currentPartyId", "partyId") == party)
-                .GroupBy(CharacterIdFrom).Select(g => g.First()).Take(64).ToList();
+                .GroupBy(Program.CharacterIdFrom).Select(g => g.First()).Take(64).ToList();
         }
 
         private static Dictionary<string, object> StartBanter(ReignDbConnection c, string campaign, string timeline, string generation, Dictionary<string, object> p)
         {
-            var options = BanterOptions(LoadSettings()); double day = ReadDouble(p, "worldDay", 0);
+            var options = Program.BanterOptions(Program.LoadSettings()); double day = ReadDouble(p, "worldDay", 0);
             var recent = RecentBanter(c, timeline); string requestedId = ReadString(p, "sessionId", "");
             var replay = recent.FirstOrDefault(x => ReadString(x, "sessionId", "") == requestedId);
             if (replay != null) return BanterPublic(campaign, replay);
@@ -171,17 +171,17 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
                 roster.Count, day, ended, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), retryAfter)) return TestDict("ok", true, "eligible", false, "options", options);
             // Fairness is the first key; affinity strength/asymmetry breaks ties.
             int Used(string id) => recent.Count(x => ReadStringList(x, "heroIds").Contains(id));
-            var candidates = roster.Where(h => ReadString(ReadJsonObject(CharacterFile(campaign, CharacterIdFrom(h), "traits.json")), "basePersonalitySummary", "").Length >= CharactersService.PersonalitySummaryMinimumCharacters)
-                .OrderBy(h => Used(CharacterIdFrom(h))).ThenBy(h => PromptHash(requestedId + CharacterIdFrom(h))).ToList();
+            var candidates = roster.Where(h => ReadString(Program.ReadJsonObject(Program.CharacterFile(campaign, Program.CharacterIdFrom(h), "traits.json")), "basePersonalitySummary", "").Length >= CharactersService.PersonalitySummaryMinimumCharacters)
+                .OrderBy(h => Used(Program.CharacterIdFrom(h))).ThenBy(h => PromptHash(requestedId + Program.CharacterIdFrom(h))).ToList();
             if (candidates.Count < 2) return TestDict("ok", true, "eligible", false, "reason", "character_foundations_not_ready");
             var chosen = new List<Dictionary<string, object>> { candidates[0] };
             var first = candidates[0];
-            var second = candidates.Skip(1).OrderBy(h => Used(CharacterIdFrom(h))).ThenByDescending(h => BanterPairWeight(c, first, h)).First(); chosen.Add(second);
+            var second = candidates.Skip(1).OrderBy(h => Used(Program.CharacterIdFrom(h))).ThenByDescending(h => BanterPairWeight(c, first, h)).First(); chosen.Add(second);
             if (ReadInt(options, "maxResponses", 6) >= 3 && candidates.Count > 2 && (Convert.ToInt32(PromptHash(requestedId).Substring(0, 2), 16) % 3 == 0))
                 chosen.Add(candidates.First(h => h != first && h != second));
-            string topicsText = LoadPromptTemplate("party_banter_topics.txt"); if (string.IsNullOrWhiteSpace(topicsText)) topicsText = BanterTopicSeeds;
+            string topicsText = Program.LoadPromptTemplate("party_banter_topics.txt"); if (string.IsNullOrWhiteSpace(topicsText)) topicsText = BanterTopicSeeds;
             var topics = topicsText.Split('\n').Select(x => x.Trim()).Where(x => x.Contains('|') && x.Length <= 160).Distinct().Take(500).ToList();
-            var shared = BanterSharedExcerpt(c, chosen.Select(CharacterIdFrom).ToList(), p);
+            var shared = BanterSharedExcerpt(c, chosen.Select(Program.CharacterIdFrom).ToList(), p);
             var topicPool = topics.Where(x => shared.Count > 0 || !x.StartsWith("events|", StringComparison.Ordinal)).ToList();
             var lastTopics = recent.Take(8).Select(x => ReadString(x, "topic", "")).ToHashSet();
             var fresh = topicPool.Where(x => !lastTopics.Contains(x)).ToList(); if (fresh.Count > 0) topicPool = fresh;
@@ -198,7 +198,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
             if (BanterPromptExceedsBaseBudget(prompt, politicalCharacters, 8800, includeGrace: true))
                 return TestDict("ok", true, "eligible", false, "reason", "protected_prompt_floor_exceeds_budget");
             if (!Regex.IsMatch(requestedId, "^banter_[a-f0-9]{32}$")) return TestDict("ok", false, "error", "A stable banter request ID is required.");
-            string player = ReadString(p, "playerHeroStringId", ""); var ids = chosen.Select(CharacterIdFrom).ToList();
+            string player = ReadString(p, "playerHeroStringId", ""); var ids = chosen.Select(Program.CharacterIdFrom).ToList();
             var start = ConversationStartApi(TestDict("campaignId", campaign, "timelineId", timeline, "sessionId", requestedId, "npcId", ids[0],
                 "playerId", player, "participants", ids.Concat(new[] { player }).ToList(), "channel", "party_chat", "worldDay", day, "locationId", ReadString(p, "locationId", "")));
             if (!ReadBool(start, "ok", false)) return start;
@@ -215,16 +215,16 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
         private static int BanterPairWeight(ReignDbConnection c, Dictionary<string, object> a, Dictionary<string, object> b)
         {
             RelationshipsService.EnsureMbtiRelationshipSchema(c);
-            var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(CharacterIdFrom(a), CharacterIdFrom(b)))).FirstOrDefault();
+            var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(Program.CharacterIdFrom(a), Program.CharacterIdFrom(b)))).FirstOrDefault();
             int ab = ReadInt(pair, "affinity_a_to_b", 0), ba = ReadInt(pair, "affinity_b_to_a", 0);
             return Math.Abs(ab - ba) + Math.Max(Math.Abs(ab), Math.Abs(ba));
         }
         private static List<Dictionary<string, object>> BanterSharedExcerpt(ReignDbConnection c, List<string> ids, Dictionary<string, object> p)
         {
             if (ids.Count < 2) return new();
-            var access = ids.Select(id => BuildKnowledgeAccessContext(id, ReadString(p, "playerHeroStringId", ""), "", p)).ToList();
+            var access = ids.Select(id => Program.BuildKnowledgeAccessContext(id, ReadString(p, "playerHeroStringId", ""), "", p)).ToList();
             var first = access[0];
-            var rows = QuerySql(c, @"SELECT t.* FROM conversation_turns t
+            var rows = Program.QuerySql(c, @"SELECT t.* FROM conversation_turns t
 WHERE t.participants_json::jsonb @> $audience::jsonb AND t.role='npc' AND t.status='active' AND length(t.text)<=400
 AND t.world_day<=$day AND t.accepted_sequence<=$sequence AND t.ts<=$timestamp AND " + MemorySourceTimelineSql("conversation_turns", "t", access: first) + @"
 ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDict("audience", Json.Serialize(ids),
@@ -258,7 +258,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             b.AppendLine("Current commitments remain active unless explicitly fulfilled, withdrawn or superseded. This joint prompt includes only commitment details known to every speaking character. Excluded private details do not mean a person has no commitments. Do not invent new promises or expose another person's private obligations.");
             foreach (var h in heroes)
             {
-                string id = CharacterIdFrom(h); var traits = ReadJsonObject(CharacterFile(campaign, id, "traits.json"));
+                string id = Program.CharacterIdFrom(h); var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json"));
                 var identity = TestDict("id", id, "name", ReadString(h, "name", ""), "pronouns", ReadBool(h, "isFemale", false) ? "she/her" : "he/him",
                     "rank", ReadBool(h, "isRuler", false) ? (ReadBool(h, "isFemale", false) ? "queen" : "king") : ReadBool(h, "isLord", false) ? "noble" : "commoner",
                     "culture", ReadString(h, "cultureId", ""), "clan", ReadString(h, "clanName", ""), "kingdom", ReadString(h, "kingdomName", ""),
@@ -276,19 +276,19 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 foreach (var fact in CharactersService.ReadNpcLives(c, campaign, ContinuityTimeline(p)).Characters.Where(n => n.HeroId == id)
                     .SelectMany(n => n.Facts).Where(f => f.Active && !f.Private))
                     b.AppendLine("Established personal fact for " + id + ": " + fact.Text);
-                var voice = ReadDictionary(ReadJsonObject(CharacterFile(campaign, id, "narrative.json")), "voice") ?? ReadJsonObject(CharacterFile(campaign, id, "voice.json"));
-                b.AppendLine("Voice: " + LimitText(ReadString(voice, "speechStyle", ""), 140));
+                var voice = ReadDictionary(Program.ReadJsonObject(Program.CharacterFile(campaign, id, "narrative.json")), "voice") ?? Program.ReadJsonObject(Program.CharacterFile(campaign, id, "voice.json"));
+                b.AppendLine("Voice: " + Program.LimitText(ReadString(voice, "speechStyle", ""), 140));
                 var persistentSources = new List<string>();
-                var otherObservers = heroes.Where(other => other != h).Select(CharacterIdFrom).ToList();
-                var persistentPayload = CloneDictionary(p);
+                var otherObservers = heroes.Where(other => other != h).Select(Program.CharacterIdFrom).ToList();
+                var persistentPayload = Program.CloneDictionary(p);
                 persistentPayload["memoryActiveTopic"] = topic;
                 b.AppendLine(BuildCharacterCommitmentPrompt(c, id, ReadString(p, "playerHeroStringId", ""), persistentPayload, persistentSources, otherObservers));
                 b.AppendLine(BuildPlayerPerformancePrompt(c, id, persistentPayload, persistentSources, otherObservers));
                 foreach (var other in heroes.Where(x => x != h))
                 {
-                    string target = CharacterIdFrom(other); var acquaintance = CharactersService.ReadAcquaintance(c, id, target);
+                    string target = Program.CharacterIdFrom(other); var acquaintance = CharactersService.ReadAcquaintance(c, id, target);
                     var view = CharactersService.BuildIdentityView(acquaintance, TestDict("mode", "party_chat", "canonicalName", ReadString(other, "name", ""), "subject", other, "appearance", TestDict()));
-                    var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(id, target))).FirstOrDefault();
+                    var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(id, target))).FirstOrDefault();
                     int native = ReadInt(RelationshipsService.FindRelationshipPair(ReadDictionaryList(p, "relationshipPairs"), id, target), "nativeRelation", 0);
                     int affinity = pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == id, native);
                     bool known = CharactersService.IdentityStateVerified(acquaintance), ruler = ReadBool(other, "isRuler", false), noble = ReadBool(other, "isLord", false);
@@ -331,24 +331,24 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 // Each streamed publication independently takes a short lease and a
                 // restore-generation fence; Save Sync never waits for the network.
                 var response = BanterTestProvider != null ? BanterTestProvider(request, Fragment, () => job.Cancellation.IsCancellationRequested)
-                    : RunInteractiveRequest(() => ChatWithLlm(request, Fragment, () => job.Cancellation.IsCancellationRequested));
+                    : Program.RunInteractiveRequest(() => Program.ChatWithLlm(request, Fragment, () => job.Cancellation.IsCancellationRequested));
                 if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Banter generation failed."));
                 string content = ReadString(response, "content", "");
                 if (buffered.Length == 0) { buffered.Append(content); parsedLines = 0; }
                 foreach (string row in buffered.ToString().Split('\n').Skip(parsedLines)) AppendBanterDraft(campaign, id, generation, row, job);
                 UpdateGeneratedBanter(campaign, id, generation, job, "");
             }
-            catch (Exception ex) { UpdateGeneratedBanter(campaign, id, generation, job, LimitText(ex.Message, 400)); }
+            catch (Exception ex) { UpdateGeneratedBanter(campaign, id, generation, job, Program.LimitText(ex.Message, 400)); }
             finally { BanterJobs.TryRemove(BanterJobKey(campaign, id), out _); job.Cancellation.Dispose(); }
         }
         private static void AppendBanterDraft(string campaign, string id, string generation, string json, BanterJob job)
         {
             if (job.Cancellation.IsCancellationRequested || string.IsNullOrWhiteSpace(json)) return;
-            var access = EnterCampaignRequestAccess("/party-banter/draft");
+            var access = Program.EnterCampaignRequestAccess("/party-banter/draft");
             try
             {
                 using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
-                using var c = OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
+                using var c = Program.OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
                 if (!BanterActive(e) || BanterGeneration(c) != generation || ReadString(e, "generation", "") != generation) return;
                 var drafts = ReadDictionaryList(e, "drafts"); var row = ValidateBanterDraft(json, ReadStringList(e, "heroIds"), ReadDictionary(e, "options"), drafts);
                 if (row == null) throw new InvalidOperationException("Banter returned an invalid spoken line.");
@@ -357,7 +357,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 if (!e.ContainsKey("firstDraftMs")) e["firstDraftMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - ReadLong(e, "createdUtc", 0);
                 WriteBanter(c, e); // Draft arrival does not change the acceptance revision.
             }
-            finally { ExitCampaignRequestAccess(access); }
+            finally { Program.ExitCampaignRequestAccess(access); }
         }
         internal static Dictionary<string, object> ValidateBanterDraft(string json, List<string> ids, Dictionary<string, object> options, List<Dictionary<string, object>> prior)
         {
@@ -377,18 +377,18 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
         private static void UpdateGeneratedBanter(string campaign, string id, string generation, BanterJob job, string error)
         {
             if (job.Cancellation.IsCancellationRequested) return;
-            var access = EnterCampaignRequestAccess("/party-banter/draft");
+            var access = Program.EnterCampaignRequestAccess("/party-banter/draft");
             try
             {
-                using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)); using var c = OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
+                using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)); using var c = Program.OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
                 if (!BanterActive(e) || BanterGeneration(c) != generation || ReadString(e, "generation", "") != generation) return;
                 e["generationDone"] = true; e["generationMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - ReadLong(e, "createdUtc", 0); e["error"] = error;
                 if (ReadDictionaryList(e, "drafts").Count == 0) FinishBanter(c, campaign, e, ReadDouble(e, "startedDay", 0), "generation_failed", TestDict());
                 else if (ReadInt(e, "accepted", 0) == 0) e["state"] = "ready";
                 WriteBanter(c, e);
-                LogOperational("party_banter.generated", TestDict("campaignId", campaign, "sessionId", id, "firstDraftMs", e.GetValueOrDefault("firstDraftMs"), "generationMs", e["generationMs"], "draftCount", ReadDictionaryList(e, "drafts").Count, "error", error));
+                Program.LogOperational("party_banter.generated", TestDict("campaignId", campaign, "sessionId", id, "firstDraftMs", e.GetValueOrDefault("firstDraftMs"), "generationMs", e["generationMs"], "draftCount", ReadDictionaryList(e, "drafts").Count, "error", error));
             }
-            finally { ExitCampaignRequestAccess(access); }
+            finally { Program.ExitCampaignRequestAccess(access); }
         }
 
         private static Dictionary<string, object> AcceptBanter(ReignDbConnection c, string campaign, Dictionary<string, object> e, Dictionary<string, object> p)
@@ -397,8 +397,8 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             if (sequence <= accepted && sequence > 0) return BanterPublic(campaign, e); // transport retry after accepted source commit
             if (!BanterActive(e) || ReadInt(p, "expectedRevision", -1) != ReadInt(e, "revision", 0) || sequence != accepted + 1)
                 return TestDict("ok", false, "errorCode", "banter_revision", "episode", BanterPublic(campaign, e));
-            var available = BanterRoster(p).Select(CharacterIdFrom).ToHashSet();
-            if (!ReadBool(LoadSettings(), "banterEnabled", true) || ReadStringList(e, "heroIds").Any(id => !available.Contains(id)))
+            var available = BanterRoster(p).Select(Program.CharacterIdFrom).ToHashSet();
+            if (!ReadBool(Program.LoadSettings(), "banterEnabled", true) || ReadStringList(e, "heroIds").Any(id => !available.Contains(id)))
             { FinishBanter(c, campaign, e, ReadDouble(p, "worldDay", 0), "interrupted", p); return BanterPublic(campaign, e); }
             var drafts = ReadDictionaryList(e, "drafts");
             if (accepted >= drafts.Count) return BanterPublic(campaign, e);
@@ -411,7 +411,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 FinishBanter(c, campaign, e, ReadDouble(p, "worldDay", 0), "obsolete_address_draft", p);
                 return BanterPublic(campaign, e);
             }
-            var profile = ReadDictionaryList(e, "heroes").First(h => CharacterIdFrom(h) == hero);
+            var profile = ReadDictionaryList(e, "heroes").First(h => Program.CharacterIdFrom(h) == hero);
             string exchange = id + "_banter_" + sequence;
             var payload = TestDict("campaignId", campaign, "timelineId", ReadString(e, "timelineId", ""), "worldDay", ReadDouble(p, "worldDay", 0),
                 "conversationSessionId", id, "sceneTurnId", exchange, "channel", "party_chat", "conversationMode", "party_banter",
@@ -461,7 +461,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 result.Add(TestDict("observerHeroStringId", observer, "targetHeroStringId", target, "eligibleTargetIds", ids,
                     "valence", valence, "severityTier", tier, "actKind", act, "confidence", .8d, "importance", .5d,
                     "currentConductQuote", quote, "sourceText", ReadString(drafts[source - 1], "text", ""),
-                    "sourceTurnIds", new[] { session + "_banter_" + source + "_npc_" + SafeMemoryKey(target) }, "summary", LimitText(ReadString(reaction, "reason", ""), 300)));
+                    "sourceTurnIds", new[] { session + "_banter_" + source + "_npc_" + SafeMemoryKey(target) }, "summary", Program.LimitText(ReadString(reaction, "reason", ""), 300)));
             }
             return result.GroupBy(x => ReadString(x, "observerHeroStringId", "") + "->" + ReadString(x, "targetHeroStringId", ""))
                 .Select(g => RelationshipsService.SelectDominantConversationAssessment(g.ToList())).ToList();
@@ -486,18 +486,18 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             e["drafts"] = ReadDictionaryList(e, "drafts").Take(ReadInt(e, "accepted", 0)).ToList();
             // Keep an explicit continuation-compatible close boundary. NPC-only
             // history remains party_chat and can be adopted without republishing.
-            ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='ui_continuation',end_world_day=$day WHERE session_id=$id;", TestDict("id", id, "day", day));
+            Program.ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='ui_continuation',end_world_day=$day WHERE session_id=$id;", TestDict("id", id, "day", day));
             WriteBanter(c, e);
         }
         private static Dictionary<string, object> HandoffBanter(ReignDbConnection c, string campaign, Dictionary<string, object> e, Dictionary<string, object> p)
         {
-            var present = BanterRoster(p).Select(CharacterIdFrom).ToHashSet(); bool unavailable = ReadStringList(e, "heroIds").Any(id => !present.Contains(id));
+            var present = BanterRoster(p).Select(Program.CharacterIdFrom).ToHashSet(); bool unavailable = ReadStringList(e, "heroIds").Any(id => !present.Contains(id));
             bool wasActive = BanterActive(e); FinishBanter(c, campaign, e, ReadDouble(p, "worldDay", 0), "takeover", p);
             string id = ReadString(e, "sessionId", "");
             if (!unavailable && ReadString(e, "handoffSessionId", "").Length == 0)
             {
                 string handoff = wasActive ? id : id + "_joined";
-                if (wasActive) ExecuteSql(c, "UPDATE conversation_sessions SET status='open',close_reason='' WHERE session_id=$id;", TestDict("id", id));
+                if (wasActive) Program.ExecuteSql(c, "UPDATE conversation_sessions SET status='open',close_reason='' WHERE session_id=$id;", TestDict("id", id));
                 else
                 {
                     var start = ConversationStartApi(TestDict("campaignId", campaign, "timelineId", ReadString(e, "timelineId", ""), "sessionId", handoff,
@@ -509,7 +509,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 e["handoffSessionId"] = handoff; WriteBanter(c, e);
             }
             string adopted = ReadString(e, "handoffSessionId", "");
-            bool closed = adopted.Length > 0 && ReadString(QuerySql(c, "SELECT status FROM conversation_sessions WHERE session_id=$id;", TestDict("id", adopted)).FirstOrDefault(), "status", "closed") != "open";
+            bool closed = adopted.Length > 0 && ReadString(Program.QuerySql(c, "SELECT status FROM conversation_sessions WHERE session_id=$id;", TestDict("id", adopted)).FirstOrDefault(), "status", "closed") != "open";
             var result = BanterPublic(campaign, e); result["readOnly"] = unavailable || closed; return result;
         }
     }

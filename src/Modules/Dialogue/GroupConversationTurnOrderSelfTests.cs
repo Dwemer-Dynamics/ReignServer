@@ -5,9 +5,9 @@ using Reign.Core.Contracts.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>> RunGroupConversationTurnOrderSelfTests()
+        internal static List<Dictionary<string, object>> RunGroupConversationTurnOrderSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             void check(string id, bool passed) => results.Add(TestDict("caseId", "group_turn_order_" + id,

@@ -5,11 +5,11 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static readonly object PartyDialogueAuditLock = new object();
 
-        private static Dictionary<string, object> PartyDialogueAuditRequestApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditRequestApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
@@ -49,7 +49,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditRequestPollApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditRequestPollApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
@@ -64,7 +64,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditRequestAckApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditRequestAckApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
@@ -90,7 +90,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditStartApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditStartApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -133,7 +133,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditTurnApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditTurnApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -155,20 +155,20 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> turns;
                 Dictionary<string, int> turnFts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 List<Dictionary<string, object>> memories = new List<Dictionary<string, object>>();
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange ORDER BY turn_order;",
+                    turns = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange ORDER BY turn_order;",
                         new Dictionary<string, object> { ["session"] = sessionId, ["exchange"] = exchangeId });
                     foreach (Dictionary<string, object> turn in turns)
                     {
                         string turnId = ReadString(turn, "turn_id", "");
-                        turnFts[turnId] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turn_fts WHERE turn_id=$id;",
+                        turnFts[turnId] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turn_fts WHERE turn_id=$id;",
                             new Dictionary<string, object> { ["id"] = turnId }).FirstOrDefault(), "count", 0);
                     }
                     List<string> eventIds = turns.Select(turn => ReadString(turn, "event_id", "")).Where(id => id.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     foreach (string eventId in eventIds)
                     {
-                        memories.AddRange(QuerySql(connection, "SELECT * FROM memories WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = eventId }));
+                        memories.AddRange(Program.QuerySql(connection, "SELECT * FROM memories WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = eventId }));
                     }
                 }
 
@@ -185,7 +185,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_session_exchange", turns.All(turn => ReadString(turn, "session_id", "") == sessionId && ReadString(turn, "exchange_id", "") == exchangeId), "Every grouped turn shares the requested session and exchange IDs.", sessionId + "," + exchangeId);
                 AddNpcDialogueAssertion(assertions, "party_participants", turns.All(turn =>
                 {
-                    List<string> participants = TextListFromJson(ReadString(turn, "participants_json", "[]"));
+                    List<string> participants = Program.TextListFromJson(ReadString(turn, "participants_json", "[]"));
                     return heroIds.Concat(new[] { playerId }).All(id => participants.Contains(id, StringComparer.OrdinalIgnoreCase));
                 }), "Every turn carries the full group participant set.", string.Join(",", heroIds.Concat(new[] { playerId })));
                 AddNpcDialogueAssertion(assertions, "party_location", turns.All(turn => !string.IsNullOrWhiteSpace(ReadString(turn, "location_id", ""))), "Every grouped turn retains the native location ID.", string.Join(",", turns.Select(turn => ReadString(turn, "location_id", ""))));
@@ -198,7 +198,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> reply = replies[replyIndex];
                     string heroId = ReadFirstString(reply, "heroId", "heroStringId");
                     string correlationId = ReadString(reply, "correlationId", "");
-                    List<Dictionary<string, object>> auditRows = ReadJsonLinesFromPath(CampaignFile(campaignId, "audit", "audit.jsonl"))
+                    List<Dictionary<string, object>> auditRows = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "audit.jsonl"))
                         .Where(row => string.Equals(ReadString(row, "correlationId", ""), correlationId, StringComparison.OrdinalIgnoreCase)).ToList();
                     AddNpcDialogueAssertion(assertions, "party_audit_context_" + SafeMemoryKey(heroId), auditRows.Any(row => ReadString(row, "phase", "") == "context.loaded"), "Speaker context was loaded.", correlationId);
                     AddNpcDialogueAssertion(assertions, "party_audit_prompt_" + SafeMemoryKey(heroId), auditRows.Any(row => ReadString(row, "phase", "") == "prompt.built"), "Speaker prompt was audited.", correlationId);
@@ -238,7 +238,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_memory_lineage", memories.All(memory =>
                     !string.IsNullOrWhiteSpace(ReadString(memory, "event_id", ""))
                     && new[] { "private", "public", "rumor" }.Contains(ReadString(memory, "visibility", ""), StringComparer.OrdinalIgnoreCase)
-                    && TextListFromJson(ReadString(memory, "known_by_json", "[]")).Contains(ReadString(memory, "owner_id", ""), StringComparer.OrdinalIgnoreCase)), "Party memory writes retain source lineage, visibility, and owner knowledge.", string.Join(",", memories.Select(memory => ReadString(memory, "memory_id", ""))));
+                    && Program.TextListFromJson(ReadString(memory, "known_by_json", "[]")).Contains(ReadString(memory, "owner_id", ""), StringComparer.OrdinalIgnoreCase)), "Party memory writes retain source lineage, visibility, and owner knowledge.", string.Join(",", memories.Select(memory => ReadString(memory, "memory_id", ""))));
                 if (recallTokens.Count > 0)
                 {
                     foreach (string token in recallTokens)
@@ -256,7 +256,7 @@ namespace ReignBetaServer
                     ["sceneIndex"] = ReadInt(payload, "sceneIndex", 0),
                     ["sessionId"] = sessionId,
                     ["exchangeId"] = exchangeId,
-                    ["playerText"] = LimitText(playerText, 1600),
+                    ["playerText"] = Program.LimitText(playerText, 1600),
                     ["replies"] = replies,
                     ["selectedContextPulls"] = pullsByHero,
                     ["memoryIds"] = memories.Select(memory => ReadString(memory, "memory_id", "")).ToList(),
@@ -273,7 +273,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditSceneApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditSceneApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -289,17 +289,17 @@ namespace ReignBetaServer
                 Dictionary<string, object> session;
                 Dictionary<string, object> summary;
                 int turnCount, links, fts, embeddingJobs;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    session = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
+                    session = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                     string summaryId = FirstNonEmpty(ReadString(session, "scene_summary_id", ""), ReadString(payload, "sceneSummaryId", ""));
-                    summary = QuerySql(connection, "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault();
-                    turnCount = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id;", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    links = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
-                    fts = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
-                    embeddingJobs = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type='summary' AND source_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
+                    summary = Program.QuerySql(connection, "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault();
+                    turnCount = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id;", new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
+                    links = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
+                    fts = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
+                    embeddingJobs = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type='summary' AND source_id=$id;", new Dictionary<string, object> { ["id"] = summaryId }).FirstOrDefault(), "count", 0);
                 }
-                List<string> participants = TextListFromJson(ReadString(summary, "participants_json", "[]"));
+                List<string> participants = Program.TextListFromJson(ReadString(summary, "participants_json", "[]"));
                 AddNpcDialogueAssertion(assertions, "party_scene_closed", session != null && ReadString(session, "status", "") != "open", "Party conversation session is closed.", sessionId);
                 AddNpcDialogueAssertion(assertions, "party_scene_turn_count", turnCount == ReadInt(payload, "expectedTurns", 12), "Party scene contains the expected grouped raw turns.", turnCount.ToString());
                 AddNpcDialogueAssertion(assertions, "party_scene_summary", summary != null && ReadString(summary, "summary_type", "") == "scene", "Party scene summary exists.", ReadString(summary, "summary_id", ""));
@@ -307,7 +307,7 @@ namespace ReignBetaServer
                 AddNpcDialogueAssertion(assertions, "party_scene_participants", heroIds.Concat(new[] { playerId }).All(id => participants.Contains(id, StringComparer.OrdinalIgnoreCase)), "Party scene summary retains the full participant set.", Json.Serialize(participants));
                 AddNpcDialogueAssertion(assertions, "party_scene_sources", links >= turnCount + 1, "Party scene summary links every raw turn and its session.", links.ToString());
                 AddNpcDialogueAssertion(assertions, "party_scene_fts", fts == 1, "Party scene summary has one FTS row.", fts.ToString());
-                Dictionary<string, object> settings = LoadSettings();
+                Dictionary<string, object> settings = Program.LoadSettings();
                 if (ReadBool(settings, "enableSemanticMemory", true))
                     AddNpcDialogueAssertion(assertions, "party_scene_embedding", embeddingJobs >= 1 || ReadString(summary, "embedding_status", "") == "indexed", "Party scene summary is queued or indexed for semantic memory.", embeddingJobs.ToString());
 
@@ -330,12 +330,12 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditFinishApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditFinishApi(Dictionary<string, object> payload)
         {
             return CompletePartyDialogueAudit(payload, false);
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditCancelApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> PartyDialogueAuditCancelApi(Dictionary<string, object> payload)
         {
             return CompletePartyDialogueAudit(payload, true);
         }
@@ -371,7 +371,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PartyDialogueAuditStatusApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> PartyDialogueAuditStatusApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
             string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : "default";
@@ -388,17 +388,17 @@ namespace ReignBetaServer
         private static Dictionary<string, object> PartyDialogueAuditCounts(string campaignId, List<string> heroIds)
         {
             Dictionary<string, object> counts = new Dictionary<string, object>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 foreach (string heroId in heroIds ?? new List<string>())
                 {
                     counts[heroId] = new Dictionary<string, object>
                     {
-                        ["turns"] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE speaker_id=$id OR participants_json LIKE $like;", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0),
-                        ["memories"] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE owner_id=$id;", new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault(), "count", 0),
-                        ["sceneSummaries"] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE summary_type='scene' AND (owner_id=$id OR participants_json LIKE $like);", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0),
-                        ["middleTermSummaries"] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE summary_type='middle_term' AND (owner_id=$id OR participants_json LIKE $like);", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0),
-                        ["arcSummaries"] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE summary_type='arc' AND (owner_id=$id OR participants_json LIKE $like);", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0)
+                        ["turns"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM conversation_turns WHERE speaker_id=$id OR participants_json LIKE $like;", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0),
+                        ["memories"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM memories WHERE owner_id=$id;", new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault(), "count", 0),
+                        ["sceneSummaries"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE summary_type='scene' AND (owner_id=$id OR participants_json LIKE $like);", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0),
+                        ["middleTermSummaries"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE summary_type='middle_term' AND (owner_id=$id OR participants_json LIKE $like);", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0),
+                        ["arcSummaries"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM summaries WHERE summary_type='arc' AND (owner_id=$id OR participants_json LIKE $like);", new Dictionary<string, object> { ["id"] = heroId, ["like"] = "%" + heroId + "%" }).FirstOrDefault(), "count", 0)
                     };
                 }
             }
@@ -429,31 +429,31 @@ namespace ReignBetaServer
 
         private static string PartyDialogueAuditDirectory(string campaignId)
         {
-            return CampaignFile(campaignId, "tests", "party-dialogue-audits");
+            return Program.CampaignFile(campaignId, "tests", "party-dialogue-audits");
         }
 
         private static string PartyDialogueAuditPath(string campaignId, string runId)
         {
-            return Path.Combine(PartyDialogueAuditDirectory(campaignId), SafePathSegment(runId, "latest") + ".json");
+            return Path.Combine(PartyDialogueAuditDirectory(campaignId), Program.SafePathSegment(runId, "latest") + ".json");
         }
 
         private static string PartyDialogueAuditRequestPath(string campaignId)
         {
-            return CampaignFile(campaignId, "tests", "party-dialogue-audits", "requests", "current.json");
+            return Program.CampaignFile(campaignId, "tests", "party-dialogue-audits", "requests", "current.json");
         }
 
         private static void SavePartyDialogueAudit(Dictionary<string, object> report)
         {
             string path = PartyDialogueAuditPath(ReadString(report, "campaignId", "default"), ReadString(report, "runId", "latest"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            WriteJsonObject(path, report);
+            Program.WriteJsonObject(path, report);
         }
 
         private static Dictionary<string, object> LoadPartyDialogueAudit(string campaignId, string runId)
         {
             if (string.IsNullOrWhiteSpace(runId)) return FindLatestPartyDialogueAudit(campaignId);
             string path = PartyDialogueAuditPath(campaignId, runId);
-            return File.Exists(path) ? ReadJsonObject(path) : null;
+            return File.Exists(path) ? Program.ReadJsonObject(path) : null;
         }
 
         private static Dictionary<string, object> FindActivePartyDialogueAudit(string campaignId)
@@ -470,14 +470,14 @@ namespace ReignBetaServer
         {
             string directory = PartyDialogueAuditDirectory(campaignId);
             if (!Directory.Exists(directory)) return Enumerable.Empty<Dictionary<string, object>>();
-            return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).Select(ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
+            return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly).Select(Program.ReadJsonObject).Where(report => report != null && report.Count > 0).ToList();
         }
 
         private static Dictionary<string, object> LoadPartyDialogueAuditRequest(string campaignId)
         {
             string path = PartyDialogueAuditRequestPath(campaignId);
             if (!File.Exists(path)) return null;
-            Dictionary<string, object> request = ReadJsonObject(path);
+            Dictionary<string, object> request = Program.ReadJsonObject(path);
             return request.Count == 0 ? null : request;
         }
 
@@ -485,7 +485,7 @@ namespace ReignBetaServer
         {
             string path = PartyDialogueAuditRequestPath(ReadString(request, "campaignId", "default"));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            WriteJsonObject(path, request);
+            Program.WriteJsonObject(path, request);
         }
 
         private static Dictionary<string, object> PartyDialogueAuditRequestSummary(Dictionary<string, object> request)
@@ -505,7 +505,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static List<Dictionary<string, object>> RunPartyDialogueAuditSelfTests()
+        internal static List<Dictionary<string, object>> RunPartyDialogueAuditSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => rows.Add(new Dictionary<string, object>
@@ -578,10 +578,10 @@ namespace ReignBetaServer
                     && ReadBool(status, "found", false) && File.Exists(ReadString(status, "reportPath", "")),
                     "Cancelled party runs remain available as durable partial reports.");
 
-                List<Dictionary<string, object>> incidentalSellerPulls = DeterministicContextPullSelection(
-                    "party_chat", "A spice seller sneezed twice beside my chipped cup.", "", ContextPullIds.ToList());
-                List<Dictionary<string, object>> explicitTradePulls = DeterministicContextPullSelection(
-                    "party_chat", "Will you sell me that chipped cup, and how much is it worth?", "", ContextPullIds.ToList());
+                List<Dictionary<string, object>> incidentalSellerPulls = Program.DeterministicContextPullSelection(
+                    "party_chat", "A spice seller sneezed twice beside my chipped cup.", "", Program.ContextPullIds.ToList());
+                List<Dictionary<string, object>> explicitTradePulls = Program.DeterministicContextPullSelection(
+                    "party_chat", "Will you sell me that chipped cup, and how much is it worth?", "", Program.ContextPullIds.ToList());
                 add("commerce_term_boundaries",
                     !incidentalSellerPulls.Any(pull => string.Equals(ReadString(pull, "id", ""), "appraise_trade_offer", StringComparison.OrdinalIgnoreCase))
                     && explicitTradePulls.Any(pull => string.Equals(ReadString(pull, "id", ""), "appraise_trade_offer", StringComparison.OrdinalIgnoreCase)),
@@ -612,14 +612,14 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                add("fixture", false, "Party dialogue audit fixture failed: " + LimitText(ex.Message, 400));
+                add("fixture", false, "Party dialogue audit fixture failed: " + Program.LimitText(ex.Message, 400));
             }
             finally
             {
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();
-                    string path = CampaignDirectory(campaignId);
+                    string path = Program.CampaignDirectory(campaignId);
                     if (Directory.Exists(path)) Directory.Delete(path, true);
                 }
                 catch { }

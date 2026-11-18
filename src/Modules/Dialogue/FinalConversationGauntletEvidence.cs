@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static Dictionary<string, object> BuildFinalGauntletEvidenceBundle(
             string campaignId,
@@ -21,7 +21,7 @@ namespace ReignBetaServer
                     .Where(x => !string.IsNullOrWhiteSpace(x)),
                 StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> entries =
-                ReadJsonLinesFromPath(CampaignFile(
+                Program.ReadJsonLinesFromPath(Program.CampaignFile(
                     campaignId,
                     "audit",
                     "audit.jsonl"))
@@ -100,17 +100,17 @@ namespace ReignBetaServer
                         .ToList(),
                     ["sourceAuditEntries"] = entries
                 };
-            string directory = CampaignFile(
+            string directory = Program.CampaignFile(
                 campaignId,
                 "audit",
                 "test-data",
                 "final-gauntlet",
-                SafePathSegment(runId, "run"));
+                Program.SafePathSegment(runId, "run"));
             Directory.CreateDirectory(directory);
             string path = Path.Combine(
                 directory,
-                SafePathSegment(caseInstanceId, "case") + ".evidence-v3.json");
-            WriteJsonObject(path, bundle);
+                Program.SafePathSegment(caseInstanceId, "case") + ".evidence-v3.json");
+            Program.WriteJsonObject(path, bundle);
             bundle["artifactPath"] = path;
             return bundle;
         }

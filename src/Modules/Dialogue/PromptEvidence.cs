@@ -9,9 +9,9 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static string PromptContentHash(string content)
+        internal static string PromptContentHash(string content)
         {
             using (var sha = SHA256.Create())
                 return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(content ?? ""))).Replace("-", "");
@@ -42,7 +42,7 @@ namespace ReignBetaServer
                 });
             }
             // Sanitize bounded diagnostics as well, including strings with labeled secrets.
-            string metadata = Json.Serialize(RedactPromptEvidenceMetadata(SanitizeAuditValue(diagnostics ?? new Dictionary<string, object>(), 0), apiKey));
+            string metadata = Json.Serialize(RedactPromptEvidenceMetadata(Program.SanitizeAuditValue(diagnostics ?? new Dictionary<string, object>(), 0), apiKey));
             return new Dictionary<string, object> {
                 ["schema"] = "reign-prompt-evidence-v1", ["evidenceId"] = Guid.NewGuid().ToString("N"),
                 ["campaignId"] = campaignId, ["correlationId"] = correlationId,
@@ -72,20 +72,20 @@ namespace ReignBetaServer
             return value;
         }
 
-        private static void CapturePromptEvidence(string campaignId, string correlationId, string requestType,
+        internal static void CapturePromptEvidence(string campaignId, string correlationId, string requestType,
             string model, Dictionary<string, object> request, Dictionary<string, object> diagnostics, string apiKey, string captureStage = "before_provider_attempt")
         {
             if (diagnostics == null) return; // Only assembled envelopes, not arbitrary audit ingestion.
             try
             {
                 var row = BuildPromptEvidenceRecord(campaignId, correlationId, requestType, model, request, diagnostics, apiKey, captureStage);
-                AppendBoundedJsonLineToPath(CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"), row,
+                Program.AppendBoundedJsonLineToPath(Program.CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"), row,
                     8L * 1024L * 1024L, 4L * 1024L * 1024L);
             }
             catch
             {
                 // Evidence failure must not disrupt an otherwise valid conversation.
-                LogOperational("prompts.evidence_unavailable", new Dictionary<string, object> { ["correlationId"] = correlationId });
+                Program.LogOperational("prompts.evidence_unavailable", new Dictionary<string, object> { ["correlationId"] = correlationId });
             }
         }
 
@@ -118,15 +118,15 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> ReadPromptEvidenceApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> ReadPromptEvidenceApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = ResolveLogCampaignId(query.TryGetValue("campaignId", out string campaign) ? campaign : "");
+            string campaignId = Program.ResolveLogCampaignId(query.TryGetValue("campaignId", out string campaign) ? campaign : "");
             string correlationId = query.TryGetValue("correlationId", out string correlation) ? correlation : "";
             if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 200)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An exact correlationId is required." };
             string evidenceId = query.TryGetValue("evidenceId", out string evidence) ? evidence : "";
-            var matches = ReadJsonLinesFromPath(CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"))
+            var matches = Program.ReadJsonLinesFromPath(Program.CampaignFile(campaignId, "audit", "prompt-evidence.jsonl"))
                 .Where(row => ReadString(row, "correlationId", "") == correlationId).ToList();
             var selected = string.IsNullOrEmpty(evidenceId) ? matches.LastOrDefault()
                 : matches.LastOrDefault(row => ReadString(row, "evidenceId", "") == evidenceId);

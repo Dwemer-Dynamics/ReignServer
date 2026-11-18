@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal delegate Dictionary<string, object> ConversationSourceAcceptance(
             ReignDbConnection connection, Dictionary<string, object> source);
@@ -25,12 +25,12 @@ namespace ReignBetaServer
             internal List<Dictionary<string, object>> Memories, Beliefs, Relationships, Obligations, Comprehensions, Continuity;
         }
 
-        private static string AcceptedConversationEventId(string campaign, string hero, Dictionary<string, object> payload) =>
+        internal static string AcceptedConversationEventId(string campaign, string hero, Dictionary<string, object> payload) =>
             "accepted_" + PromptHash(string.Join("|", campaign, ContinuityTimeline(payload), hero,
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"),
-                FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload)))).Substring(0, 32);
+                FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload)))).Substring(0, 32);
 
-        internal static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_accepted_units (
+        internal static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_accepted_units (
 unit_id TEXT PRIMARY KEY, response_hash TEXT NOT NULL, restore_generation TEXT NOT NULL,
 receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
 
@@ -42,7 +42,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
         {
             if (string.IsNullOrWhiteSpace(unit.Generation))
                 throw new InvalidOperationException("Conversation publication requires its pre-generation restore boundary.");
-            var finalOpening = CloneDictionary(unit.Parsed ?? TestDict()); finalOpening["reply"] = unit.Reply;
+            var finalOpening = Program.CloneDictionary(unit.Parsed ?? TestDict()); finalOpening["reply"] = unit.Reply;
             bool groundingFailed = ReadBool(unit.Payload, "conversationGroundingFailed", false);
             bool intentionalSilence = (unit.GroupConversation || unit.EventType == "social_event_turn")
                 && IsIntentionalConversationSilence(unit.Parsed) && string.IsNullOrWhiteSpace(unit.Reply);
@@ -54,22 +54,22 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                 throw new InvalidOperationException("The final spoken approach no longer matches its saved opening evidence.");
             lock (RelationshipsService.CampaignRelationshipWriteLock(unit.Campaign))
             {
-                using (var setup = OpenCampaignConnection(unit.Campaign)) EnsureAcceptedConversationUnitSchema(setup);
+                using (var setup = Program.OpenCampaignConnection(unit.Campaign)) EnsureAcceptedConversationUnitSchema(setup);
                 var exchange = publishSources((connection, source) =>
                 {
-                    var sourceRows = ReadStringList(source, "turnIds").SelectMany(id => QuerySql(connection,
+                    var sourceRows = ReadStringList(source, "turnIds").SelectMany(id => Program.QuerySql(connection,
                         "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
                     source["turnIds"] = sourceRows.Select(row => ReadString(row, "turn_id", "")).ToList();
                     BindAcceptedInputSource(connection, unit.Payload, ReadString(source, "sessionId", ""), unit.EventId,
                         ReadStringList(source, "turnIds"));
-                    string generation = ReadString(QuerySql(connection,
+                    string generation = ReadString(Program.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
                     if (generation != unit.Generation)
                         throw new InvalidOperationException("The campaign changed before the conversation could be accepted.");
                     string hash = PromptHash(CanonicalJson(TestDict("reply", unit.Reply, "playerText", unit.PlayerText,
                         "hero", unit.Hero, "player", unit.Player, "timeline", ContinuityTimeline(unit.Payload),
                         "sourceIds", ReadStringList(source, "turnIds"))));
-                    var previous = QuerySql(connection, "SELECT * FROM conversation_accepted_units WHERE unit_id=$unit;",
+                    var previous = Program.QuerySql(connection, "SELECT * FROM conversation_accepted_units WHERE unit_id=$unit;",
                         TestDict("unit", unit.EventId)).SingleOrDefault();
                     if (previous != null)
                     {
@@ -83,14 +83,14 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                     boundary?.Invoke("after_sources");
                     // Commit methods may update their request-local receipts. Keep
                     // those changes private until the outer source transaction wins.
-                    var effectPayload = CloneDictionary(unit.Payload);
+                    var effectPayload = Program.CloneDictionary(unit.Payload);
                     if (ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local")
                     {
                         unit.Memories = unit.Beliefs = unit.Relationships = unit.Obligations = unit.Comprehensions = unit.Continuity = new List<Dictionary<string, object>>();
                         unit.PublishScene = unit.PublishSocial = unit.PublishIntroductions = false;
                     }
                     CopyPlayerInputSource(unit.Payload, effectPayload);
-                    var effectParsed = CloneDictionary(unit.Parsed);
+                    var effectParsed = Program.CloneDictionary(unit.Parsed);
                     bool technicalNotice = IsTechnicalConversationNotice(unit.Reply) || groundingFailed;
                     bool suppressReplyEffects = technicalNotice || intentionalSilence;
                     string excludedStatus = intentionalSilence ? "intentional_silence_excluded" : "technical_notice_excluded";
@@ -102,7 +102,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                     boundary?.Invoke("after_effects");
                     string session = ReadString(source, "sessionId", "");
                     var audience = unit.PrivateWhisper ? new[] { unit.Hero, unit.Player }
-                        : TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
+                        : Program.TextListFromJson(ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero),
                             "participants_json", "[]")).ToArray();
                     var scene = unit.PublishScene && !suppressReplyEffects
                         ? FinalizeConversationSceneState(unit.Campaign, unit.Payload, unit.Hero, unit.PlayerText,
@@ -127,16 +127,16 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                     boundary?.Invoke("after_context_effects");
                     string group = unit.GroupConversation || unit.EventType == "dialogue_turn"
                         ? "conversation:" + session
-                        : BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
+                        : Program.BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
                     var personalState = CharactersService.ReadNpcLives(connection, unit.Campaign, ContinuityTimeline(unit.Payload));
                     bool personalMatter = CharactersService.NpcLivesOwnsRelationshipReward(personalState, unit.Hero, unit.Payload);
                     if (personalMatter) unit.Relationships = new List<Dictionary<string, object>>();
                     // A quiet turn preserves the player's sources and an idempotent
                     // receipt, but supplies no NPC speech or attention evidence.
                     var memory = suppressReplyEffects ? TestDict("status", excludedStatus, "continuity", TestDict("status", "complete"))
-                        : StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
+                        : Program.StoreTurnMemoryLayers(unit.Campaign, unit.EventId, unit.EventType,
                         unit.Hero, unit.Player, unit.Location, unit.PlayerText, unit.Reply,
-                        (unit.Memories ?? new List<Dictionary<string, object>>()).Select(CloneDictionary).ToList(),
+                        (unit.Memories ?? new List<Dictionary<string, object>>()).Select(Program.CloneDictionary).ToList(),
                         unit.Beliefs, unit.Relationships, unit.Obligations, unit.Comprehensions, group, unit.Timestamp,
                         unit.Participants, unit.RetrievalEligible, unit.Payload, unit.Continuity, connection);
                     boundary?.Invoke("after_memory");
@@ -146,10 +146,10 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         : CharactersService.RecordAcceptedNpcLives(connection, unit, sourceRows);
                     var communications = suppressReplyEffects ? TestDict("status", excludedStatus)
                         : AcceptCommunicationCommitments(connection, unit, source, sourceRows.Concat(
-                            ReadStringList(privateExchange, "turnIds").SelectMany(id => QuerySql(connection,
+                            ReadStringList(privateExchange, "turnIds").SelectMany(id => Program.QuerySql(connection,
                                 "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList());
                     var references = StoreAcceptedConversationReferences(connection, unit, sourceRows.Concat(
-                        ReadStringList(privateExchange, "turnIds").SelectMany(id => QuerySql(connection,
+                        ReadStringList(privateExchange, "turnIds").SelectMany(id => Program.QuerySql(connection,
                             "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)))).ToList(),
                         suppressReplyEffects || ReadString(ReadDictionary(unit.Payload, "npcLeaveResponseGuard"), "repair", "") == "bounded_local");
                     boundary?.Invoke("after_reference_graph");
@@ -174,7 +174,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         && !unit.PrivateWhisper && unit.EventType == "dialogue_turn"
                         ? IndividualViewInsertionDescriptor(unit, session, generation, sourceRows) : null;
                     if (viewInsertion != null) receipt["viewInsertion"] = viewInsertion;
-                    ExecuteSql(connection, @"INSERT INTO conversation_accepted_units(unit_id,response_hash,restore_generation,receipt_json,created_ts)
+                    Program.ExecuteSql(connection, @"INSERT INTO conversation_accepted_units(unit_id,response_hash,restore_generation,receipt_json,created_ts)
 VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "hash", hash,
                         "generation", generation, "receipt", Json.Serialize(receipt), "ts", unit.Timestamp));
                     SaveConversationInputAcceptance(connection, unit, source, receipt);
@@ -185,9 +185,9 @@ VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "
                     throw new InvalidOperationException("The conversation's source publication did not accept its dependent records.");
                 var effectReceipt = ReadDictionary(accepted, "effects");
                 foreach (var item in ReadDictionary(accepted, "effectPayload") ?? TestDict())
-                    if (item.Value is Dictionary<string, object> value && value.Count > 0) unit.Payload[item.Key] = CloneDictionary(value);
+                    if (item.Value is Dictionary<string, object> value && value.Count > 0) unit.Payload[item.Key] = Program.CloneDictionary(value);
                 if (unit.Parsed != null && ReadDictionary(unit.Payload, "conversationAgencyReceipt") is { } agency && agency.Count > 0)
-                    unit.Parsed["conversationAgencyReceipt"] = CloneDictionary(agency);
+                    unit.Parsed["conversationAgencyReceipt"] = Program.CloneDictionary(agency);
                 unit.Payload["conversationEffectAcceptance"] = effectReceipt;
                 unit.Payload["conversationAcceptedUnit"] = accepted;
                 return exchange;
@@ -200,13 +200,13 @@ VALUES($unit,$hash,$generation,$receipt,$ts);", TestDict("unit", unit.EventId, "
             string turn = ReadFirstString(unit.Payload, "sceneTurnId", "turnId", "exchangeId");
             string session = ReadString(publicSource, "sessionId", "") + "_whisper_" + SafeMemoryKey(unit.Hero) + "_" + SafeMemoryKey(turn);
             string exchange = turn + "_whisper_" + SafeMemoryKey(unit.Hero);
-            var request = CloneDictionary(unit.Payload);
+            var request = Program.CloneDictionary(unit.Payload);
             CopyPlayerInputSource(unit.Payload, request);
             var audience = new List<string> { unit.Hero, unit.Player };
             request["conversationSessionId"] = session; request["sceneTurnId"] = exchange;
             request["participants"] = audience; request["activeHeroIds"] = new[] { unit.Hero };
             double day = ReadDouble(request, "worldDay", 0d);
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions
+            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$day,$location,$audience,$payload);",
                 TestDict("session", session, "campaign", unit.Campaign, "hero", unit.Hero, "player", unit.Player,
@@ -219,7 +219,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             InsertConversationTurn(connection, npcTurn, session, unit.EventId, 1, exchange, "npc", unit.Hero,
                 unit.HeroName, unit.Reply, "private_whisper", day, unit.Timestamp, unit.Location, audience, request);
             return TestDict("ok", true, "sessionId", session, "exchangeId", exchange, "turnIds",
-                new[] { playerTurn, npcTurn }.Where(id => QuerySql(connection,
+                new[] { playerTurn, npcTurn }.Where(id => Program.QuerySql(connection,
                     "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count > 0).ToArray());
         }
 
@@ -230,12 +230,12 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
         private const string IndividualViewInsertionSchema = "reign-individual-view-insertion-v1";
         private const string IndividualViewInsertionAckSchema = "reign-individual-view-insertion-ack-v1";
         private const string IndividualViewInsertionResultSchema = "reign-individual-view-insertion-result-v1";
-        private const string IndividualViewInsertionRoute = "/conversation/view-insertion";
+        internal const string IndividualViewInsertionRoute = "/conversation/view-insertion";
         private const string IndividualViewInsertionOptInField = "viewInsertionReceipt";
         private static readonly string[] IndividualViewInsertionIdentityFields = { "campaignId", "timelineId", "unitId",
             "sessionId", "sourceTurnId", "role", "speakerHeroStringId", "playerHeroStringId", "restoreGeneration", "textSha256" };
 
-        private static bool IndividualViewInsertionRequested(Dictionary<string, object> payload) =>
+        internal static bool IndividualViewInsertionRequested(Dictionary<string, object> payload) =>
             payload != null && payload.TryGetValue(IndividualViewInsertionOptInField, out object value)
             && value is string text && text == IndividualViewInsertionSchema;
 
@@ -252,7 +252,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 && ReadString(row, "speaker_id", "") == unit.Hero).ToList();
             if (matches.Count != 1) return null;
             var row = matches[0];
-            var audience = TextListFromJson(ReadString(row, "participants_json", "[]"));
+            var audience = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
             string turn = ReadString(row, "turn_id", "");
             if (ReadString(row, "text", "") != reply || ReadString(row, "status", "") != "active"
                 || ReadString(row, "session_id", "") != session || ReadString(row, "event_id", "") != unit.EventId
@@ -269,7 +269,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
 
         // POST /conversation/view-insertion. Records evidence on the existing accepted
         // unit receipt only; publishes no effects and never regenerates or replays a reply.
-        private static Dictionary<string, object> IndividualViewInsertionApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> IndividualViewInsertionApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string Exact(string key) => payload.TryGetValue(key, out object value) && value is string text ? text : "";
@@ -295,7 +295,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             using var connection = ReignPostgreSqlStorage.OpenMetadataConnection();
             using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
             // First statement of the transaction; disposal rolls back and restores search_path.
-            QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
+            Program.QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
             // Absent prerequisites mean no descriptor can exist; an acknowledgment never creates them.
             if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => WorldSimulationService.TableExists(connection, table)))
                 return Reply("unknown", "no_view_insertion_descriptor");
@@ -306,11 +306,11 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             // locks, so it cannot avoid the inversion. Then source turn before fence, as the
             // direct editor update trigger orders them; the share lock is held through commit.
             LockConversationSourceSession(connection, ack["sessionId"]);
-            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session FOR SHARE;",
+            var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND session_id=$session FOR SHARE;",
                 TestDict("id", ack["sourceTurnId"], "session", ack["sessionId"])).FirstOrDefault();
-            string current = ReadString(QuerySql(connection,
+            string current = ReadString(Program.QuerySql(connection,
                 "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").FirstOrDefault(), "restore_generation", "");
-            var stored = QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
+            var stored = Program.QuerySql(connection, "SELECT restore_generation,receipt_json FROM conversation_accepted_units WHERE unit_id=$unit FOR UPDATE;",
                 TestDict("unit", ack["unitId"])).FirstOrDefault();
             if (stored == null) return Reply("unknown", "unknown_unit");
             var receipt = TryParseJsonObject(ReadString(stored, "receipt_json", "{}"));
@@ -323,7 +323,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 || ReadString(receipt, "restoreGeneration", "") != ack["restoreGeneration"])
                 return Reply("conflict", "identity_mismatch");
             if (current != ack["restoreGeneration"]) return Reply("stale", "restore_generation_changed");
-            var audience = TextListFromJson(ReadString(source, "participants_json", "[]"));
+            var audience = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
             if (source == null || ReadString(source, "role", "") != "npc" || ReadString(source, "status", "") != "active"
                 || ReadString(source, "speaker_id", "") != ack["speakerHeroStringId"]
                 || ReadString(source, "session_id", "") != ack["sessionId"] || ReadString(source, "event_id", "") != ack["unitId"]
@@ -339,7 +339,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
                 "acknowledgedTs", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             descriptor["insertion"] = insertion;
             receipt["viewInsertion"] = descriptor;
-            ExecuteSql(connection, "UPDATE conversation_accepted_units SET receipt_json=$receipt WHERE unit_id=$unit AND restore_generation=$generation;",
+            Program.ExecuteSql(connection, "UPDATE conversation_accepted_units SET receipt_json=$receipt WHERE unit_id=$unit AND restore_generation=$generation;",
                 TestDict("receipt", Json.Serialize(receipt), "unit", ack["unitId"], "generation", ack["restoreGeneration"]));
             transaction.Commit();
             return Reply("inserted", "recorded", insertion);

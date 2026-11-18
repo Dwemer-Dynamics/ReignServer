@@ -7,7 +7,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ReviewedRecoveryGuidance = "RECOVERY REFERENCE — engine instruction, not player speech\n"
             + "Answer the current contribution again in character. Return the full current response schema. "
@@ -47,10 +47,10 @@ namespace ReignBetaServer
                 && (LooksLikeMostRecentConversationRecall(speech) || LooksLikeExactFactRestatement(speech));
         }
 
-        private static bool ReviewedRecoverySourceSuperseded(ReignDbConnection connection, KnowledgeAccessContext access, string turnId)
+        private static bool ReviewedRecoverySourceSuperseded(ReignDbConnection connection, Program.KnowledgeAccessContext access, string turnId)
         {
             // Check a replacement's existence without admitting its possibly private text to the prompt.
-            return QuerySql(connection, @"SELECT 1 FROM conversation_continuity_versions v
+            return Program.QuerySql(connection, @"SELECT 1 FROM conversation_continuity_versions v
 JOIN conversation_continuity c ON c.record_id=v.record_id
 WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
  AND c.updated_ts<=$time AND COALESCE((c.payload_json::jsonb->>'worldDay')::double precision,0)<=$day
@@ -65,13 +65,13 @@ WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
             Dictionary<string, object> item, Dictionary<string, object> context, List<Dictionary<string, object>> transcript,
             Dictionary<string, object> projection)
         {
-            var access = BuildKnowledgeAccessContext(observer, peer, "", context);
+            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
             var plan = PlanMemoryQuery(observer, peer, ReadString(item, "query", ""), context);
             var recent = transcript.ToDictionary(row => ReadString(row, "turnId", ""), MemoryTranscriptSourceHash, StringComparer.Ordinal);
             foreach (var pair in recent) plan.SuppliedSources[pair.Key] = pair.Value;
             long oldestRecent = ReadLong(EvidenceReplayRecentSources(item, ReadDictionaryList(item, "sources")).First(), "sequence", 0);
             string[] audience = { observer, peer }; // The detached shared-party replay has its own initial-only binding.
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction(IsolationLevel.RepeatableRead);
             var pinnedExchanges = new HashSet<(string Session, string Exchange)>();
             foreach (var pin in ReadDictionaryList(projection, "factPins"))
@@ -89,7 +89,7 @@ WHERE c.owner_id=$observer AND c.timeline_id=$timeline AND c.revision>v.revision
                 .Where(key => key.Exchange.Length > 0 && pinnedExchanges.Contains(key)).Distinct().Take(2).ToList();
             if (anchors.Count != 1) return null;
             var anchor = anchors[0];
-            var rows = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange
+            var rows = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange
 ORDER BY turn_order LIMIT 5;", TestDict("session", anchor.Session, "exchange", anchor.Exchange));
             if (rows.Count is < 1 or > 4) return null;
             var proofs = new List<Dictionary<string, object>>();
@@ -99,7 +99,7 @@ ORDER BY turn_order LIMIT 5;", TestDict("session", anchor.Session, "exchange", a
                 string id = ReadString(row, "turn_id", ""), speaker = ReadString(row, "speaker_id", ""), name = ReadString(row, "speaker_name", "");
                 string role = ReadString(row, "role", ""), body = ReplayReviewedSourceBody(row, observer);
                 long sequence = ReadLong(row, "accepted_sequence", -1);
-                var listeners = TextListFromJson(ReadString(row, "participants_json", "[]"));
+                var listeners = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
                 if (recent.ContainsKey(id) || sequence < 1 || sequence >= oldestRecent || !PrecisionTurnVisible(row, observer, access, connection)
                     || !audience.All(listeners.Contains) || !listeners.Contains(speaker) || role is not ("player" or "npc")
                     || name.Length == 0 || name.Any(char.IsControl) || body.Trim().Length == 0
@@ -159,13 +159,13 @@ ORDER BY turn_order LIMIT 5;", TestDict("session", anchor.Session, "exchange", a
             }
             int insertion = receipt.Messages.FindIndex(row => ReadString(row, "content", "").StartsWith("HISTORICAL ", StringComparison.Ordinal));
             if (insertion < 0) throw new InvalidOperationException("Reviewed recovery cannot find the protected authored window.");
-            var request = CloneDictionary(initial);
-            nativeMessages = nativeMessages.Select(CloneDictionary).ToList();
+            var request = Program.CloneDictionary(initial);
+            nativeMessages = nativeMessages.Select(Program.CloneDictionary).ToList();
             nativeMessages.InsertRange(insertion, additions);
             request["messages"] = nativeMessages;
             var envelope = ReadDictionary(request, "promptEnvelope");
-            var expected = receipt.Messages.Select(CloneDictionary).ToList();
-            expected.InsertRange(insertion, additions.Select(CloneDictionary));
+            var expected = receipt.Messages.Select(Program.CloneDictionary).ToList();
+            expected.InsertRange(insertion, additions.Select(Program.CloneDictionary));
             ConversationStructureReceipts.Remove(envelope);
             ConversationStructureReceipts.Add(envelope, new ConversationStructureReceipt { Messages = expected, CanonicalTranscript = receipt.CanonicalTranscript });
             var structure = ReadDictionary(envelope, "conversationMessageStructure");

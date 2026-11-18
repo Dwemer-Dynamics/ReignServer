@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string PublicWitnessGossipVersion = "public-witness-gossip-v1";
 
@@ -101,7 +101,7 @@ namespace ReignBetaServer
 
         private static bool PublicWitnessGossipCapacityReached(ReignDbConnection c, Dictionary<string, object> topic)
         {
-            var rows = QuerySql(c, @"SELECT m.payload_json FROM personal_gossip_messages m
+            var rows = Program.QuerySql(c, @"SELECT m.payload_json FROM personal_gossip_messages m
 JOIN personal_gossip_topics t ON t.topic_id=m.topic_id
 WHERE m.timeline_id=$timeline AND t.session_id=$session AND m.is_reply=0 AND m.hop=1;",
                 GossipFields("timeline", ReadString(topic, "timelineId", "main"), "session", ReadString(topic, "sessionId", "")));
@@ -125,7 +125,7 @@ WHERE m.timeline_id=$timeline AND t.session_id=$session AND m.is_reply=0 AND m.h
             var nativeSceneIds = ReadStringList(ConversationSceneSnapshot(mode, payload), "witnessIds");
             var current = ReadDictionaryList(ReadDictionary(payload, "conversationSceneState"), "current");
             if (ReadDictionary(payload, "conversationSceneState")?.ContainsKey("current") == true && current.Count == 0) return;
-            var scenePeople = (current.Count > 0 ? current : MergedInteractionParticipantProfiles(payload)).Select(CharacterIdFrom)
+            var scenePeople = (current.Count > 0 ? current : MergedInteractionParticipantProfiles(payload)).Select(Program.CharacterIdFrom)
                 .Where(id => id.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var witnesses = people.Where(person => nativeSceneIds.Contains(GossipHeroId(person), StringComparer.OrdinalIgnoreCase)
                     && scenePeople.Contains(GossipHeroId(person)) && GossipCommunicationAvailable(person)
@@ -139,7 +139,7 @@ WHERE m.timeline_id=$timeline AND t.session_id=$session AND m.is_reply=0 AND m.h
             // Only the two accepted public parent turns belong to this source.
             // A private child exchange is never supplied here.
             var turns = ReadStringList(episode, "turnIds").Distinct(StringComparer.Ordinal).Take(2)
-                .SelectMany(id => QuerySql(c, @"SELECT turn_id,speaker_id,text FROM conversation_turns
+                .SelectMany(id => Program.QuerySql(c, @"SELECT turn_id,speaker_id,text FROM conversation_turns
 WHERE turn_id=$id AND session_id=$session AND exchange_id=$exchange AND status='active' AND world_day=$day;",
                     GossipFields("id", id, "session", session, "exchange", exchange, "day", day)))
                 .Where(turn => GossipSameId(ReadString(turn, "speaker_id", ""), player) || GossipSameId(ReadString(turn, "speaker_id", ""), participant))
@@ -169,7 +169,7 @@ WHERE turn_id=$id AND session_id=$session AND exchange_id=$exchange AND status='
                     string observer = GossipHeroId(witness);
                     if (!GossipLocal(witness, main) || !GossipLocal(witness, other)) continue;
                     string id = GossipTopicId(timeline, observer, player, day, category, participant) + "_witness";
-                    var prior = QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", id)).FirstOrDefault();
+                    var prior = Program.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", id)).FirstOrDefault();
                     if (prior != null && ReadString(prior, "status", "") == "queued") continue;
                     var reference = GossipPlayerReference(c, observer, player, main, payload);
                     string playerLabel = ReadString(reference, "label", "the traveler");

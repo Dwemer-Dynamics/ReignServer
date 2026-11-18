@@ -383,18 +383,18 @@ namespace ReignBetaServer
                 && ReadString(ResolveEffectiveNarrative(stack), "schema", "") == NarrativeSchema,
                 "Accepted development replaces the old concern in legacy motivation projections and the shared effective snapshot.");
             string prompt = BuildCoreSkillAwarenessPrompt(hero, stack);
-            string directFoundation = Program.BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, stack);
+            string directFoundation = DialogueService.BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, stack);
             var currentWounds = ReadDictionaryList(ResolveEffectiveNarrative(stack), "items").Where(item => ReadString(item, "category", "") == "wound").ToList();
             check("all_current_wounds_and_reputation_always_present", currentWounds.All(item => directFoundation.Contains(ReadString(item, "description", "")))
                 && directFoundation.Contains("PUBLIC REPUTATION") && directFoundation.Contains("CENTRAL WOUNDS")
                 && directFoundation.Contains(ReadString(ReadDictionary(written, "life"), "reputation", "")),
                 "The owner's complete current wound and reputation foundation does not depend on selected context or retrieval mode.");
             var legacyFoundation = TestDict("background", TestDict("centralWound", "LEGACY_WOUND", "publicReputation", "LEGACY_REPUTATION", "reputation", "LEGACY_REPUTATION"));
-            string legacyCharacter = Program.BuildStableCharacterPrompt("legacy", "Legacy", hero, legacyFoundation);
+            string legacyCharacter = DialogueService.BuildStableCharacterPrompt("legacy", "Legacy", hero, legacyFoundation);
             check("legacy_wound_and_reputation_preserved_without_alias_duplicate", legacyCharacter.Contains("LEGACY_WOUND")
                 && legacyCharacter.Split("LEGACY_REPUTATION").Length == 2, "Legacy foundation fields remain always available, with exact reputation aliases deduplicated.");
             var staleFoundation = Program.CloneDictionary(stack); staleFoundation["background"] = ReadDictionary(legacyFoundation, "background");
-            string currentCharacter = Program.BuildStableCharacterPrompt("current", "Current", hero, staleFoundation);
+            string currentCharacter = DialogueService.BuildStableCharacterPrompt("current", "Current", hero, staleFoundation);
             check("current_narrative_overrides_legacy_wound_alias", !currentCharacter.Contains("LEGACY_WOUND") && !currentCharacter.Contains("LEGACY_REPUTATION"),
                 "A current narrative does not resurrect obsolete legacy wounds or reputation.");
             check("projected_list_prose_reaches_prompt", !directFoundation.Contains("System.Collections")
@@ -413,11 +413,11 @@ namespace ReignBetaServer
                 "Ordinary questions about free time or fear retrieve real stored concerns even without exact title keywords.");
             var unrankedLegacy = DeepCloneProfileDictionary(stack);
             unrankedLegacy["motivations"] = new Dictionary<string, object> { ["fears"] = new System.Collections.ArrayList { "obsolete_unranked_fear_marker" } };
-            string rankedFoundation = Program.BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, unrankedLegacy);
+            string rankedFoundation = DialogueService.BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, unrankedLegacy);
             unrankedLegacy.Remove("narrative");
             check("ranked_motivations_replace_legacy_prompt", !rankedFoundation.Contains("obsolete_unranked_fear_marker")
                 && rankedFoundation.Contains("CURRENT PERSONAL IMPORTANCE")
-                && Program.BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, unrankedLegacy).Contains("obsolete_unranked_fear_marker"),
+                && DialogueService.BuildStableCharacterPrompt("narrative_test_ruler", "Test ruler", hero, unrankedLegacy).Contains("obsolete_unranked_fear_marker"),
                 "A v5 foundation uses its rated defining concerns without repeating every legacy motivation at equal prominence; old campaigns keep their existing motivation prompt.");
             var effective = ResolveEffectiveNarrative(stack);
             var unchanged = MergeEditedNarrative(written, effective, effective);

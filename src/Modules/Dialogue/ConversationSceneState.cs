@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static readonly object SharedPortraitFolderIndexLock = new object();
         private static Dictionary<string, string> SharedPortraitFolderByHeroId =
@@ -32,7 +32,7 @@ Use only supplied heroStringId values.";
 
         private static void EnsureConversationSceneStateSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_scene_state (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_scene_state (
 hero_id TEXT PRIMARY KEY,
 location_override TEXT NOT NULL DEFAULT '',
 location_class TEXT NOT NULL DEFAULT '',
@@ -43,7 +43,7 @@ world_hour INTEGER NOT NULL DEFAULT -1,
 expires_world_hour INTEGER NOT NULL DEFAULT -1,
 revision INTEGER NOT NULL DEFAULT 0,
 updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_scene_proposals (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_scene_proposals (
 proposal_id TEXT PRIMARY KEY,
 scene_turn_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,
@@ -57,7 +57,7 @@ world_hour INTEGER NOT NULL,
 payload_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL,
 updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_scene_proposals_turn_subject ON conversation_scene_proposals(scene_turn_id,subject_id,status);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_scene_proposals_turn_subject ON conversation_scene_proposals(scene_turn_id,subject_id,status);");
         }
 
         private static long ConversationWorldHour(Dictionary<string, object> payload)
@@ -71,7 +71,7 @@ updated_ts INTEGER NOT NULL);");
             Dictionary<string, object> scene = ReadDictionary(payload, "conversationSceneState") ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> rawProfiles = new[] { ReadDictionary(payload, "hero") }
                 .Where(x => x != null)
-                .Concat(string.IsNullOrWhiteSpace(CharacterIdFrom(payload))
+                .Concat(string.IsNullOrWhiteSpace(Program.CharacterIdFrom(payload))
                     ? Enumerable.Empty<Dictionary<string, object>>()
                     : new[] { payload })
                 .Concat(ReadDictionaryList(scene, "participants"))
@@ -84,7 +84,7 @@ updated_ts INTEGER NOT NULL);");
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> candidate in rawProfiles)
             {
-                string id = CharacterIdFrom(candidate);
+                string id = Program.CharacterIdFrom(candidate);
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 if (!merged.TryGetValue(id, out Dictionary<string, object> profile))
                 {
@@ -126,7 +126,7 @@ updated_ts INTEGER NOT NULL);");
         {
             List<Dictionary<string, object>> profiles = MergedInteractionParticipantProfiles(payload);
             Dictionary<string, object> speaker = profiles.FirstOrDefault(x =>
-                CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
+                Program.CharacterIdFrom(x).Equals(speakerId ?? "", StringComparison.OrdinalIgnoreCase));
             if (speaker == null || parsed == null) return new List<Dictionary<string, object>>();
             List<string> texts = new List<string>();
             CollectConversationStringValues(parsed, texts);
@@ -139,7 +139,7 @@ updated_ts INTEGER NOT NULL);");
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             foreach (Dictionary<string, object> target in profiles)
             {
-                string targetId = CharacterIdFrom(target);
+                string targetId = Program.CharacterIdFrom(target);
                 if (string.IsNullOrWhiteSpace(targetId) || targetId.Equals(speakerId, StringComparison.OrdinalIgnoreCase)) continue;
                 string targetName = FirstNonEmpty(ReadString(target, "name", ""), targetId);
                 List<string> aliases = new List<string> { targetName, targetId };
@@ -173,7 +173,7 @@ updated_ts INTEGER NOT NULL);");
                                         ["targetName"] = targetName,
                                         ["claimedRelation"] = claimed,
                                         ["authoritativeRelation"] = actual,
-                                        ["matchedText"] = LimitText(match.Value, 240)
+                                        ["matchedText"] = Program.LimitText(match.Value, 240)
                                     };
                                 }
                             }
@@ -232,7 +232,7 @@ updated_ts INTEGER NOT NULL);");
             List<Dictionary<string, object>> profiles = MergedInteractionParticipantProfiles(payload);
             return string.Join("\n", profiles.Select(profile =>
             {
-                string id = CharacterIdFrom(profile);
+                string id = Program.CharacterIdFrom(profile);
                 string name = FirstNonEmpty(ReadString(profile, "name", ""), id);
                 List<string> children = ReadStringList(profile, "childrenIds");
                 Func<string, string> relative = relativeId => string.IsNullOrWhiteSpace(relativeId) ? "none"
@@ -286,20 +286,20 @@ updated_ts INTEGER NOT NULL);");
             return safe;
         }
 
-        private static Dictionary<string, object> ConversationSceneHourlyTickApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationSceneHourlyTickApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             long hour = ConversationWorldHour(payload);
             int expired;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationSceneStateSchema(connection);
-                expired = ReadInt(QuerySql(connection,
+                expired = ReadInt(Program.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
                     new Dictionary<string, object> { ["hour"] = hour }).FirstOrDefault(), "count", 0);
-                ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
+                Program.ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
                     new Dictionary<string, object> { ["hour"] = hour });
-                ExecuteSql(connection, "DELETE FROM conversation_scene_proposals WHERE world_hour<$hour;",
+                Program.ExecuteSql(connection, "DELETE FROM conversation_scene_proposals WHERE world_hour<$hour;",
                     new Dictionary<string, object> { ["hour"] = hour });
             }
             return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["worldHour"] = hour, ["expired"] = expired };
@@ -343,7 +343,7 @@ updated_ts INTEGER NOT NULL);");
             return result;
         }
 
-        private static Dictionary<string, object> PrepareConversationSceneState(
+        internal static Dictionary<string, object> PrepareConversationSceneState(
             string campaignId,
             Dictionary<string, object> payload,
             string speakerId,
@@ -362,16 +362,16 @@ updated_ts INTEGER NOT NULL);");
             detailedParticipantIds.Remove("");
             AttachSceneParticipantMbti(campaignId, participants, detailedParticipantIds);
             Dictionary<string, Dictionary<string, object>> current = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationSceneStateSchema(connection);
                 EnsureConversationContinuitySchema(connection);
-                ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
+                Program.ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE expires_world_hour<=$hour;",
                     new Dictionary<string, object> { ["hour"] = hour });
                 foreach (Dictionary<string, object> participant in participants)
                 {
                     string id = ReadString(participant, "heroStringId", "");
-                    Dictionary<string, object> row = QuerySql(connection,
+                    Dictionary<string, object> row = Program.QuerySql(connection,
                         "SELECT * FROM conversation_scene_state WHERE hero_id=$id AND expires_world_hour>$hour LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = id, ["hour"] = hour }).FirstOrDefault();
                     // Narrative location survives an hourly legacy cache expiry or
@@ -555,10 +555,10 @@ updated_ts INTEGER NOT NULL);");
                 if (ReadString(participant, "role", "npc").Equals("player", StringComparison.OrdinalIgnoreCase)) continue;
                 string heroId = ReadString(participant, "heroStringId", "");
                 if (string.IsNullOrWhiteSpace(heroId) || detailedParticipantIds == null || !detailedParticipantIds.Contains(heroId)) continue;
-                Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+                Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
                 if (profile.Count == 0) profile = participant;
                 Dictionary<string, object> mbti = RelationshipsService.ResolveCharacterMbtiProfile(
-                    campaignId, heroId, profile, ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json")));
+                    campaignId, heroId, profile, Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json")));
                 if (ReadString(mbti, "type", "XXXX") != "XXXX") participant["mbtiProfile"] = mbti;
             }
         }
@@ -618,11 +618,11 @@ updated_ts INTEGER NOT NULL);");
                 ["heroStringId"] = id,
                 ["name"] = ReadString(participant, "name", id),
                 ["role"] = ReadString(participant, "role", "npc"),
-                ["location"] = LimitText(location, 500),
+                ["location"] = Program.LimitText(location, 500),
                 ["locationClass"] = locationClass,
                 ["hasNarrativeLocation"] = narrativeLocation.Length > 0,
                 ["acceptedPrivateScene"] = ReadBool(stored, "acceptedPrivateScene", false),
-                ["clothing"] = LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
+                ["clothing"] = Program.LimitText(clothing, clothingSource == "confirmed_outfit_change" ? 4000 : 900),
                 ["clothingSource"] = clothingSource,
                 ["revision"] = ReadLong(stored, "revision", 0)
             };
@@ -632,8 +632,8 @@ updated_ts INTEGER NOT NULL);");
         {
             List<string> cachePaths = new List<string>
             {
-                CharacterFile(campaignId, heroId, "portraits", "formal_outfit.json"),
-                CharacterFile("_shared", heroId, "portraits", "formal_outfit.json")
+                Program.CharacterFile(campaignId, heroId, "portraits", "formal_outfit.json"),
+                Program.CharacterFile("_shared", heroId, "portraits", "formal_outfit.json")
             };
             // The shared cache contains more than a thousand portrait folders. Loading every
             // portrait's metadata here used to add about ten seconds to every NPC response.
@@ -644,7 +644,7 @@ updated_ts INTEGER NOT NULL);");
                 cachePaths.Add(Path.Combine(sharedPortraitFolder, "formal_outfit.json"));
             foreach (string path in cachePaths.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                Dictionary<string, object> cached = ReadJsonObject(path);
+                Dictionary<string, object> cached = Program.ReadJsonObject(path);
                 string description = ReadString(cached, "description", "");
                 string status = ReadString(cached, "status", "");
                 string source = ReadString(cached, "descriptionSource", "");
@@ -660,7 +660,7 @@ updated_ts INTEGER NOT NULL);");
                     return description;
                 }
             }
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
             if (profile.Count == 0) profile = participant;
             return ResolveFormalOutfitFallback(participant, profile);
         }
@@ -691,7 +691,7 @@ updated_ts INTEGER NOT NULL);");
                 ReadString(participant, "travelClothingDescription", ""));
             if (!string.IsNullOrWhiteSpace(observed))
             {
-                return LimitText(
+                return Program.LimitText(
                     Regex.Replace(observed, @"\s+", " ").Trim(), 900);
             }
 
@@ -867,7 +867,7 @@ updated_ts INTEGER NOT NULL);");
             HashSet<string> allowed = new HashSet<string>(participants.Select(x => ReadString(x, "heroStringId", "")), StringComparer.OrdinalIgnoreCase);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             List<Dictionary<string, object>> applied = new List<Dictionary<string, object>>();
-            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
+            using (ReignDbConnection ownedConnection = existingConnection == null ? Program.OpenCampaignConnection(campaignId) : null)
             using (ReignDbTransaction transaction = existingConnection == null ? ownedConnection.BeginTransaction() : null)
             {
                 ReignDbConnection connection = existingConnection ?? ownedConnection;
@@ -879,7 +879,7 @@ updated_ts INTEGER NOT NULL);");
                     bool isPlayer = string.Equals(ReadString(participants.FirstOrDefault(x => ReadString(x, "role", "") == "player"), "heroStringId", ""), subject, StringComparison.OrdinalIgnoreCase);
                     if (!isSpeaker && !isPlayer) continue;
                     var before = ReadDictionaryList(prepared, "current").FirstOrDefault(s => ReadString(s, "heroStringId", "") == subject);
-                    var latest = QuerySql(connection, "SELECT revision,source_turn_id FROM conversation_scene_state WHERE hero_id=$id FOR UPDATE;", TestDict("id", subject)).SingleOrDefault();
+                    var latest = Program.QuerySql(connection, "SELECT revision,source_turn_id FROM conversation_scene_state WHERE hero_id=$id FOR UPDATE;", TestDict("id", subject)).SingleOrDefault();
                     if (latest != null && ReadString(latest, "source_turn_id", "") != sceneTurnId
                         && ReadLong(latest, "revision", 0) != ReadLong(before, "revision", 0))
                         throw new InvalidOperationException("The scene changed while this response was being written; the submitted original remains saved.");
@@ -898,7 +898,7 @@ updated_ts INTEGER NOT NULL);");
                         UpsertConversationSceneOverride(connection, subject, location, locationClass, clothing, sceneTurnId, mode, hour, ts);
                         applied.Add(new Dictionary<string, object> { ["heroStringId"] = subject, ["location"] = location, ["clothing"] = clothing });
                     }
-                    ExecuteSql(connection, "UPDATE conversation_scene_proposals SET status=$status,updated_ts=$ts WHERE proposal_id=$id;",
+                    Program.ExecuteSql(connection, "UPDATE conversation_scene_proposals SET status=$status,updated_ts=$ts WHERE proposal_id=$id;",
                         new Dictionary<string, object> { ["status"] = locationDenied || clothingDenied ? "denied_or_partial" : "applied", ["ts"] = ts, ["id"] = ReadString(proposal, "proposal_id", "") });
                 }
                 foreach (Dictionary<string, object> update in npcUpdates)
@@ -917,7 +917,7 @@ updated_ts INTEGER NOT NULL);");
                         denied.Add(TestDict("heroStringId", subject, "reason", "unaccepted_or_other_speaker_scene_update"));
                         continue;
                     }
-                    string location = LimitText(ReadString(update, "location", ""), 500);
+                    string location = Program.LimitText(ReadString(update, "location", ""), 500);
                     // A writer-authored location is not movement authority. Only the
                     // source-bound proposal above can replace a narrative venue.
                     if (location.Length > 0 && !AcceptedSpeakerMovement(update, speakerId, reply)
@@ -926,7 +926,7 @@ updated_ts INTEGER NOT NULL);");
                         && !SceneProposalRefused(p, parsedResponse, reply)))
                     { denied.Add(TestDict("heroStringId", subject, "reason", "location_without_source_bound_transition")); location = ""; }
                     string locationClass = string.IsNullOrWhiteSpace(location) ? "" : FirstNonEmpty(ReadString(update, "locationClass", ""), InferLocationClass(location));
-                    string clothing = UsesCastleRoomAttireContext(payload) ? "" : LimitText(ReadString(update, "clothing", ""), 900);
+                    string clothing = UsesCastleRoomAttireContext(payload) ? "" : Program.LimitText(ReadString(update, "clothing", ""), 900);
                     if (string.IsNullOrWhiteSpace(location) && string.IsNullOrWhiteSpace(clothing)) continue;
                     UpsertConversationSceneOverride(connection, subject, location, locationClass, clothing, sceneTurnId, mode, hour, ts);
                     applied.Add(new Dictionary<string, object> { ["heroStringId"] = subject, ["location"] = location, ["clothing"] = clothing, ["source"] = "npc_reply" });
@@ -940,12 +940,12 @@ updated_ts INTEGER NOT NULL);");
         private static void UpsertConversationSceneOverride(ReignDbConnection connection, string heroId, string location, string locationClass,
             string clothing, string turnId, string mode, long hour, long ts)
         {
-            Dictionary<string, object> existing = QuerySql(connection, "SELECT * FROM conversation_scene_state WHERE hero_id=$id LIMIT 1;",
+            Dictionary<string, object> existing = Program.QuerySql(connection, "SELECT * FROM conversation_scene_state WHERE hero_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
             if (string.IsNullOrWhiteSpace(location)) location = ReadString(existing, "location_override", "");
             if (string.IsNullOrWhiteSpace(locationClass)) locationClass = ReadString(existing, "location_class", "");
             if (string.IsNullOrWhiteSpace(clothing)) clothing = ReadString(existing, "clothing_override", "");
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_state
+            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO conversation_scene_state
 (hero_id,location_override,location_class,clothing_override,source_turn_id,source_mode,world_hour,expires_world_hour,revision,updated_ts)
 VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);",
                 new Dictionary<string, object>
@@ -956,9 +956,9 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                 });
         }
 
-        private static Dictionary<string, object> ScanFormalOutfitsApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ScanFormalOutfitsApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             bool includeShared = ReadBool(payload, "includeShared", true);
             int limit = Math.Max(1, Math.Min(5000, ReadInt(payload, "limit", 5000)));
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
@@ -975,14 +975,14 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                     });
                 }
             }
-            string characters = Path.Combine(CampaignDirectory(campaignId), "characters");
+            string characters = Path.Combine(Program.CampaignDirectory(campaignId), "characters");
             if (Directory.Exists(characters))
             {
                 foreach (string dir in Directory.GetDirectories(characters))
                 {
                     string portraits = Path.Combine(dir, "portraits");
                     string active = File.Exists(Path.Combine(portraits, "custom.png")) ? Path.Combine(portraits, "custom.png") : Path.Combine(portraits, "portrait.png");
-                    Dictionary<string, object> profile = ReadJsonObject(Path.Combine(dir, "profile.json"));
+                    Dictionary<string, object> profile = Program.ReadJsonObject(Path.Combine(dir, "profile.json"));
                     candidates.Add(new Dictionary<string, object>
                     {
                         ["heroId"] = Path.GetFileName(dir), ["name"] = ReadString(profile, "name", Path.GetFileName(dir)),
@@ -1026,7 +1026,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
             byte[] bytes = File.ReadAllBytes(imagePath);
             string hash;
             using (SHA256 sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "");
-            Dictionary<string, object> cached = ReadJsonObject(outputPath);
+            Dictionary<string, object> cached = Program.ReadJsonObject(outputPath);
             if (string.Equals(ReadString(cached, "imageSha256", ""), hash, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(ReadString(cached, "status", ""), "completed", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(ReadString(cached, "description", "")))
@@ -1038,7 +1038,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                 new Dictionary<string, object> { ["type"] = "text", ["text"] = "Describe only the visible formal clothing in this portrait. Return JSON {\"description\":\"...\"}. Mention garments, layers, apparent materials, dominant colors, ornament, coverage, and headwear. Be concise. Do not describe the body, face, pose, weapons, personality, or background." },
                 new Dictionary<string, object> { ["type"] = "image_url", ["image_url"] = new Dictionary<string, object> { ["url"] = "data:" + mime + ";base64," + Convert.ToBase64String(bytes) } }
             };
-            Dictionary<string, object> llm = ChatWithLlm(new Dictionary<string, object>
+            Dictionary<string, object> llm = Program.ChatWithLlm(new Dictionary<string, object>
             {
                 ["requestType"] = "formal_outfit_vision", ["campaignId"] = campaignId,
                 ["heroStringId"] = ReadString(candidate, "heroId", ""), ["temperature"] = 0d, ["maxTokens"] = 350,
@@ -1049,7 +1049,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                 }
             });
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>();
-            string visionDescription = LimitText(ReadString(parsed, "description", ""), 900);
+            string visionDescription = Program.LimitText(ReadString(parsed, "description", ""), 900);
             bool visionCompleted = !string.IsNullOrWhiteSpace(visionDescription);
             string description = visionCompleted ? visionDescription : FormalOutfitPromptFallback(candidate);
             Dictionary<string, object> record = new Dictionary<string, object>
@@ -1063,7 +1063,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o")
             };
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
-            WriteJsonObject(outputPath, record);
+            Program.WriteJsonObject(outputPath, record);
             return record;
         }
 
@@ -1073,7 +1073,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
             string outputPath = ReadString(candidate, "output", "");
             string hash;
             using (SHA256 sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(imagePath))).Replace("-", "");
-            Dictionary<string, object> cached = ReadJsonObject(outputPath);
+            Dictionary<string, object> cached = Program.ReadJsonObject(outputPath);
             if (string.Equals(ReadString(cached, "imageSha256", ""), hash, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(ReadString(cached, "status", ""), "completed", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(ReadString(cached, "description", "")))
@@ -1087,7 +1087,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o")
             };
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
-            WriteJsonObject(outputPath, record);
+            Program.WriteJsonObject(outputPath, record);
             return record;
         }
 
@@ -1095,7 +1095,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
         {
             Dictionary<string, object> metadata = ReadDictionary(candidate, "metadata") ?? new Dictionary<string, object>();
             string promptFile = PortraitsService.SelectPortraitClothingPromptFile(metadata);
-            string guidance = string.IsNullOrWhiteSpace(promptFile) ? "" : LoadPromptTemplate(promptFile);
+            string guidance = string.IsNullOrWhiteSpace(promptFile) ? "" : Program.LoadPromptTemplate(promptFile);
             if (string.IsNullOrWhiteSpace(guidance))
             {
                 string generationPrompt = Path.Combine(ReadString(candidate, "folder", ""), "prompt.txt");
@@ -1108,14 +1108,14 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
                         .Take(3));
                 }
             }
-            guidance = LimitText(Regex.Replace(guidance ?? "", @"\s+", " ").Trim(), 900);
+            guidance = Program.LimitText(Regex.Replace(guidance ?? "", @"\s+", " ").Trim(), 900);
             if (!string.IsNullOrWhiteSpace(guidance)) return guidance;
             string culture = FirstNonEmpty(ReadFirstString(metadata, "cultureName", "cultureId"), "their culture");
             string station = FirstNonEmpty(ReadString(metadata, "socialStation", ""), "station");
             return "Formal clothing appropriate to " + culture + " and " + station + ", matching the active portrait.";
         }
 
-        private static List<Dictionary<string, object>> RunConversationSceneStateSelfTests()
+        internal static List<Dictionary<string, object>> RunConversationSceneStateSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, object> add = (id, pass, data) => rows.Add(new Dictionary<string, object> { ["id"] = id, ["passed"] = pass, ["data"] = data });

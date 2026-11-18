@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Fixed stripes cannot evict an in-flight lock. Durable receipts own reuse.
         private static readonly object[] InputInterpretationLocks = Enumerable.Range(0, 256).Select(_ => new object()).ToArray();
@@ -38,7 +38,7 @@ namespace ReignBetaServer
         {
             var blocks = InputNarrationBlocks(original);
             var results = ReadDictionaryList(candidate, "narration");
-            var people = MergedInteractionParticipantProfiles(payload).Select(CharacterIdFrom)
+            var people = MergedInteractionParticipantProfiles(payload).Select(Program.CharacterIdFrom)
                 .Concat(new[] { ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                     ReadFirstString(payload, "heroStringId", "speakerHeroStringId") })
                 .Where(id => id.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -151,7 +151,7 @@ namespace ReignBetaServer
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             var present = ReadStringList(payload, "activeHeroIds").Concat(new[] { ReadFirstString(payload, "heroStringId", "speakerHeroStringId") })
                 .Where(id => id.Length > 0 && id != player).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var person in MergedInteractionParticipantProfiles(payload).Where(p => present.Contains(CharacterIdFrom(p))))
+            foreach (var person in MergedInteractionParticipantProfiles(payload).Where(p => present.Contains(Program.CharacterIdFrom(p))))
             {
                 string name = ReadString(person, "name", "");
                 if (name.Length == 0 || player.Length == 0) continue;
@@ -164,7 +164,7 @@ namespace ReignBetaServer
                     if (!arrival.Success || Regex.IsMatch(words, @"\b(?:imagin\w*|dream\w*|hypothetical\w*|absent|empty|away|isn't (?:here|there)|not (?:here|there)|has left)\b", RegexOptions.IgnoreCase)) continue;
                     string quote = arrival.Value.Trim(), venue = arrival.Groups["venue"].Value;
                     scenes.Add(TestDict("quote", quote, "location", venue, "locationClass", InferLocationClass(venue),
-                        "subjectIds", new[] { player, CharacterIdFrom(person) }, "kind", "establish", "linkedWithPlayer", true));
+                        "subjectIds", new[] { player, Program.CharacterIdFrom(person) }, "kind", "establish", "linkedWithPlayer", true));
                 }
             }
             return scenes;
@@ -188,9 +188,9 @@ namespace ReignBetaServer
             string key = campaign + "|" + source.Generation + "|" + source.InputId;
             lock (InputInterpretationLocks[(uint)StringComparer.Ordinal.GetHashCode(key) % InputInterpretationLocks.Length])
             {
-                using var connection = OpenCampaignConnection(campaign);
+                using var connection = Program.OpenCampaignConnection(campaign);
                 EnsureConversationInputSchema(connection);
-                var row = source.InputId.Length == 0 ? null : QuerySql(connection,
+                var row = source.InputId.Length == 0 ? null : Program.QuerySql(connection,
                     "SELECT projection_json FROM conversation_input_receipts WHERE input_id=$id AND restore_generation=$generation;",
                     TestDict("id", source.InputId, "generation", source.Generation)).SingleOrDefault();
                 var cached = TryParseJsonObject(ReadString(row, "projection_json", "{}"));
@@ -201,10 +201,10 @@ namespace ReignBetaServer
                     result = TestDict("status", "unresolved", "errors", new[] { "interpretation_capacity" }, "providerCalls", 0);
                 else
                 {
-                    var settings = LoadSettings();
+                    var settings = Program.LoadSettings();
                     var request = TestDict("requestType", "conversation_input_grounding", "campaignId", campaign,
-                        "correlationId", EnsureCorrelationId(payload) + "-input-grounding",
-                        "model", ModelForRequest(settings, ReadString(payload, "mode", "dialogue")),
+                        "correlationId", Program.EnsureCorrelationId(payload) + "-input-grounding",
+                        "model", Program.ModelForRequest(settings, ReadString(payload, "mode", "dialogue")),
                         "reasoningDisabled", true, "temperature", 0d, "maxTokens", 4096, "promptCacheEligible", false,
                         "response_format", TestDict("type", "json_object"),
                         "messages", new[] {
@@ -221,11 +221,11 @@ namespace ReignBetaServer
                                 "A whisper's action may be observable; its contents keep their existing recipient restriction. Return [] for absent scene changes."),
                             TestDict("role", "user", "content", Json.Serialize(TestDict("narrationBlocks", blocks,
                                 "playerId", ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
-                                "participants", MergedInteractionParticipantProfiles(payload).Select(p => TestDict("heroStringId", CharacterIdFrom(p), "name", ReadString(p, "name", ""))).ToList())))
+                                "participants", MergedInteractionParticipantProfiles(payload).Select(p => TestDict("heroStringId", Program.CharacterIdFrom(p), "name", ReadString(p, "name", ""))).ToList())))
                         });
                     try
                     {
-                        var response = (responder ?? ChatWithLlm)(request);
+                        var response = (responder ?? Program.ChatWithLlm)(request);
                         result = ReadBool(response, "ok", false)
                             ? ValidateNarrationInterpretation(source.Original, TryParseJsonObject(ReadString(response, "content", "")), payload)
                             : TestDict("status", "unresolved", "errors", new[] { "interpretation_unavailable" }, "providerCalls", 1);
@@ -235,7 +235,7 @@ namespace ReignBetaServer
                 }
                 result["sourceHash"] = ConversationExactTextHash(source.Original);
                 if (source.InputId.Length > 0)
-                    ExecuteSql(connection, @"UPDATE conversation_input_receipts SET projection_json=$json,updated_ts=$now
+                    Program.ExecuteSql(connection, @"UPDATE conversation_input_receipts SET projection_json=$json,updated_ts=$now
 WHERE input_id=$id AND restore_generation=$generation;",
                         TestDict("json", Json.Serialize(result), "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             "id", source.InputId, "generation", source.Generation));

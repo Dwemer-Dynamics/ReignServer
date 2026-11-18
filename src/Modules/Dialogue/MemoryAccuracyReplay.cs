@@ -7,16 +7,16 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static string MemoryReplayInputPath(string file)
         {
-            if (ActiveServerPort > 0 || !HasArg(Environment.GetCommandLineArgs(), "--run-verification")
+            if (Program.ActiveServerPort > 0 || !Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification")
                 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                 || !new[] { "input.json", "evidence-input.json" }.Contains(file))
                 throw new InvalidOperationException("Replay input requires isolated artifact-bound verification.");
-            string path = Path.Combine(TestsDir, "memory-accuracy", file);
+            string path = Path.Combine(Program.TestsDir, "memory-accuracy", file);
             // Linux verification writes to a fresh temporary data root. Its
             // explicitly staged, read-only input remains beside this exact artifact.
             if (!File.Exists(path)) path = Path.Combine(AppContext.BaseDirectory, "data", "tests", "memory-accuracy", file);
@@ -53,16 +53,16 @@ namespace ReignBetaServer
 #if !REIGN_EXCLUDE_VERIFICATION
         // Explicit CLI suite only. Private replay input lives beside this exact
         // validated artifact; no live campaign or external path is read.
-        private static Dictionary<string, object> RunMemoryAccuracyReplay()
+        internal static Dictionary<string, object> RunMemoryAccuracyReplay()
         {
-            if (ActiveServerPort > 0 || !HasArg(Environment.GetCommandLineArgs(), "--run-verification")
+            if (Program.ActiveServerPort > 0 || !Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification")
                 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Memory replay requires the isolated artifact-bound Verification Lab CLI.");
             string path = MemoryReplayInputPath("input.json");
             if (!File.Exists(path) || new FileInfo(path).Length > 32 * 1024 * 1024)
                 throw new InvalidOperationException("A bounded memory-accuracy/input.json must be staged under the validated artifact's data/tests directory.");
-            var input = ReadJsonObject(path);
+            var input = Program.ReadJsonObject(path);
             var cases = ReadDictionaryList(input, "cases");
             if (ReadString(input, "schema", "") != "reign-memory-retrieval-replay-input-v1" || cases.Count < 1 || cases.Count > 1000
                 || cases.Select(c => ReadString(c, "caseId", "")).Distinct(StringComparer.Ordinal).Count() != cases.Count)
@@ -76,7 +76,7 @@ namespace ReignBetaServer
             string campaign = "memory_replay_" + Guid.NewGuid().ToString("N");
             try
             {
-                for (int index = 0; index < cases.Count && !ShouldCancelVerification(); index++)
+                for (int index = 0; index < cases.Count && !Program.ShouldCancelVerification(); index++)
                 {
                     var item = cases[index];
                     string npc = "replay_npc_" + index, player = "replay_player_" + index, session = "replay_session_" + index;
@@ -85,11 +85,11 @@ namespace ReignBetaServer
                     var context = TestDict("timelineId", "replay", "worldDay", 1d, "playerHeroStringId", player,
                         "conversationSessionId", session, "memoryActiveTopic", sources.LastOrDefault(s => ReadString(s, "speakerId", "") == "npc") is { } latest
                             ? ReadString(latest, "text", "") : "");
-                    using (var connection = OpenCampaignConnection(campaign))
+                    using (var connection = Program.OpenCampaignConnection(campaign))
                     {
                         // Case-local identities and source IDs prevent a prior replay
                         // from becoming evidence for a later independent case.
-                        ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,
+                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,
 start_ts,start_world_day,participants_json,payload_json) VALUES($session,$campaign,$npc,$player,'in_person','open',1,1,$participants,$payload);",
                             TestDict("session", session, "campaign", campaign, "npc", npc, "player", player,
                                 "participants", Json.Serialize(new[] { npc, player }), "payload", Json.Serialize(context)));
@@ -105,18 +105,18 @@ start_ts,start_world_day,participants_json,payload_json) VALUES($session,$campai
                             ordinal++;
                         }
                     }
-                    var transcript = CanonicalizePromptTranscript(ReadCurrentSessionDialogueLines(campaign, session, 30), 30);
+                    var transcript = Program.CanonicalizePromptTranscript(ReadCurrentSessionDialogueLines(campaign, session, 30), 30);
                     SetMemoryTranscriptContext(context, transcript);
                     var settings = TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false,
                         "memoryPrecisionMode", "legacy", "enableMemoryPrecisionCrossEncoder", false,
                         "highMemoryMode", false, "memoryPrecisionOrdinaryTokens", 4000);
                     var timer = Stopwatch.StartNew();
-                    var legacy = BuildNpcMemoryPacket(campaign, npc, player, "", query, 6000, context, settings);
+                    var legacy = Program.BuildNpcMemoryPacket(campaign, npc, player, "", query, 6000, context, settings);
                     long legacyMs = timer.ElapsedMilliseconds;
                     timer.Restart();
                     var precision = BuildPrecisionMemoryPacket(campaign, npc, player, "", query, context, settings, true);
                     long precisionMs = timer.ElapsedMilliseconds;
-                    string common = "CURRENT PLAYER [speakerId=player]: " + current + "\nRECENT DIALOGUE:\n" + FormatEventLinesForPrompt(transcript);
+                    string common = "CURRENT PLAYER [speakerId=player]: " + current + "\nRECENT DIALOGUE:\n" + Program.FormatEventLinesForPrompt(transcript);
                     string legacyText = ReadString(legacy, "memoryPacket", ""), precisionText = ReadString(precision, "memoryPacket", "");
                     results.Add(TestDict("caseId", ReadString(item, "caseId", ""), "legacyPacket", legacyText,
                         "precisionPacket", precisionText, "commonTranscript", common, "precisionEvidence", ReadDictionary(precision, "precisionEvidence"),
@@ -135,8 +135,8 @@ start_ts,start_world_day,participants_json,payload_json) VALUES($session,$campai
                     "Precision SQL path compared with legacy SQL; semantic worker/reranker not invoked.",
                     "Memory and common transcript token estimates are not full provider-input or generation measurements.",
                     "Retrieval outputs require independent source/answer coverage evaluation and later semantic/voice/native acceptance." });
-            string resultPath = Path.Combine(TestsDir, "memory-accuracy", "retrieval-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
-            WriteJsonObject(resultPath, report);
+            string resultPath = Path.Combine(Program.TestsDir, "memory-accuracy", "retrieval-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
+            Program.WriteJsonObject(resultPath, report);
             return TestDict("ok", results.Count == cases.Count, "resultPath", resultPath, "completedCases", results.Count,
                 "inputSha256", report["inputSha256"], "certificateEligible", false, "providerCalls", 0);
         }

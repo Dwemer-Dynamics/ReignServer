@@ -79,7 +79,7 @@ namespace ReignBetaServer
                 observedRequest = request;
                 return ContextualIntroductionResponse("self_introduction", "Michael of Howarton", exactQuote);
             });
-            string delivered = Program.NormalizeUnknownIdentityVisibleAddress(
+            string delivered = DialogueService.NormalizeUnknownIdentityVisibleAddress(
                 SanitizePromptForIdentity(correctReply, "", "Michael", identity), identity);
             add("contextual_introduction_constalia_final_reply", calls == 1
                 && ReadBool(identity, "canonicalNameAllowed", false) && delivered == correctReply,
@@ -106,7 +106,7 @@ namespace ReignBetaServer
             captured["playerText"] = "Perhaps you heard Michael of Howarton announced at the lists?";
             var subsequent = ResolveContextualIntroductionFixture(captured, request => { calls++; return null; });
             add("contextual_introduction_next_turn_no_helper", calls == 1 && ReadBool(subsequent, "canonicalNameAllowed", false)
-                && Program.NormalizeUnknownIdentityVisibleAddress(SanitizePromptForIdentity(correctReply, "", "Michael", subsequent), subsequent) == correctReply,
+                && DialogueService.NormalizeUnknownIdentityVisibleAddress(SanitizePromptForIdentity(correctReply, "", "Michael", subsequent), subsequent) == correctReply,
                 "Learned identity survives the next prompt and adds no classification call.", null);
 
             int index = 0;

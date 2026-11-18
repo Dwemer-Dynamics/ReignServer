@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunTemporaryGuestDialogueSelfTests()
         {
@@ -34,26 +34,26 @@ namespace ReignBetaServer
             payload["playerText"] = "*She agreed to leave my party, I head off to other things*";
             check("captured_second_turn_requires_reconciliation", flagged("*She stays seated with her ledger.* *She does not watch him go.*", uncommitted), null);
             check("player_narration_alone_does_not_grant_consent", !flagged("We should discuss how long this outing will last.", uncommitted)
-                && !ActionGateShouldPlan(uncommitted), null);
+                && !Program.ActionGateShouldPlan(uncommitted), null);
             check("ordinary_goodbye_keeps_party", !flagged("Goodbye for now. I will remain with your party.", uncommitted), null);
             check("refusal_is_not_departure", !flagged("I won't leave your party.", TestDict("needed", false, "commitment", "refused")), null);
             check("future_condition_is_not_present_departure", !flagged("If we reach Phycaon, I will return home.", uncommitted), null);
             check("current_choice_requires_action", flagged("I will leave your party.", uncommitted), null);
-            check("accepted_choice_can_reach_executor", !flagged("I will leave your party.", accepted) && ActionGateShouldPlan(accepted), null);
+            check("accepted_choice_can_reach_executor", !flagged("I will leave your party.", accepted) && Program.ActionGateShouldPlan(accepted), null);
             check("accepted_gate_cannot_contradict_refusal", flagged("I won't leave your party.", accepted), null);
             check("accepted_gate_cannot_promote_condition", flagged("If we reach Phycaon, I will return home.", accepted), null);
             check("cannot_claim_removal_before_execution", flagged("I have already left your party.", accepted), null);
-            var fallback = BuildAcceptedTemporaryPartyGuestFallbackAction(accepted, payload, PromptParityProfile(),
+            var fallback = Program.BuildAcceptedTemporaryPartyGuestFallbackAction(accepted, payload, PromptParityProfile(),
                 ReadString(payload, "playerText", ""), "I will leave your party.", new HashSet<string> { "end_temporary_party_guest" });
-            check("accepted_end_command_preserved", TemporaryPartyGuestCandidateToPreserve(accepted, "Farewell.") == "end_temporary_party_guest"
+            check("accepted_end_command_preserved", Program.TemporaryPartyGuestCandidateToPreserve(accepted, "Farewell.") == "end_temporary_party_guest"
                 && ReadString(fallback, "command", "") == "end_temporary_party_guest", fallback);
             check("fallback_binds_actual_speaker", Json.Serialize(fallback).Contains(heroId), fallback);
-            check("current_departure_outranks_historical_invitation", TemporaryPartyGuestCandidateToPreserve(accepted,
+            check("current_departure_outranks_historical_invitation", Program.TemporaryPartyGuestCandidateToPreserve(accepted,
                 "You agreed to join my party earlier; can we part now?") == "end_temporary_party_guest", null);
-            check("initial_join_keeps_future_departure_safeguard", TemporaryPartyGuestCandidateToPreserve(
+            check("initial_join_keeps_future_departure_safeguard", Program.TemporaryPartyGuestCandidateToPreserve(
                 TestDict("needed", true, "commitment", "accepted", "intent", "I agree to join the player party; a later end_temporary_party_guest may end the arrangement."),
                 "Join my party with a thirty-day review.") == "accept_temporary_party_guest", null);
-            check("refused_gate_cannot_preserve_action", TemporaryPartyGuestCandidateToPreserve(uncommitted, "leave my party") == "", null);
+            check("refused_gate_cannot_preserve_action", Program.TemporaryPartyGuestCandidateToPreserve(uncommitted, "leave my party") == "", null);
             check("native_context_serialization_roundtrip", BuildTemporaryGuestDialoguePromptBlock(TryParseJsonObject(Json.Serialize(payload)), heroId)
                 .Contains("guest_fixture_agreement"), null);
             check("other_speaker_has_no_guest_context", BuildTemporaryGuestDialoguePromptBlock(payload, "fixture_other") == "", null);
@@ -70,7 +70,7 @@ namespace ReignBetaServer
             }
             native["phase"] = "Active";
 
-            var routingPayload = ReadDictionary(DefaultActionTestSnapshot(), "payload");
+            var routingPayload = ReadDictionary(Program.DefaultActionTestSnapshot(), "payload");
             var routingHero = ReadDictionary(routingPayload, "hero");
             routingPayload["speakerHeroStringId"] = heroId;
             routingPayload["heroStringId"] = heroId;
@@ -78,7 +78,7 @@ namespace ReignBetaServer
             routingHero["currentPartyId"] = "player_party";
             routingPayload["worldDay"] = 110.1d;
             routingPayload["temporaryPartyGuest"] = native;
-            var settings = new Dictionary<string, object>(LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
+            var settings = new Dictionary<string, object>(Program.LoadSettings()) { ["enableMinimeMemoryWorker"] = false };
             const string capturedRenewal = "I feel we are getting to the end of our search, Ive heard no reports of him falling, I used Northern Empire contacts and he isnt a prisoner, theres a very good chance hes alive and nearby. It means a great deal to have you with me. Lets talk again in another 20 days and see if you still feel the same about me as I do you. Your scouting and advise has been invaluable.";
             var renewalGate = TestDict("needed", true, "commitment", "accepted", "intent",
                 "Hulara renews her traveling companion commitment to Michael's party for 20 more days, contingent on Michael answering her contingency plan question before she scouts ahead.");
@@ -87,15 +87,15 @@ namespace ReignBetaServer
             foreach (string utterance in new[] { capturedRenewal, "Stay another 20 days as my traveling companion.",
                 "Extend our scout arrangement by 20 more days.", "Renew our arrangement for 20 additional days." })
             {
-                var gate = CloneDictionary(renewalGate);
+                var gate = Program.CloneDictionary(renewalGate);
                 check("renewal_survives_continuity_" + results.Count,
                     !NormalizeAlreadySatisfiedContinuityGate(gate, routingPayload, routingHero), gate);
-                var choices = BuildAllowedActionPlannerChoices(settings, routingPayload, routingHero, gate,
+                var choices = Program.BuildAllowedActionPlannerChoices(settings, routingPayload, routingHero, gate,
                     utterance, "I agree to twenty more days.", 10);
                 check("renewal_not_initial_join_" + results.Count,
                     choices.Any(x => ReadString(x, "command", "") == "renew_temporary_party_guest")
                     && !choices.Any(x => ReadString(x, "command", "") == "accept_temporary_party_guest"), choices);
-                var renewal = BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
+                var renewal = Program.BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
                     utterance, "I agree to twenty more days.", lifecycleAllowed);
                 var terms = ReadDictionary(renewal, "terms");
                 check("renewal_exact_twenty_and_identity_" + results.Count,
@@ -118,11 +118,11 @@ namespace ReignBetaServer
             }
             foreach (string commitment in new[] { "refused", "conditional", "considering", "roleplay_only" })
             {
-                var gate = CloneDictionary(renewalGate);
+                var gate = Program.CloneDictionary(renewalGate);
                 gate["commitment"] = commitment;
                 check("renewal_does_not_invent_consent_" + commitment,
-                    TemporaryPartyGuestCandidateToPreserve(gate, capturedRenewal, routingPayload, routingHero) == ""
-                    && BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
+                    Program.TemporaryPartyGuestCandidateToPreserve(gate, capturedRenewal, routingPayload, routingHero) == ""
+                    && Program.BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
                         capturedRenewal, "We need to discuss it.", lifecycleAllowed) == null, null);
             }
             foreach (string intent in new[] { "The speaker agrees to stay for twenty more days.",
@@ -130,32 +130,32 @@ namespace ReignBetaServer
                 "The travelling companion accepts another 20 days of service." })
             {
                 var gate = TestDict("needed", true, "commitment", "accepted", "intent", intent);
-                var renewal = BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
+                var renewal = Program.BuildAcceptedTemporaryPartyGuestFallbackAction(gate, routingPayload, routingHero,
                     "Do you agree?", intent, lifecycleAllowed);
                 check("renewal_variant_" + results.Count, ReadString(renewal, "command", "") == "renew_temporary_party_guest"
                     && ReadDouble(ReadDictionary(renewal, "terms"), "durationDays", 0) == 20, renewal);
             }
             var missingTermGate = TestDict("needed", true, "commitment", "accepted", "intent", "The speaker renews the scout arrangement.");
-            check("unrelated_renewed_friendship_not_guest_renewal", TemporaryPartyGuestCandidateToPreserve(
+            check("unrelated_renewed_friendship_not_guest_renewal", Program.TemporaryPartyGuestCandidateToPreserve(
                 TestDict("needed", true, "commitment", "accepted", "intent", "The speaker renews a friendship."),
                 "I appreciate your friendship.", routingPayload, routingHero) == "", null);
-            check("missing_extension_term_not_invented", BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate,
+            check("missing_extension_term_not_invented", Program.BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate,
                 routingPayload, routingHero, "Stay longer?", "I will stay a little longer.", lifecycleAllowed) == null, null);
-            var openRenewal = BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate, routingPayload, routingHero,
+            var openRenewal = Program.BuildAcceptedTemporaryPartyGuestFallbackAction(missingTermGate, routingPayload, routingHero,
                 "Renew our arrangement with no fixed end date, reviewed every thirty days.", "I agree.", lifecycleAllowed);
             check("explicit_open_ended_renewal_preserved", ReadString(ReadDictionary(openRenewal, "terms"), "termKind", "") == "open_ended"
                 && ReadInt(ReadDictionary(openRenewal, "terms"), "reviewIntervalDays", 0) == 30, openRenewal);
-            var transportPayload = ReadDictionary(DefaultActionTestSnapshot(), "payload");
+            var transportPayload = ReadDictionary(Program.DefaultActionTestSnapshot(), "payload");
             var transportHero = ReadDictionary(transportPayload, "hero");
             string transportHeroId = ReadString(transportHero, "heroStringId", "");
-            var transportNative = CloneDictionary(native);
+            var transportNative = Program.CloneDictionary(native);
             transportNative["heroId"] = transportHeroId;
             transportPayload["speakerHeroStringId"] = transportHeroId;
             transportPayload["temporaryPartyGuest"] = transportNative;
             transportPayload["worldDay"] = 110.1d;
-            var transportAction = BuildAcceptedTemporaryPartyGuestFallbackAction(renewalGate, transportPayload, transportHero,
+            var transportAction = Program.BuildAcceptedTemporaryPartyGuestFallbackAction(renewalGate, transportPayload, transportHero,
                 capturedRenewal, "I agree to twenty more days.", lifecycleAllowed);
-            var transportRecord = NormalizeActionCommand(transportAction, "guest_dialogue_transport_" + Guid.NewGuid().ToString("N"),
+            var transportRecord = Program.NormalizeActionCommand(transportAction, "guest_dialogue_transport_" + Guid.NewGuid().ToString("N"),
                 out var transportErrors, transportPayload, capturedRenewal);
             var transportTerms = TryParseJsonObject(ReadString(transportRecord, "termsJson", ""));
             check("native_action_transport_keeps_exact_terms_and_revision", transportErrors.Count == 0
@@ -187,7 +187,7 @@ namespace ReignBetaServer
             native["phase"] = "Active";
 
             string campaign = "guest_dialogue_test_" + Guid.NewGuid().ToString("N");
-            UpsertCharacterProfile(campaign, new Dictionary<string, object>(PromptParityProfile()) { ["heroStringId"] = heroId });
+            Program.UpsertCharacterProfile(campaign, new Dictionary<string, object>(PromptParityProfile()) { ["heroStringId"] = heroId });
             var empty = new Dictionary<string, object>();
             var lines = new List<Dictionary<string, object>>();
             var dialogueEnvelope = BuildDialoguePromptEnvelope(campaign, heroId, "Fixture Speaker", "Traveler", "Traveler",
@@ -224,12 +224,12 @@ namespace ReignBetaServer
             var repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
             check("real_repair_is_bounded_and_native_informed", repairCalls == 1 && repairHasNative, repaired);
             check("real_repair_opens_departure_gate", ReadBool(repaired, "ok", false)
-                && ActionGateShouldPlan(ReadDictionary(repairedParsed, "actionGate")), repaired);
+                && Program.ActionGateShouldPlan(ReadDictionary(repairedParsed, "actionGate")), repaired);
             var clarified = RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(original)), requestStub,
                 payload, PromptParityIdentity(), lines, campaign, "guest-clarified", "party_chat", heroId, "Fixture Speaker", "Traveler", "",
                 request => TestDict("ok", true, "content", Json.Serialize(reply("I will remain with your party. We can speak again later.", uncommitted))));
             check("real_repair_may_clarify_without_departure", ReadBool(clarified, "ok", false)
-                && !ActionGateShouldPlan(ReadDictionary(TryParseJsonObject(ReadString(clarified, "content", "")), "actionGate")), clarified);
+                && !Program.ActionGateShouldPlan(ReadDictionary(TryParseJsonObject(ReadString(clarified, "content", "")), "actionGate")), clarified);
             var unresolved = RetryRoleplayContinuityViolation(TestDict("ok", true, "content", Json.Serialize(original)), requestStub,
                 payload, PromptParityIdentity(), lines, campaign, "guest-unresolved", "dialogue", heroId, "Fixture Speaker", "Traveler", "",
                 request => TestDict("ok", true, "content", Json.Serialize(original)));
@@ -237,7 +237,7 @@ namespace ReignBetaServer
             check("unresolved_mechanical_contradiction_marked_without_departure", ReadBool(unresolved, "ok", false)
                 && ReadBool(unresolved, "visibleRepairFailure", false)
                 && ReadString(unresolvedVisible, "reply", "").EndsWith(".,", StringComparison.Ordinal)
-                && !ActionGateShouldPlan(ReadDictionary(unresolvedVisible, "actionGate"))
+                && !Program.ActionGateShouldPlan(ReadDictionary(unresolvedVisible, "actionGate"))
                 && ReadDictionaryList(unresolvedVisible, "continuityWrites").Count == 0
                 && !ReadBool(ReadDictionary(unresolvedVisible, "conversationAgencyReceipt"), "ok", true), unresolved);
             // The existing Lab owns this unique fixture campaign and isolated storage lifecycle.

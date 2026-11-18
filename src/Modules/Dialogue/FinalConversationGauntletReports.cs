@@ -6,7 +6,7 @@ using Npgsql;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
 #if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object>
@@ -23,24 +23,24 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "Final gauntlet run was not found."
                 };
-            List<Dictionary<string, object>> cases = QuerySql(
+            List<Dictionary<string, object>> cases = Program.QuerySql(
                 connection,
                 @"SELECT * FROM final_gauntlet_cases
 WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> attempts = QuerySql(
+            List<Dictionary<string, object>> attempts = Program.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_attempts WHERE run_id=$run ORDER BY case_instance_id,attempt_number;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> assertions = QuerySql(
+            List<Dictionary<string, object>> assertions = Program.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_assertions WHERE run_id=$run ORDER BY case_instance_id,assertion_id;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> evidence = QuerySql(
+            List<Dictionary<string, object>> evidence = Program.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_evidence WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
                 new Dictionary<string, object> { ["run"] = runId });
-            List<Dictionary<string, object>> providerCalls = QuerySql(
+            List<Dictionary<string, object>> providerCalls = Program.QuerySql(
                 connection,
                 "SELECT * FROM final_gauntlet_provider_calls WHERE run_id=$run ORDER BY ordinal;",
                 new Dictionary<string, object> { ["run"] = runId });
@@ -104,14 +104,14 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                     ["stageBPolicy"] =
                         "Every case runs once; failures are retained and execution continues."
                 };
-            WriteJsonObject(Path.Combine(root, "manifest.json"), manifest);
+            Program.WriteJsonObject(Path.Combine(root, "manifest.json"), manifest);
             WriteGauntletNdjson(
                 Path.Combine(root, "cases.ndjson"), cases);
             WriteGauntletNdjson(
                 Path.Combine(root, "assertions.ndjson"), assertions);
-            WriteJsonObject(
+            Program.WriteJsonObject(
                 Path.Combine(root, "scorecard.json"), scorecard);
-            WriteJsonObject(
+            Program.WriteJsonObject(
                 Path.Combine(root, "report.json"), report);
             foreach (Dictionary<string, object> row in evidence)
             {
@@ -131,7 +131,7 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                 BuildFinalGauntletReviewPack(
                     connection, campaignId, runId, cases, evidence);
             report["reviewPack"] = review;
-            WriteJsonObject(
+            Program.WriteJsonObject(
                 Path.Combine(root, "report.json"), report);
             return new Dictionary<string, object>
             {
@@ -413,7 +413,7 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
             string campaignId,
             string runId)
         {
-            return CampaignFile(
+            return Program.CampaignFile(
                 campaignId,
                 "tests",
                 "fg",

@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ConversationSourceContract = @"
 SOURCE ACCOUNTABILITY: Preserve the original speaker, actor, sequence and uncertainty. A reported event is not a witnessed or native-confirmed event. Beliefs, hypotheses, intentions and narrated actions are different evidence types. Do not make a temporary feeling, metaphor or qualified claim into a permanent trait. An answered question stays answered unless explicitly reopened; a reciprocal question does not change who asked the original. Keep separate unresolved concerns separate.
@@ -108,7 +108,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             return bound;
         }
 
-        private static void AttachConversationWriteEvidence(IEnumerable<Dictionary<string, object>> writes,
+        internal static void AttachConversationWriteEvidence(IEnumerable<Dictionary<string, object>> writes,
             List<Dictionary<string, object>> sources, string owner, string eventId, bool requireSemanticAdmission = false)
         {
             foreach (var write in writes ?? Enumerable.Empty<Dictionary<string, object>>())
@@ -188,21 +188,21 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
             if (id.Length == 0 && kind.Length == 0) return "";
             if (!new[] { "answer", "reciprocal_question", "correction", "activity_completion", "abandonment" }.Contains(kind)) return "invalid_relation_kind";
             string quote = ReadString(write, "relatedQuote", "");
-            var row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
+            var row = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
                 new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
             if (row == null && quote.Length >= 12)
             {
-                var access = new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay };
-                var candidates = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", id))
+                var access = new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay };
+                var candidates = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND status='active';", TestDict("id", id))
                     .Where(candidate => MemoryTimeVisible(candidate, access, connection)
-                        && (ReadString(candidate, "speaker_id", "") == owner || TextListFromJson(ReadString(candidate, "participants_json", "[]")).Contains(owner))
+                        && (ReadString(candidate, "speaker_id", "") == owner || Program.TextListFromJson(ReadString(candidate, "participants_json", "[]")).Contains(owner))
                         && ConversationTurnTextForRecall(candidate).Contains(quote, StringComparison.Ordinal)
                         && ObserverConversationText(ConversationTurnTextForRecall(candidate), ReadString(candidate, "speaker_id", ""), owner,
                             ReadString(candidate, "role", "") == "player").Contains(quote, StringComparison.Ordinal)).Take(2).ToList();
                 if (candidates.Count == 1) row = candidates[0];
             }
-            if (row == null || !MemoryTimeVisible(row, new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay }, connection)
-                || (ReadString(row, "speaker_id", "") != owner && !TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(owner)))
+            if (row == null || !MemoryTimeVisible(row, new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = worldDay }, connection)
+                || (ReadString(row, "speaker_id", "") != owner && !Program.TextListFromJson(ReadString(row, "participants_json", "[]")).Contains(owner)))
                 return "related_source_unavailable";
             if (quote.Length < 12 || !ConversationTurnTextForRecall(row).Contains(quote, StringComparison.Ordinal)) return "related_source_quote_mismatch";
             if (!ObserverConversationText(ConversationTurnTextForRecall(row), ReadString(row, "speaker_id", ""), owner, ReadString(row, "role", "") == "player").Contains(quote, StringComparison.Ordinal))
@@ -217,7 +217,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
         }
 
         private static List<Dictionary<string, object>> ExpandConversationSequence(ReignDbConnection connection,
-            List<Dictionary<string, object>> anchors, KnowledgeAccessContext knowledge)
+            List<Dictionary<string, object>> anchors, Program.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>(anchors);
             foreach (var group in anchors.GroupBy(r => ReadString(r, "session_id", "")))
@@ -225,11 +225,11 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                 // Adjacent *complete* exchanges keep questions with answers and
                 // reciprocal questions. Historical evaluation still uses as-of guards.
                 long first = group.Min(r => ReadLong(r, "turn_order", 0)), last = group.Max(r => ReadLong(r, "turn_order", 0));
-                var nearby = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active'
+                var nearby = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active'
 AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", new Dictionary<string, object> {
                     ["session"] = group.Key, ["first"] = Math.Max(0, first - 2), ["last"] = last + 4 });
                 result.AddRange(nearby.Where(r => MemoryTimeVisible(r, knowledge, connection)
-                    && (ReadString(r, "speaker_id", "") == knowledge.NpcId || TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId))));
+                    && (ReadString(r, "speaker_id", "") == knowledge.NpcId || Program.TextListFromJson(ReadString(r, "participants_json", "[]")).Contains(knowledge.NpcId))));
             }
             return result.GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First())
                 .OrderBy(r => ReadLong(r, "accepted_sequence", 0)).ThenBy(r => ReadLong(r, "ts", 0)).ThenBy(r => ReadInt(r, "turn_order", 0)).ToList();
@@ -240,7 +240,7 @@ AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", new Dictionary<st
         // to the separate source-linked question state. A returned question needs
         // its answer too, but unrelated neighboring exchanges do not belong here.
         private static List<Dictionary<string, object>> ExpandPrecisionQuestionContext(ReignDbConnection connection,
-            List<Dictionary<string, object>> anchors, KnowledgeAccessContext knowledge)
+            List<Dictionary<string, object>> anchors, Program.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>(anchors);
             string Spoken(Dictionary<string, object> row) => Regex.Replace(ObserverConversationText(ReadString(row, "text", ""),
@@ -269,7 +269,7 @@ AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", new Dictionary<st
                 var ordered = group.OrderBy(row => ReadLong(row, "turn_order", 0)).ToList();
                 var first = ordered.First(); var last = ordered.Last();
                 long start = ReadLong(first, "turn_order", 0), end = ReadLong(last, "turn_order", 0);
-                var nearby = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active'
+                var nearby = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE session_id=$session AND status='active'
 AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", TestDict("session", group.Key, "first", Math.Max(0, start - 2), "last", end + 4));
                 // Inspect actual neighboring order before visibility filtering:
                 // hidden dialogue cannot be skipped to invent adjacency.
@@ -323,14 +323,14 @@ AND turn_order BETWEEN $first AND $last ORDER BY turn_order;", TestDict("session
         }
 
         private static List<MemoryEvidence> LinkedConversationEvidence(ReignDbConnection connection, string owner, string peer,
-            string timeline, string query, KnowledgeAccessContext knowledge, IEnumerable<string> linkedSourceIds = null)
+            string timeline, string query, Program.KnowledgeAccessContext knowledge, IEnumerable<string> linkedSourceIds = null)
         {
             var results = new List<MemoryEvidence>();
-            var terms = MemoryQueryTerms(query ?? "").Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).ToList();
-            knowledge ??= new KnowledgeAccessContext { NpcId = owner, PlayerId = peer, TimelineId = timeline };
+            var terms = Program.MemoryQueryTerms(query ?? "").Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).ToList();
+            knowledge ??= new Program.KnowledgeAccessContext { NpcId = owner, PlayerId = peer, TimelineId = timeline };
             string document = "to_tsvector('english',COALESCE(payload_json::jsonb->>'relatedQuote','') || ' ' || "
                 + "COALESCE(payload_json::jsonb->>'subject','') || ' ' || COALESCE(payload_json::jsonb->>'evidenceQuote',''))";
-            var parameters = TestDict("owner", owner, "peer", peer, "timeline", timeline, "query", BuildFtsQuery(terms),
+            var parameters = TestDict("owner", owner, "peer", peer, "timeline", timeline, "query", Program.BuildFtsQuery(terms),
                 "day", knowledge.WorldDay, "asOf", knowledge.AsOfTimestamp, "offset", 0);
             var relatedIds = (linkedSourceIds ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.Ordinal).Take(64).ToList();
@@ -351,20 +351,20 @@ THEN (payload_json::jsonb->>'worldDay')::double precision ELSE 0 END<=$day"
             for (int offset = 0; results.Count < 6; offset += 64)
             {
                 parameters["offset"] = offset;
-                var rows = QuerySql(connection, search, parameters);
+                var rows = Program.QuerySql(connection, search, parameters);
                 foreach (var row in rows.Where(r => MemoryTimeVisible(r, knowledge, connection)))
                 {
                 var link = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 string related = ReadString(link, "relatedTurnId", ""), relation = ReadString(link, "relationKind", "");
                 string quote = ReadString(link, "relatedQuote", "");
-                var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
+                var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
                     new Dictionary<string, object> { ["id"] = related }).FirstOrDefault();
                 if (source == null || !PrecisionTurnVisible(source, owner, knowledge, connection)) continue;
                 if (quote.Length < 12 || !ReadString(source, "text", "").Contains(quote, StringComparison.Ordinal)
                     || !ObserverConversationText(ReadString(source, "text", ""), ReadString(source, "speaker_id", ""), owner, ReadString(source, "role", "") == "player").Contains(quote, StringComparison.Ordinal)
                     || ReadString(link, "relatedSpeakerId", "") != ReadString(source, "speaker_id", "")
                     || ReadString(link, "relatedSourceHash", "") != PromptHash(ReadString(source, "text", ""))) continue;
-                var response = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event AND status='active' ORDER BY turn_order;",
+                var response = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event AND status='active' ORDER BY turn_order;",
                     new Dictionary<string, object> { ["event"] = ReadString(row, "source_event_id", "") })
                     .Where(r => PrecisionTurnVisible(r, owner, knowledge, connection)).ToList();
                 if (response.Count == 0) continue; // Never substitute a derivative for missing original evidence.

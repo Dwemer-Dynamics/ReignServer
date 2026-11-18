@@ -5,13 +5,13 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal const string ChatViewVersion = "reign-chat-view-v1";
 
         internal static void EnsureChatViewSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS chat_view_frames (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS chat_view_frames (
 turn_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,exchange_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 frame_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chat_view_requests (
@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_
         {
             var people = ReadDictionaryList(request, "sceneParticipants");
             if (people.Count == 0) return; // Historical rows without a reliable snapshot cannot invent one.
-            var actors = people.Select(p => TestDict("id", CharacterIdFrom(p), "name", ReadString(p, "name", ""),
+            var actors = people.Select(p => TestDict("id", Program.CharacterIdFrom(p), "name", ReadString(p, "name", ""),
                 "age", p.ContainsKey("age") ? (object)ReadDouble(p, "age", 0) : null,
                 "isChild", p.ContainsKey("isChild") ? (object)ReadBool(p, "isChild", false) : null,
                 "appearance", ReadDictionary(p, "appearance"),
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_
             if (expected.Count == 0)
             {
                 string npc = ReadFirstString(request, "speakerHeroStringId", "heroStringId", "npcId");
-                if (npc.Length == 0) npc = CharacterIdFrom(ReadDictionary(request, "hero") ?? new Dictionary<string, object>());
+                if (npc.Length == 0) npc = Program.CharacterIdFrom(ReadDictionary(request, "hero") ?? new Dictionary<string, object>());
                 if (npc.Length > 0) expected.Add(npc);
             }
             var frame = TestDict("actors", actors, "expectedNpcIds", expected,
@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_
                 "wardrobeScene", PortraitsService.ChatViewWardrobeSceneKey(request));
             string json = Json.Serialize(frame);
             if (json.Length > 65536) return;
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_frames(turn_id,session_id,exchange_id,timeline_id,frame_json)
+            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_frames(turn_id,session_id,exchange_id,timeline_id,frame_json)
 VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "session", session,
                 "exchange", exchange, "timeline", ContinuityTimeline(request), "frame", json));
         }
@@ -60,7 +60,7 @@ VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "ses
             string timeline = ReadString(payload, "timelineId", "");
             if (session.Length == 0 || player.Length == 0 || timeline.Length == 0)
                 throw new InvalidOperationException("A current conversation, player and timeline are required.");
-            var scope = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$session AND player_id=$player;",
+            var scope = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$session AND player_id=$player;",
                 TestDict("session", session, "player", player)).SingleOrDefault();
             if (scope == null) throw new InvalidOperationException("This conversation does not belong to the current player.");
             string channel = ReadString(scope, "channel", "");
@@ -74,31 +74,31 @@ VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "ses
             ChatViewScope(connection, payload);
             string session = ReadString(payload, "sessionId", ""), timeline = ReadString(payload, "timelineId", "");
             string player = ReadString(payload, "playerId", "");
-            var access = new KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
+            var access = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
                 WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             // Page by complete exchange identities, never a bounded UI line buffer.
             string through = ReadString(payload, "throughExchangeId", "");
             int boundary = int.MaxValue;
             if (through.Length > 0)
             {
-                var edge = QuerySql(connection, "SELECT MAX(turn_order) AS boundary FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active';",
+                var edge = Program.QuerySql(connection, "SELECT MAX(turn_order) AS boundary FROM conversation_turns WHERE session_id=$session AND exchange_id=$exchange AND status='active';",
                     TestDict("session", session, "exchange", through)).SingleOrDefault();
                 if (edge == null || edge["boundary"] == null || edge["boundary"] == DBNull.Value)
                     throw new InvalidOperationException("The selected conversation boundary is no longer available.");
                 boundary = ReadInt(edge, "boundary", -1);
             }
-            var groups = QuerySql(connection, @"SELECT exchange_id,MAX(turn_order) AS last_order FROM conversation_turns
+            var groups = Program.QuerySql(connection, @"SELECT exchange_id,MAX(turn_order) AS last_order FROM conversation_turns
 WHERE session_id=$session AND status='active' GROUP BY exchange_id HAVING MAX(turn_order)<=$boundary
 ORDER BY last_order DESC LIMIT 64;", TestDict("session", session, "boundary", boundary));
             var rows = new List<Dictionary<string, object>>();
             foreach (var group in groups)
             {
                 string exchange = ReadString(group, "exchange_id", "");
-                var turns = QuerySql(connection, @"SELECT t.*,f.frame_json,f.timeline_id FROM conversation_turns t
+                var turns = Program.QuerySql(connection, @"SELECT t.*,f.frame_json,f.timeline_id FROM conversation_turns t
 LEFT JOIN chat_view_frames f ON f.turn_id=t.turn_id WHERE t.session_id=$session AND t.exchange_id=$exchange
 AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exchange", exchange));
                 turns = turns.Where(t => ReadString(t, "frame_json", "").Length > 0 && MemoryTimeVisible(t, access, connection)
-                    && TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)).ToList();
+                    && Program.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)).ToList();
                 var complete = ChatViewCompleteExchange(turns, player);
                 if (complete.Count == 0) continue;
                 foreach (var line in complete.Where(t => ReadString(t, "role", "") == "player"))
@@ -107,7 +107,7 @@ AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exc
                     var metadata = TryParseJsonObject(ReadString(projected, "payload_json", "{}"));
                     string originalId = ReadString(metadata, "inputSourceId", "");
                     if (originalId.Length == 0) continue;
-                    var original = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND speaker_id=$player AND status='source_only';",
+                    var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND speaker_id=$player AND status='source_only';",
                         TestDict("id", originalId, "player", player)).SingleOrDefault();
                     if (original == null || !MemoryTimeVisible(original, access, connection)) throw new InvalidDataException("The original player input is unavailable in this timeline.");
                     OriginalConversationSourceIntegrity(original);
@@ -130,10 +130,10 @@ AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exc
             if (selectedId.Length == 0) selectedId = ReadString(window.LastOrDefault(), "turnId", "");
             var frozen = window.SingleOrDefault(t => ReadString(t, "turnId", "") == selectedId);
             if (frozen == null || ReadString(frozen, "role", "") != "npc") return false;
-            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", selectedId)).SingleOrDefault();
+            var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", selectedId)).SingleOrDefault();
             return source != null && PromptHash(ReadString(source, "text", "")) == ReadString(frozen, "sourceHash", "")
-                && TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(ReadString(request, "playerId", ""), StringComparer.OrdinalIgnoreCase)
-                && MemoryTimeVisible(source, new KnowledgeAccessContext { NpcId = ReadString(request, "playerId", ""),
+                && Program.TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(ReadString(request, "playerId", ""), StringComparer.OrdinalIgnoreCase)
+                && MemoryTimeVisible(source, new Program.KnowledgeAccessContext { NpcId = ReadString(request, "playerId", ""),
                     TimelineId = ReadString(request, "timelineId", ""), WorldDay = ReadDouble(request, "worldDay", double.MaxValue),
                     AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue }, connection);
         }

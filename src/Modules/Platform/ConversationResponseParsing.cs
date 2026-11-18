@@ -21,12 +21,12 @@ namespace ReignBetaServer
             reply ??= "";
             return reply.Contains(DialogueActionQueuedNoticePrefix, StringComparison.OrdinalIgnoreCase)
                 || reply.Contains(DialogueActionFailureNotice, StringComparison.OrdinalIgnoreCase)
-                || TechnicalConversationNoticePrefixes.Any(notice => reply.Contains(notice, StringComparison.OrdinalIgnoreCase));
+                || DialogueService.TechnicalConversationNoticePrefixes.Any(notice => reply.Contains(notice, StringComparison.OrdinalIgnoreCase));
         }
 
         // Engine notices and structured metadata belong outside authored speech.
         // Check the provider text before any effects are accepted.
-        private static Dictionary<string, object> RejectProviderReservedSpeech(Dictionary<string, object> response,
+        internal static Dictionary<string, object> RejectProviderReservedSpeech(Dictionary<string, object> response,
             Dictionary<string, object> parsed)
         {
             string reply = ReadFirstString(parsed, "reply", "response", "text", "content");
@@ -43,7 +43,7 @@ namespace ReignBetaServer
             return rejected;
         }
 
-        private sealed class ConversationResponseEnvelope
+        internal sealed class ConversationResponseEnvelope
         {
             internal Dictionary<string, object> Fields = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             internal bool Complete;
@@ -57,7 +57,7 @@ namespace ReignBetaServer
         // Read one outer object in source order. TryParseValue consumes a whole
         // value or nothing, so an unfinished array cannot contribute its earlier
         // entries, and nested/quoted objects never become replacement envelopes.
-        private static ConversationResponseEnvelope ReadConversationResponseEnvelope(string text)
+        internal static ConversationResponseEnvelope ReadConversationResponseEnvelope(string text)
         {
             var result = new ConversationResponseEnvelope();
             if ((text?.Length ?? 0) > ConversationResponseRecoveryCharacterLimit)
@@ -155,9 +155,9 @@ namespace ReignBetaServer
             bool missingDrinks = ConversationResponseNeedsDrinkActions(request) && !envelope.Fields.ContainsKey("drinkActions");
             bool recovered = envelope.Truncated && envelope.Error.Length == 0 && hasReply && !incompleteEffect && !missingDrinks;
             var evidence = TestDict("schema", "reign-conversation-response-recovery-v1",
-                "originalContentSha256", ConversationExactTextHash(original), "originalCharacters", original.Length,
+                "originalContentSha256", DialogueService.ConversationExactTextHash(original), "originalCharacters", original.Length,
                 "sourceStage", "sanitized_assistant_content",
-                "providerAssistantContentSha256", ReadString(llm, "providerAssistantContentSha256", ConversationExactTextHash(original)),
+                "providerAssistantContentSha256", ReadString(llm, "providerAssistantContentSha256", DialogueService.ConversationExactTextHash(original)),
                 "providerFinishReason", ReadString(llm, "finishReason", ""), "complete", envelope.Complete,
                 "truncated", envelope.Truncated, "replyPath", hasReply ? "$.reply" : "",
                 "replyStartUtf8", envelope.ReplyStart, "replyEndUtf8", envelope.ReplyEnd,
@@ -168,7 +168,7 @@ namespace ReignBetaServer
             llm["responseRecovery"] = evidence;
             if (recovered)
             {
-                RemovePrivateReasoningFields(envelope.Fields);
+                DialogueService.RemovePrivateReasoningFields(envelope.Fields);
                 envelope.Fields["conversationResponseRecovery"] = evidence;
                 llm["content"] = Json.Serialize(envelope.Fields);
             }

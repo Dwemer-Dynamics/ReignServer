@@ -74,18 +74,18 @@ namespace ReignBetaServer
                 && !ReadBool(body, "stream", true) && !body.ContainsKey("response_format")
                 && ReadString(ReadDictionaryList(body, "messages")[0], "content", "") == "Return JSON. Unicode 雪 😀"
                 && ReadDictionary(payload, "response_format") != null);
-            ConfigurePromptCacheRouting(settings, payload, body, OllamaCloudChatUrl, "exact-model:tag", "dialogue");
-            check("no_nano_cache_or_probe", !body.ContainsKey("caching") && !body.ContainsKey("stickyprovider") && !SupportsPromptCacheProbe(settings));
+            DialogueService.ConfigurePromptCacheRouting(settings, payload, body, OllamaCloudChatUrl, "exact-model:tag", "dialogue");
+            check("no_nano_cache_or_probe", !body.ContainsKey("caching") && !body.ContainsKey("stickyprovider") && !DialogueService.SupportsPromptCacheProbe(settings));
             settings["reasoningMode"] = "selective"; settings["reasoningEffort"] = "medium";
             foreach (string type in new[] { "dialogue", "action_router" })
             {
                 var wire = TestDict("reasoning", TestDict("effort", "high"), "reasoning_effort", "high");
-                var route = ConfigureReasoningRouting(settings, TestDict(), wire, OllamaCloudChatUrl, "exact-model:tag", type);
+                var route = DialogueService.ConfigureReasoningRouting(settings, TestDict(), wire, OllamaCloudChatUrl, "exact-model:tag", type);
                 check("reasoning_" + type, ReadBool(route, "providerControlsApplied", false)
                     && ReadString(wire, "reasoning_effort", "") == (type == "dialogue" ? "medium" : "none") && !wire.ContainsKey("reasoning"));
             }
             var disabled = TestDict("reasoning_effort", "high");
-            ConfigureReasoningRouting(settings, TestDict("reasoningDisabled", true), disabled, OllamaCloudChatUrl, "exact-model:tag", "dialogue");
+            DialogueService.ConfigureReasoningRouting(settings, TestDict("reasoningDisabled", true), disabled, OllamaCloudChatUrl, "exact-model:tag", "dialogue");
             check("explicit_reasoning_disabled", ReadString(disabled, "reasoning_effort", "") == "none");
             var banter = TestDict("llmProvider", NanoGptProvider, "banterProvider", OllamaCloudProvider,
                 "ollamaCloudApiKey", "fixture-banter", "llmModelProfiles", ReadDictionary(settings, "llmModelProfiles"));

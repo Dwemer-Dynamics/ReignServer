@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal sealed class AcceptedPlayerInputSource
         {
@@ -43,7 +43,7 @@ namespace ReignBetaServer
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (active.Count > 0) return active.Count == 1 ? active[0] : "__private_unknown__";
             var people = MergedInteractionParticipantProfiles(payload ?? TestDict()).Where(p =>
-                !CharacterIdFrom(p).Equals(player, StringComparison.OrdinalIgnoreCase) && ReadString(p, "role", "") != "player").Select(CharacterIdFrom)
+                !Program.CharacterIdFrom(p).Equals(player, StringComparison.OrdinalIgnoreCase) && ReadString(p, "role", "") != "player").Select(Program.CharacterIdFrom)
                 .Where(id => id.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (people.Count > 0) return people.Count == 1 ? people[0] : "__private_unknown__";
             string solo = ReadFirstString(payload, "heroStringId", "speakerHeroStringId");
@@ -77,7 +77,7 @@ namespace ReignBetaServer
             // distinct negative slots under the publisher's transaction/session lock;
             // active observer turns retain their independent nonnegative sequence.
             LockConversationSourcePublication(connection, sessionId);
-            var existingSource = QuerySql(connection, "SELECT text,status,speaker_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceId)).SingleOrDefault();
+            var existingSource = Program.QuerySql(connection, "SELECT text,status,speaker_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceId)).SingleOrDefault();
             if (existingSource != null)
             {
                 if (ReadString(existingSource, "text", "") != captured.Original || ReadString(existingSource, "status", "") != "source_only"
@@ -85,10 +85,10 @@ namespace ReignBetaServer
                     throw new InvalidOperationException("The saved original does not match this contribution; no input was replaced.");
                 return;
             }
-            int sourceOrder = ReadInt(QuerySql(connection,
+            int sourceOrder = ReadInt(Program.QuerySql(connection,
                 "SELECT COALESCE(MIN(turn_order),0)-1 AS next_order FROM conversation_turns WHERE session_id=$session AND turn_order<0;",
                 TestDict("session", sessionId)).Single(), "next_order", -1);
-            ExecuteSql(connection, @"INSERT INTO conversation_turns(
+            Program.ExecuteSql(connection, @"INSERT INTO conversation_turns(
 turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,location_id,participants_json,status,payload_json)
 VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,'player_input_source',$day,$ts,$location,$participants,'source_only',$payload);",
                 TestDict("id", sourceId, "session", sessionId, "event", eventId, "exchange", exchangeId,
@@ -202,7 +202,7 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
                     if (string.IsNullOrWhiteSpace(pendingWhisperTarget))
                     {
                         var recipients = (attendees ?? new()).Where(a => ReadString(a, "role", "") != "player"
-                            && CharacterIdFrom(a) != "main_hero").Select(CharacterIdFrom).Where(id => id.Length > 0).Distinct().ToList();
+                            && Program.CharacterIdFrom(a) != "main_hero").Select(Program.CharacterIdFrom).Where(id => id.Length > 0).Distinct().ToList();
                         pendingWhisperTarget = privateFocusId.Length > 0 ? privateFocusId
                             : recipients.Count == 1 ? recipients[0] : "__private_unknown__";
                     }
@@ -272,7 +272,7 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
             List<string> matches = new List<string>();
             foreach (Dictionary<string, object> attendee in attendees ?? new List<Dictionary<string, object>>())
             {
-                string id = CharacterIdFrom(attendee);
+                string id = Program.CharacterIdFrom(attendee);
                 string name = ReadString(attendee, "name", "");
                 if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name)) continue;
                 if (Regex.IsMatch(action, @"\b" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase)
@@ -283,7 +283,7 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
 
         private static string AttendeeName(List<Dictionary<string, object>> attendees, string id)
         {
-            return attendees?.Where(row => string.Equals(CharacterIdFrom(row), id,
+            return attendees?.Where(row => string.Equals(Program.CharacterIdFrom(row), id,
                     StringComparison.OrdinalIgnoreCase))
                 .Select(row => ReadString(row, "name", ""))
                 .FirstOrDefault() ?? string.Empty;

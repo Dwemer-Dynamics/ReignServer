@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ReviewedWriterPlanRules = "RECALL RESPONSE PLAN — internal to the response. First fill recallBasis with the exact reviewed recollections. "
             + "Use the named source as the person making each report. The source may name a different actor. "
@@ -106,14 +106,14 @@ namespace ReignBetaServer
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var review = ReadDictionary(item, "reviewedFactReplay");
             var facts = ReadDictionaryList(review, "facts");
-            var access = BuildKnowledgeAccessContext(observer, peer, "", context);
+            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
             var pins = new List<Dictionary<string, object>>();
             var keptFacts = new List<Dictionary<string, object>>();
             bool bindWriterPlan = !followUp && review.ContainsKey("writerPlan");
             bool boundDelivery = IsReviewedDelivery(ReadString(review, "writerPlan", ""));
             if (bindWriterPlan && access.PlayerIdentityUnknown)
                 throw new InvalidOperationException("A reviewed writer plan requires verified actor names in the disposable fixture.");
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             foreach (var fact in facts)
             {
                 string id = mapSourceId(ReadString(fact, "sourceId", ""));
@@ -127,7 +127,7 @@ namespace ReignBetaServer
                     if (publishedParty != null) throw new InvalidOperationException("Reviewed fact source is outside the published party view.");
                     projected = ReplayReviewedSourceBody(row, observer);
                 }
-                var audience = TextListFromJson(ReadString(row, "participants_json", "[]"));
+                var audience = Program.TextListFromJson(ReadString(row, "participants_json", "[]"));
                 long sequence = ReadLong(row, "accepted_sequence", -1);
                 string digest = ConversationExactTextHash(projected);
                 if (!audience.Contains(observer) || !audience.Contains(peer) || speaker != mapSourceId(ReadString(fact, "speakerId", ""))
@@ -150,7 +150,7 @@ namespace ReignBetaServer
             var recent = ReadStringList(item, "recentSourceIds").ToHashSet(StringComparer.Ordinal);
             var older = ReadDictionaryList(item, "sources").Select(s => ReadString(s, "sourceId", ""))
                 .Where(id => !recent.Contains(id)).Select(mapSourceId).ToHashSet(StringComparer.Ordinal);
-            var precision = CloneDictionary(ReadDictionary(stockPacket, "precisionEvidence"));
+            var precision = Program.CloneDictionary(ReadDictionary(stockPacket, "precisionEvidence"));
             if (ReadString(precision, "mode", "") != "precision")
                 throw new InvalidOperationException("Reviewed fact replay requires the stock precision packet.");
             string text = ReadString(stockPacket, "memoryPacket", "");
@@ -181,7 +181,7 @@ namespace ReignBetaServer
             }
             precision["records"] = kept;
             precision["dynamicMemoryTokenEstimate"] = EstimateContinuityTokens(text);
-            var projectedPacket = CloneDictionary(stockPacket);
+            var projectedPacket = Program.CloneDictionary(stockPacket);
             projectedPacket["memoryPacket"] = text;
             projectedPacket["precisionEvidence"] = precision;
             projectedPacket["reviewedFactProjection"] = TestDict("reviewReceiptSha256", ReadString(review, "reviewReceiptSha256", ""),
@@ -198,7 +198,7 @@ namespace ReignBetaServer
             var review = ReadDictionary(item, "reviewedFactReplay");
             string mode = ReadString(review, "writerPlan", "");
             if (mode.Length == 0) return null;
-            var deliveryChoices = IsReviewedDelivery(mode) ? CloneDictionary(ReadDictionary(review, "deliveryChoices")) : null;
+            var deliveryChoices = IsReviewedDelivery(mode) ? Program.CloneDictionary(ReadDictionary(review, "deliveryChoices")) : null;
             var envelope = ReadDictionary(request, "promptEnvelope");
             var messages = ReadDictionaryList(request, "messages");
             if (envelope == null || !ConversationStructureReceipts.TryGetValue(envelope, out var receipt)
@@ -271,7 +271,7 @@ namespace ReignBetaServer
             }
 
             int index = messages.IndexOf(reference);
-            var moved = messages.Select(CloneDictionary).ToList();
+            var moved = messages.Select(Program.CloneDictionary).ToList();
             moved[index]["content"] = context.Remove(start, record.Text.Length);
             moved.InsertRange(moved.Count - 1, new[] { TestDict("role", "user", "content", record.Text),
                 TestDict("role", "user", "content", rules) });
@@ -281,7 +281,7 @@ namespace ReignBetaServer
                 "strict", true, "schema", ObjectSchema(properties)));
             ConversationStructureReceipts.Remove(envelope);
             ConversationStructureReceipts.Add(envelope, new ConversationStructureReceipt {
-                Messages = moved.Select(CloneDictionary).ToList(), CanonicalTranscript = receipt.CanonicalTranscript });
+                Messages = moved.Select(Program.CloneDictionary).ToList(), CanonicalTranscript = receipt.CanonicalTranscript });
             envelope["messageCount"] = moved.Count;
             ReadDictionary(envelope, "conversationMessageStructure")["serializedMessagesHash"] = PromptHash(Json.Serialize(moved));
             string choicesHash = deliveryChoices == null ? "" : PromptHash(CanonicalJson(TestDict(

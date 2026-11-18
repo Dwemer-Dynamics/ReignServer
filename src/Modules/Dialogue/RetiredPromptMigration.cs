@@ -6,11 +6,11 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Exact reviewed versions only. An unfamiliar customization must be mapped
         // to its active rule owners before adding its hash here; never accept by filename.
-        private static readonly Dictionary<string, HashSet<string>> RetiredPromptHashes =
+        internal static readonly Dictionary<string, HashSet<string>> RetiredPromptHashes =
             new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
             {
                 ["dialogue_user_template.txt"] = new HashSet<string>(new[] {
@@ -38,9 +38,9 @@ namespace ReignBetaServer
                 && !pair.Value.Contains(PromptHash(File.ReadAllText(Path.Combine(directory, pair.Key), Encoding.UTF8))))
                 .Select(pair => pair.Key).ToList();
 
-        private static void RetireLegacyPromptTemplates(string directory)
+        internal static void RetireLegacyPromptTemplates(string directory)
         {
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 // Preflight the entire set before archiving anything. A restart after
                 // a partial filesystem failure safely resumes the remaining files.

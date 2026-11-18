@@ -8,7 +8,7 @@ using System.Runtime.CompilerServices;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string DialogueAnswerSupportSchema = "reign-dialogue-answer-support-v1";
         private const int AnswerSupportMaxCalls = 2;
@@ -44,7 +44,7 @@ namespace ReignBetaServer
             var checkedResult = ApplyAnswerSupportGuard(result, request, payload, prior, speaker, responder);
             if (!ReadBool(checkedResult, "ok", false))
             {
-                var failure = CloneDictionary(result);
+                var failure = Program.CloneDictionary(result);
                 foreach (var pair in checkedResult) failure[pair.Key] = pair.Value;
                 return failure;
             }
@@ -52,7 +52,7 @@ namespace ReignBetaServer
             string after = ReadFirstString(parsed, AnswerSupportReplyFields);
             if (before != after && validateChangedReply != null)
             {
-                var view = CloneDictionary(parsed);
+                var view = Program.CloneDictionary(parsed);
                 view["reply"] = after;
                 if (!validateChangedReply(view))
                 {
@@ -80,7 +80,7 @@ namespace ReignBetaServer
                 || !Regex.IsMatch(outsideQuotes, @"\bmy\s+(?:(?:old|former)\s+)?(?:mentor|tutor|teacher)\b", RegexOptions.IgnoreCase)
                 || !Regex.IsMatch(outsideQuotes, @"\bI\s+(?:answered|replied|responded)\b", RegexOptions.IgnoreCase)
                 || Regex.IsMatch(outsideQuotes, @"\b(?:you|your|we|us|our|he|she|they|him|her|them)\b", RegexOptions.IgnoreCase)) return false;
-            return !MergedInteractionParticipantProfiles(payload ?? TestDict()).Where(p => CharacterIdFrom(p) != speaker).Any(p => {
+            return !MergedInteractionParticipantProfiles(payload ?? TestDict()).Where(p => Program.CharacterIdFrom(p) != speaker).Any(p => {
                 string name = ReadString(p, "name", "");
                 return name.Length > 0 && Regex.IsMatch(speech, @"\b" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase);
             });
@@ -203,7 +203,7 @@ namespace ReignBetaServer
                 "playerId", ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 "youBinding", targets.Count == 1 ? targets[0] : "unbound_use_only_unambiguous_source_context",
                 "ordering", "unverified_unless_native_stage_attests_it", "nativeStage", ObservedGroupTurnStageFromRequest(request),
-                "participants", MergedInteractionParticipantProfiles(payload).Select(p => TestDict("id", CharacterIdFrom(p), "name", ReadString(p, "name", ""))).ToList(),
+                "participants", MergedInteractionParticipantProfiles(payload).Select(p => TestDict("id", Program.CharacterIdFrom(p), "name", ReadString(p, "name", ""))).ToList(),
                 "sources", sources.Select(s => TestDict("sourceId", ReadString(s, "id", ""), "speakerId", ReadString(s, "speakerId", ""), "text", ReadString(s, "text", ""),
                     "sourceHash", ReadString(s, "sourceHash", ""), "role", ReadString(s, "role", ""), "addressedIds", ReadStringList(s, "addressedIds"),
                     "acceptedSequence", ReadLong(s, "acceptedSequence", 0), "worldDay", double.IsFinite(ReadDouble(s, "worldDay", double.NaN)) ? s.GetValueOrDefault("worldDay") : null)).ToList());
@@ -246,7 +246,7 @@ namespace ReignBetaServer
             foreach (var actor in MergedInteractionParticipantProfiles(payload).Where(p => ReadString(p, "name", "").Length > 0)
                 .GroupBy(p => ReadString(p, "name", ""), StringComparer.OrdinalIgnoreCase).Where(g => g.Count() == 1).Select(g => g.First()))
             {
-                string name = ReadString(actor, "name", ""), id = CharacterIdFrom(actor);
+                string name = ReadString(actor, "name", ""), id = Program.CharacterIdFrom(actor);
                 if (name.Length == 0 || id.Length == 0) continue;
                 if (Regex.IsMatch(claim.Text, @"\b" + Regex.Escape(name) + @"\s+(?:asked|demanded|requested)\b", RegexOptions.IgnoreCase)
                     && ReadString(question, "speakerId", "") != id) return "unsupported_attribution";
@@ -277,8 +277,8 @@ namespace ReignBetaServer
             if (!ReadBool(llm, "ok", false)) return llm;
             var parsed = TryParseJsonObject(ReadString(llm, "content", ""));
             if (parsed == null) return llm;
-            bool isolated = !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value) || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1";
-            if (!isolated && !ReadBool(LoadSettings(), "enableDialogueAnswerSupportGuard", true)) return llm;
+            bool isolated = !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value) || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1";
+            if (!isolated && !ReadBool(Program.LoadSettings(), "enableDialogueAnswerSupportGuard", true)) return llm;
             var claims = AnswerSupportClaims(parsed, payload);
             claims = claims.Where(c => !IsExplicitPersonalAnswerBackstory(c.Text, payload, speaker)).ToList();
             if (claims.Count == 0) return ApplyQuestionCoverageGuard(llm, request, payload, speaker, AnswerSupportMaxCalls, responder);
@@ -301,11 +301,11 @@ namespace ReignBetaServer
                 int bytes = Encoding.UTF8.GetByteCount(Json.Serialize(check));
                 Dictionary<string, object> answer;
                 if (bytes > AnswerSupportRequestByteLimit) answer = TestDict("ok", false, "errorCode", "answer_support_input_budget");
-                else if (responder == null && (!string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+                else if (responder == null && (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                     || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1")) answer = TestDict("ok", false, "errorCode", "answer_support_capture_missing");
                 else
                 {
-                    try { answer = (responder ?? ChatWithLlm)(SealAnswerSupportAudit(CloneDictionary(check))); }
+                    try { answer = (responder ?? Program.ChatWithLlm)(SealAnswerSupportAudit(Program.CloneDictionary(check))); }
                     catch (Exception) { answer = TestDict("ok", false, "errorCode", "answer_support_unavailable"); }
                 }
                 string verdict = AnswerSupportVerdict(answer, sources, claim, payload, speaker, parsed);
@@ -338,7 +338,7 @@ namespace ReignBetaServer
                 // historical assertion or changes any surviving source quote.
                 if (!originalQuiet && string.IsNullOrWhiteSpace(DialogueClaimSpeech(visible)))
                     return TestDict("ok", false, "content", "", "errorCode", "dialogue_answer_support_no_visible_reply", "dialogueAnswerSupport", support);
-                var changed = CloneDictionary(parsed);
+                var changed = Program.CloneDictionary(parsed);
                 string replyField = AnswerSupportReplyFields.FirstOrDefault(key => ReadString(parsed, key, "").Length > 0) ?? "reply";
                 changed[replyField] = visible;
                 var invalidated = new List<Dictionary<string, object>>();

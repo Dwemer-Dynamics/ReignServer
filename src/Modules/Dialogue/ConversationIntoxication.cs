@@ -7,7 +7,7 @@ using ReignBeta.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string DrinkingOutputContract = @"DRINKING — PRIVATE ACTIONS, CHARACTER-AUTHORED PROSE
 Choose drinking as part of this ordinary response and describe it naturally in your character's own style. Optional observable narration uses single *asterisks*, speech outside. A lingering taste, a hurried mouthful or an absent-minded sip may flow within a longer paragraph; no fixed phrase, separate action sentence or visible action menu is required. Keep these private fields out of the visible reply.
@@ -118,12 +118,12 @@ Engine owns intoxication, recovery and tolerance; stateUpdates cannot change the
         {
             // Campaign schemas and their tables are cloned atomically by Save Sync.
             // Restored state seeds a new history branch instead of resetting sobriety.
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_intoxication (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_intoxication (
 hero_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS conversation_drinking_turns (
 hero_id TEXT NOT NULL, turn_key TEXT NOT NULL, receipt_json TEXT NOT NULL,
 PRIMARY KEY(hero_id,turn_key));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_drink_scene (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_drink_scene (
 scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
         }
 
@@ -136,10 +136,10 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
         {
             Dictionary<string, object> stored;
             DrinkScene scene;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureIntoxicationSchema(connection);
-                var row = QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
+                var row = Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
                     new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
                 stored = TryParseJsonObject(ReadString(row, "state_json", "{}"));
                 scene = LoadDrinkScene(connection, payload, IntoxicationWorldHour(payload));
@@ -229,15 +229,15 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
             double hour = IntoxicationWorldHour(payload);
             bool missingClock = double.IsNaN(hour) || double.IsInfinity(hour);
             string proposedReply = reply;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureIntoxicationSchema(connection);
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     var args = new Dictionary<string, object> { ["hero"] = heroId, ["turn"] = key };
-                    ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
-                    var row = QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args).First();
-                    var previous = QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).FirstOrDefault();
+                    Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
+                    var row = Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args).First();
+                    var previous = Program.QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).FirstOrDefault();
                     if (previous != null)
                     {
                         var receipt = TryParseJsonObject(ReadString(previous, "receipt_json", "{}"));
@@ -262,7 +262,7 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
                     // Invalid observation metadata must not suppress independently
                     // supported legacy refills/handoffs in the same paragraph.
                     var observationCheckScene = new DrinkScene { Scope = scene.Scope, Hour = scene.Hour,
-                        Vessels = scene.Vessels.Select(CloneDictionary).ToList() };
+                        Vessels = scene.Vessels.Select(Program.CloneDictionary).ToList() };
                     sceneObservations = sceneObservations.Where(o => ApplyDrinkSceneObservation(observationCheckScene, o,
                         payload, heroId, key, new List<Dictionary<string, object>>())).ToList();
                     var coveredSceneObservations = new List<DrinkSceneObservation>();
@@ -292,7 +292,7 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
                         profile != null && profile.ContainsKey("isFemale") ? (bool?)ReadBool(profile, "isFemale", false) : null,
                         proposedVessel, offeredBeverage, offer, scene.Scope.Length == 0 ? null : advanceScene, scene.Scope.Length == 0 ? null : sceneCovered);
                     if (scene.Scope.Length > 0) advanceScene(reply.Length);
-                    var consumptionCandidate = CloneDictionary(parsed);
+                    var consumptionCandidate = Program.CloneDictionary(parsed);
                     foreach (var item in ReadDictionaryList(consumptionCandidate, "drinkConsumptions"))
                         if (scene.Aliases.TryGetValue(ReadString(item, "vesselId", ""), out string id)) item["vesselId"] = id;
                     proposed += ValidateQuietDrinkConsumption(consumptionCandidate, reply, heroId, proposedVessel, offer, evidence);
@@ -353,14 +353,14 @@ scene_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}');");
                     if (persist)
                     {
                         CommitDrinkScene(connection, receiptNew);
-                        ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
-                        ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
+                        Program.ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
+                        Program.ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
                         transaction.Commit();
                     }
                     else transaction.Rollback();
                     payload["intoxicationReceipt"] = receiptNew;
                     if (persist && evidence.Count > 0)
-                        WriteAudit(campaignId, ReadString(payload, "correlationId", identity), "server",
+                        Program.WriteAudit(campaignId, ReadString(payload, "correlationId", identity), "server",
                             ReadString(payload, "mode", "dialogue"), "drinking.receipt", heroId, "", "", "completed", 0,
                             "Narrated drinking adjudicated against the accepted reply.", receiptNew);
                     return reply;

@@ -6,7 +6,7 @@ using ReignBeta.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static bool FiniteDrinkNumber(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
         // One unambiguous vessel shared by this NPC and the player in this conversation.

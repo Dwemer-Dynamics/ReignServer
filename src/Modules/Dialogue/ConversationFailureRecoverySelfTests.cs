@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunConversationFailureRecoverySelfTests()
         {
@@ -55,8 +55,8 @@ namespace ReignBetaServer
                 && ReadString(outage, "error", "") == "provider timeout"
                 && ReadInt(ReadDictionary(outage, "conversationRecovery"), "additionalProviderCalls", -1) == 0);
             var limited = TestDict("codexFailure", TestDict("httpStatusCode", 429));
-            Check("codex_rate_limit_is_explained_to_player", LlmFailureForDisplay(limited).Contains("429")
-                && LlmFailureForDisplay(limited).Contains("Retry"));
+            Check("codex_rate_limit_is_explained_to_player", Program.LlmFailureForDisplay(limited).Contains("429")
+                && Program.LlmFailureForDisplay(limited).Contains("Retry"));
             var quiet = TestDict("ok", true, "content", Json.Serialize(TestDict("participation", "quiet", "reply", "")));
             Check("intentional_group_silence_remains_valid", ReadBool(EnsureConversationDelivery(quiet, true), "ok", false)
                 && !ReadBool(EnsureConversationDelivery(quiet), "ok", true));
@@ -69,7 +69,7 @@ namespace ReignBetaServer
             foreach (string mode in new[] { "party_chat", "castle_chat", "social_event" })
             {
                 string bytes = Json.Serialize(quietAnswer);
-                var structured = RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
+                var structured = Program.RetryMalformedStructuredResponse(TestDict("ok", true, "content", bytes), TestDict(),
                     "", "quiet-contract", mode, "npc", "", _ => { formatRepairCalls++; throw new InvalidOperationException("Silence needs no provider repair."); });
                 var validated = ValidateSpokenEventResponse(structured, candidate => { spokenValidationCalls++; return candidate; });
                 Check(mode + "_silence_skips_format_and_spoken_repairs", formatRepairCalls == 0 && spokenValidationCalls == 0
@@ -108,7 +108,7 @@ namespace ReignBetaServer
             string campaign = "unanswered_input_" + Guid.NewGuid().ToString("N"), oldGeneration = _playerActionGeneration;
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     _playerActionGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 foreach (string route in new[] { "individual", "party", "event", "private_party" })
                 {
@@ -119,8 +119,8 @@ namespace ReignBetaServer
                         "heroStringId", "npc", "participants", new[] { "npc", "player", "listener" },
                         "playerText", words, "publicPlayerText", secret ? "I speak privately." : words,
                         "privatePlayerInputForSpeaker", secret, "mode", group ? "party_chat" : "dialogue");
-                    using (var connection = OpenCampaignConnection(campaign))
-                        ExecuteSql(connection, @"INSERT INTO conversation_sessions
+                    using (var connection = Program.OpenCampaignConnection(campaign))
+                        Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""listener""]','{""timelineId"":""input_branch""}');",
                             TestDict("session", session, "campaign", campaign));
@@ -128,15 +128,15 @@ VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""liste
                         words, group, route == "event" ? "event-input" : "");
                     var replay = RetainUnansweredPlayerContribution(campaign, input, "npc", "player", "Player", "Mira",
                         words, group, route == "event" ? "event-input" : "");
-                    using (var connection = OpenCampaignConnection(campaign))
+                    using (var connection = Program.OpenCampaignConnection(campaign))
                     {
                         string unit = AcceptedConversationEventId(campaign, "npc", input);
-                        var originals = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;",
+                        var originals = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;",
                             TestDict("id", unit));
                         Check(route + "_failed_generation_retains_input_once_without_npc", ReadString(retained, "status", "") == "player_input_retained"
                             && ReadStringList(retained, "sourceIds").SequenceEqual(ReadStringList(replay, "sourceIds"))
                             && originals.Count == (secret ? 2 : 1) && originals.All(t => ReadString(t, "role", "") == "player")
-                            && QuerySql(connection, "SELECT * FROM memories;").Count == 0);
+                            && Program.QuerySql(connection, "SELECT * FROM memories;").Count == 0);
                         if (secret)
                             Check("failed_private_input_is_not_heard_by_bystander", originals
                                 .Where(t => ReadString(t, "text", "").Contains("SECRET-EAST-GATE-901"))
@@ -149,7 +149,7 @@ VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""liste
                     }
                     if (route == "individual")
                     {
-                        input["retryOfCorrelationId"] = EnsureCorrelationId(input);
+                        input["retryOfCorrelationId"] = Program.EnsureCorrelationId(input);
                         int generated = 0;
                         input["playerText"] = "Changed words cannot replace an original.";
                         var changed = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });
@@ -163,8 +163,8 @@ VALUES($session,$campaign,'npc','player','open',1,1,'[""npc"",""player"",""liste
                         var recovered = RunDialogueWithRetryGate(input, () => { generated++; return TestDict("ok", true); });
                         Check("completed_response_is_recovered_without_generation", ReadBool(recovered, "reloadConversationHistory", false)
                             && ReadInt(recovered, "additionalProviderCalls", -1) == 0 && generated == 1);
-                        using (var connection = OpenCampaignConnection(campaign))
-                            Check("retry_never_duplicates_original_player_line", QuerySql(connection,
+                        using (var connection = Program.OpenCampaignConnection(campaign))
+                            Check("retry_never_duplicates_original_player_line", Program.QuerySql(connection,
                                 "SELECT turn_id FROM conversation_turns WHERE event_id=$id AND role='player';", TestDict("id", unit)).Count == 1);
                     }
                 }

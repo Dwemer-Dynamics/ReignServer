@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Player-facing history only. Never call this from NPC recall or prompt construction.
         internal static List<Dictionary<string, object>> ReadOriginalConversationHistory(string campaign,
@@ -14,8 +14,8 @@ namespace ReignBetaServer
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string timeline = ContinuityTimeline(payload);
             if (player.Length == 0) return legacy;
-            using var connection = OpenCampaignConnection(campaign);
-            var rows = QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload
+            using var connection = Program.OpenCampaignConnection(campaign);
+            var rows = Program.QuerySql(connection, @"SELECT t.*,s.npc_id,s.player_id,s.payload_json AS session_payload
 FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE s.player_id=$player AND ($session='' OR t.session_id=$session)
 AND ($npc='' OR s.npc_id=$npc OR (t.channel='party_announcement' AND t.participants_json::jsonb @> jsonb_build_array($npc)) OR EXISTS(SELECT 1 FROM conversation_turns n
@@ -24,13 +24,13 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
                 TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));
             bool official = ReadString(payload, "conversationMode", "") == "ambassador_official";
             string posting = ReadString(payload, "postingId", "");
-            var historyAccess = new KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
+            var historyAccess = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
                 WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             rows = rows.Where(row => {
                 var meta = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var sessionMeta = TryParseJsonObject(ReadString(row, "session_payload", "{}"));
                 string rowTimeline = FirstNonEmpty(ReadString(meta, "timelineId", ""), ReadString(sessionMeta, "timelineId", ""));
-                var scoped = CloneDictionary(row); scoped["timeline_id"] = rowTimeline;
+                var scoped = Program.CloneDictionary(row); scoped["timeline_id"] = rowTimeline;
                 return MemoryTimeVisible(scoped, historyAccess, connection) && (!official || ReadString(row, "channel", "") == "ambassador_official"
                     || ReadString(sessionMeta, "channel", "") == "ambassador_official")
                     && (!official || posting.Length == 0 || FirstNonEmpty(ReadString(meta, "postingId", ""), ReadString(sessionMeta, "postingId", "")) == posting);
@@ -46,7 +46,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             {
                 var args = TestDict("player", player);
                 var parameters = batch.Select((id, index) => { args["source" + index] = id; return "$source" + index; }).ToList();
-                foreach (var source in QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player AND turn_id IN ("
+                foreach (var source in Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player AND turn_id IN ("
                     + string.Join(",", parameters) + ");", args).Where(r => MemoryTimeVisible(r, historyAccess, connection)))
                     sources[ReadString(source, "turn_id", "")] = source;
             }
@@ -58,7 +58,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
             {
                 var args = TestDict("player", player);
                 var parameters = batch.Select((id, index) => { args["turn" + index] = id; return "$turn" + index; }).ToList();
-                foreach (var source in QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player"
+                foreach (var source in Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='source_only' AND speaker_id=$player"
                     + " AND payload_json::jsonb->'originalRecovery'->>'acceptedTurnId' IN (" + string.Join(",", parameters) + ");", args)
                     .Where(r => MemoryTimeVisible(r, historyAccess, connection)))
                     sources[ReadString(source, "turn_id", "")] = source;
@@ -119,7 +119,7 @@ AND t.status IN ('active','source_only') ORDER BY t.ts DESC,t.session_id DESC,t.
                     (exchange.Length > 0 && ReadString(line, "exchangeId", "") == exchange
                     || ReadString(line, "text", "") == ReadString(old, "text", "")))) continue;
                 if (ReadDouble(old, "worldDay", 0d) > historyAccess.WorldDay) continue;
-                var retained = CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
+                var retained = Program.CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
             }
             return lines.OrderBy(line => ReadLong(line, "ts", 0)).TakeLast(limit).ToList();
         }

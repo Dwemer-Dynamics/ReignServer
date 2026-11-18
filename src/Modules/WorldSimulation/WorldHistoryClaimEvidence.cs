@@ -51,7 +51,7 @@ namespace ReignBetaServer
                 if (family == "payment" && !Regex.IsMatch(quote, @"\b(?:gold|coins?|denars?|money|payment|tribute|wages?|rent)\b|\d", RegexOptions.IgnoreCase)) continue;
                 if (family == "meeting" && Regex.IsMatch(quote, @"\bmet\s+(?:(?:the|your|my|their|our)\s+)?(?:expectations?|requirements?|conditions?|needs?|standards?)\b", RegexOptions.IgnoreCase)) continue;
                 result.Add(new Dictionary<string, object> { ["quote"] = quote, ["start"] = start,
-                    ["length"] = quote.Length, ["sourceHash"] = Program.PromptHash(source), ["claimFamily"] = family,
+                    ["length"] = quote.Length, ["sourceHash"] = DialogueService.PromptHash(source), ["claimFamily"] = family,
                     ["actor"] = "claimant", ["evidenceType"] = "spoken_statement" });
             }
             return result;

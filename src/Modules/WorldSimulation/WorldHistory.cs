@@ -150,8 +150,8 @@ AND NOT EXISTS (
                 }
             }
             else Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
-            Program.EnsureImmediateTournamentKnowledge(connection);
-            Program.EnsurePlayerPerformanceSchema(connection);
+            DialogueService.EnsureImmediateTournamentKnowledge(connection);
+            DialogueService.EnsurePlayerPerformanceSchema(connection);
             string storedCampaignId = ReadString(Program.QuerySql(connection,
                 "SELECT campaign_id FROM world_history_events WHERE campaign_id<>'' LIMIT 1;").FirstOrDefault(), "campaign_id", "");
             if (!string.IsNullOrWhiteSpace(storedCampaignId))
@@ -250,14 +250,14 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                 // advisory lock. Complete them before the ingest transaction so
                 // retention compaction cannot retain that lock for its entire batch.
                 EnsureWorldHistorySchema(connection);
-                Program.EnsureSharedActivityMemorySchema(connection);
+                DialogueService.EnsureSharedActivityMemorySchema(connection);
                 if (hasSpouseLetter)
                 {
                     RelationshipsService.EnsureRelationshipAndCorrespondenceSchema(connection);
                     RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                     RelationshipsService.EnsureRelationshipLifecycleSchema(connection);
                 }
-                if (!Program.SharedActivityGenerationMatches(connection, payload))
+                if (!DialogueService.SharedActivityGenerationMatches(connection, payload))
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Stale activity upload from an obsolete save generation." };
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
@@ -360,7 +360,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                     // Preserve original native participation before lossy history compaction.
                     foreach (var item in events)
                     {
-                        Program.ProjectSharedActivity(connection, timelineId, item);
+                        DialogueService.ProjectSharedActivity(connection, timelineId, item);
                         if (hasSpouseLetter)
                         {
                             foreach (var stored in Program.QuerySql(connection,
@@ -375,7 +375,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                         string performanceEventId = ReadFirstString(item, "eventId", "event_id", "id");
                         foreach (var performanceEvent in Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));",
                             TestDict("id", performanceEventId, "timeline", timelineId)))
-                            Program.ProjectPlayerPerformanceEvent(connection, performanceEvent);
+                            DialogueService.ProjectPlayerPerformanceEvent(connection, performanceEvent);
                     }
                     transaction.Commit();
                 }
@@ -511,16 +511,16 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
                     new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
                 if (historyMissing || branched)
                 {
-                    Program.BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
-                    Program.BindRecoveredCommunications(connection, requested, timelineId, savedSequence, savedHead);
+                    DialogueService.BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
+                    DialogueService.BindRecoveredCommunications(connection, requested, timelineId, savedSequence, savedHead);
                     RelationshipsService.BindRecoveredPregnancyKnowledge(connection, requested, timelineId, savedSequence, savedHead);
-                    Program.BindRecoveredMemorySources(connection, requested, timelineId, savedSequence, savedHead);
+                    DialogueService.BindRecoveredMemorySources(connection, requested, timelineId, savedSequence, savedHead);
                 }
                 result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["branched"] = branched,
                     ["historyMissing"] = historyMissing,
-                    ["sharedActivityGeneration"] = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", ""),
+                    ["sharedActivityGeneration"] = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", ""),
                     ["parentTimelineId"] = branched ? requested : ReadString(existing, "parent_timeline_id", ""),
                     ["savedSequence"] = savedSequence, ["previousServerHeadSequence"] = serverHead, ["historyCompleteFromWorldDay"] = completeFrom
                 };
@@ -641,7 +641,7 @@ VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<stri
         internal static bool IsImmediateHistoryParticipant(string eventType, Dictionary<string, object> entity)
         {
             string type = ReadFirstString(entity, "entityType", "entity_type", "type");
-            return (type == "hero" || type == "character") && Program.IsFirsthandWorldHistoryRole(eventType, ReadString(entity, "role", ""));
+            return (type == "hero" || type == "character") && DialogueService.IsFirsthandWorldHistoryRole(eventType, ReadString(entity, "role", ""));
         }
 
         private static void InsertWorldHistoryFts(ReignDbConnection connection, string eventId, string text, List<Dictionary<string, object>> entities, string location, string eventType)
@@ -772,9 +772,9 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
 
                 string candidateClaimantId = lookupOnly ? "" : claimantId;
                 List<Dictionary<string, object>> candidates = QueryWorldHistoryCandidates(connection, timelineId, claim, family, candidateClaimantId, entityHints, locationId, fromDay, toDay, 256);
-                Dictionary<string, object> semanticHistory = Program.TrySemanticMemorySearch(campaignId, claim,
+                Dictionary<string, object> semanticHistory = DialogueService.TrySemanticMemorySearch(campaignId, claim,
                     new Dictionary<string, object>(), Program.LoadSettings(), new[] { "world_history_event" }, timelineId);
-                candidates = Program.MergeSemanticWorldHistoryCandidates(connection, campaignId, timelineId, claim, family, claimantId,
+                candidates = DialogueService.MergeSemanticWorldHistoryCandidates(connection, campaignId, timelineId, claim, family, claimantId,
                     entityHints, locationId, fromDay, toDay, candidates, semanticHistory, Program.LoadSettings());
                 Dictionary<string, object> minimeRerank = TryMinimeHistoryRerank(claim, purpose, family, candidates.Take(64).ToList());
                 ApplyWorldHistoryMinimeScores(candidates, minimeRerank);
@@ -823,9 +823,9 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                 List<string> speakerIds = evidenceIds.Where(id => WorldHistoryEventVisibleToSpeaker(connection, id, speakerId, speakerKingdomId, worldDay)).ToList();
                 foreach (string visibleEventId in speakerIds)
                 {
-                    Program.UpsertKnowledgeReceipt(connection, visibleEventId, speakerId, "world_history_rule", 1d, 1d, worldDay, "world_history_verification", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                    DialogueService.UpsertKnowledgeReceipt(connection, visibleEventId, speakerId, "world_history_rule", 1d, 1d, worldDay, "world_history_verification", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 }
-                List<string> reconciledBeliefIds = Program.ReconcileWorldHistoryClaimBeliefs(connection, speakerId, speakerIds, worldDay);
+                List<string> reconciledBeliefIds = DialogueService.ReconcileWorldHistoryClaimBeliefs(connection, speakerId, speakerIds, worldDay);
                 string objectiveVerdict = ReadString(verdict, "verdict", "insufficient_evidence");
                 string speakerVerdict = string.IsNullOrWhiteSpace(speakerId) ? "unknown" : speakerIds.Count == 0 ? "unknown" : objectiveVerdict;
                 string checkId = "whc_" + Guid.NewGuid().ToString("N");
@@ -839,7 +839,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                     ["explanation"] = ReadString(verdict, "explanation", ""), ["evidenceEventIds"] = evidenceIds,
                     ["speakerEvidenceEventIds"] = speakerIds, ["matchedComponents"] = ReadStringList(verdict, "matchedComponents"),
                     ["mismatchedComponents"] = ReadStringList(verdict, "mismatchedComponents"),
-                    ["speakerKnowledge"] = Program.BuildWorldHistoryKnowledgeSummary(connection, speakerIds, speakerId, speakerKingdomId, worldDay),
+                    ["speakerKnowledge"] = DialogueService.BuildWorldHistoryKnowledgeSummary(connection, speakerIds, speakerId, speakerKingdomId, worldDay),
                     ["reconciledBeliefIds"] = reconciledBeliefIds,
                     ["coverage"] = new Dictionary<string, object> { ["historyCompleteFromWorldDay"] = completeFrom, ["requestedFromDay"] = fromDay, ["complete"] = fromDay < 0 || completeFrom <= 0 || fromDay >= completeFrom },
                     ["minime"] = new Dictionary<string, object> { ["route"] = minimeRoute, ["rerank"] = minimeRerank },
@@ -1107,7 +1107,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
         private static bool WorldHistoryEventVisibleToSpeaker(ReignDbConnection connection, string eventId, string speakerId, string speakerKingdomId, double worldDay)
         {
             if (string.IsNullOrWhiteSpace(speakerId)) return false;
-            Dictionary<string, object> knowledge = Program.DetermineWorldHistoryKnowledge(connection, new List<string> { eventId }, speakerId, speakerKingdomId, worldDay);
+            Dictionary<string, object> knowledge = DialogueService.DetermineWorldHistoryKnowledge(connection, new List<string> { eventId }, speakerId, speakerKingdomId, worldDay);
             return !string.Equals(ReadString(knowledge, "basis", "none"), "none", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -1280,9 +1280,9 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                     && ReadStringList(lookup,"evidenceEventIds").Contains("battle_test",StringComparer.OrdinalIgnoreCase)
                     && ReadDictionaryList(ReadDictionary(lookup,"speakerKnowledge"),"events").Any(x=>ReadString(x,"event_id","")=="battle_test")}}
             };
-            assertions.AddRange(Program.RunLieDetectionAssertions(campaignId, timelineId));
+            assertions.AddRange(DialogueService.RunLieDetectionAssertions(campaignId, timelineId));
             assertions.AddRange(RunWorldHistoryRetentionAssertions());
-            assertions.AddRange(Program.RunWorldHistoryDialogueAssertions(campaignId, timelineId));
+            assertions.AddRange(DialogueService.RunWorldHistoryDialogueAssertions(campaignId, timelineId));
             try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
             try { Directory.Delete(Program.CampaignDirectory(campaignId), true); } catch { }
             return new Dictionary<string, object> { ["ok"] = assertions.All(x => ReadBool(x, "passed", false)), ["passed"] = assertions.All(x => ReadBool(x, "passed", false)), ["assertions"] = assertions };

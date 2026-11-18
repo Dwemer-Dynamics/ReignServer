@@ -4,9 +4,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static Dictionary<string, object> AgencyTestContext() => TestDict(
+        internal static Dictionary<string, object> AgencyTestContext() => TestDict(
             "timelineId", "agency_timeline", "ownerId", "npc", "peerId", "player", "worldDay", 20d,
             "playerText", "Will you leave your house and travel with me?", "records", new List<Dictionary<string, object>>(),
             "objectIds", new[] { "castle_a", "castle_b" },
@@ -28,7 +28,7 @@ namespace ReignBetaServer
                     "paymentDeferred", false, "benefit", "", "conditions", ""));
         }
 
-        private static Dictionary<string, object> AgencyTestReply(Dictionary<string, object> proposal) => TestDict(
+        internal static Dictionary<string, object> AgencyTestReply(Dictionary<string, object> proposal) => TestDict(
             "reply", "My household matters to me.", "body", "My household matters to me.", "shouldReply", true,
             "decisionBrief", TestDict("facts", new string[0], "goals", new string[0], "constraints", new string[0], "decision", "Consider the terms.", "confidence", 1d),
             "politicalConduct", TestDict(), "emotion", "calm", "intent", "considering", "participation", "speak",
@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 && ReadString(ReadDictionary(soldierUpdate, "terms"), "conditions", "") == ""
                 && ReadString(soldierUpdate, "reconsideration", "").Contains("transparency")
                 && ReadDictionaryList(soldierReply, "continuityWrites").Count == 1, soldierEvaluation);
-            var ambiguousSoldier = CloneDictionary(soldierReply);
+            var ambiguousSoldier = Program.CloneDictionary(soldierReply);
             soldierContext["playerText"] = "I agree.";
             add("ambiguous_agreement_does_not_clear_soldier_condition",
                 !TryResolveSoldierNoticeCondition(ambiguousSoldier, soldierContext), null);
@@ -223,7 +223,7 @@ namespace ReignBetaServer
             add("condition_does_not_execute_immediately", !ReadBool(EvaluateConversationAgency(AgencyTestReply(condition), context), "ok", true), null);
             condition["disposition"] = "conditional";
             add("conditional_agreement_can_be_recorded", ReadBool(EvaluateConversationAgency(AgencyTestReply(condition), context), "ok", false), null);
-            var conditionalContext = CloneDictionary(context);
+            var conditionalContext = Program.CloneDictionary(context);
             condition["objections"] = new[] { "duty" };
             conditionalContext["records"] = ReadDictionaryList(EvaluateConversationAgency(AgencyTestReply(condition), conditionalContext), "updates");
             var unfulfilled = AgencyTestProposal(conditionalContext, "accepted", "");
@@ -247,17 +247,17 @@ namespace ReignBetaServer
             string campaign = "agency_test_" + Guid.NewGuid().ToString("N");
             context = AgencyTestContext();
             var original = AgencyTestReply(AgencyTestProposal(context));
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 add("postgresql_backend_only", connection is Npgsql.NpgsqlConnection
-                    && ReadString(QuerySql(connection, "SELECT version() AS version;").FirstOrDefault(), "version", "").StartsWith("PostgreSQL", StringComparison.Ordinal), null);
+                    && ReadString(Program.QuerySql(connection, "SELECT version() AS version;").FirstOrDefault(), "version", "").StartsWith("PostgreSQL", StringComparison.Ordinal), null);
                 var committed = CommitConversationAgency(connection, original, context, "turn_1");
                 var replay = CommitConversationAgency(connection, original, context, "turn_1");
                 add("durable_turn_retry_is_idempotent", ReadBool(committed, "ok", false) && ReadBool(replay, "replayed", false)
-                    && QuerySql(connection, "SELECT * FROM conversation_negotiation_turns;").Count == 1, replay);
+                    && Program.QuerySql(connection, "SELECT * FROM conversation_negotiation_turns;").Count == 1, replay);
                 add("stale_prepared_reply_rejected", !ReadBool(CommitConversationAgency(connection, original, context, "stale_turn"), "ok", true), null);
             }
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 var reloaded = ReadConversationNegotiations(connection, "agency_timeline", "npc", "player");
                 add("connection_reload_retains_refusal", reloaded.Count == 1 && ReadString(reloaded.Single(), "disposition", "") == "terms_refusal", reloaded);
@@ -279,10 +279,10 @@ namespace ReignBetaServer
                 && IsTechnicalConversationNotice(ReadString(failedVisible, "reply", ""))
                 && ReadDictionaryList(failedVisible, "proposalDecisions").Count == 0
                 && ReadDictionaryList(failedVisible, "relationshipAssessments").Count == 0
-                && !ActionGateShouldPlan(ReadDictionary(failedVisible, "actionGate"))
+                && !Program.ActionGateShouldPlan(ReadDictionary(failedVisible, "actionGate"))
                 && !ReadBool(ReadDictionary(failedVisible, "conversationAgencyReceipt"), "ok", true), enforced);
             add("failed_repair_marker_survives_display_sanitizer",
-                SanitizeVisibleReply(ReadString(failedVisible, "reply", "")).EndsWith(".,", StringComparison.Ordinal), null);
+                Program.SanitizeVisibleReply(ReadString(failedVisible, "reply", "")).EndsWith(".,", StringComparison.Ordinal), null);
             var failedAuthorityErrors = new List<string>();
             add("failed_visible_reply_cannot_authorize_voluntary_action",
                 !BindConversationAgencyAuthority(TestDict("conversationAgencyReceipt", ReadDictionary(failedVisible, "conversationAgencyReceipt")),
@@ -358,15 +358,15 @@ namespace ReignBetaServer
                 TestDict("ok", true, "replayed", true, "heroStringId", "npc", "participation", "speak", "reply", "My answer is still no.") }),
                 new List<Dictionary<string, object>>(), "player", "replayed_agency_turn");
             add("replayed_reply_cannot_farm_party_reactions", replayParty.Count == 0, replayParty);
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
-                int before = QuerySql(connection, "SELECT letter_id FROM letters;").Count;
+                int before = Program.QuerySql(connection, "SELECT letter_id FROM letters;").Count;
                 var staleLetter = AgencyTestReply(AgencyTestProposal(AgencyTestContext()));
                 staleLetter["motiveDecision"] = TestDict("conversationAgency", context);
                 bool rolledBack = false;
                 try { RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "stale_parent", "", "", 20, 21, staleLetter); }
                 catch { rolledBack = true; }
-                add("stale_letter_and_negotiation_roll_back_together", rolledBack && QuerySql(connection, "SELECT letter_id FROM letters;").Count == before, null);
+                add("stale_letter_and_negotiation_roll_back_together", rolledBack && Program.QuerySql(connection, "SELECT letter_id FROM letters;").Count == before, null);
                 var letter = AgencyTestReply(AgencyTestProposal(context)); letter["motiveDecision"] = TestDict("conversationAgency", context); letter["agencyTurnId"] = "mail_parent";
                 var sent = RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
                 var resent = RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
@@ -377,14 +377,14 @@ namespace ReignBetaServer
             var point = PersistenceService.SaveSyncTestPointPayload(campaign, "agency_snapshot", 20d, "Agency isolated snapshot");
             point["timelineId"] = "agency_timeline";
             var registered = PersistenceService.SaveSyncRegisterApi(point);
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
                 CommitConversationAgency(connection, AgencyTestReply(AgencyTestProposal(context)), context, "future_pressure");
             PersistenceService.MarkSaveSyncActiveStateDirty(campaign);
             var restored = PersistenceService.SaveSyncLoadApi(point, false);
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
                 add("save_sync_restores_refusal_revision_and_receipts", ReadBool(registered, "ok", false) && ReadBool(restored, "ok", false)
                     && ReadInt(ReadConversationNegotiations(connection, "agency_timeline", "npc", "player").Single(), "revision", 0) == 2
-                    && QuerySql(connection, "SELECT receipt_id FROM conversation_negotiation_turns WHERE turn_id='future_pressure';").Count == 0, restored);
+                    && Program.QuerySql(connection, "SELECT receipt_id FROM conversation_negotiation_turns WHERE turn_id='future_pressure';").Count == 0, restored);
             return results;
         }
     }

@@ -30,7 +30,7 @@ namespace ReignBetaServer
                 && ReadBool(p, "suppressPlayerTranscript", false) && IsNpcLifeApproach(p)
                 && ReadString(source, "playerText", "") == "FORGED_PLAYER_SPEECH");
             Check("serialized_flags_cannot_grant_draft_authority", !IsNpcLifeApproach(TryParseJsonObject(Json.Serialize(p))));
-            Check("server_arrival_selects_shipping_action_protocol", Program.UsesStructuredActions(p)
+            Check("server_arrival_selects_shipping_action_protocol", DialogueService.UsesStructuredActions(p)
                 && ReadInt(source, "structuredActionProtocolVersion", 0) == -1);
             int legacyRepairCalls = 0;
             var leaveOpening = TestDict("ok", true, "content", Json.Serialize(TestDict("reply",
@@ -38,7 +38,7 @@ namespace ReignBetaServer
             var leaveMotive = TestDict("conversationAgency", TestDict("peerId", "player", "playerText", "",
                 "facts", TestDict(), "records", new object[0]));
             string originalLeaveOpening = Json.Serialize(leaveOpening);
-            var routedLeaveOpening = Program.EnforceConversationAgencyResponse(leaveOpening, TestDict(), leaveMotive, p,
+            var routedLeaveOpening = DialogueService.EnforceConversationAgencyResponse(leaveOpening, TestDict(), leaveMotive, p,
                 campaign, "arrival_leave_protocol_fixture", "individual_chat", encounter.HeroId,
                 _ => { legacyRepairCalls++; return TestDict("ok", false); }, persist: false);
             Check("typed_arrival_does_not_require_incompatible_legacy_proposal_metadata",
@@ -79,18 +79,18 @@ namespace ReignBetaServer
             Check("current_preparation_has_campaign_admission_and_releases_on_success_and_exception",
                 ReadBool(admitted, "held", false) && ReadBool(admitted, "successReleased", false) && ReadBool(admitted, "exceptionReleased", false));
 
-            var characteristics = Program.PromptParityCharacteristics();
+            var characteristics = DialogueService.PromptParityCharacteristics();
             characteristics["traits"] = TestDict("basePersonalitySummary", "Patient, compassionate and careful with difficult truths.");
             characteristics["background"] = TestDict("summary", "Her responsibility for Ostican weighs heavily on her.");
             characteristics["voice"] = TestDict("speechStyle", "Direct, familiar with trusted friends.");
             var live = TestDict("mood", "worried about the town's stores", "currentPlan", "await Michael's return with supplies or news", "currentCrisis", "uncertain supplies");
-            var identity = Program.PromptParityIdentity(); identity["usableName"] = "Michael";
+            var identity = DialogueService.PromptParityIdentity(); identity["usableName"] = "Michael";
             const string expected = "Come back with wagons or come back with word. A rider ahead of the wagons.";
             const string letter = "I sent a letter asking for news; delivery and reading remain unknown.";
             const string revised = "The old exact arrival date was withdrawn. No new date is fixed.";
-            string memory = Program.RenderContinuityRecord("arrival_commitment", "obligation", encounter.HeroId, state.TimelineId, 19, 120, true, expected)
-                + "\n" + Program.RenderContinuityRecord("arrival_letter", "letter", encounter.HeroId, state.TimelineId, 20, 120, true, letter)
-                + "\n" + Program.RenderContinuityRecord("arrival_revision", "correction", encounter.HeroId, state.TimelineId, 20, 120, true, revised);
+            string memory = DialogueService.RenderContinuityRecord("arrival_commitment", "obligation", encounter.HeroId, state.TimelineId, 19, 120, true, expected)
+                + "\n" + DialogueService.RenderContinuityRecord("arrival_letter", "letter", encounter.HeroId, state.TimelineId, 20, 120, true, letter)
+                + "\n" + DialogueService.RenderContinuityRecord("arrival_revision", "correction", encounter.HeroId, state.TimelineId, 20, 120, true, revised);
             var prior = new List<Dictionary<string, object>> {
                 TestDict("turnId", "arrival_old_npc", "role", "npc", "speakerHeroStringId", encounter.HeroId, "speaker", "Ingunde",
                     "text", "Go safely, friend. I will set aside an evening when you return."),
@@ -98,7 +98,7 @@ namespace ReignBetaServer
                     "text", "I will be back. I do not know the date yet.")
             };
             var empty = TestDict(); var noLines = new List<Dictionary<string, object>>();
-            Program.PromptEnvelope Envelope(Dictionary<string, object> payload) => Program.BuildDialoguePromptEnvelope(campaign,
+            DialogueService.PromptEnvelope Envelope(Dictionary<string, object> payload) => DialogueService.BuildDialoguePromptEnvelope(campaign,
                 encounter.HeroId, "Ingunde", "Michael", "Michael", NpcLifeArrivalCue, ReadString(payload, "sceneContext", ""),
                 profile, characteristics, live, empty, empty, prior, noLines, noLines, noLines, identity, payload, memory, "");
             var ordinary = DeepCloneProfileDictionary(p);
@@ -123,7 +123,7 @@ namespace ReignBetaServer
                 && ReadString(request, "heroStringId", "") == encounter.HeroId && ReadString(request, "heroName", "") == "Ingunde");
             var wireSettings = TestDict("llmProvider", Program.NanoGptProvider, "reasoningMode", "always", "reasoningEffort", "medium");
             request["model"] = "approach_fixture_model";
-            var wire = ReadDictionary(Program.CaptureMemoryReplayProviderRequest(request, wireSettings), "providerWireCapture");
+            var wire = ReadDictionary(DialogueService.CaptureMemoryReplayProviderRequest(request, wireSettings), "providerWireCapture");
             var wireBody = TryParseJsonObject(ReadString(wire, "requestJson", ""));
             string wireText = string.Join("\n", ReadDictionaryList(wireBody, "messages").Select(m => ReadString(m, "content", "")));
             Check("actual_provider_wire_retains_history_and_required_return_sources", ReadString(wire, "status", "") == "captured"

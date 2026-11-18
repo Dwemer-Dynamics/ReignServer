@@ -1647,16 +1647,16 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(ReadString(settings, "qdrantUrl", "")))
                 throw new InvalidOperationException("External Qdrant is selected, but its URL is not configured. No campaign data was deleted.");
 
-            Program.StartManagedSemanticWorker(settings);
-            Dictionary<string, object> request = Program.SemanticProviderRequest(settings);
-            request["collection"] = Program.SemanticCollection;
+            DialogueService.StartManagedSemanticWorker(settings);
+            Dictionary<string, object> request = DialogueService.SemanticProviderRequest(settings);
+            request["collection"] = DialogueService.SemanticCollection;
             request["deleteCollection"] = true;
             Exception last = null;
             for (int attempt = 0; attempt < 20; attempt++)
             {
                 try
                 {
-                    Dictionary<string, object> response = TryParseJsonObject(Program.PostJsonToUrl(Program.SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000)) ?? new Dictionary<string, object>();
+                    Dictionary<string, object> response = TryParseJsonObject(Program.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000)) ?? new Dictionary<string, object>();
                     if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Qdrant collection deletion failed."));
                     return;
                 }
@@ -2201,16 +2201,16 @@ WHERE table_schema=current_schema()
             }
             if (ids.Count == 0) return 0;
             Dictionary<string, object> settings = Program.LoadSettings();
-            Program.StartManagedSemanticWorker(settings);
+            DialogueService.StartManagedSemanticWorker(settings);
             for (int offset = 0; offset < ids.Count;
                 offset += CampaignSemanticDeleteBatchSize)
             {
-                Dictionary<string, object> request = Program.SemanticProviderRequest(settings);
-                request["collection"] = Program.SemanticCollection;
+                Dictionary<string, object> request = DialogueService.SemanticProviderRequest(settings);
+                request["collection"] = DialogueService.SemanticCollection;
                 request["ids"] = ids.Skip(offset)
                     .Take(CampaignSemanticDeleteBatchSize).ToList();
                 Dictionary<string, object> response = TryParseJsonObject(
-                    Program.PostJsonToUrl(Program.SemanticWorkerUrl(settings, "/vectors/delete"),
+                    Program.PostJsonToUrl(DialogueService.SemanticWorkerUrl(settings, "/vectors/delete"),
                         Json.Serialize(request), CampaignSemanticDeleteTimeoutMs))
                     ?? new Dictionary<string, object>();
                 if (!ReadBool(response, "ok", false))

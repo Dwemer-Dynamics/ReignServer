@@ -7,12 +7,12 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static Dictionary<string, object> BanterOptions(Dictionary<string, object> settings) => TestDict(
+        internal static Dictionary<string, object> BanterOptions(Dictionary<string, object> settings) => TestDict(
             "enabled", ReadBool(settings, "banterEnabled", true),
             "maxResponses", Clamp(ReadInt(settings, "banterMaxResponses", PartyBanterPolicy.DefaultResponses), 2, 12),
             "maxCharacters", Clamp(ReadInt(settings, "banterMaxCharacters", PartyBanterPolicy.DefaultCharacters), 80, 1000));
 
-        private static string ValidateBanterOptions(Dictionary<string, object> incoming)
+        internal static string ValidateBanterOptions(Dictionary<string, object> incoming)
         {
             if (incoming == null) return "";
             if (incoming.TryGetValue("banterEnabled", out var enabled) && !(enabled is bool)) return "Party banter must be on or off.";

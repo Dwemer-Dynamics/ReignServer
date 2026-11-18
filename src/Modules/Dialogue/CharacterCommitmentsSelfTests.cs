@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunCharacterCommitmentAssertions()
         {
@@ -16,7 +16,7 @@ namespace ReignBetaServer
                 results.Add(TestDict("caseId", "commitment_performance_" + id, "passed", passed, "summary", id));
                 if (!passed && diagnostic != null)
                 {
-                    string directory = Path.Combine(TestsDir, "commitment-performance-diagnostics");
+                    string directory = Path.Combine(Program.TestsDir, "commitment-performance-diagnostics");
                     Directory.CreateDirectory(directory);
                     File.WriteAllText(Path.Combine(directory, id + ".json"), Json.Serialize(diagnostic));
                 }
@@ -47,13 +47,13 @@ namespace ReignBetaServer
             NormalizeDialogueCommitment(forged, "npc");
             Check("binder_removes_forged_support_and_unknown_kind_is_not_promise", ReadString(forged, "bindingStatus", "") == "unbound"
                 && ReadString(forged, "acceptanceStatus", "") == "unknown" && ReadString(forged, "recordKind", "") == "unclassified");
-            var firstObserver = CloneDictionary(reportedOffer); var secondObserver = CloneDictionary(reportedOffer);
+            var firstObserver = Program.CloneDictionary(reportedOffer); var secondObserver = Program.CloneDictionary(reportedOffer);
             NormalizeDialogueCommitment(firstObserver, "ira"); NormalizeDialogueCommitment(secondObserver, "rhagaea");
             Check("observers_get_distinct_interpretation_ids", StableCommitmentId(firstObserver) != StableCommitmentId(secondObserver));
             ReadDictionary(firstObserver, "sourceEvidence")["timestamp"] = 10L;
             var previousInterpretation = TestDict("timeline_id", ContinuityTimeline(firstObserver), "owed_by", "ira", "owed_to", "player",
                 "status", "unresolved", "known_by_json", Json.Serialize(new[] { "ira" }), "payload_json", Json.Serialize(firstObserver));
-            var newer = CloneDictionary(firstObserver); ReadDictionary(newer, "sourceEvidence")["timestamp"] = 20L;
+            var newer = Program.CloneDictionary(firstObserver); ReadDictionary(newer, "sourceEvidence")["timestamp"] = 20L;
             Check("newer_same_scope_bound_interpretation_can_be_revised", DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
             newer["bindingStatus"] = "unbound";
             Check("unbound_revision_cannot_overwrite_bound_interpretation", !DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
@@ -64,7 +64,7 @@ namespace ReignBetaServer
             Check("dialogue_cannot_replace_native_or_confirmed_record", !DialogueCommitmentRevisionAllowed(previousInterpretation, newer));
             const string corein = "I'll give you my word on two of the three. I'll go with you. I'll speak to my father — my mouth, my timing, my framing, the way I already told you. Those I can promise because they're mine to give. The clan-name promise is not mine to give yet.";
             var sourceRow = TestDict("turn_id", "commitment_source", "role", "npc", "speaker_id", "npc", "text", corein);
-            var sourceObserver = new KnowledgeAccessContext { NpcId = "npc" };
+            var sourceObserver = new Program.KnowledgeAccessContext { NpcId = "npc" };
             string requiredSource = RenderContinuityRecord("commitment_source", "accepted_exchange", "npc", "session", 20, 120, true, corein);
             string optionalSource = RenderContinuityRecord("commitment_source", "accepted_exchange", "npc", "session", 20, 120, false, corein);
             Check("required_exact_source_referenced_once", !CommitmentContextTurn(sourceRow, sourceObserver, requiredSource).Contains(corein)
@@ -84,20 +84,20 @@ namespace ReignBetaServer
             foreach (string qualification in new[] { "when my father agrees", "as long as my father agrees", "on condition my father agrees" })
                 Check("qualified_word_intro_" + PromptHash(qualification).Substring(0, 8), ExplicitPromiseClauses("I'll give you my word " + qualification + ". I'll go with you.").Count == 0);
             Check("compound_metadata_condition_is_not_split_off", AtomicCommitmentWrites(TestDict("description", "Corein promised to go. Only if her father agrees.")).Count() == 1);
-            string cliEvidence = Path.Combine(TestsDir, "cli-report-fixture-" + Guid.NewGuid().ToString("N"));
+            string cliEvidence = Path.Combine(Program.TestsDir, "cli-report-fixture-" + Guid.NewGuid().ToString("N"));
             try
             {
                 string largeDetail = new string('x', 300000);
                 var fullCli = TestDict("ok", true, "results", new[] { TestDict("caseId", "retained_large_pass", "passed", true, "actual", largeDetail),
                     TestDict("caseId", "retained_large_failure", "passed", false, "summary", largeDetail) });
-                var compactCli = PersistBoundedMotiveCliReport(fullCli, cliEvidence);
+                var compactCli = Program.PersistBoundedMotiveCliReport(fullCli, cliEvidence);
                 string retainedCli = File.ReadAllText(ReadString(compactCli, "resultsPath", ""));
                 Check("large_cli_evidence_retained_without_false_success", !ReadBool(compactCli, "ok", true) && ReadInt(compactCli, "failedCount", 0) == 1
                     && Json.Serialize(compactCli).Length < 8192 && ReadDictionaryList(TryParseJsonObject(retainedCli), "results").Count == 2
                     && ReadString(ReadDictionaryList(TryParseJsonObject(retainedCli), "results")[0], "actual", "") == largeDetail
                     && ReadString(compactCli, "resultsSha256", "") == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(ReadString(compactCli, "resultsPath", "")))).ToLowerInvariant());
                 var manyFailures = Enumerable.Range(0, 80).Select(index => TestDict("caseId", "failed_" + index, "passed", false, "summary", largeDetail.Substring(0, 10000))).ToList();
-                var boundedFailures = PersistBoundedMotiveCliReport(TestDict("ok", false, "results", manyFailures), cliEvidence);
+                var boundedFailures = Program.PersistBoundedMotiveCliReport(TestDict("ok", false, "results", manyFailures), cliEvidence);
                 Check("cli_failure_detail_cap_keeps_exact_failure_count", ReadInt(boundedFailures, "failedCount", 0) == 80
                     && ReadDictionaryList(boundedFailures, "failures").Count == 32 && ReadBool(boundedFailures, "failureDetailsLimited", false)
                     && Json.Serialize(boundedFailures).Length < 32768 && ReadDictionaryList(TryParseJsonObject(File.ReadAllText(ReadString(boundedFailures, "resultsPath", ""))), "results").Count == 80);
@@ -130,40 +130,40 @@ namespace ReignBetaServer
             string campaign = "commitment_performance_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var connection = OpenCampaignConnection(campaign);
-                foreach (var write in PrepareStructuredWrites(fallback, "npc", "player", "", "dialogue", "obligation"))
+                using var connection = Program.OpenCampaignConnection(campaign);
+                foreach (var write in Program.PrepareStructuredWrites(fallback, "npc", "player", "", "dialogue", "obligation"))
                 {
                     write["timelineId"] = "promise_branch"; write["worldDay"] = 20d; write["created_day"] = 20d;
-                    InsertObligation(connection, "promise_event", write, 100, "dialogue");
-                    InsertObligation(connection, "promise_event", write, 100, "dialogue");
+                    Program.InsertObligation(connection, "promise_event", write, 100, "dialogue");
+                    Program.InsertObligation(connection, "promise_event", write, 100, "dialogue");
                 }
-                Check("accepted_retry_does_not_duplicate_debt", QuerySql(connection, "SELECT * FROM obligations;").Count == 2);
-                Check("accepted_promise_persists_canonical_timeline", QuerySql(connection, "SELECT * FROM obligations;").All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
-                ExecuteSql(connection, "UPDATE obligations SET timeline_id='main'; DELETE FROM schema_meta WHERE key='character_commitment_timeline_v1';");
+                Check("accepted_retry_does_not_duplicate_debt", Program.QuerySql(connection, "SELECT * FROM obligations;").Count == 2);
+                Check("accepted_promise_persists_canonical_timeline", Program.QuerySql(connection, "SELECT * FROM obligations;").All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
+                Program.ExecuteSql(connection, "UPDATE obligations SET timeline_id='main'; DELETE FROM schema_meta WHERE key='character_commitment_timeline_v1';");
                 EnsureCharacterCommitmentTimeline(connection);
                 EnsureCharacterCommitmentTimeline(connection);
-                Check("legacy_supported_default_timeline_repaired_once", QuerySql(connection, "SELECT * FROM obligations;").All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
+                Check("legacy_supported_default_timeline_repaired_once", Program.QuerySql(connection, "SELECT * FROM obligations;").All(row => ReadString(row, "timeline_id", "") == "promise_branch"));
                 foreach (string guard in new[] { "unsupported", "edited", "foreign", "missing" })
                 {
-                    var guarded = CloneDictionary(fallback[0]);
+                    var guarded = Program.CloneDictionary(fallback[0]);
                     guarded["obligation_id"] = "migration_" + guard; guarded["status"] = "fulfilled"; guarded["timelineId"] = "promise_branch";
                     if (guard == "unsupported") guarded["sourceValidation"] = "incomplete";
                     if (guard == "missing") guarded.Remove("timelineId");
-                    InsertObligation(connection, "promise_event", guarded, 100, "dialogue");
-                    ExecuteSql(connection, "UPDATE obligations SET timeline_id=$timeline,revision=$revision WHERE obligation_id=$id;",
+                    Program.InsertObligation(connection, "promise_event", guarded, 100, "dialogue");
+                    Program.ExecuteSql(connection, "UPDATE obligations SET timeline_id=$timeline,revision=$revision WHERE obligation_id=$id;",
                         TestDict("id", "migration_" + guard, "timeline", guard == "foreign" ? "other" : "main", "revision", guard == "edited" ? 1 : 0));
                 }
-                ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='character_commitment_timeline_v1';");
+                Program.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='character_commitment_timeline_v1';");
                 EnsureCharacterCommitmentTimeline(connection);
-                Check("timeline_migration_preserves_unverified_revised_foreign_and_missing_rows", QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id LIKE 'migration_%';")
+                Check("timeline_migration_preserves_unverified_revised_foreign_and_missing_rows", Program.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id LIKE 'migration_%';")
                     .All(row => ReadString(row, "timeline_id", "") == (ReadString(row, "obligation_id", "") == "migration_foreign" ? "other" : "main")));
                 var ids = new List<string>();
                 string prompt = BuildCharacterCommitmentPrompt(connection, "npc", "player", context, ids);
                 Check("unrelated_topic_keeps_both_protected_promises", prompt.Contains(clauses[0]) && prompt.Contains(clauses[1]) && ids.Count == 2,
-                    TestDict("prompt", prompt, "evidence", ReadDictionary(context, "characterCommitmentEvidence"), "rows", QuerySql(connection, "SELECT * FROM obligations;").Select(row =>
+                    TestDict("prompt", prompt, "evidence", ReadDictionary(context, "characterCommitmentEvidence"), "rows", Program.QuerySql(connection, "SELECT * FROM obligations;").Select(row =>
                         TestDict("id", ReadString(row, "obligation_id", ""), "payload", TryParseJsonObject(ReadString(row, "payload_json", "{}")),
-                            "visible", KnowledgeRowVisibleToNpc("obligations", row, BuildKnowledgeAccessContext("npc", "player", "", context), connection))).ToList(),
-                        "eligible", QuerySql(connection, "SELECT obligation_id FROM obligations WHERE " + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations") + ";", TestDict("observer", "npc", "timeline", "promise_branch")).Count));
+                            "visible", Program.KnowledgeRowVisibleToNpc("obligations", row, Program.BuildKnowledgeAccessContext("npc", "player", "", context), connection))).ToList(),
+                        "eligible", Program.QuerySql(connection, "SELECT obligation_id FROM obligations WHERE " + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations") + ";", TestDict("observer", "npc", "timeline", "promise_branch")).Count));
                 Check("joint_prompt_does_not_share_owner_only_commitment", BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>(), new[] { "stranger" }).Length == 0
                     && BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>(), new[] { "player" }).Contains(clauses[0]));
                 var banterHero = TestDict("heroStringId", "npc", "name", "Corein", "age", 30);
@@ -177,23 +177,23 @@ namespace ReignBetaServer
                 Check("future_promise_cannot_leak", BuildCharacterCommitmentPrompt(connection, "npc", "player", new Dictionary<string, object>(context) { ["worldDay"] = 19d }, new List<string>()).Length == 0);
                 Check("wrong_timeline_cannot_leak", BuildCharacterCommitmentPrompt(connection, "npc", "player", new Dictionary<string, object>(context) { ["timelineId"] = "other" }, new List<string>()).Length == 0);
                 Check("official_channel_preserves_private_firewall", BuildCharacterCommitmentPrompt(connection, "npc", "player", new Dictionary<string, object>(context) { ["officialMemoryFirewall"] = true }, new List<string>()).Length == 0);
-                ExecuteSql(connection, "UPDATE obligations SET status='fulfilled' WHERE description=$description;", TestDict("description", clauses[0]));
+                Program.ExecuteSql(connection, "UPDATE obligations SET status='fulfilled' WHERE description=$description;", TestDict("description", clauses[0]));
                 string partlyFulfilled = BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>());
                 Check("closing_one_promise_keeps_the_other_active", !partlyFulfilled.Contains(clauses[0]) && partlyFulfilled.Contains(clauses[1]));
-                ExecuteSql(connection, "UPDATE obligations SET status='fulfilled';");
+                Program.ExecuteSql(connection, "UPDATE obligations SET status='fulfilled';");
                 Check("fulfilled_promise_does_not_reappear_active", BuildCharacterCommitmentPrompt(connection, "npc", "player", context, new List<string>()).Length == 0);
 
-                ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""player"",""bootstrap_npc""]','{""timelineId"":""promise_branch""}');", TestDict("campaign", campaign));
                 var bootstrapContext = new Dictionary<string, object>(context) { ["conversationSessionId"] = "promise_bootstrap", ["participants"] = new[] { "player", "bootstrap_npc" } };
                 StoreConversationExchange(campaign, bootstrapContext, "bootstrap_npc", "player", "Michael", "Corein", "What can you promise?", corein, "bootstrap_accepted", 200);
-                ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='explicit_accepted_commitment_bootstrap_v1';");
+                Program.ExecuteSql(connection, "DELETE FROM schema_meta WHERE key='explicit_accepted_commitment_bootstrap_v1';");
                 EnsureLatestAcceptedCommitments(connection);
                 EnsureLatestAcceptedCommitments(connection);
                 string bootstrapped = BuildCharacterCommitmentPrompt(connection, "bootstrap_npc", "player", bootstrapContext, new List<string>());
                 Check("latest_accepted_private_source_bootstrapped_once", bootstrapped.Contains(clauses[0]) && bootstrapped.Contains(clauses[1])
-                    && QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';").Count == 2,
-                    TestDict("prompt", bootstrapped, "rows", QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';")));
+                    && Program.QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';").Count == 2,
+                    TestDict("prompt", bootstrapped, "rows", Program.QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';")));
 
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsurePlayerPerformanceSchema(connection);
@@ -221,13 +221,13 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     var replay = WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", group.Key, "events", group.ToList()));
                     Check("native_replay_" + group.Key, ReadInt(replay, "accepted", 0) == 0);
                 }
-                var access = BuildKnowledgeAccessContext("npc", "player", "", context);
+                var access = Program.BuildKnowledgeAccessContext("npc", "player", "", context);
                 var counts = ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d, access);
                 Check("all_types_counted_independently_of_examples", ReadInt(counts, "battleWins", 0) == 107 && ReadInt(counts, "battleLosses", 0) == 1
                     && ReadDictionary(counts, "battleTypes").Count == 3);
                 Check("team_tournament_count_once", ReadInt(counts, "tournamentWins", 0) == 1);
                 Check("private_counts_stay_engine_only", ReadInt(ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d), "battleWins", 0) == 108);
-                var privateAccess = BuildKnowledgeAccessContext("other", "player", "", context);
+                var privateAccess = Program.BuildKnowledgeAccessContext("other", "player", "", context);
                 Check("official_performance_does_not_include_private_outcome", ReadInt(ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d, privateAccess, publicOnly: true), "battleWins", 0) == 107);
                 Check("joint_performance_counts_use_audience_intersection", ReadInt(ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d, privateAccess), "battleWins", 0) == 108
                     && ReadInt(ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d, privateAccess, new[] { access }), "battleWins", 0) == 107);
@@ -246,8 +246,8 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 Check("duel_native_ids_not_prose", NativePerformanceOutcome("social_outcome", TestDict("sourceEventId", "duel|action|winner", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", "player")) == "win"
                     && NativePerformanceOutcome("social_outcome", TestDict("sourceEventId", "rumor|duel", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", "player")) == "");
                 ReputationService.EnsureSocialReputationSchema(connection);
-                int rumorsBeforePractice = QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count;
-                int reputationsBeforePractice = QuerySql(connection, "SELECT * FROM character_reputations;").Count;
+                int rumorsBeforePractice = Program.QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count;
+                int reputationsBeforePractice = Program.QuerySql(connection, "SELECT * FROM character_reputations;").Count;
                 foreach (bool playerWon in new[] { true, false })
                 {
                     string action = "private_practice_" + playerWon;
@@ -256,97 +256,97 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                         "actionId", action, "type", "RegularDuelPlayer", "status", "completed", "message", summary,
                         "playerHeroStringId", "player", "actorHeroStringId", "npc", "targetHeroStringId", "player",
                         "result", TestDict("success", true, "completed", true, "resultCode", "practice_duel_completed", "message", summary));
-                    WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
-                        TestDict("id", action, "status", "delivered", "record", CloneDictionary(practice)) });
-                    var pending = CloneDictionary(practice); pending["status"] = "executing";
+                    Program.WriteActionQueueUnlocked(campaign, new List<Dictionary<string, object>> {
+                        TestDict("id", action, "status", "delivered", "record", Program.CloneDictionary(practice)) });
+                    var pending = Program.CloneDictionary(practice); pending["status"] = "executing";
                     pending["message"] = "Practice duel is in progress."; pending["result"] = TestDict("resultCode", "conversation_duel_armed");
-                    StoreActionResultMemory(pending, "fixture");
-                    var report = ReportAction(practice);
-                    var replay = ReportAction(practice);
-                    var memories = QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event;", TestDict("event", "action_" + action));
-                    var evt = QuerySql(connection, "SELECT * FROM events WHERE event_id=$event;", TestDict("event", "action_" + action)).Single();
+                    Program.StoreActionResultMemory(pending, "fixture");
+                    var report = Program.ReportAction(practice);
+                    var replay = Program.ReportAction(practice);
+                    var memories = Program.QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event;", TestDict("event", "action_" + action));
+                    var evt = Program.QuerySql(connection, "SELECT * FROM events WHERE event_id=$event;", TestDict("event", "action_" + action)).Single();
                     Check("practice_remembers_result_for_opponent_" + playerWon, ReadBool(report, "ok", false) && ReadBool(report, "found", false)
                         && ReadBool(ReadDictionary(report, "memoryStore"), "ok", false) && ReadBool(replay, "ok", false)
                         && memories.Count == 1 && ReadString(memories[0], "owner_id", "") == "npc"
                         && ReadString(memories[0], "summary", "") == summary && ReadString(evt, "summary", "") == summary,
                         TestDict("report", report, "memories", memories, "event", evt));
                     Check("practice_memory_is_private_and_replay_safe_" + playerWon, ReadString(evt, "visibility", "") == "private"
-                        && TextListFromJson(ReadString(evt, "known_by_json", "[]")).SequenceEqual(new[] { "npc" })
-                        && KnowledgeRowVisibleToNpc("events", evt, access, connection)
-                        && !KnowledgeRowVisibleToNpc("events", evt, privateAccess, connection)
+                        && Program.TextListFromJson(ReadString(evt, "known_by_json", "[]")).SequenceEqual(new[] { "npc" })
+                        && Program.KnowledgeRowVisibleToNpc("events", evt, access, connection)
+                        && !Program.KnowledgeRowVisibleToNpc("events", evt, privateAccess, connection)
                         && ReadDouble(evt, "world_day", 0d) == 20d, evt);
                     string receipt = "action_receipt_" + PromptHash("promise_branch|" + action + "|completed").Substring(0, 32);
-                    var observers = QuerySql(connection, "SELECT * FROM shared_activity_observers WHERE activity_id=$id;", TestDict("id", receipt));
+                    var observers = Program.QuerySql(connection, "SELECT * FROM shared_activity_observers WHERE activity_id=$id;", TestDict("id", receipt));
                     Check("practice_action_receipt_has_no_other_npc_" + playerWon,
-                        QuerySql(connection, "SELECT * FROM shared_activity_events WHERE activity_id=$id;", TestDict("id", receipt)).Count == 1
+                        Program.QuerySql(connection, "SELECT * FROM shared_activity_events WHERE activity_id=$id;", TestDict("id", receipt)).Count == 1
                         && observers.Any(row => ReadString(row, "owner_id", "") == "npc")
                         && observers.All(row => new[] { "npc", "player" }.Contains(ReadString(row, "owner_id", ""))), observers);
                     Check("practice_has_no_automatic_relationship_effect_" + playerWon,
                         ReadDictionaryList(report, "nativeRelationChanges").Count == 0
                         && RelationshipsService.EvaluateCompletedActionRelationships(practice).Count == 0);
                     Check("practice_creates_no_public_or_social_history_" + playerWon,
-                        QuerySql(connection, "SELECT * FROM world_history_events WHERE correlation_id=$action;", TestDict("action", action)).Count == 0
-                        && QuerySql(connection, "SELECT * FROM character_performance_events WHERE event_id=$event;", TestDict("event", "action_" + action)).Count == 0);
-                    var malformed = CloneDictionary(practice); malformed["actionId"] = action + "_missing"; malformed.Remove("actorHeroStringId");
+                        Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE correlation_id=$action;", TestDict("action", action)).Count == 0
+                        && Program.QuerySql(connection, "SELECT * FROM character_performance_events WHERE event_id=$event;", TestDict("event", "action_" + action)).Count == 0);
+                    var malformed = Program.CloneDictionary(practice); malformed["actionId"] = action + "_missing"; malformed.Remove("actorHeroStringId");
                     Check("practice_missing_identity_never_becomes_public_" + playerWon,
-                        !ReadBool(StoreActionResultMemory(malformed, "fixture"), "ok", true)
-                        && QuerySql(connection, "SELECT * FROM events WHERE event_id=$event;", TestDict("event", "action_" + action + "_missing")).Count == 0);
+                        !ReadBool(Program.StoreActionResultMemory(malformed, "fixture"), "ok", true)
+                        && Program.QuerySql(connection, "SELECT * FROM events WHERE event_id=$event;", TestDict("event", "action_" + action + "_missing")).Count == 0);
                 }
                 Check("practice_leaves_rumors_and_reputations_unchanged",
-                    QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count == rumorsBeforePractice
-                    && QuerySql(connection, "SELECT * FROM character_reputations;").Count == reputationsBeforePractice);
-                Check("practice_report_detection_preserves_other_duels", !IsPracticeDuelActionReport(TestDict("type", "RegularDuelPlayer",
+                    Program.QuerySql(connection, "SELECT * FROM rumor_occurrences;").Count == rumorsBeforePractice
+                    && Program.QuerySql(connection, "SELECT * FROM character_reputations;").Count == reputationsBeforePractice);
+                Check("practice_report_detection_preserves_other_duels", !Program.IsPracticeDuelActionReport(TestDict("type", "RegularDuelPlayer",
                     "result", TestDict("resultCode", "training_duel_completed")))
-                    && !IsPracticeDuelActionReport(TestDict("type", "RegularDuelPlayer", "result", TestDict("resultCode", "lethal_duel_completed")))
-                    && !IsPracticeDuelActionReport(TestDict("type", "give_gold_to_player", "result", TestDict("resultCode", "practice_duel_completed"))));
+                    && !Program.IsPracticeDuelActionReport(TestDict("type", "RegularDuelPlayer", "result", TestDict("resultCode", "lethal_duel_completed")))
+                    && !Program.IsPracticeDuelActionReport(TestDict("type", "give_gold_to_player", "result", TestDict("resultCode", "practice_duel_completed"))));
                 foreach (string entity in new[] { "player", "npc" })
                     Check("practice_excluded_from_public_performance_" + entity, NativePerformanceOutcome("social_outcome",
                         TestDict("sourceEventId", "duel|practice|winner", "duelMode", "practice", "winnerHeroId", "player", "loserHeroId", "npc"), TestDict("entity_id", entity)) == "");
-                Check("practice_inference_and_violence_gate", InferDuelModeFromDirective("Let us have a practice duel.") == "practice"
-                    && InferDuelModeFromDirective("Would you like some sparring?") == "practice"
-                    && InferDuelModeFromDirective("Let's spar.") == "practice"
-                    && InferDuelModeFromDirective("A sparse crowd watched the duel.") != "practice" && !IsLethalDuelMode("practice"));
+                Check("practice_inference_and_violence_gate", Program.InferDuelModeFromDirective("Let us have a practice duel.") == "practice"
+                    && Program.InferDuelModeFromDirective("Would you like some sparring?") == "practice"
+                    && Program.InferDuelModeFromDirective("Let's spar.") == "practice"
+                    && Program.InferDuelModeFromDirective("A sparse crowd watched the duel.") != "practice" && !Program.IsLethalDuelMode("practice"));
                 Check("one_and_zero_are_not_false_lifetime_claims", RoughPerformanceCount(0) == "no documented results" && RoughPerformanceCount(1) == "one recorded result");
                 Check("hundred_boundary_conservative", RoughPerformanceCount(100) == "around a hundred" && RoughPerformanceCount(101) == "over a hundred" && RoughPerformanceCount(200) == "hundreds");
-                ExecuteSql(connection, "DELETE FROM world_history_events;");
+                Program.ExecuteSql(connection, "DELETE FROM world_history_events;");
                 Check("retained_receipts_survive_lossy_history", ReadInt(ReadPlayerPerformanceCounts(connection, "promise_branch", "player", 20d, access), "battleWins", 0) == 107);
                 string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 CaptureRestoredMemorySources(connection, TestDict("savePointId", "fixture_point", "timelineId", "promise_branch", "campaignTimeDays", 20d, "worldHistorySequence", 1L, "worldHistoryHeadEventId", "fixture_head"), generation);
                 BindRecoveredMemorySources(connection, "promise_branch", "recovered", 1L, "fixture_head");
                 Check("verified_restored_receipts_follow_recovered_branch", ReadInt(ReadPlayerPerformanceCounts(connection, "recovered", "player", 20d, access), "battleWins", 0) == 107);
-                ExecuteSql(connection, "UPDATE character_performance_events SET source_hash='changed' WHERE competition_id='battle_0';");
+                Program.ExecuteSql(connection, "UPDATE character_performance_events SET source_hash='changed' WHERE competition_id='battle_0';");
                 Check("changed_or_foreign_receipt_cannot_borrow_snapshot_proof", ReadInt(ReadPlayerPerformanceCounts(connection, "recovered", "player", 20d, access), "battleWins", 0) == 106
                     && ReadInt(ReadPlayerPerformanceCounts(connection, "unrelated_branch", "player", 20d, access), "battleWins", 0) == 0);
-                InsertObligation(connection, "native_fixture", TestDict("obligation_id", "native_protected", "description", "Native confirmed terms.",
+                Program.InsertObligation(connection, "native_fixture", TestDict("obligation_id", "native_protected", "description", "Native confirmed terms.",
                     "owed_by", "ira", "owed_to", "player", "known_by", new[] { "ira" }, "timelineId", "revision_fixture"), 100, "native");
                 foreach (string observer in new[] { "ira", "rhagaea" })
                 {
-                    var proposal = CloneDictionary(reportedOffer);
+                    var proposal = Program.CloneDictionary(reportedOffer);
                     proposal["obligation_id"] = "native_protected"; proposal["timelineId"] = "revision_fixture";
                     proposal["description"] = "An inferred report about the terms.";
                     NormalizeDialogueCommitment(proposal, observer);
-                    InsertObligation(connection, "proposal_event", CloneDictionary(proposal), 200, "dialogue");
-                    InsertObligation(connection, "proposal_event", CloneDictionary(proposal), 200, "dialogue");
+                    Program.InsertObligation(connection, "proposal_event", Program.CloneDictionary(proposal), 200, "dialogue");
+                    Program.InsertObligation(connection, "proposal_event", Program.CloneDictionary(proposal), 200, "dialogue");
                 }
-                var proposals = QuerySql(connection, "SELECT * FROM obligations WHERE payload_json::jsonb->>'proposedRevisionOf'='native_protected';");
+                var proposals = Program.QuerySql(connection, "SELECT * FROM obligations WHERE payload_json::jsonb->>'proposedRevisionOf'='native_protected';");
                 Check("incompatible_proposal_replay_is_idempotent_and_observer_scoped", proposals.Count == 2
                     && proposals.Select(row => ReadString(row, "known_by_json", "")).Distinct().Count() == 2
-                    && ReadString(QuerySql(connection, "SELECT description FROM obligations WHERE obligation_id='native_protected';").Single(), "description", "") == "Native confirmed terms.");
-                var revision = CloneDictionary(reportedOffer); revision["timelineId"] = "revision_fixture";
+                    && ReadString(Program.QuerySql(connection, "SELECT description FROM obligations WHERE obligation_id='native_protected';").Single(), "description", "") == "Native confirmed terms.");
+                var revision = Program.CloneDictionary(reportedOffer); revision["timelineId"] = "revision_fixture";
                 revision["description"] = "An unresolved interpreted request.";
                 ReadDictionary(revision, "sourceEvidence")["timestamp"] = 200L;
                 NormalizeDialogueCommitment(revision, "ira");
                 string revisionId = StableCommitmentId(revision);
-                InsertObligation(connection, "revision_event", CloneDictionary(revision), 200, "dialogue");
+                Program.InsertObligation(connection, "revision_event", Program.CloneDictionary(revision), 200, "dialogue");
                 revision["obligation_id"] = revisionId; revision["description"] = "The model interprets the newer statement as fulfillment.";
                 revision["status"] = "fulfilled"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 300L;
-                InsertObligation(connection, "revision_event_later", CloneDictionary(revision), 300, "dialogue");
-                var revised = QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single();
+                Program.InsertObligation(connection, "revision_event_later", Program.CloneDictionary(revision), 300, "dialogue");
+                var revised = Program.QuerySql(connection, "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single();
                 Check("newer_bound_revision_persists_source_and_history", ReadString(revised, "status", "") == "fulfilled"
                     && ReadDictionaryList(TryParseJsonObject(ReadString(revised, "payload_json", "{}")), "interpretationHistory").Count == 1);
                 revision["status"] = "active"; ReadDictionary(revision, "sourceEvidence")["timestamp"] = 400L;
-                InsertObligation(connection, "revival_event", revision, 400, "dialogue");
-                Check("inferred_revival_does_not_overwrite_closed_record", ReadString(QuerySql(connection,
+                Program.InsertObligation(connection, "revival_event", revision, 400, "dialogue");
+                Check("inferred_revival_does_not_overwrite_closed_record", ReadString(Program.QuerySql(connection,
                     "SELECT status FROM obligations WHERE obligation_id=$id;", TestDict("id", revisionId)).Single(), "status", "") == "fulfilled");
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
@@ -360,25 +360,25 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
             string campaign = "commitment_source_context_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var c = OpenCampaignConnection(campaign);
+                using var c = Program.OpenCampaignConnection(campaign);
                 var context = TestDict("campaignId", campaign, "timelineId", "source_branch", "worldDay", 30d,
                     "playerHeroStringId", "player", "playerText", "What did you promise about your father?", "participants", new[] { "npc", "player" });
                 const string originalQuestion = "Will you speak to your father? You do not need to promise to join my clan.";
                 const string promise = "I promise to speak to my father. But only after you have explained the proposal.";
                 Dictionary<string, object> Save(string id, string question, string reply, double day = 20d, string obligation = "", object participants = null, string timeline = "source_branch")
                 {
-                    var p = CloneDictionary(context); p["worldDay"] = day;
+                    var p = Program.CloneDictionary(context); p["worldDay"] = day;
                     p["timelineId"] = timeline;
                     if (participants != null) p["participants"] = participants;
                     StoreConversationExchange(campaign, p, "npc", "player", "Michael", "Corein", question, reply, id, (long)(day * 10));
                     var write = TestDict("description", ExplicitPromiseClauses(reply).First(), "owed_by", "npc", "owed_to", "player",
                         "status", "active", "sourceEvidence", TestDict("turnId", "current_npc", "speakerId", "npc", "quote", ExplicitPromiseClauses(reply).First()));
                     AttachConversationWriteEvidence(new[] { write }, CurrentConversationSources("player", "npc", question, reply, id), "npc", id);
-                    write = PrepareStructuredWrites(new[] { write }.ToList(), "npc", "player", "", "dialogue", "obligation").Single();
+                    write = Program.PrepareStructuredWrites(new[] { write }.ToList(), "npc", "player", "", "dialogue", "obligation").Single();
                     write["timelineId"] = timeline; write["worldDay"] = day; write["created_day"] = day;
                     if (obligation.Length > 0) write["obligation_id"] = obligation;
-                    InsertObligation(c, id, write, (long)(day * 10), "dialogue");
-                    return QuerySql(c, "SELECT * FROM obligations WHERE event_id=$event;", TestDict("event", id)).Single();
+                    Program.InsertObligation(c, id, write, (long)(day * 10), "dialogue");
+                    return Program.QuerySql(c, "SELECT * FROM obligations WHERE event_id=$event;", TestDict("event", id)).Single();
                 }
                 var first = Save("original", originalQuestion, promise);
                 string obligationId = ReadString(first, "obligation_id", "");
@@ -392,17 +392,17 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 var storedPayload = TryParseJsonObject(ReadString(first, "payload_json", "{}"));
                 foreach (string legacyShape in new[] { "missing", "null", "non_dictionary" })
                 {
-                    var legacyPayload = CloneDictionary(storedPayload);
+                    var legacyPayload = Program.CloneDictionary(storedPayload);
                     if (legacyShape == "missing") legacyPayload.Remove("commitmentOriginalSource");
                     else legacyPayload["commitmentOriginalSource"] = legacyShape == "null" ? null : "legacy value";
-                    ExecuteSql(c, "UPDATE obligations SET payload_json=$payload WHERE obligation_id=$id;",
+                    Program.ExecuteSql(c, "UPDATE obligations SET payload_json=$payload WHERE obligation_id=$id;",
                         TestDict("payload", Json.Serialize(legacyPayload), "id", obligationId));
                     string legacyPrompt = Build();
                     Check("legacy_original_" + legacyShape + "_uses_verified_current_source",
                         legacyPrompt.Contains(originalQuestion) && legacyPrompt.Contains(promise)
                         && Regex.Matches(legacyPrompt, "kind=commitment_source_context ").Count == 1);
                 }
-                var legacyUpdate = CloneDictionary(storedPayload);
+                var legacyUpdate = Program.CloneDictionary(storedPayload);
                 legacyUpdate["timelineId"] = "source_branch"; legacyUpdate["owed_by"] = "npc"; legacyUpdate["owed_to"] = "player";
                 PreserveCommitmentOriginalSource(c, obligationId, "legacy_update", legacyUpdate);
                 Check("legacy_update_preserves_verified_original_source", Json.Serialize(ReadDictionary(legacyUpdate, "commitmentOriginalSource"))
@@ -411,10 +411,10 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     "payload_json", "{\"commitmentOriginalSource\":null,\"sourceEvidence\":null}");
                 var unreferencedSources = new List<string>();
                 string unreferencedContext = BuildRelevantCommitmentContext(c, new List<Dictionary<string, object>> { unreferenced },
-                    context, new List<KnowledgeAccessContext> { BuildKnowledgeAccessContext("npc", "player", "", context) },
+                    context, new List<Program.KnowledgeAccessContext> { Program.BuildKnowledgeAccessContext("npc", "player", "", context) },
                     unreferencedSources, new List<Dictionary<string, object>>());
                 Check("missing_both_references_does_not_invent_source_context", unreferencedContext.Length == 0 && unreferencedSources.Count == 0);
-                ExecuteSql(c, "UPDATE obligations SET payload_json=$payload WHERE obligation_id=$id;",
+                Program.ExecuteSql(c, "UPDATE obligations SET payload_json=$payload WHERE obligation_id=$id;",
                     TestDict("payload", Json.Serialize(storedPayload), "id", obligationId));
                 string unrelated = Build(new Dictionary<string, object>(context) { ["playerText"] = "The weather is pleasant today." });
                 Check("unrelated_topic_keeps_ledger_without_expansion", unrelated.Contains(promise) && !unrelated.Contains(originalQuestion));
@@ -423,46 +423,46 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 Check("keeping_your_word_can_follow_exact_source", Build(new Dictionary<string, object>(context) { ["playerText"] = "Are you keeping your word?" }).Contains(originalQuestion));
                 var forged = TryParseJsonObject(ReadString(first, "payload_json", "{}"));
                 forged["commitmentOriginalSource"] = TestDict("sourceEventId", "forged", "quote", "an invented unrelated conversation");
-                InsertObligation(c, "original", forged, 200, "dialogue");
-                Check("model_cannot_replace_original_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(QuerySql(c,
+                Program.InsertObligation(c, "original", forged, 200, "dialogue");
+                Check("model_cannot_replace_original_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(Program.QuerySql(c,
                     "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", obligationId)).Single(), "payload_json", "{}")), "commitmentOriginalSource"), "sourceEventId", "") == "original");
                 const string revised = "I promise to speak to my father after the harvest instead.";
                 Save("revision", "Please wait until the harvest before speaking to your father.", revised, 21d, obligationId);
                 string revision = Build();
                 Check("revision_keeps_original_and_latest_exchange", revision.Contains(originalQuestion) && revision.Contains(promise)
                     && revision.Contains("turn_id=revision_npc") && revision.Contains(revised) && revision.Contains("current ledger controls status"));
-                Check("revision_retains_first_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(QuerySql(c,
+                Check("revision_retains_first_source_reference", ReadString(ReadDictionary(TryParseJsonObject(ReadString(Program.QuerySql(c,
                     "SELECT * FROM obligations WHERE obligation_id=$id;", TestDict("id", obligationId)).Single(), "payload_json", "{}")), "commitmentOriginalSource"), "sourceEventId", "") == "original");
                 Check("future_source_cannot_leak", !Build(new Dictionary<string, object>(context) { ["worldDay"] = 20d }).Contains(revised));
                 Check("sequence_cutoff_cannot_leak", !Build(new Dictionary<string, object>(context) { ["memoryAsOfAcceptedSequence"] = 0L }).Contains(originalQuestion));
                 Check("timestamp_cutoff_cannot_leak", !Build(new Dictionary<string, object>(context) { ["memoryAsOfTimestamp"] = 199L }).Contains(originalQuestion));
                 Check("official_channel_does_not_expand_private_source", Build(new Dictionary<string, object>(context) { ["officialMemoryFirewall"] = true }).Length == 0);
                 Check("new_observer_has_no_private_context", Build(null, "stranger").Length == 0);
-                ExecuteSql(c, "UPDATE conversation_turns SET text='Changed accepted wording.' WHERE turn_id='original_npc';");
+                Program.ExecuteSql(c, "UPDATE conversation_turns SET text='Changed accepted wording.' WHERE turn_id='original_npc';");
                 string changed = Build();
                 Check("changed_hash_rejects_original_keeps_current", !changed.Contains(originalQuestion) && changed.Contains(revised));
-                ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='original_npc';", TestDict("text", promise));
-                var beforeRead = QuerySql(c, "SELECT turn_id,text,payload_json FROM conversation_turns ORDER BY turn_id;");
+                Program.ExecuteSql(c, "UPDATE conversation_turns SET text=$text WHERE turn_id='original_npc';", TestDict("text", promise));
+                var beforeRead = Program.QuerySql(c, "SELECT turn_id,text,payload_json FROM conversation_turns ORDER BY turn_id;");
                 Build();
-                Check("reading_context_preserves_transcript_bytes", Json.Serialize(beforeRead) == Json.Serialize(QuerySql(c, "SELECT turn_id,text,payload_json FROM conversation_turns ORDER BY turn_id;")));
-                var source = QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='revision_npc';").Single();
+                Check("reading_context_preserves_transcript_bytes", Json.Serialize(beforeRead) == Json.Serialize(Program.QuerySql(c, "SELECT turn_id,text,payload_json FROM conversation_turns ORDER BY turn_id;")));
+                var source = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id='revision_npc';").Single();
                 InsertConversationTurn(c, "ambiguous_revision", ReadString(source, "session_id", ""), "revision", 99,
                     ReadString(source, "exchange_id", ""), "npc", "npc", "Corein", revised, "in_person", 21d, 210,
                     "", new List<string> { "npc", "player" }, new Dictionary<string, object>(context) { ["worldDay"] = 21d });
                 string ambiguous = Build();
                 Check("ambiguous_exact_sources_do_not_become_invented_context", !ambiguous.Contains("turn_id=revision_npc") && ambiguous.Contains(revised));
-                ExecuteSql(c, "DELETE FROM conversation_turns WHERE event_id IN ('original','revision');");
+                Program.ExecuteSql(c, "DELETE FROM conversation_turns WHERE event_id IN ('original','revision');");
                 string missing = Build();
                 Check("missing_originals_keep_protected_ledger_without_reconstruction", missing.Contains(revised) && !missing.Contains("EXACT ACCEPTED COMMITMENT CONTEXT"));
-                ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
+                Program.ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
                 Check("closed_commitment_does_not_renew_from_old_context", Build().Length == 0);
 
                 const string shared = "I promise to repair the wagon tomorrow. *I privately remember SECRET-NARRATION-991.*";
                 Save("shared", "Please repair the wagon.", shared, participants: new[] { "npc", "player", "friend" });
-                var sharedRow = QuerySql(c, "SELECT * FROM obligations WHERE event_id='shared';").Single();
+                var sharedRow = Program.QuerySql(c, "SELECT * FROM obligations WHERE event_id='shared';").Single();
                 var sharedValue = TryParseJsonObject(ReadString(sharedRow, "payload_json", "{}"));
                 sharedValue["known_by"] = new[] { "npc", "player", "friend" };
-                ExecuteSql(c, "UPDATE obligations SET known_by_json=$known,payload_json=$payload WHERE event_id='shared';",
+                Program.ExecuteSql(c, "UPDATE obligations SET known_by_json=$known,payload_json=$payload WHERE event_id='shared';",
                     TestDict("known", Json.Serialize(new[] { "npc", "player", "friend" }), "payload", Json.Serialize(sharedValue)));
                 var sharedContext = new Dictionary<string, object>(context) { ["playerText"] = "How about your promise to repair the wagon?" };
                 string joint = Build(sharedContext, "friend");
@@ -473,17 +473,17 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     "duty|keeping one's word", TestDict("maxResponses", 2, "maxCharacters", 360), new(),
                     new Dictionary<string, object>(sharedContext) { ["playerText"] = "" }, false);
                 Check("banter_active_topic_follows_common_source_without_private_thoughts", banter.Contains("Please repair the wagon.") && !banter.Contains("SECRET-NARRATION-991"));
-                ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='shared_player';");
+                Program.ExecuteSql(c, "UPDATE conversation_turns SET participants_json='[\"npc\",\"player\"]' WHERE turn_id='shared_player';");
                 Check("known_promise_does_not_grant_private_question_access", !Build(sharedContext, "friend").Contains("Please repair the wagon."));
-                ExecuteSql(c, "UPDATE conversation_turns SET channel='letter' WHERE event_id='shared';");
+                Program.ExecuteSql(c, "UPDATE conversation_turns SET channel='letter' WHERE event_id='shared';");
                 Check("letter_without_delivery_receipt_does_not_expand", !Build(sharedContext).Contains("EXACT ACCEPTED COMMITMENT CONTEXT"));
-                ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
+                Program.ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
 
                 Save("oversized", "Explain the archive promise.", "I promise to maintain the archive. " + new string('x', 7000) + " END-OF-LONG-EXCHANGE");
                 string oversized = Build(new Dictionary<string, object>(context) { ["playerText"] = "What did you promise about the archive?" });
                 Check("oversized_exchange_is_not_cut_into_misleading_excerpt", oversized.Contains("I promise to maintain the archive.")
                     && !oversized.Contains("EXACT ACCEPTED COMMITMENT CONTEXT") && !oversized.Contains("END-OF-LONG-EXCHANGE"));
-                ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
+                Program.ExecuteSql(c, "UPDATE obligations SET status='fulfilled';");
                 for (int i = 0; i < 5; i++) Save("bounded_" + i, "Will you pay the ransom for prisoner " + i + "?", "I promise to pay the ransom for prisoner " + i + ".");
                 var bounded = new Dictionary<string, object>(context) { ["playerText"] = "What are your promises about ransom?" };
                 string boundedText = Build(bounded);
@@ -497,12 +497,12 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 var recovered = new Dictionary<string, object>(bounded) { ["timelineId"] = "recovered" };
                 Check("verified_restore_carries_exact_source_context", restoredTurn.Length > 0 && Build(recovered).Contains("turn_id=" + restoredTurn));
                 string originalEvent = restoredTurn.Replace("_npc", "");
-                var restoredPromise = QuerySql(c, "SELECT * FROM obligations WHERE event_id=$event;", TestDict("event", originalEvent)).Single();
+                var restoredPromise = Program.QuerySql(c, "SELECT * FROM obligations WHERE event_id=$event;", TestDict("event", originalEvent)).Single();
                 Save("recovered_revision", "Please pay this ransom after the harvest.", "I promise to pay this ransom after the harvest.",
                     25d, ReadString(restoredPromise, "obligation_id", ""), timeline: "recovered");
                 Check("recovered_revision_retains_verified_original", Build(recovered).Contains("turn_id=" + restoredTurn)
                     && Build(recovered).Contains("turn_id=recovered_revision_npc"));
-                ExecuteSql(c, "UPDATE conversation_turns SET text='tampered source' WHERE turn_id=$turn;", TestDict("turn", restoredTurn));
+                Program.ExecuteSql(c, "UPDATE conversation_turns SET text='tampered source' WHERE turn_id=$turn;", TestDict("turn", restoredTurn));
                 Check("tampered_restored_source_cannot_expand", restoredTurn.Length > 0 && !Build(recovered).Contains("turn_id=" + restoredTurn));
                 Check("abandoned_branch_cannot_expand", Build(new Dictionary<string, object>(bounded) { ["timelineId"] = "unrelated" }).Length == 0);
             }

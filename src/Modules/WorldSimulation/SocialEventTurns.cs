@@ -24,14 +24,14 @@ namespace ReignBetaServer
         {
             PrepareSocialConversationInput(payload);
             var floorPayload = Program.CloneDictionary(payload);
-            Program.CopyPlayerInputSource(payload, floorPayload);
+            DialogueService.CopyPlayerInputSource(payload, floorPayload);
             string eventId = ReadFirstString(payload, "eventId", "socialEventId");
             floorPayload["campaignId"] = ReadString(payload, "campaignId", Program.LatestCampaignId());
             floorPayload["activeHeroIds"] = ReadStringList(payload, "activeHeroIds").Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Take(SocialEventMaximumActive).ToList();
             floorPayload["mode"] = ReadString(payload, "templateId", "") == "generated_wilderness" ? "wilderness_event" : "social_event";
-            floorPayload["conversationSessionId"] = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), "social_event_" + Program.SafeMemoryKey(eventId));
-            var result = Program.GroupConversationFloorApi(floorPayload);
+            floorPayload["conversationSessionId"] = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"), "social_event_" + DialogueService.SafeMemoryKey(eventId));
+            var result = DialogueService.GroupConversationFloorApi(floorPayload);
             if (payload.TryGetValue("inputReceipt", out var receipt)) result["inputReceipt"] = receipt;
             return result;
         }
@@ -40,11 +40,11 @@ namespace ReignBetaServer
         {
             string campaign = ReadString(payload, "campaignId", Program.LatestCampaignId());
             payload["conversationSessionId"] = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId"),
-                "social_event_" + Program.SafeMemoryKey(ReadFirstString(payload, "eventId", "socialEventId")));
+                "social_event_" + DialogueService.SafeMemoryKey(ReadFirstString(payload, "eventId", "socialEventId")));
             string generation;
             using (var connection = Program.OpenCampaignConnection(campaign))
-                generation = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", "");
-            Program.AdmitConversationInput(campaign, payload, generation);
+                generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+            DialogueService.AdmitConversationInput(campaign, payload, generation);
         }
 
         internal static Dictionary<string, object> SocialEventTurnWithResponder(
@@ -172,7 +172,7 @@ namespace ReignBetaServer
                     ["turnId"] = turnId,
                     ["contributionId"] = ReadString(payload, "contributionId", turnId),
                     ["conversationSessionId"] = ReadString(payload, "conversationSessionId", ""),
-                    ["playerText"] = Program.OriginalPlayerInput(payload),
+                    ["playerText"] = DialogueService.OriginalPlayerInput(payload),
                     ["suppressPlayerTranscript"] = true,
                     ["activeHeroIds"] = activeIds,
                     ["groupTurnPlan"] = floor,
@@ -183,7 +183,7 @@ namespace ReignBetaServer
                     ["canInvitePlayerToDance"] = CanSocialEventSpeakerInviteToDance(payload, request)
                 };
                 speakerPayload["sceneContext"] = ReadString(speakerPayload, "sceneContext", "")
-                    + "\n" + Program.GroupConversationParticipationGuidance;
+                    + "\n" + DialogueService.GroupConversationParticipationGuidance;
                 if (spokenResults.Count > 0)
                 {
                     speakerPayload["sceneContext"] =
@@ -282,8 +282,8 @@ namespace ReignBetaServer
             // long enough to put the installed .NET Framework path exactly at the
             // legacy MAX_PATH boundary. The full ids remain inside the JSON; stable
             // hashes keep the storage path short without weakening idempotency.
-            string eventSegment = Program.PromptHash(eventId ?? "unknown").Substring(0, 16);
-            string turnSegment = Program.PromptHash(turnId ?? "turn").Substring(0, 24);
+            string eventSegment = DialogueService.PromptHash(eventId ?? "unknown").Substring(0, 16);
+            string turnSegment = DialogueService.PromptHash(turnId ?? "turn").Substring(0, 24);
             return Path.Combine(Program.CampaignDirectory(campaignId), "turn_cache", "turn_" + eventSegment + "_" + turnSegment + ".json");
         }
 
@@ -591,7 +591,7 @@ namespace ReignBetaServer
             });
             return ReadDictionaryList(evaluation, "nativeChanges").Select(change => new Dictionary<string, object>
             {
-                ["receiptId"] = "conversation_native_" + Program.PromptHash(turnId + "|" + ReadString(change, "subjectId", "") + "|" + ReadString(change, "targetId", "")).Substring(0, 24).ToLowerInvariant(),
+                ["receiptId"] = "conversation_native_" + DialogueService.PromptHash(turnId + "|" + ReadString(change, "subjectId", "") + "|" + ReadString(change, "targetId", "")).Substring(0, 24).ToLowerInvariant(),
                 ["receiptIds"] = ReadStringList(change, "receiptIds"),
                 ["subjectId"] = ReadString(change, "subjectId", ""), ["targetId"] = ReadString(change, "targetId", ""),
                 ["nativeRelationDelta"] = ReadInt(change, "delta", 0), ["idempotent"] = ReadInt(evaluation, "idempotentCount", 0) > 0,

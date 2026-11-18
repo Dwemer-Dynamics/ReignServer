@@ -7,7 +7,7 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static string ReplayReferenceGraphModeError(Dictionary<string, object> fixture) =>
             fixture?.TryGetValue("referenceGraphMode", out var value) == true
@@ -28,14 +28,14 @@ namespace ReignBetaServer
                 bool supplied = fixture?.ContainsKey("referenceGraphMode") == true;
                 if (supplied)
                 {
-                    if (!ReignPostgreSqlStorage.Options.IsValidation || ActiveServerPort > 0
-                        || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+                    if (!ReignPostgreSqlStorage.Options.IsValidation || Program.ActiveServerPort > 0
+                        || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                         throw new InvalidOperationException("Reference graph replay requires non-listening isolated validation.");
                     ConversationReferenceValidationMode.Value = ReadString(fixture, "referenceGraphMode", "");
                 }
                 try
                 {
-                    var settings = LoadSettings();
+                    var settings = Program.LoadSettings();
                     Audit = TestDict("mode", ConversationReferenceMode(settings), "source", supplied ? "fixture"
                         : previous != null ? "inherited_fixture" : settings.ContainsKey("memoryReferenceGraphMode") ? "settings" : "default",
                         "historyBackfilled", false, "scope", "isolated_fixture_not_native_campaign");
@@ -129,7 +129,7 @@ namespace ReignBetaServer
                 if (characteristics?.ContainsKey("politicalProfile") == true
                     && CanonicalJson(ReadDictionary(characteristics, "politicalProfile")) != CanonicalJson(applied))
                     return "initial_native_political_snapshots_disagree";
-                var content = CloneDictionary(applied);
+                var content = Program.CloneDictionary(applied);
                 foreach (string key in new[] { "CampaignId", "HeroId", "TimelineId" }) content.Remove(key);
                 // Mature or nested cross-world history needs its own receipt; this
                 // initial characterization supports only an unchanged genesis.
@@ -145,9 +145,9 @@ namespace ReignBetaServer
             Dictionary<string, object> fixture, Dictionary<string, object> profile, Dictionary<string, object> characteristics,
             string campaign, string observer, string timeline)
         {
-            if (!ReignPostgreSqlStorage.Options.IsValidation || ActiveServerPort > 0
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
-                || !HasArg(Environment.GetCommandLineArgs(), "--run-verification")
+            if (!ReignPostgreSqlStorage.Options.IsValidation || Program.ActiveServerPort > 0
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
+                || !Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification")
                 || campaign.Length != "evidence_replay_".Length + 32
                 || !campaign.StartsWith("evidence_replay_", StringComparison.Ordinal)
                 || !campaign.Skip("evidence_replay_".Length).All(Uri.IsHexDigit)
@@ -162,23 +162,23 @@ namespace ReignBetaServer
             if (campaign == ReadString(source, "CampaignId", "") || observer == ReadString(source, "HeroId", "")
                 || timeline == ReadString(source, "TimelineId", ""))
                 throw new InvalidOperationException("The replay political namespace must differ from the source.");
-            var bound = CloneDictionary(source);
+            var bound = Program.CloneDictionary(source);
             bound["CampaignId"] = campaign; bound["HeroId"] = observer; bound["TimelineId"] = timeline;
             var value = System.Text.Json.JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(bound));
-            string path = CharacterFile(campaign, observer, "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json");
+            string path = Program.CharacterFile(campaign, observer, "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json");
             lock (CharactersService.PoliticalProfileLock)
             {
-                var existing = ReadJsonObject(path);
+                var existing = Program.ReadJsonObject(path);
                 if (existing.Count > 0 && CanonicalJson(existing) != CanonicalJson(bound))
                     throw new InvalidOperationException("The isolated political revision already has different content.");
                 CharactersService.WritePoliticalRevision(campaign, observer, value);
-                if (value.Revision != 1 || CanonicalJson(ReadJsonObject(path)) != CanonicalJson(bound))
+                if (value.Revision != 1 || CanonicalJson(Program.ReadJsonObject(path)) != CanonicalJson(bound))
                     throw new InvalidOperationException("The isolated political revision did not preserve its captured content.");
             }
-            profile["appliedPoliticalProfile"] = CloneDictionary(bound);
-            characteristics["politicalProfile"] = CloneDictionary(bound);
+            profile["appliedPoliticalProfile"] = Program.CloneDictionary(bound);
+            characteristics["politicalProfile"] = Program.CloneDictionary(bound);
             return TestDict("status", "fixture_rebound_not_native_issued", "sourceSha256", PromptHash(CanonicalJson(source)),
-                "boundSha256", PromptHash(CanonicalJson(bound)), "writtenSha256", PromptHash(CanonicalJson(ReadJsonObject(path))),
+                "boundSha256", PromptHash(CanonicalJson(bound)), "writtenSha256", PromptHash(CanonicalJson(Program.ReadJsonObject(path))),
                 "changedPaths", new[] { "CampaignId", "HeroId", "TimelineId" }, "revisionPreserved", true,
                 "limits", "Only revision1 with empty change/evidence/interval history is supported. Values are preserved; this is an isolated namespace clone, not native issuance or restore acceptance.");
         }
@@ -205,16 +205,16 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CaptureMemoryReplayProviderRequest(Dictionary<string, object> request,
             Dictionary<string, object> fixtureSettings)
         {
-            var captured = CloneDictionary(request);
-            var payload = CloneDictionary(request);
-            var settings = CloneDictionary(fixtureSettings);
+            var captured = Program.CloneDictionary(request);
+            var payload = Program.CloneDictionary(request);
+            var settings = Program.CloneDictionary(fixtureSettings);
             string purpose = ReadString(payload, "requestType", "dialogue");
             string model = ReadString(payload, "model", "");
             string error = "";
-            if (IsRetiredMemoryRequest(purpose)) error = "memory_llm_stage_retired";
+            if (Program.IsRetiredMemoryRequest(purpose)) error = "memory_llm_stage_retired";
             if (model.Length == 0 && error.Length == 0) error = "missing_fixture_model";
             var wire = TestDict("schema", "reign-memory-provider-wire-capture-v1", "status", error.Length == 0 ? "captured" : "blocked",
-                "requestType", purpose, "model", model, "provider", NanoGptProvider, "apiUrl", PortraitsService.NanoGptChatCompletionsUrl,
+                "requestType", purpose, "model", model, "provider", Program.NanoGptProvider, "apiUrl", PortraitsService.NanoGptChatCompletionsUrl,
                 "providerCalls", 0, "certificateEligible", false, "scope", "initial_json_shared_builders_nano_fixture",
                 "excluded", new[] { "credentials_and_http_headers", "http_dispatch", "runtime_queue_and_cooldowns", "retries", "other_providers", "native_and_semantic_acceptance" });
             captured["providerWireCapture"] = wire;
@@ -227,7 +227,7 @@ namespace ReignBetaServer
                 messages.Add(TestDict("role", "user", "content", ReadString(payload, "prompt", ReadString(payload, "text", ""))));
             }
             if (EffectiveReasoningEffort(settings, payload, purpose) != "none") ApplyPrivateReasoningPolicyToMessages(messages);
-            var body = BuildChatRequestBody(settings, payload, messages, model);
+            var body = Program.BuildChatRequestBody(settings, payload, messages, model);
             ConfigurePromptCacheRouting(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, model, purpose);
             wire["reasoningRouting"] = ConfigureReasoningRouting(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, model, purpose);
             string json = Json.Serialize(body);
@@ -283,13 +283,13 @@ namespace ReignBetaServer
                 connection = ReignPostgreSqlStorage.OpenMetadataConnection();
                 try
                 {
-                    locked = ReadBool(QuerySql(connection,
+                    locked = ReadBool(Program.QuerySql(connection,
                         "SELECT pg_try_advisory_lock(hashtextextended($owner,0)) AS acquired;",
                         TestDict("owner", "memory-evidence-replay:" + Campaign)).Single(), "acquired", false);
                     if (!locked) throw new InvalidOperationException("This evidence replay world is already owned by another run.");
                     // CampaignExists joins the registry to pg_namespace and
                     // therefore cannot establish absence of orphaned state.
-                    if (ReadBool(QuerySql(connection, @"SELECT
+                    if (ReadBool(Program.QuerySql(connection, @"SELECT
 EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=$schema)
 OR EXISTS(SELECT 1 FROM reign_meta.campaign_registry WHERE campaign_id=$campaign OR schema_name=$schema)
 OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign) AS present;",
@@ -308,7 +308,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 {
                     try
                     {
-                        if (locked) QuerySql(connection, "SELECT pg_advisory_unlock(hashtextextended($owner,0));",
+                        if (locked) Program.QuerySql(connection, "SELECT pg_advisory_unlock(hashtextextended($owner,0));",
                             TestDict("owner", "memory-evidence-replay:" + Campaign));
                     }
                     finally { connection.Dispose(); connection = null; }
@@ -319,10 +319,10 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
         private static Dictionary<string, object> EvidenceWriterContinuationFixture(Dictionary<string, object> fixture,
             Dictionary<string, object> continuation)
         {
-            var next = CloneDictionary(fixture);
+            var next = Program.CloneDictionary(fixture);
             foreach (string key in new[] { "response", "repairResponses", "nextContribution", "nextPlanResponse", "nextAssemblyResponse", "nextReviewResponse", "continuation" })
                 next.Remove(key);
-            foreach (var pair in CloneDictionary(continuation)) next[pair.Key] = pair.Value;
+            foreach (var pair in Program.CloneDictionary(continuation)) next[pair.Key] = pair.Value;
             return next;
         }
 
@@ -344,7 +344,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             string campaign, string observer, string peer, Dictionary<string, object> context,
             Dictionary<string, object> settings, IEnumerable<string> sourceIds)
         {
-            var access = BuildKnowledgeAccessContext(observer, peer, "", context);
+            var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
             var result = new List<Dictionary<string, object>>();
             foreach (string id in sourceIds)
             {
@@ -531,7 +531,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                         || continuation.Keys.Any(k => !new[] { "response", "repairResponses", "nextContribution", "nextPlanResponse", "nextAssemblyResponse",
                             "nextReviewResponse", "finalCheck", "continuation" }.Contains(k, StringComparer.Ordinal)))
                         return "invalid_writer_continuation";
-                    var continuedItem = CloneDictionary(item);
+                    var continuedItem = Program.CloneDictionary(item);
                     continuedItem["writerReplay"] = EvidenceWriterContinuationFixture(writer, continuation);
                     string continuationError = MemoryEvidenceReplayInputError(continuedItem, continuationDepth + 1);
                     if (continuationError.Length > 0) return continuationError;
@@ -576,11 +576,11 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             string heroName = ReadString(ReadDictionary(fixture, "profile"), "name",
                 ReadString(transcript.LastOrDefault(t => ReadString(t, "speakerId", "") == observer), "speaker", "Observer"));
             string playerName = EvidenceReplayPlayerName(item, transcript, peer);
-            var profile = CloneDictionary(ReadDictionary(fixture, "profile"));
+            var profile = Program.CloneDictionary(ReadDictionary(fixture, "profile"));
             profile["name"] = heroName; profile["heroStringId"] = observer;
             profile["campaignId"] = campaign;
             profile["politicalTimelineId"] = ReadString(context, "timelineId", "main");
-            var payload = CloneDictionary(context);
+            var payload = Program.CloneDictionary(context);
             payload["campaignId"] = campaign; payload["heroStringId"] = observer;
             payload["mainHeroStringId"] = peer; payload["playerHeroStringId"] = peer;
             payload["mainHeroName"] = playerName; payload["playerName"] = playerName;
@@ -597,20 +597,20 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             // writer model as the captured request, not the Lab's default model.
             // Captured capacity metadata is fixture evidence only: no network or
             // production settings write is allowed, and normal limits still apply.
-            var writerSettings = CloneDictionary(settings);
-            writerSettings["llmProvider"] = NanoGptProvider;
+            var writerSettings = Program.CloneDictionary(settings);
+            writerSettings["llmProvider"] = Program.NanoGptProvider;
             writerSettings["dialogueModel"] = model; writerSettings["eventsModel"] = model;
             writerSettings["apiKey"] = ""; writerSettings["nanoGptApiKey"] = "";
             ApplyReplayGenerationSettings(fixture, writerSettings);
             if (ReadDictionary(fixture, "contextCapacity") is { } capturedCapacity)
             {
-                var certificate = CloneDictionary(capturedCapacity);
+                var certificate = Program.CloneDictionary(capturedCapacity);
                 certificate["endpoint"] = PortraitsService.NanoGptChatCompletionsUrl;
-                string routeKey = NanoGptProvider + ":" + model + ":" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
+                string routeKey = Program.NanoGptProvider + ":" + model + ":" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
                 writerSettings["verifiedConversationContextWindows"] = TestDict(routeKey, certificate);
             }
             var empty = TestDict();
-            var characteristics = CloneDictionary(ReadDictionary(fixture, "characteristics"));
+            var characteristics = Program.CloneDictionary(ReadDictionary(fixture, "characteristics"));
             var initialNativeContext = MapReplayInitialNativeContext(fixture, ReadString(item, "observerId", ""),
                 ReadString(item, "peerId", ""), observer, peer);
             Dictionary<string, object> initialPoliticalBinding = null;
@@ -618,14 +618,14 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             {
                 if (preparedWriterRequest != null || continuationDepth != 0)
                     throw new InvalidOperationException("Initial native context cannot override a prepared or continued request.");
-                foreach (var pair in initialNativeContext) payload[pair.Key] = CloneDictionary((Dictionary<string, object>)pair.Value);
+                foreach (var pair in initialNativeContext) payload[pair.Key] = Program.CloneDictionary((Dictionary<string, object>)pair.Value);
                 initialPoliticalBinding = BindInitialReplayPoliticalProfile(item, fixture, profile, characteristics,
                     campaign, observer, ReadString(context, "timelineId", "main"));
             }
             var nativeIdentity = ReadDictionary(initialNativeContext, "identityView");
             var identity = nativeIdentity == null
                 ? TestDict("identityState", "verified", "canonicalNameAllowed", true, "usableName", playerName)
-                : CloneDictionary(nativeIdentity);
+                : Program.CloneDictionary(nativeIdentity);
             Dictionary<string, object> Request(Dictionary<string, object> turn, List<Dictionary<string, object>> prior,
                 Dictionary<string, object> memory, PublishedPartyReplayView initialView = null)
             {
@@ -637,44 +637,44 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 // continuity adds the legacy history again and final preflight
                 // cannot verify the selected precision sources.
                 var memoryEvidence = ReadDictionary(memory, "precisionEvidence");
-                turn["memoryPrecisionEvidence"] = memoryEvidence == null ? null : CloneDictionary(memoryEvidence);
+                turn["memoryPrecisionEvidence"] = memoryEvidence == null ? null : Program.CloneDictionary(memoryEvidence);
                 string memoryText = ReadString(memory, "memoryPacket", "");
                 if (!string.IsNullOrWhiteSpace(memoryText)) memoryText = "REIGN KNOWLEDGE PACKET\n" + memoryText;
-                turn["continuityOutputReserve"] = socialEvent ? StructuredEventResponseMaxTokens(writerSettings) : StructuredDialogueResponseMaxTokens(writerSettings);
-                var priorSettings = CodexPerformanceSettings.Value;
+                turn["continuityOutputReserve"] = socialEvent ? Program.StructuredEventResponseMaxTokens(writerSettings) : Program.StructuredDialogueResponseMaxTokens(writerSettings);
+                var priorSettings = Program.CodexPerformanceSettings.Value;
                 try
                 {
-                    CodexPerformanceSettings.Value = writerSettings;
+                    Program.CodexPerformanceSettings.Value = writerSettings;
                     PromptEnvelope envelope = socialEvent
                     ? BuildEventPromptEnvelope(campaign, observer + ":event", observer, heroName, playerName, playerName,
-                        contribution, scene, turn, profile, characteristics, CloneDictionary(ReadDictionary(fixture, "state")),
-                        CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity,
+                        contribution, scene, turn, profile, characteristics, Program.CloneDictionary(ReadDictionary(fixture, "state")),
+                        Program.CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity,
                         precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "", publishedParty: initialView)
                     : BuildDialoguePromptEnvelope(campaign, observer, heroName, playerName, playerName,
-                        contribution, scene, profile, characteristics, CloneDictionary(ReadDictionary(fixture, "state")),
-                        CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity, turn,
+                        contribution, scene, profile, characteristics, Program.CloneDictionary(ReadDictionary(fixture, "state")),
+                        Program.CloneDictionary(ReadDictionary(fixture, "relationships")), empty, prior, new(), new(), new(), identity, turn,
                         precomputedMemoryPacket: memoryText, precomputedGroupConversationPrompt: "");
                     // Replay retains production's evidence gate. Estimated size
                     // remains advisory here just as at real provider dispatch.
                     if (!ConversationProviderPreflightAllowsDispatch(ReadDictionary(envelope.Diagnostics, "continuityPreflight")))
                         throw new InvalidOperationException("Captured writer context is missing required original evidence.");
-                    var prepared = BuildConversationGenerationRequest(writerSettings, envelope, campaign, "", observer,
+                    var prepared = Program.BuildConversationGenerationRequest(writerSettings, envelope, campaign, "", observer,
                         contribution, socialEvent, observer + ":event");
                     // The non-listening fixture has no native profile file. Bind its
                     // mapped profile as the ordinary wire builder expects, retaining
                     // required political context inside this isolated replay world.
-                    prepared["hero"] = CloneDictionary(profile);
+                    prepared["hero"] = Program.CloneDictionary(profile);
                     prepared["model"] = model;
                     prepared["singleProviderAttempt"] = true;
                     return prepared;
                 }
-                finally { CodexPerformanceSettings.Value = priorSettings; }
+                finally { Program.CodexPerformanceSettings.Value = priorSettings; }
             }
             Dictionary<string, object> request;
             ReviewedReplayWriterPlan expectedWriterPlan;
             try
             {
-                request = preparedWriterRequest == null ? Request(payload, transcript, packet, publishedParty) : CloneDictionary(preparedWriterRequest);
+                request = preparedWriterRequest == null ? Request(payload, transcript, packet, publishedParty) : Program.CloneDictionary(preparedWriterRequest);
                 expectedWriterPlan = PrepareReplayReviewedWriterPlan(request, item, ReadDictionary(packet, "reviewedFactProjection"));
             }
             catch (InvalidOperationException ex)
@@ -799,7 +799,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     if (index >= EvidenceWriterReplayMaxRepairs) throw new InvalidOperationException("Conversation repair capture exceeded its bound.");
                     // Repairs have their own request dictionary; retain the same
                     // isolated native profile through the ordinary political guard.
-                    repairRequest["hero"] = CloneDictionary(profile);
+                    repairRequest["hero"] = Program.CloneDictionary(profile);
                     var wire = ReadDictionary(CaptureMemoryReplayProviderRequest(repairRequest, writerSettings), "providerWireCapture");
                     repairRequests.Add(TestDict("index", index, "requestType", ReadString(repairRequest, "requestType", ""),
                         "request", repairRequest, "providerWireCapture", wire));
@@ -817,12 +817,12 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     if (!string.Equals(ReadString(captures[index], "requestSha256", ""), ReadString(wire, "requestSha256", ""), StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Captured conversation repair does not match its exact production request.");
                     result["repairResponsesConsumed"] = index + 1;
-                    return CloneDictionary(ReadDictionary(captures[index], "response"));
+                    return Program.CloneDictionary(ReadDictionary(captures[index], "response"));
                 }
                 try
                 {
                     string auditMode = mode == "dialogue" ? "dialogue" : "party_chat";
-                    response = RetryMalformedStructuredResponse(CloneDictionary(response), request, campaign,
+                    response = Program.RetryMalformedStructuredResponse(Program.CloneDictionary(response), request, campaign,
                         "captured-writer", auditMode, observer, "", CapturedRepair);
                     response = RetryRoleplayContinuityViolation(response, request, payload, identity, transcript, campaign,
                         "captured-writer", auditMode, observer, heroName, playerName, "", CapturedRepair);
@@ -860,7 +860,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 }
             }
             bool quiet = mode != "dialogue" && parsed != null && WorldSimulationService.NormalizeSocialEventParticipation(parsed) == "quiet";
-            var checkedResponse = RejectProviderReservedSpeech(response, parsed);
+            var checkedResponse = Program.RejectProviderReservedSpeech(response, parsed);
             if (!ReferenceEquals(checkedResponse, response))
             {
                 result["status"] = "writer_response_rejected";
@@ -894,17 +894,17 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             reply = RenderGroundedSceneHeading(payload, observer, parsed, reply);
             result["groundingAccepted"] = FinalizeConversationGrounding(payload, observer, parsed, ref reply);
             parsed["reply"] = reply;
-            result["grounding"] = CloneDictionary(ReadDictionary(payload, "conversationGrounding"));
+            result["grounding"] = Program.CloneDictionary(ReadDictionary(payload, "conversationGrounding"));
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string generation;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
                 generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             var rejections = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> Writes(string key, string kind)
             {
-                var values = kind == "memory" ? NormalizeMemoryWrites(parsed.GetValueOrDefault(key), campaign, observer, timestamp)
+                var values = kind == "memory" ? Program.NormalizeMemoryWrites(parsed.GetValueOrDefault(key), campaign, observer, timestamp)
                     : ReadDictionaryList(parsed, key);
-                return FilterRoleplayFeedbackWrites(FilterConversationRoleMisattributions(values, payload,
+                return FilterRoleplayFeedbackWrites(Program.FilterConversationRoleMisattributions(values, payload,
                     ReadString(payload, "playerText", ""), kind, rejections), kind, rejections, payload, observer, campaign);
             }
             var unit = new AcceptedConversationUnit {
@@ -926,12 +926,12 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             result["publication"] = publication; result["writeRejections"] = rejections;
             result["acceptedProse"] = reply;
             var stored = TestDict();
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 foreach (string table in new[] { "conversation_turns", "memories", "beliefs", "obligations", "comprehension" })
-                    if (WorldSimulationService.TableExists(connection, table)) stored[table] = QuerySql(connection,
+                    if (WorldSimulationService.TableExists(connection, table)) stored[table] = Program.QuerySql(connection,
                         "SELECT * FROM " + table + " WHERE event_id=$event LIMIT 256;", TestDict("event", unit.EventId));
-                if (WorldSimulationService.TableExists(connection, "conversation_continuity")) stored["continuity"] = QuerySql(connection,
+                if (WorldSimulationService.TableExists(connection, "conversation_continuity")) stored["continuity"] = Program.QuerySql(connection,
                     "SELECT * FROM conversation_continuity WHERE owner_id=$owner AND timeline_id=$timeline LIMIT 256;",
                     TestDict("owner", observer, "timeline", ContinuityTimeline(payload)));
             }
@@ -959,7 +959,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             nextTranscript = nextTranscript.TakeLast(30).ToList();
             SetMemoryTranscriptContext(next, nextTranscript);
             {
-                var nextPacket = BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(next, "playerText", ""), 4000, next, settings);
+                var nextPacket = Program.BuildNpcMemoryPacket(campaign, observer, peer, "", ReadString(next, "playerText", ""), 4000, next, settings);
                 result["nextPacket"] = nextPacket;
                 try
                 {
@@ -983,7 +983,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 result["status"] = pending.Count == 0 ? "captured_writer_stored_next_read_prepared" : "next_evidence_pending";
                 if (mapSourceId != null && publishedParty == null && item.ContainsKey("reviewedFactReplay")
                     && !item.ContainsKey("reviewedRecoveryReplay") && !item.ContainsKey("durableReadReplay"))
-                    result["reviewedFactFollowUp"] = CaptureReplayReviewedFollowUp(campaign, observer, peer, item, CloneDictionary(next),
+                    result["reviewedFactFollowUp"] = CaptureReplayReviewedFollowUp(campaign, observer, peer, item, Program.CloneDictionary(next),
                         nextTranscript, nextPacket, mapSourceId, writerSettings, (turn, lines, memory) => Request(turn, lines, memory));
                 if (item.ContainsKey("durableReadReplay"))
                     result["durableRead"] = ReplayLaterDurableRead(campaign, observer, peer, item, payload, writerSettings,
@@ -994,7 +994,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                         result["continuation"] = TestDict("status", "waiting_for_prior_evidence", "providerCalls", 0, "certificateEligible", false);
                     else
                     {
-                        var continuedItem = CloneDictionary(item);
+                        var continuedItem = Program.CloneDictionary(item);
                         continuedItem["caseId"] = ReadString(item, "caseId", "writer_turn") + ":continuation";
                         continuedItem["query"] = next["playerText"];
                         continuedItem["asOfSequence"] = next["memoryAsOfAcceptedSequence"];
@@ -1044,7 +1044,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             var captured = ReadDictionary(capture, "result");
             // Match the runtime's model gate, including failures without a model identity.
             if (ReadString(captured, "modelHash", "") != modelHash) return null;
-            var result = CloneDictionary(captured);
+            var result = Program.CloneDictionary(captured);
             result["sourceId"] = mappedSourceId;
             return result;
         }
@@ -1058,16 +1058,16 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> RunMemoryEvidenceReplay()
+        internal static Dictionary<string, object> RunMemoryEvidenceReplay()
         {
-            if (ActiveServerPort > 0 || !HasArg(Environment.GetCommandLineArgs(), "--run-verification")
+            if (Program.ActiveServerPort > 0 || !Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification")
                 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Evidence replay requires the isolated artifact-bound Verification Lab CLI.");
             string path = MemoryReplayInputPath("evidence-input.json");
             if (!File.Exists(path) || new FileInfo(path).Length > 32 * 1024 * 1024)
                 throw new InvalidOperationException("Stage bounded memory-accuracy/evidence-input.json beside the validated artifact.");
-            var input = ReadJsonObject(path);
+            var input = Program.ReadJsonObject(path);
             if (ReadString(input, "schema", "") == DialogueAttributionReplaySchema)
                 return RunDialogueAttributionReplay(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant());
             if (ReadString(input, "schema", "") == "reign-native-archive-contracts-v1")
@@ -1076,8 +1076,8 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                 && ReadDictionaryList(input, "cases").Any(c => c.ContainsKey("publishedPartyViewSha256"))
                 ? ReadPublishedPartyReplayFile(path) : null;
             var report = ReplayMemoryEvidenceFixture(input, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(), publication);
-            string resultPath = Path.Combine(TestsDir, "memory-accuracy", "evidence-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
-            WriteJsonObject(resultPath, report);
+            string resultPath = Path.Combine(Program.TestsDir, "memory-accuracy", "evidence-result-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
+            Program.WriteJsonObject(resultPath, report);
             return TestDict("ok", report["ok"], "resultPath", resultPath, "completedCases", report["completedCases"],
                 "fullyReplayedCases", report["fullyReplayedCases"], "inputSha256", report["inputSha256"], "providerCalls", 0, "certificateEligible", false);
         }
@@ -1087,8 +1087,8 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
         private static Dictionary<string, object> ReplayMemoryEvidenceFixture(Dictionary<string, object> input, string inputHash,
             byte[] publication = null)
         {
-            if (ActiveServerPort > 0 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (Program.ActiveServerPort > 0 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Fixture replay requires non-listening isolated Verification Lab state.");
             bool formationOnly = ReadString(input, "schema", "") == SceneFormationReplaySchema;
             if (formationOnly) input = SceneFormationEvidenceManifest(input);
@@ -1150,7 +1150,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             var denseHistoryScopes = new Dictionary<string, int>();
             try
             {
-                for (int index = 0; index < cases.Count && !ShouldCancelVerification(); index++)
+                for (int index = 0; index < cases.Count && !Program.ShouldCancelVerification(); index++)
                 {
                     var item = cases[index];
                     using var referenceMode = new EvidenceReplayReferenceModeScope(ReadDictionary(item, "writerReplay"));
@@ -1176,7 +1176,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     var lateViews = new List<Dictionary<string, object>>();
                     var indexingClock = System.Diagnostics.Stopwatch.StartNew();
                     if (seedHistory)
-                    using (var connection = OpenCampaignConnection(campaign))
+                    using (var connection = Program.OpenCampaignConnection(campaign))
                     using (var transaction = connection.BeginTransaction())
                     {
                         foreach (var group in sources.GroupBy(s => ReadString(s, "sessionId", "history")))
@@ -1190,7 +1190,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                             // recent and leave selection dependent on row order.
                             long startTimestamp = group.Min(s => ReadLong(s, "sequence", 0));
                             long endTimestamp = group.Max(s => ReadLong(s, "sequence", 0));
-                            ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                            Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$payload);", TestDict("session", session, "campaign", campaign,
                                 "npc", observer, "player", peer, "start", startTimestamp, "end", endTimestamp,
                                 "participants", Json.Serialize(participants), "payload", Json.Serialize(context)));
@@ -1202,20 +1202,20 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                                     ReadString(source, "role", ""), Map(ReadString(source, "speakerId", "")), ReadString(source, "speakerName", ReadString(source, "speakerId", "")),
                                     ReadString(source, "text", ""), published ? "party_chat" : "in_person", ReadDouble(source, "worldDay", 0),
                                     ReadLong(source, "sequence", 0), "", ReadStringList(source, "audience").Select(Map).ToList(), context);
-                                ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;",
+                                Program.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=$sequence WHERE turn_id=$id;",
                                     TestDict("sequence", ReadLong(source, "sequence", 0), "id", id));
                                 if (indexSpecialists)
                                 {
-                                    var original = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
+                                    var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
                                     var captured = extractorEnabled ? extractionCaptures[ReadString(source, "sourceId", "")] : null;
                                     var extraction = captured == null ? null : RebindMemoryExtractionReplay(captured, id, extractorModelHash);
                                     StoreMemorySpecialistDocument(connection, original, extraction);
                                     var indexed = TestDict("sourceId", id, "sourceHash", MemorySpecialistSourceHash(original));
                                     if (extractorEnabled)
                                     {
-                                        var stored = QuerySql(connection, "SELECT payload_json,public_topics_json,public_entities_json FROM memory_specialist_sources WHERE turn_id=$id;", TestDict("id", id)).Single();
+                                        var stored = Program.QuerySql(connection, "SELECT payload_json,public_topics_json,public_entities_json FROM memory_specialist_sources WHERE turn_id=$id;", TestDict("id", id)).Single();
                                         indexed["document"] = TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
-                                        indexed["publicTopics"] = TextListFromJson(ReadString(stored, "public_topics_json", "[]"));
+                                        indexed["publicTopics"] = Program.TextListFromJson(ReadString(stored, "public_topics_json", "[]"));
                                         indexed["publicEntitiesJson"] = ReadString(stored, "public_entities_json", "[]");
                                         indexed["captureSha256"] = PromptHash(CanonicalJson(captured));
                                         indexed["captureOk"] = ReadBool(extraction, "ok", false);
@@ -1224,7 +1224,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                                 }
                                 if(captureLateInteraction)
                                 {
-                                    var original=QuerySql(connection,"SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;",TestDict("id",id)).Single();
+                                    var original=Program.QuerySql(connection,"SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;",TestDict("id",id)).Single();
                                     foreach(var view in new[]{"self","public"}.Select(v=>LateInteractionView(original,v)).Where(v=>v!=null))
                                     {
                                         lateViews.Add(view);
@@ -1281,7 +1281,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                     }
                     if (ReadBool(item, "captureSemanticDocuments", false))
                     {
-                        using var captureConnection = OpenCampaignConnection(campaign);
+                        using var captureConnection = Program.OpenCampaignConnection(campaign);
                         semanticDocuments = CaptureReplaySemanticDocuments(captureConnection, campaign, observer, peer,
                             context, settings, sources.Select(s => Map(ReadString(s, "sourceId", ""))));
                     }
@@ -1297,7 +1297,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                     {
                         var queryClock = System.Diagnostics.Stopwatch.StartNew();
                         string query = ReadString(item, "query", "");
-                        var roundPacket = publishedParty == null ? BuildNpcMemoryPacket(campaign, observer, peer, "", query, 4000, context, settings)
+                        var roundPacket = publishedParty == null ? Program.BuildNpcMemoryPacket(campaign, observer, peer, "", query, 4000, context, settings)
                             : BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, context, settings, false, publishedParty);
                         long packetMs = queryClock.ElapsedMilliseconds;
                         var writerPacket = item.ContainsKey("reviewedFactReplay")
@@ -1333,7 +1333,7 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                         "semanticDocuments", semanticDocuments,
                         "lateInteractionReplay",lateCaptures,"lateInteractionAudit",LateInteractionReplayAudit.Value,"precisionMode",precisionMode,
                         "memorySelectionReplay", selectionCaptures, "memoryPrecisionOrdinaryTokens", ordinaryTokens,
-                        "commonTranscript", "CURRENT CONTRIBUTION: " + ReadString(item, "query", "") + "\nRECENT DIALOGUE:\n" + FormatEventLinesForPrompt(transcript),
+                        "commonTranscript", "CURRENT CONTRIBUTION: " + ReadString(item, "query", "") + "\nRECENT DIALOGUE:\n" + Program.FormatEventLinesForPrompt(transcript),
                         "recentTranscriptSourceIds", transcript.Select(t => ReadString(t, "turnId", "")).ToList(),
                         "sourceSetHash", PromptHash(CanonicalJson(sources)), "pendingResponses", pending,
                         "densePipeline", denseWorker == null ? null : TestDict("index", denseIndex, "rounds", denseRounds),

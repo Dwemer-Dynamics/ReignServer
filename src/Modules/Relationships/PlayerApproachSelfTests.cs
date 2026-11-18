@@ -100,7 +100,7 @@ namespace ReignBetaServer
                 var people = new[] { TestDict("heroId", "npc", "alive", true, "scopes", new[] { "settlement:town" }),
                     TestDict("heroId", "observer", "alive", true, "scopes", new[] { "settlement:town" }),
                     TestDict("heroId", "absent", "alive", true, "scopes", new[] { "settlement:other" }) };
-                Program.AcceptedConversationUnit Unit(string hero, string exchange, int day) => new Program.AcceptedConversationUnit
+                DialogueService.AcceptedConversationUnit Unit(string hero, string exchange, int day) => new DialogueService.AcceptedConversationUnit
                 {
                     Campaign = campaign, Hero = hero, HeroName = hero, Player = "player", Reply = "A successful spoken response.", Location = "town",
                     Payload = TestDict("campaignId", campaign, "timelineId", "attention_test", "playerHeroStringId", "player", "channel", "in_person",
@@ -124,15 +124,15 @@ namespace ReignBetaServer
                         "An accepted individual invitation permits an empty player contribution and binds the saved opening brief without manufacturing player speech.");
                     // Reproduce the empty immutable original that replaced the old
                     // playerText cue, then exercise real prompt packing and message separation.
-                    Program.ApplyPlayerInputAudienceToPayload(individualOpening, "npc", allowInterpretation: false);
-                    string emptyOriginal = Program.ProjectCurrentPlayerPromptText(IndividualNpcOpeningCue, "npc", individualOpening);
+                    DialogueService.ApplyPlayerInputAudienceToPayload(individualOpening, "npc", allowInterpretation: false);
+                    string emptyOriginal = DialogueService.ProjectCurrentPlayerPromptText(IndividualNpcOpeningCue, "npc", individualOpening);
                     string attentionPrompt = PlayerAttentionPrompt(campaign, "npc", individualOpening);
-                    var packed = Program.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText",
+                    var packed = DialogueService.BuildBudgetedConversationLiveTurn("dialogue_live_turn_template.txt", "priorDialogueText",
                         new Dictionary<string, string> { ["playerText"] = emptyOriginal, ["contextPullText"] = attentionPrompt,
                             ["priorDialogueText"] = "" }, "Current camp.", "Speak for yourself.", "", "Rules.", "Profile.",
                         targetOverride: 1000, capacity: TestDict("inputAllowance", 990976, "outputFits", true, "capacityVerified", true));
-                    var packedEnvelope = Program.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", packed.LiveTurn);
-                    Program.StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), Program.FormatDialogueForPrompt,
+                    var packedEnvelope = DialogueService.CreatePromptEnvelope("dialogue", "test", "Rules.", "Profile.", packed.LiveTurn);
+                    DialogueService.StructureConversationMessages(packedEnvelope, packed.Structure, "", new(), Program.FormatDialogueForPrompt,
                         "npc", "Player", emptyOriginal, false, text => text);
                     string outbound = string.Join("\n", packedEnvelope.Messages.Select(message => ReadString(message, "content", "")));
                     Check("saved_brief_and_cue_survive_empty_original_and_budget_pressure", emptyOriginal == ""
@@ -140,7 +140,7 @@ namespace ReignBetaServer
                         && outbound.Contains("approachOpeningEvidence") && outbound.Contains("rivalDays")
                         && packed.ContextPullText.Contains("required=true") && ReadString(individualOpening, "playerText", "missing") == "",
                         "Required saved authority and NPC-first instructions reach the outbound messages despite an empty player source and a full working budget.");
-                    var protectedRecords = Program.ContinuityPromptRecords(attentionPrompt, false).Where(record => record.Required).ToList();
+                    var protectedRecords = DialogueService.ContinuityPromptRecords(attentionPrompt, false).Where(record => record.Required).ToList();
                     Check("frozen_approach_brief_is_one_complete_required_record", protectedRecords.Count == 1
                         && protectedRecords[0].Text.Contains(Json.Serialize(individualBrief))
                         && protectedRecords[0].Text.Contains(JealousyOpeningInstructions(individualBrief)),
@@ -164,11 +164,11 @@ namespace ReignBetaServer
                     var ordinary = Program.CloneDictionary(individualOpening); ordinary["playerText"] = "Hello.";
                     Check("individual_player_reply_stays_player_reply", !PrepareIndividualNpcOpening(campaign, "npc", ordinary)
                         && ReadString(ordinary, "playerText", "") == "Hello.", "A real player contribution cannot be promoted into NPC-first speech.");
-                    var openingUnit = new Program.AcceptedConversationUnit { Campaign = campaign, Hero = "npc", Player = "player", HeroName = "Mira", PlayerName = "Player",
+                    var openingUnit = new DialogueService.AcceptedConversationUnit { Campaign = campaign, Hero = "npc", Player = "player", HeroName = "Mira", PlayerName = "Player",
                         EventId = "individual_opening_accepted", EventType = "dialogue_turn", PlayerText = "", Reply = ReadString(valid, "reply", ""), Timestamp = 8,
-                        Generation = ReadString(Program.ReadMemoryPrecisionState(c), "restore_generation", ""), Payload = individualOpening, Parsed = valid,
+                        Generation = ReadString(DialogueService.ReadMemoryPrecisionState(c), "restore_generation", ""), Payload = individualOpening, Parsed = valid,
                         Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new(), Continuity = new() };
-                    var acceptedOpening = Program.PublishAcceptedConversationUnit(openingUnit, accept => Program.StoreConversationExchange(campaign, individualOpening,
+                    var acceptedOpening = DialogueService.PublishAcceptedConversationUnit(openingUnit, accept => DialogueService.StoreConversationExchange(campaign, individualOpening,
                         "npc", "player", "Player", "Mira", "", openingUnit.Reply, openingUnit.EventId, 8, acceptance: accept));
                     string openingSession = ReadString(acceptedOpening, "sessionId", "");
                     Check("individual_opening_only_npc_source_and_heard_receipt", ReadBool(acceptedOpening, "ok", false)
@@ -207,7 +207,7 @@ namespace ReignBetaServer
                     foreach (string failure in new[] { "action_verification", "continuity_evidence", "memory_rewrite", "dialogue_validation" })
                     {
                         var notice = Unit("npc", "failure_" + failure, 11);
-                        notice.Reply = ReadString(Program.VisibleFailedRepairWithoutEffects(TestDict("reply", "An unverified attempted response."), failure), "reply", "");
+                        notice.Reply = ReadString(DialogueService.VisibleFailedRepairWithoutEffects(TestDict("reply", "An unverified attempted response."), failure), "reply", "");
                         noticesExcluded &= ReadString(RecordAcceptedPlayerAttention(c, notice, Sources("npc", "bad_" + failure)), "status", "") == "excluded";
                     }
                     var letter = Unit("npc", "letter", 11); letter.Payload["channel"] = "correspondence";

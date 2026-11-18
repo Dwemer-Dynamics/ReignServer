@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string DialogueAttributionReplaySchema = "reign-dialogue-attribution-replay-v1";
 
@@ -70,7 +70,7 @@ namespace ReignBetaServer
             var prior = ReadDictionaryList(item, "sources").Select(s => TestDict("id", s["sourceId"], "turnId", s["sourceId"],
                 "speakerId", s["speakerId"], "role", s["role"], "text", s["text"], "worldDay", s["worldDay"],
                 "acceptedSequence", s["sequence"], "audienceIds", s["audience"], "sessionId", ReadString(s, "sessionId", ""))).ToList();
-            var parsed = CloneDictionary(ReadDictionary(item, "draft"));
+            var parsed = Program.CloneDictionary(ReadDictionary(item, "draft"));
             var plan = BuildDialogueClaimPlan(parsed, payload, prior, observer);
             var issues = FindDialogueIntegrityViolations(parsed, payload, prior, observer);
             int repairs = 0;
@@ -85,14 +85,14 @@ namespace ReignBetaServer
                         PrepareCountedRouteProviderRequest(check, replayRequest);
                         string hash = PromptHash(CanonicalJson(check));
                         var wireSettings = TestDict("reasoningMode", "selective", "reasoningEffort", "high");
-                        var wire = BuildChatRequestBody(wireSettings, check, ReadDictionaryList(check, "messages"), "");
+                        var wire = Program.BuildChatRequestBody(wireSettings, check, ReadDictionaryList(check, "messages"), "");
                         ConfigurePromptCacheRouting(wireSettings, check, wire, PortraitsService.NanoGptChatCompletionsUrl, "", "dialogue_answer_support");
                         ConfigureReasoningRouting(wireSettings, check, wire, PortraitsService.NanoGptChatCompletionsUrl, "", "dialogue_answer_support");
                         supportRequests.Add(TestDict("requestHash", hash, "request", check, "wireTemplate", wire,
                             "nativeReferenceSealed", IsSealedAnswerSupportAudit(check), "routeAdapterPreservedRequest", beforeAdapter == hash,
                             "wireTemplateScope", "isolated_NanoGPT_HIGH_template_model_is_bound_by_subscription_dispatcher"));
                         var match = captures.Where(c => ReadString(c, "requestHash", "") == hash).ToList();
-                        return match.Count == 1 ? CloneDictionary(ReadDictionary(match[0], "response"))
+                        return match.Count == 1 ? Program.CloneDictionary(ReadDictionary(match[0], "response"))
                             : TestDict("ok", false, "errorCode", "answer_support_capture_missing");
                     }
                     repairs++; return TestDict("ok", false, "error", "offline_repair_capture_missing");
@@ -105,7 +105,7 @@ namespace ReignBetaServer
                 earlyAudits = supportRequests.Count;
                 if (!ReadBool(initial, "ok", false) || !item.ContainsKey("lateRepairDraft")) return initial;
                 lateApplied = true;
-                return TestDict("ok", true, "content", Json.Serialize(CloneDictionary(ReadDictionary(item, "lateRepairDraft"))));
+                return TestDict("ok", true, "content", Json.Serialize(Program.CloneDictionary(ReadDictionary(item, "lateRepairDraft"))));
             }, replayRequest, payload, prior, observer, Respond);
             return TestDict("caseId", item["caseId"], "inputDraftHash", MemorySelectionTextHash(Json.Serialize(parsed)),
                 "claimPlan", plan, "integrityViolations", issues, "repairRequests", repairs, "answerSupportRequests", supportRequests, "result", result,
@@ -117,8 +117,8 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> RunDialogueAttributionReplay(Dictionary<string, object> input, string hash)
         {
-            if (ActiveServerPort > 0 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
-                || !HasArg(Environment.GetCommandLineArgs(), "--run-verification") || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (Program.ActiveServerPort > 0 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") != "1"
+                || !Program.HasArg(Environment.GetCommandLineArgs(), "--run-verification") || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Attribution trace requires isolated artifact-bound verification.");
             string error = DialogueAttributionReplayError(input);
             if (error.Length > 0) throw new InvalidOperationException("Invalid attribution trace: " + error);
@@ -133,9 +133,9 @@ namespace ReignBetaServer
                 var rows = ReadDictionaryList(input, "cases").Select(TraceDialogueAttributionCase).ToList();
                 var report = TestDict("schema", DialogueAttributionReplaySchema, "ok", true, "inputSha256", hash,
                     "cases", rows, "providerCalls", 0, "publicationPerformed", false, "certificateEligible", false);
-                string path = Path.Combine(TestsDir, "memory-accuracy", "attribution-trace-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
+                string path = Path.Combine(Program.TestsDir, "memory-accuracy", "attribution-trace-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json");
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                WriteJsonObject(path, report);
+                Program.WriteJsonObject(path, report);
                 return TestDict("ok", true, "resultPath", path, "cases", rows.Count, "providerCalls", 0, "certificateEligible", false);
             }
             finally { DialogueClaimHelperReplay.Value = oldHelper; DialogueClaimExtractorReplay.Value = oldExtractor; }

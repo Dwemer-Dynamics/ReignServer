@@ -11,7 +11,7 @@ namespace ReignBetaServer
             "structuredOutputs", "compactMetadata", "stablePromptMapping",
             "parallelContextPreparation", "reuseThreads", "asyncThreadCleanup"
         };
-        private sealed class CodexConversationScope
+        internal sealed class CodexConversationScope
         {
             internal Dictionary<string, object> Settings;
             internal string CorrelationId;
@@ -21,10 +21,10 @@ namespace ReignBetaServer
             internal Dictionary<string, object> FinalContract;
             internal Dictionary<string, object> AcceptedPoliticalConduct;
             internal string AcceptedPoliticalConductReply;
-            internal CodexRoleplayMemoryAccess MemoryAccess;
+            internal DialogueService.CodexRoleplayMemoryAccess MemoryAccess;
             internal readonly List<Tuple<Dictionary<string, object>, Dictionary<string, object>>> Results = new List<Tuple<Dictionary<string, object>, Dictionary<string, object>>>();
         }
-        private static readonly AsyncLocal<CodexConversationScope> ActiveCodexConversationScope = new AsyncLocal<CodexConversationScope>();
+        internal static readonly AsyncLocal<CodexConversationScope> ActiveCodexConversationScope = new AsyncLocal<CodexConversationScope>();
         private sealed class CodexConversationGate
         {
             internal readonly SemaphoreSlim Semaphore = new SemaphoreSlim(1, 1);
@@ -32,8 +32,8 @@ namespace ReignBetaServer
         }
         private static readonly object CodexConversationGateLock = new object();
         private static readonly Dictionary<string, CodexConversationGate> CodexConversationGates = new Dictionary<string, CodexConversationGate>();
-        private static readonly object CodexTimelineGate = new object();
-        private static readonly Dictionary<string, string> CodexConversationTimelines = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        internal static readonly object CodexTimelineGate = new object();
+        internal static readonly Dictionary<string, string> CodexConversationTimelines = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         internal static void InvalidateCodexConversationTimeline(string campaignId)
         {
@@ -41,7 +41,7 @@ namespace ReignBetaServer
             InvalidateCodexThreads("save_load_or_rollback");
         }
 
-        private static string CodexConversationTimeline(string campaignId)
+        internal static string CodexConversationTimeline(string campaignId)
         {
             lock (CodexTimelineGate)
             {
@@ -78,8 +78,8 @@ namespace ReignBetaServer
                 ["campaignId"] = campaignId, ["timelineId"] = generation, ["loadGeneration"] = generation,
                 ["sessionId"] = sessionId ?? "", ["ownSessionId"] = sessionId ?? "", ["speakerHeroStringId"] = speakerId,
                 ["conversationMode"] = FirstNonEmpty(ReadString(source, "conversationMode", ""), mode),
-                ["visibilityScope"] = PromptHash(CanonicalJson(CodexIdentityPermissions(identityView)) + "|" + mode + "|" + speakerId),
-                ["authorityHash"] = PromptHash(Json.Serialize(authority)),
+                ["visibilityScope"] = DialogueService.PromptHash(CanonicalJson(DialogueService.CodexIdentityPermissions(identityView)) + "|" + mode + "|" + speakerId),
+                ["authorityHash"] = DialogueService.PromptHash(Json.Serialize(authority)),
                 ["canonicalHistorySignature"] = CodexCanonicalHistorySignature(canonicalHistory),
                 ["currentTurnText"] = currentTurnText ?? "",
                 ["promptVersion"] = ReadString(ReadDictionary(request, "promptEnvelope"), "globalPrefixHash", "")
@@ -88,12 +88,12 @@ namespace ReignBetaServer
                 "authoritativeApproachOpening", "authoritativeApproachKind", "authoritativeApproachBrief", "rescueOpening", "rescueContext" })
                 if (source != null && source.ContainsKey(key)) metadata[key] = source[key];
             request["codexAuthoritativeMetadata"] = metadata;
-            AttachCodexRoleplayContext(request, source, metadata, campaignId, speakerId, identityView, profile);
+            DialogueService.AttachCodexRoleplayContext(request, source, metadata, campaignId, speakerId, identityView, profile);
         }
 
         private static string CodexCanonicalHistorySignature(List<Dictionary<string, object>> lines)
         {
-            return PromptHash(Json.Serialize((lines ?? new List<Dictionary<string, object>>()).Select(line => new[] {
+            return DialogueService.PromptHash(Json.Serialize((lines ?? new List<Dictionary<string, object>>()).Select(line => new[] {
                 ReadString(line, "role", ""), ReadString(line, "speaker", ""), ReadString(line, "text", "") }).ToList()));
         }
 
@@ -160,7 +160,7 @@ namespace ReignBetaServer
                                 // It does not change what the character said; the current
                                 // engine update carries the accepted scene on the next turn.
                                 if (field.Key == "reply" && field.Value is string draftReply && finalValue is string acceptedReply
-                                    && RenderGroundedSceneHeading(payload, speaker, scope.FinalContract, draftReply) == acceptedReply) continue;
+                                    && DialogueService.RenderGroundedSceneHeading(payload, speaker, scope.FinalContract, draftReply) == acceptedReply) continue;
                                 if (CodexAcceptedPoliticalConductMatches(scope, draft, field.Key, finalValue)) continue;
                                 changed = true; changeReason = "changed_final_field:" + field.Key; break;
                             }
@@ -245,7 +245,7 @@ namespace ReignBetaServer
                 ["schemaId"] = ReadString(entry.Item2, "schemaId", ""),
                 ["schemaContractFingerprint"] = ReadString(entry.Item2, "schemaContractFingerprint", "unknown"),
                 ["schemaFingerprint"] = !ReadBool(ReadDictionary(ReadDictionary(entry.Item1, "codexDiagnostics"), "request"), "schemaApplied", false)
-                    ? "not_applied" : PromptHash(Json.Serialize(ReadDictionary(entry.Item2, "outputSchema"))),
+                    ? "not_applied" : DialogueService.PromptHash(Json.Serialize(ReadDictionary(entry.Item2, "outputSchema"))),
                 ["promptMappingVersion"] = ReadString(entry.Item2, "promptMappingVersion", "unknown"),
                 ["promptSegments"] = ReadDictionaryList(entry.Item2, "promptSegments").Select(segment => new Dictionary<string, object> {
                     ["name"] = ReadString(segment, "name", ""), ["role"] = ReadString(segment, "role", ""),
@@ -261,7 +261,7 @@ namespace ReignBetaServer
                     ["repair"] = repairMs, ["finalization"] = timing == null ? null : (object)(ReadLong(timing, "parseMs", 0) + ReadLong(timing, "storageMs", 0)),
                     ["generation"] = calls.Sum(row => ReadLong(row, "durationMs", 0)),
                     ["queue"] = null, ["firstText"] = null, ["threadStartup"] = null, ["cleanup"] = null
-                }, ["calls"] = calls, ["settingsFingerprint"] = PromptHash(Json.Serialize(ReadDictionary(scope.Settings, "codexOptions")))
+                }, ["calls"] = calls, ["settingsFingerprint"] = DialogueService.PromptHash(Json.Serialize(ReadDictionary(scope.Settings, "codexOptions")))
             };
             var stages = ReadDictionary(diagnostics, "stages");
             foreach (string stage in new[] { "queue", "threadStartup", "generation", "cleanup" })
@@ -296,7 +296,7 @@ namespace ReignBetaServer
             var normalized = new Dictionary<string, object> {
                 ["schema"] = "reign-codex-options-v1", ["version"] = 1, ["reasoningMode"] = mode,
                 ["reasoningEffort"] = effort, ["fastMode"] = ReadBool(previous, "fastMode", false),
-                ["lookupMode"] = NormalizeCodexLookupMode(ReadString(previous, "lookupMode", "auto"))
+                ["lookupMode"] = DialogueService.NormalizeCodexLookupMode(ReadString(previous, "lookupMode", "auto"))
             };
             foreach (string key in CodexExperimentKeys) normalized[key] = ReadBool(previous, key, false);
             settings["codexOptions"] = normalized;
@@ -311,12 +311,12 @@ namespace ReignBetaServer
             if (ReadBool(payload, "reasoningDisabled", false)) return "none";
             string mode = ReadString(options, "reasoningMode", "selective");
             string type = (requestType ?? "").Trim().ToLowerInvariant();
-            if (mode == "off" || (mode == "selective" && !SelectiveReasoningRequestTypes.Contains(type))) return "none";
+            if (mode == "off" || (mode == "selective" && !DialogueService.SelectiveReasoningRequestTypes.Contains(type))) return "none";
             string effort = ReadString(options, "reasoningEffort", "medium");
             return type == "memory" && new[] { "medium", "high", "xhigh", "max", "ultra" }.Contains(effort) ? "low" : effort;
         }
 
-        private static Dictionary<string, object> BuildCodexGenerationContext(Dictionary<string, object> settings,
+        internal static Dictionary<string, object> BuildCodexGenerationContext(Dictionary<string, object> settings,
             Dictionary<string, object> payload, string requestType, string model, string correlationId)
         {
             if (!UsesCodexSubscription(settings)) return null;
@@ -359,7 +359,7 @@ namespace ReignBetaServer
             internal readonly List<Dictionary<string, object>> Calls = new List<Dictionary<string, object>>();
         }
         private static readonly AsyncLocal<CodexPerformanceBudget> ActiveCodexPerformanceBudget = new AsyncLocal<CodexPerformanceBudget>();
-        private static readonly AsyncLocal<Dictionary<string, object>> CodexPerformanceSettings = new AsyncLocal<Dictionary<string, object>>();
+        internal static readonly AsyncLocal<Dictionary<string, object>> CodexPerformanceSettings = new AsyncLocal<Dictionary<string, object>>();
 
         // Reserve at physical turn/start, so tier retries, repairs and probes all consume the same cap.
         private static void ReserveCodexPerformanceCall(Dictionary<string, object> context)

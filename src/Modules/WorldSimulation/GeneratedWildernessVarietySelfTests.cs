@@ -70,17 +70,17 @@ namespace ReignBetaServer
             {
                 var empty = new Dictionary<string, object>();
                 var female = new Dictionary<string, object> { ["name"] = "Mira", ["occupation"] = "Lord", ["isFemale"] = true };
-                string foundation = Program.BuildStableCharacterPrompt("female", "Mira", female, empty);
+                string foundation = DialogueService.BuildStableCharacterPrompt("female", "Mira", female, empty);
                 Require(foundation.Contains("female; she/her") && foundation.Contains("earlier event descriptions and transcript wording never override native identity"), "Saved scene wording or a Lord title can override native female identity.");
                 female["isFemale"] = false;
-                Require(Program.BuildStableCharacterPrompt("male", "Mira", female, empty).Contains("male; he/him"), "Known male foundation lost native pronouns.");
+                Require(DialogueService.BuildStableCharacterPrompt("male", "Mira", female, empty).Contains("male; he/him"), "Known male foundation lost native pronouns.");
                 foreach (object unknown in new object[] { null, "invalid" })
                 {
                     female["isFemale"] = unknown;
-                    Require(Program.BuildStableCharacterPrompt("unknown", "Mira", female, empty).Contains("unknown; they/them"), "Invalid foundation identity defaulted to male.");
+                    Require(DialogueService.BuildStableCharacterPrompt("unknown", "Mira", female, empty).Contains("unknown; they/them"), "Invalid foundation identity defaulted to male.");
                 }
                 female.Remove("isFemale");
-                Require(Program.BuildStableCharacterPrompt("missing", "Mira", female, empty).Contains("unknown; they/them"), "Missing foundation identity defaulted to male.");
+                Require(DialogueService.BuildStableCharacterPrompt("missing", "Mira", female, empty).Contains("unknown; they/them"), "Missing foundation identity defaulted to male.");
             });
             Check("obvious_named_gender_conflict_rejected_without_rewriting", () =>
             {
@@ -150,7 +150,7 @@ namespace ReignBetaServer
                 { ["name"] = huge, ["cultureName"] = huge, ["generatedRole"] = huge }).ToList();
                 string prompt = Program.BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, largeParticipants,
                     WildernessDirections[1], (id, person) => { loads++; return stack; });
-                var envelope = Program.BuildSimplePromptEnvelope("generated_wilderness_event", "opening", "Output valid JSON.", prompt);
+                var envelope = DialogueService.BuildSimplePromptEnvelope("generated_wilderness_event", "opening", "Output valid JSON.", prompt);
                 string request = Json.Serialize(new Dictionary<string, object> { ["messages"] = envelope.Messages, ["promptEnvelope"] = envelope.Diagnostics });
                 Require(loads == 3 && WildernessRecentEvents(payload).Count == 8, "Unbounded history or participant input reached the prompt.");
                 Require(prompt.Length < 180000 && request.Length < 220000, "Unicode serialization exceeded the conservative opening allowance: " + prompt.Length + "/" + request.Length);

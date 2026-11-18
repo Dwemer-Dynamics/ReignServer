@@ -89,7 +89,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 string sourceBasis = Program.NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
                 if (string.IsNullOrWhiteSpace(sourceBasis)) sourceBasis = "npc_generated_personal_history";
                 string rejection = DynamicCharacteristicRejectionReason(text, heroId, profile, payload, visibleReply);
-                var evidence = Program.BindConversationSource(item, Program.CurrentConversationSources("", heroId, "", visibleReply,
+                var evidence = DialogueService.BindConversationSource(item, DialogueService.CurrentConversationSources("", heroId, "", visibleReply,
                     ReadString(payload, "sceneTurnId", "")), heroId, ReadString(payload, "sceneTurnId", ""));
                 if (ReadDictionary(item, "sourceEvidence") != null && ReadString(evidence, "status", "") != "supported_span")
                     rejection = "unverified_source_span";
@@ -292,7 +292,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 || visibleReply.IndexOf(FirstDynamicEvidencePhrase(clean), StringComparison.OrdinalIgnoreCase) < 0
                     && !HasDynamicTextEvidence(clean, visibleReply))
                 return "not_expressed_in_visible_reply";
-            if (Program.IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
+            if (DialogueService.IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
             string q = Program.NormalizeLookup(clean);
             if (!DynamicCharacteristicIsAboutSpeaker(clean, profile))
                 return "not_about_speaking_character";
@@ -423,7 +423,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     string text = ReadString(write, "text", "").Trim();
                     string normalized = Program.NormalizeLookup(text);
                     if (string.IsNullOrWhiteSpace(normalized)) continue;
-                    string id = "dynamic_" + Program.PromptHash(heroId + "|" + normalized).Substring(0, 24).ToLowerInvariant();
+                    string id = "dynamic_" + DialogueService.PromptHash(heroId + "|" + normalized).Substring(0, 24).ToLowerInvariant();
                     string status = ReadString(write, "status", "rejected");
                     string topicKey = ReadString(write, "topicKey", "");
                     string rejection = ReadString(write, "rejectionReason", "");
@@ -442,7 +442,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                         var equivalent = Program.QuerySql(connection,
                             "SELECT characteristic_id,text FROM dynamic_characteristics WHERE owner_id=$owner AND status='active' AND category<>'narrative_development' ORDER BY last_ts DESC LIMIT 250;",
                             new Dictionary<string, object> { ["owner"] = heroId })
-                            .FirstOrDefault(row => Program.DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text));
+                            .FirstOrDefault(row => DialogueService.DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text));
                         if (equivalent != null)
                         {
                             status = "rejected";
@@ -543,7 +543,7 @@ payload_json=$payload;",
             Dictionary<string, object> document,
             string relevanceQuery)
         {
-            List<Dictionary<string, object>> active = Program.SelectNaturalDynamicCharacteristics(document, relevanceQuery)
+            List<Dictionary<string, object>> active = DialogueService.SelectNaturalDynamicCharacteristics(document, relevanceQuery)
                 .Where(row => ReadString(row, "category", "") != "life_transition").ToList();
             if (active.Count == 0) return "";
             StringBuilder builder = new StringBuilder();

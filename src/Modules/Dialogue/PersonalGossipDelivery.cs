@@ -7,17 +7,17 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static void SchedulePersonalGossip(string campaign)
         {
-            if (campaign.StartsWith("__gossip_test_", StringComparison.Ordinal) || !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+            if (campaign.StartsWith("__gossip_test_", StringComparison.Ordinal) || !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1" || !PersonalGossipWorkers.TryAdd(campaign, 0)) return;
             // The marker is released exactly once: by the callback's finally after it runs, or by
             // the scheduler's not-started release on busy/stopping rejection or pre-start
             // cancellation. Pending rows, leases and generation fences are untouched; the next
             // existing scheduling trigger re-admits the campaign.
-            TryEnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
+            Program.TryEnqueuePriorityBackgroundWork("personal_gossip." + campaign, "normal", () =>
             {
                 try { RunPersonalGossipWork(campaign, ComposePersonalGossip); }
                 finally { PersonalGossipWorkers.TryRemove(campaign, out _); }
@@ -27,17 +27,17 @@ namespace ReignBetaServer
         private static bool GossipSourcesActive(ReignDbConnection c, Dictionary<string, object> data)
         {
             if (ReadInt(data, "hop", 1) > 1 || ReadBool(data, "reply", false))
-                return QuerySql(c, "SELECT receipt_id FROM personal_gossip_history WHERE message_id=$id AND owner_id=$owner LIMIT 1;",
+                return Program.QuerySql(c, "SELECT receipt_id FROM personal_gossip_history WHERE message_id=$id AND owner_id=$owner LIMIT 1;",
                     GossipFields("id", ReadString(data, "receivedMessageId", ""), "owner", ReadString(data, "speakerId", ""))).Count > 0;
             var ids = ReadStringList(data, "sourceTurnIds");
             if (ids.Count == 0) return false;
             if (ReadString(data, "sourceOrigin", "") == "public_witness")
-                return PublicWitnessGossipSourcesActive(data, ids.SelectMany(id => QuerySql(c,
+                return PublicWitnessGossipSourcesActive(data, ids.SelectMany(id => Program.QuerySql(c,
                     "SELECT turn_id,speaker_id,text FROM conversation_turns WHERE turn_id=$id AND status='active';", GossipFields("id", id))));
             var text = new StringBuilder();
             foreach (string id in ids)
             {
-                var row = QuerySql(c, "SELECT text,status FROM conversation_turns WHERE turn_id=$id;", GossipFields("id", id)).FirstOrDefault();
+                var row = Program.QuerySql(c, "SELECT text,status FROM conversation_turns WHERE turn_id=$id;", GossipFields("id", id)).FirstOrDefault();
                 if (row == null || ReadString(row, "status", "") != "active") return false;
                 text.AppendLine(ReadString(row, "text", ""));
             }
@@ -53,18 +53,18 @@ namespace ReignBetaServer
                 Dictionary<string, object> row = null, data = null;
                 string token = Guid.NewGuid().ToString("N"), generation = "";
                 long processGeneration = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
-                CampaignDataGate.EnterReadLock();
+                Program.CampaignDataGate.EnterReadLock();
                 try
                 {
                     using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                    using (var c = OpenCampaignConnection(campaign))
+                    using (var c = Program.OpenCampaignConnection(campaign))
                     {
                         EnsurePersonalGossipSchema(c);
                         EnsureMemoryPrecisionSchema(c);
                         generation = ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
                         token = generation + ":" + token;
                         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        row = QuerySql(c, @"SELECT m.* FROM personal_gossip_messages m JOIN personal_gossip_clock k ON k.timeline_id=m.timeline_id
+                        row = Program.QuerySql(c, @"SELECT m.* FROM personal_gossip_messages m JOIN personal_gossip_clock k ON k.timeline_id=m.timeline_id
 WHERE m.timeline_id=$timeline AND m.attempts<3 AND m.expires_day>=k.world_day
 AND (m.status='pending' OR m.status='generating' AND (m.lease_until<$now OR m.lease_token NOT LIKE $generation))
 ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timeline", WorldSimulationService.ActiveWorldHistoryTimeline(c), "generation", generation + ":%")).FirstOrDefault();
@@ -72,7 +72,7 @@ ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timelin
                         data = GossipJson(row);
                         if (!GossipSourcesActive(c, data))
                         {
-                            ExecuteSql(c, "UPDATE personal_gossip_messages SET status='cancelled_source' WHERE message_id=$id;",
+                            Program.ExecuteSql(c, "UPDATE personal_gossip_messages SET status='cancelled_source' WHERE message_id=$id;",
                                 GossipFields("id", ReadString(row, "message_id", "")));
                             continue;
                         }
@@ -97,7 +97,7 @@ ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timelin
                         {
                             string sourceQuote = ReadString(data, "sourceQuote", "");
                             var sourceTurns = ReadStringList(data, "sourceTurnIds").Take(2)
-                                .SelectMany(id => QuerySql(c, "SELECT turn_id,speaker_id,text FROM conversation_turns WHERE turn_id=$id AND status='active';", GossipFields("id", id)))
+                                .SelectMany(id => Program.QuerySql(c, "SELECT turn_id,speaker_id,text FROM conversation_turns WHERE turn_id=$id AND status='active';", GossipFields("id", id)))
                                 .ToList();
                             BindPersonalGossipEncounterTurns(data, sourceTurns);
                             var quoteSources = ReadString(data, "sourceOrigin", "") == "public_witness"
@@ -107,11 +107,11 @@ ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timelin
                             data["sourceQuoteSpeakerId"] = quotedSpeakers.Count == 1 ? quotedSpeakers[0] : "";
                         }
                         if (ReadInt(row, "is_reply", 0) != 0) PreparePersonalGossipReply(c, campaign, row, data);
-                        ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='generating',attempts=attempts+1,lease_token=$token,lease_until=$until
+                        Program.ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='generating',attempts=attempts+1,lease_token=$token,lease_until=$until
 WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", ""), "token", token, "until", now + 600));
                     }
                 }
-                finally { CampaignDataGate.ExitReadLock(); }
+                finally { Program.CampaignDataGate.ExitReadLock(); }
                 if (row == null || data == null) continue;
                 Dictionary<string, object> result;
                 try
@@ -122,18 +122,18 @@ WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", ""), "t
                     int delaySeconds = PersonalGossipCompositionDelaySeconds(data);
                     if (delaySeconds > 0) Thread.Sleep(delaySeconds * 1000);
                 }
-                catch (Exception ex) { result = GossipFields("error", LimitText(ex.Message, 500)); }
-                CampaignDataGate.EnterReadLock();
+                catch (Exception ex) { result = GossipFields("error", Program.LimitText(ex.Message, 500)); }
+                Program.CampaignDataGate.EnterReadLock();
                 try
                 {
                     using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                    using (var c = OpenCampaignConnection(campaign))
+                    using (var c = Program.OpenCampaignConnection(campaign))
                     {
                         EnsurePersonalGossipSchema(c);
                         EnsureMemoryPrecisionSchema(c);
                         if (processGeneration != Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration)
                             || generation != ReadString(ReadMemoryPrecisionState(c), "restore_generation", "")) continue;
-                        var current = QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND lease_token=$token;",
+                        var current = Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND lease_token=$token;",
                             GossipFields("id", ReadString(row, "message_id", ""), "token", token)).FirstOrDefault();
                         if (current == null || ReadString(current, "status", "") != "generating") continue;
                         bool isReply = ReadInt(current, "is_reply", 0) != 0;
@@ -141,7 +141,7 @@ WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", ""), "t
                         if (!accepted)
                         {
                             data["lastFailure"] = ReadString(result, "error", "Composition failed source, privacy, length, or distortion validation.");
-                            ExecuteSql(c, @"UPDATE personal_gossip_messages SET status=$status,lease_token='',lease_until=0,payload_json=$json WHERE message_id=$id;",
+                            Program.ExecuteSql(c, @"UPDATE personal_gossip_messages SET status=$status,lease_token='',lease_until=0,payload_json=$json WHERE message_id=$id;",
                                 GossipFields("id", ReadString(current, "message_id", ""), "status", ReadInt(current, "attempts", 0) >= 3 ? "generation_failed" : "pending", "json", Json.Serialize(data)));
                             continue;
                         }
@@ -155,11 +155,11 @@ WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", ""), "t
                         // A provider result cannot date itself using the clock captured before
                         // its request. Native must first observe this nonce, then capture time.
                         data["readyNonce"] = Guid.NewGuid().ToString("N");
-                        ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='awaiting_native_clock',lease_token='',lease_until=0,payload_json=$json WHERE message_id=$id;",
+                        Program.ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='awaiting_native_clock',lease_token='',lease_until=0,payload_json=$json WHERE message_id=$id;",
                             GossipFields("id", ReadString(current, "message_id", ""), "json", Json.Serialize(data)));
                     }
                 }
-                finally { CampaignDataGate.ExitReadLock(); }
+                finally { Program.CampaignDataGate.ExitReadLock(); }
             }
         }
 
@@ -180,20 +180,20 @@ WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", ""), "t
             double day = ReadDouble(payload, "worldDay", 0);
             var people = ReadDictionaryList(ReadDictionary(payload, "gossipPresence"), "people");
             int published = 0;
-            foreach (var row in QuerySql(c, @"SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline
+            foreach (var row in Program.QuerySql(c, @"SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline
 AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", GossipFields("timeline", timeline)))
             {
                 var data = GossipJson(row);
                 if (!nonces.Contains(ReadString(data, "readyNonce", ""))) continue;
                 if (!GossipSourcesActive(c, data))
                 {
-                    ExecuteSql(c, "UPDATE personal_gossip_messages SET status='cancelled_source' WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", "")));
+                    Program.ExecuteSql(c, "UPDATE personal_gossip_messages SET status='cancelled_source' WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", "")));
                     continue;
                 }
                 bool reply = ReadInt(row, "is_reply", 0) != 0;
                 if (!reply && day > ReadDouble(row, "expires_day", day))
                 {
-                    ExecuteSql(c, "UPDATE personal_gossip_messages SET status='expired' WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", "")));
+                    Program.ExecuteSql(c, "UPDATE personal_gossip_messages SET status='expired' WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", "")));
                     continue;
                 }
                 if (reply)
@@ -221,7 +221,7 @@ AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", G
                 {
                     data.Remove("recipientMemory"); data.Remove("replyEvidence"); data.Remove("readyNonce");
                     data["publishedDay"] = day;
-                    ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='in_transit',due_day=$due,expires_day=CASE WHEN is_reply=1 AND expires_day<$due THEN $due ELSE expires_day END,payload_json=$json WHERE message_id=$id;",
+                    Program.ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='in_transit',due_day=$due,expires_day=CASE WHEN is_reply=1 AND expires_day<$due THEN $due ELSE expires_day END,payload_json=$json WHERE message_id=$id;",
                         GossipFields("id", ReadString(row, "message_id", ""), "due", ReadDouble(data, "dueDay", day), "json", Json.Serialize(data)));
                     if (reply || !ReadBool(data, "local", false))
                         StorePersonalGossipHistory(c, row, data, ReadString(row, "speaker_id", ""), ReadString(row, "recipient_id", ""), day, 50, true);
@@ -346,7 +346,7 @@ AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", G
         }
 
         private static Dictionary<string, object> ComposePersonalGossip(Dictionary<string, object> data, bool reply)
-            => ComposePersonalGossip(data, reply, ChatWithLlm);
+            => ComposePersonalGossip(data, reply, Program.ChatWithLlm);
 
         private static Dictionary<string, object> ComposePersonalGossip(Dictionary<string, object> data, bool reply,
             Func<Dictionary<string, object>, Dictionary<string, object>> respond)
@@ -492,7 +492,7 @@ AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", G
             double bond = GossipConfidenceBond(c, self, people, ReadStringList(result, "confidenceOwnerIds"), confidencePlayer);
             int chance = GossipDetailChance(traits, ReadString(result, "privacy", "personal"), GossipFeeling(result, "feeling"), affinity, bond,
                 ReadBool(result, "ownCompromising", false), ReadBool(result, "promisedSecrecy", false), 0);
-            chance = GossipAdjustedChance(chance, "disclosure", ReadDictionary(data, "policy"));
+            chance = Program.GossipAdjustedChance(chance, "disclosure", ReadDictionary(data, "policy"));
             if (quote.Length > 0 && GossipDecisionRoll(data, ReadString(data, "messageId", ""), "reply_disclosure") > chance)
             {
                 // A refusal contains no confidence; it does not invite another recipient or provider attempt.
@@ -510,7 +510,7 @@ AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;", G
         {
             string speaker = ReadString(data, "speakerId", ""), player = ReadString(data, "playerId", "");
             double day = ReadDouble(data, "currentDay", 0);
-            data["replyEvidence"] = QuerySql(c, @"SELECT t.turn_id,t.text,t.speaker_id,t.session_id,t.payload_json FROM conversation_turns t
+            data["replyEvidence"] = Program.QuerySql(c, @"SELECT t.turn_id,t.text,t.speaker_id,t.session_id,t.payload_json FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.status='active' AND t.world_day<=$day AND t.channel<>'npc_gossip' AND "
                 + MemorySessionObserverSql("s", "t") + " ORDER BY t.ts DESC,t.turn_order DESC LIMIT 60;", GossipFields("npc", speaker, "day", day))
                 .Where(r => { var p = TryParseJsonObject(ReadString(r, "payload_json", "{}"));
@@ -527,7 +527,7 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.status='active
             }
             data["replyEvidence"] = selectedEvidence;
             data["recipientMemory"] = memory.ToString();
-            data["traits"] = ReadJsonObject(CharacterFile(campaign, speaker, "traits.json"));
+            data["traits"] = Program.ReadJsonObject(Program.CharacterFile(campaign, speaker, "traits.json"));
         }
 
         private static Dictionary<string, object> PersonalGossipReplyEvidenceBrief(Dictionary<string, object> data, Dictionary<string, object> evidence) =>
@@ -545,7 +545,7 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.status='active
             data["cancellationReason"] = reason; data["cancelledDay"] = day;
             data["cancellationPresence"] = person ?? new Dictionary<string, object>();
             data.Remove("recipientMemory"); data.Remove("replyEvidence"); data.Remove("readyNonce");
-            ExecuteSql(c, "UPDATE personal_gossip_messages SET status='cancelled_unavailable',lease_token='',lease_until=0,payload_json=$json WHERE message_id=$id;",
+            Program.ExecuteSql(c, "UPDATE personal_gossip_messages SET status='cancelled_unavailable',lease_token='',lease_until=0,payload_json=$json WHERE message_id=$id;",
                 GossipFields("id", ReadString(row, "message_id", ""), "json", Json.Serialize(data)));
         }
 
@@ -554,11 +554,11 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.status='active
             int delivered = 0;
             var snapshot = GossipSnapshot(c, timeline);
             var people = ReadDictionaryList(snapshot, "people");
-            ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='expired' WHERE timeline_id=$timeline AND expires_day<$day
+            Program.ExecuteSql(c, @"UPDATE personal_gossip_messages SET status='expired' WHERE timeline_id=$timeline AND expires_day<$day
 AND status IN ('pending','generating','awaiting_native_clock','in_transit');", GossipFields("timeline", timeline, "day", day));
-            ExecuteSql(c, "UPDATE personal_gossip_messages SET status='generation_failed' WHERE status='generating' AND attempts>=3 AND lease_until<$now;",
+            Program.ExecuteSql(c, "UPDATE personal_gossip_messages SET status='generation_failed' WHERE status='generating' AND attempts>=3 AND lease_until<$now;",
                 GossipFields("now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-            foreach (var row in QuerySql(c, @"SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit'
+            foreach (var row in Program.QuerySql(c, @"SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit'
 AND due_day<=$day AND expires_day>=$day ORDER BY due_day,message_id LIMIT 32;", GossipFields("timeline", timeline, "day", day)))
             {
                 var data = GossipJson(row);
@@ -574,7 +574,7 @@ AND due_day<=$day AND expires_day>=$day ORDER BY due_day,message_id LIMIT 32;", 
                 bool reply = ReadInt(row, "is_reply", 0) != 0;
                 var source = ReadDictionary(data, "speaker");
                 var target = ReadDictionary(data, "recipient");
-                var recipientTraits = ReadJsonObject(CharacterFile(campaign, recipient, "traits.json"));
+                var recipientTraits = Program.ReadJsonObject(Program.CharacterFile(campaign, recipient, "traits.json"));
                 int credibility = ReadString(data, "claimKind", "") == "question" ? 50
                     : GossipCredibility(GossipAffinity(c, recipient, speaker, target, source), GossipTrait(recipientTraits, "socialTrust"),
                         ReadString(data, "account", "firsthand"), Math.Max(0, ReadInt(row, "hop", 1) - 1), false, false, false);
@@ -583,7 +583,7 @@ AND due_day<=$day AND expires_day>=$day ORDER BY due_day,message_id LIMIT 32;", 
                 {
                     StorePersonalGossipHistory(c, row, data, recipient, speaker, day, credibility, false);
                     StorePersonalGossipHistory(c, row, data, speaker, recipient, day, credibility, true);
-                    ExecuteSql(c, "UPDATE personal_gossip_messages SET status='delivered',payload_json=$json WHERE message_id=$id;",
+                    Program.ExecuteSql(c, "UPDATE personal_gossip_messages SET status='delivered',payload_json=$json WHERE message_id=$id;",
                         GossipFields("id", ReadString(row, "message_id", ""), "json", Json.Serialize(data)));
                     if (!reply)
                     {
@@ -629,17 +629,17 @@ AND due_day<=$day AND expires_day>=$day ORDER BY due_day,message_id LIMIT 32;", 
                 "questionOpen", kind == "question", "feeling", 0, "personalStake", 25,
                 "raiseRoll", GossipDecisionRoll(data, ReadString(row, "root_id", "") + "|" + owner, "raise"));
             if (authored && ReadString(data, "distortion", "none") != "none") visible["authorKnowsDistortion"] = true;
-            ExecuteSql(c, @"INSERT INTO personal_gossip_history(receipt_id,message_id,root_id,timeline_id,owner_id,peer_id,acquired_day,payload_json)
+            Program.ExecuteSql(c, @"INSERT INTO personal_gossip_history(receipt_id,message_id,root_id,timeline_id,owner_id,peer_id,acquired_day,payload_json)
 VALUES($id,$message,$root,$timeline,$owner,$peer,$day,$json) ON CONFLICT(message_id,owner_id) DO NOTHING;",
                 GossipFields("id", id, "message", ReadString(row, "message_id", ""), "root", ReadString(row, "root_id", ""),
                     "timeline", ReadString(row, "timeline_id", "main"), "owner", owner, "peer", peer, "day", day, "json", Json.Serialize(visible)));
             string session = id + "_session";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,participants_json,payload_json)
+            Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,participants_json,payload_json)
 VALUES($id,$campaign,$owner,'','npc_gossip','closed',$ts,$ts,$day,$day,$participants,$json) ON CONFLICT(session_id) DO NOTHING;",
                 GossipFields("id", session, "campaign", ReadString(data, "campaignId", ReadString(row, "campaign_id", "")), "owner", owner,
                     "ts", ts, "day", day, "participants", Json.Serialize(new[] { owner }), "json", Json.Serialize(visible)));
-            if (QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", GossipFields("id", id)).Count == 0)
+            if (Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", GossipFields("id", id)).Count == 0)
                 InsertConversationTurn(c, id, session, id, 0, id, "npc", speaker, name,
                     "[NPC gossip; " + (authored ? "you said" : "you heard") + "; " + kind + ", not verified world history"
                         + (authored && ReadString(data, "distortion", "none") != "none" ? "; you deliberately distorted this claim" : "")
@@ -651,11 +651,11 @@ VALUES($id,$campaign,$owner,'','npc_gossip','closed',$ts,$ts,$day,$day,$particip
             Dictionary<string, object> result, double day)
         {
             string original = ReadString(replyData, "receivedMessageId", ""), owner = ReadString(replyData, "speakerId", "");
-            var receipt = QuerySql(c, "SELECT * FROM personal_gossip_history WHERE message_id=$id AND owner_id=$owner;", GossipFields("id", original, "owner", owner)).FirstOrDefault();
+            var receipt = Program.QuerySql(c, "SELECT * FROM personal_gossip_history WHERE message_id=$id AND owner_id=$owner;", GossipFields("id", original, "owner", owner)).FirstOrDefault();
             if (receipt == null) return;
             var visible = GossipJson(receipt);
             var evidence = ReadDictionaryList(replyData, "replyEvidence");
-            var originalMessage = QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id;", GossipFields("id", original)).FirstOrDefault();
+            var originalMessage = Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id;", GossipFields("id", original)).FirstOrDefault();
             var originalData = GossipJson(originalMessage);
             var acceptedEvidence = ReadDictionaryList(result, "beliefEvidence").Where(e => evidence.Any(s =>
                 ReadString(e, "sourceRootId", "") == ReadString(s, "sourceRootId", "")
@@ -675,11 +675,11 @@ VALUES($id,$campaign,$owner,'','npc_gossip','closed',$ts,$ts,$day,$day,$particip
             visible["personalStake"] = GossipQuoteSupported(ReadString(result, "concernEvidenceQuote", ""), ReadString(replyData, "recipientMemory", ""))
                 ? GossipFeeling(result, "personalStake") : 25;
             if (ReadString(result, "answerKind", "") == "answered") visible["questionOpen"] = false;
-            ExecuteSql(c, "UPDATE personal_gossip_history SET payload_json=$json WHERE receipt_id=$id;",
+            Program.ExecuteSql(c, "UPDATE personal_gossip_history SET payload_json=$json WHERE receipt_id=$id;",
                 GossipFields("id", ReadString(receipt, "receipt_id", ""), "json", Json.Serialize(visible)));
             // Received stories get one onward opportunity, with the holder's own feelings and traits.
             if (ReadInt(replyData, "hop", 1) >= ReadInt(ReadDictionary(replyData, "policy"), "maximumOutwardHops", 2)) return;
-            var originalRow = QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id;", GossipFields("id", original)).FirstOrDefault();
+            var originalRow = Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id;", GossipFields("id", original)).FirstOrDefault();
             if (originalRow == null) return;
             var source = GossipJson(originalRow);
             var signal = ReadDictionaryList(result, "gossipSignals").FirstOrDefault(s => ReadDouble(s, "confidence", 0) >= .8
@@ -687,10 +687,10 @@ VALUES($id,$campaign,$owner,'','npc_gossip','closed',$ts,$ts,$day,$day,$particip
             if (signal == null) return;
             var topic = new Dictionary<string, object>(source, StringComparer.OrdinalIgnoreCase);
             string id = ReadString(source, "rootId", "") + "_via_" + PromptHash(owner).Substring(0, 12).ToLowerInvariant();
-            if (QuerySql(c, "SELECT topic_id FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", id)).Count > 0) return;
+            if (Program.QuerySql(c, "SELECT topic_id FROM personal_gossip_topics WHERE topic_id=$id;", GossipFields("id", id)).Count > 0) return;
             topic["id"] = id; topic["speakerId"] = owner; topic["speaker"] = ReadDictionary(replyData, "speaker");
             topic["policy"] = new Dictionary<string, object>(ReadDictionary(source, "policy"));
-            ReadDictionary(topic, "policy")["chanceAdjustments"] = PersonalGossipChanceOptions(LoadSettings());
+            ReadDictionary(topic, "policy")["chanceAdjustments"] = Program.PersonalGossipChanceOptions(Program.LoadSettings());
             topic["receivedMessageId"] = original; topic["sourceQuote"] = ReadString(source, "body", "");
             topic.Remove("sourceEncounterTurns"); topic.Remove("sourceContextOmittedWholeTurns"); topic.Remove("compositionReview");
             // This quotation was addressed to the new holder by the previous holder.

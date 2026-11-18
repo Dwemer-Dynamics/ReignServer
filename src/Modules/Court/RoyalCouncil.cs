@@ -46,32 +46,32 @@ domain_packet_json TEXT NOT NULL DEFAULT '{}',is_opening INTEGER NOT NULL DEFAUL
             string playerText = ReadString(payload, "playerText", "");
             bool opening = ReadBool(payload, "isOpening", false), expand = ReadBool(payload, "expand", false);
             List<string> heardBy = ReadStringList(payload, "presentAdvisorIds").Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
-            var memory = Program.PrepareRouteConversationMemory(payload, speakerId, "royal_council", sessionId, turnId, heardBy,
+            var memory = DialogueService.PrepareRouteConversationMemory(payload, speakerId, "royal_council", sessionId, turnId, heardBy,
                 settingsOverride: settingsOverride);
             payload = memory.Payload;
             playerText = ReadString(payload, "playerText", "");
             var prompt = new StringBuilder();
-            prompt.AppendLine(Program.UsesStructuredActions(payload) ? "Return JSON with reply and structuredActionDecision." : "Return only JSON with one field named reply.");
+            prompt.AppendLine(DialogueService.UsesStructuredActions(payload) ? "Return JSON with reply and structuredActionDecision." : "Return only JSON with one field named reply.");
             prompt.AppendLine("You are the ruler's " + role + " advisor in a private official Royal Council. Use only the authorized packet for government facts and powers. Conversation evidence establishes what people previously said, not fresh official authority. Never invent facts, reveal absent hidden facts, queue campaign actions, or alter relationships, reputation, or political pressure.");
             prompt.AppendLine("If nothing material is relevant, answer with one short sentence. Otherwise use " + (expand ? "at most two short paragraphs" : opening ? "two to four concise sentences" : "one to four concise sentences") + ". Omit ceremonial chatter.");
             prompt.AppendLine("Authorized packet: " + Json.Serialize(bounded));
-            prompt.AppendLine(Program.StructuredActionPrompt(payload));
+            prompt.AppendLine(DialogueService.StructuredActionPrompt(payload));
             prompt.AppendLine(opening ? "Give the opening briefing now." : "Player question: " + playerText);
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "royal_council_advice", ["campaignId"] = campaignId, ["correlationId"] = Program.EnsureCorrelationId(payload),
-                ["messages"] = Program.BuildSimplePromptEnvelope("royal_council_advice", role, "Give bounded advisory-only counsel and return valid JSON.", prompt.ToString()).Messages,
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope("royal_council_advice", role, "Give bounded advisory-only counsel and return valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = Program.GenerateRouteConversation(memory, request,
+            Dictionary<string, object> llm = DialogueService.GenerateRouteConversation(memory, request,
                 "Royal Council: advisory-only, no inferred actions or relationship/reputation changes. Use only this role-authorized packet for government facts or powers; personal memories are speech, not authority. Authorized packet: " + Json.Serialize(bounded)
-                    + Program.StructuredActionPrompt(payload), expand ? 2400 : 1200, responder);
+                    + DialogueService.StructuredActionPrompt(payload), expand ? 2400 : 1200, responder);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Royal Council advice failed."), ["providerCallCount"] = memory.ProviderCalls, ["routedRole"] = role };
             Dictionary<string, object> parsed = TryParseJsonObject(ReadString(llm, "content", "")) ?? new Dictionary<string, object>();
-            Program.CaptureStructuredActionDecision(payload, parsed);
+            DialogueService.CaptureStructuredActionDecision(payload, parsed);
             string reply = ReadString(parsed, "reply", "");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.PublishRouteConversation(memory, reply, speakerName, connection =>
+            DialogueService.PublishRouteConversation(memory, reply, speakerName, connection =>
             {
                 EnsureRoyalCouncilSchema(connection);
                 Program.EnsureMemorySchema(connection);
@@ -85,7 +85,7 @@ VALUES($id,$campaign,$timeline,$session,$role,$hero,$name,$player,$reply,$heard,
                 // Canonical speaker-labeled turns above replace new paraphrased
                 // copies. Other listeners receive their own projection at recall.
             });
-            return Program.CompleteRouteConversationDelivery(memory, new Dictionary<string, object>
+            return DialogueService.CompleteRouteConversationDelivery(memory, new Dictionary<string, object>
             {
                 ["ok"] = true, ["reply"] = reply, ["speakerName"] = speakerName, ["speakerHeroId"] = speakerId,
                 ["routedRole"] = role, ["providerCallCount"] = memory.ProviderCalls, ["officialRecordId"] = turnId,

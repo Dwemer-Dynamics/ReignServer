@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // This never retries, reserves or publishes the live delivery job. Provider
         // calls run outside the campaign lock, using a detached frozen source.
@@ -15,19 +15,19 @@ namespace ReignBetaServer
             Dictionary<string, object> data;
             string root, topic, before;
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = Program.OpenCampaignConnection(campaign))
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
-                var row = QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND timeline_id=$timeline;",
+                var row = Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND timeline_id=$timeline;",
                     GossipFields("id", message, "timeline", timeline)).SingleOrDefault();
                 data = PersonalGossipProbeSource(row, actor, timeline);
                 root = ReadString(row, "root_id", ""); topic = ReadString(row, "topic_id", "");
                 before = PersonalGossipProbeState(c, timeline, root, topic);
             }
-            var proposal = PersonalGossipProbeDraft(data, ChatWithLlm);
+            var proposal = PersonalGossipProbeDraft(data, Program.ChatWithLlm);
             if (!GossipTestAuthorized(request)) throw new InvalidOperationException("The exact probe lease or native scope changed.");
             using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = Program.OpenCampaignConnection(campaign))
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline || before != PersonalGossipProbeState(c, timeline, root, topic))
                     throw new InvalidOperationException("The frozen gossip state changed during the probe; no proposal may be credited.");
@@ -68,9 +68,9 @@ namespace ReignBetaServer
         {
             var args = GossipFields("timeline", timeline, "root", root, "topic", topic);
             return CanonicalJson(GossipFields(
-                "topics", QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE timeline_id=$timeline AND topic_id=$topic ORDER BY topic_id;", args),
-                "messages", QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND root_id=$root ORDER BY message_id;", args),
-                "history", QuerySql(c, "SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND root_id=$root ORDER BY receipt_id;", args)));
+                "topics", Program.QuerySql(c, "SELECT * FROM personal_gossip_topics WHERE timeline_id=$timeline AND topic_id=$topic ORDER BY topic_id;", args),
+                "messages", Program.QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE timeline_id=$timeline AND root_id=$root ORDER BY message_id;", args),
+                "history", Program.QuerySql(c, "SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND root_id=$root ORDER BY receipt_id;", args)));
         }
 
         private static Dictionary<string, object> PersonalGossipProbeDraft(Dictionary<string, object> source,

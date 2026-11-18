@@ -4,9 +4,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             RunFinalConversationGauntletLifecycleSelfTests()
         {
             List<Dictionary<string, object>> checks =
@@ -460,7 +460,7 @@ WHERE run_id='pause-heartbeat-run';";
                     ReignPostgreSqlStorage.OpenCampaignConnection(
                         postgresCampaign))
                 {
-                    ExecuteSql(
+                    Program.ExecuteSql(
                         campaignConnection,
                         @"CREATE TABLE IF NOT EXISTS gauntlet_rollback_probe(
 id TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -477,7 +477,7 @@ ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
                     FinalGauntletStore.OpenControlConnection())
                 {
                     string schema = ReadString(
-                        QuerySql(
+                        Program.QuerySql(
                             control,
                             "SELECT current_schema() AS schema;")
                             .FirstOrDefault(),
@@ -542,7 +542,7 @@ ON CONFLICT(id) DO UPDATE SET value=excluded.value;");
                 using (ReignDbConnection campaignConnection =
                     ReignPostgreSqlStorage.OpenCampaignConnection(
                         postgresCampaign))
-                    ExecuteSql(
+                    Program.ExecuteSql(
                         campaignConnection,
                         @"UPDATE gauntlet_rollback_probe
 SET value='after' WHERE id='state';");
@@ -555,7 +555,7 @@ SET value='after' WHERE id='state';");
                         postgresCampaign))
                 {
                     long runRows = ReadLong(
-                        QuerySql(
+                        Program.QuerySql(
                             control,
                             @"SELECT COUNT(*) AS count
 FROM final_gauntlet_runs WHERE run_id=$run;",
@@ -565,7 +565,7 @@ FROM final_gauntlet_runs WHERE run_id=$run;",
                             }).FirstOrDefault(),
                         "count", 0);
                     long providerRows = ReadLong(
-                        QuerySql(
+                        Program.QuerySql(
                             control,
                             @"SELECT COUNT(*) AS count
 FROM final_gauntlet_provider_calls WHERE run_id=$run;",
@@ -575,13 +575,13 @@ FROM final_gauntlet_provider_calls WHERE run_id=$run;",
                             }).FirstOrDefault(),
                         "count", 0);
                     string restoredValue = ReadString(
-                        QuerySql(
+                        Program.QuerySql(
                             campaignConnection,
                             @"SELECT value FROM gauntlet_rollback_probe
 WHERE id='state';").FirstOrDefault(),
                         "value", "");
                     long campaignControlTables = ReadLong(
-                        QuerySql(
+                        Program.QuerySql(
                             campaignConnection,
                             @"SELECT COUNT(*) AS count
 FROM information_schema.tables
@@ -612,7 +612,7 @@ AND table_name LIKE 'final_gauntlet_%';")
                 {
                     using (ReignDbConnection control =
                         FinalGauntletStore.OpenControlConnection())
-                        ExecuteSql(
+                        Program.ExecuteSql(
                             control,
                             @"DELETE FROM final_gauntlet_runs
 WHERE run_id=$run;",

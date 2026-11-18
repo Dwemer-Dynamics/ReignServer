@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunDialogueClaimEvidenceAssertions()
         {
@@ -96,14 +96,14 @@ namespace ReignBetaServer
             Add("meeting_different_actor", FindDialogueFactualContradictions(TestDict("reply", "Ira met Michael before Rhea."), payload, history, "npc").Count == 0, "Same people with a different subject are not the same relation.");
             var conflict = new List<Dictionary<string, object>> { original, TestDict("id", "conflicting_self", "speakerId", "player", "text", "I met Ira before Rhea.") };
             Add("unresolved_conflicting_originals", FindDialogueFactualContradictions(prose, payload, conflict, "npc").Count == 0, "Unresolved conflicting first-person reports do not justify a repair.");
-            var current = CloneDictionary(payload); current["playerText"] = "No, I met Rhea before Ira.";
+            var current = Program.CloneDictionary(payload); current["playerText"] = "No, I met Rhea before Ira.";
             Add("current_correction_controls", FindDialogueFactualContradictions(prose, current, conflict, "npc").Count == 1, "An explicit current correction is available before storage.");
             var future = new List<Dictionary<string, object>> { TestDict("id", "future", "speakerId", "player", "text", original["text"], "worldDay", 11d) };
             Add("future_order_not_used", FindDialogueFactualContradictions(prose, payload, future, "npc").Count == 0, "Replays never leak a later answer into an earlier turn.");
             var privateHistory = new List<Dictionary<string, object>> { TestDict("id", "private", "speakerId", "player", "text", original["text"], "privateMental", true) };
             Add("private_order_not_used", FindDialogueFactualContradictions(prose, payload, privateHistory, "npc").Count == 0, "Unheard private thoughts cannot prove observer recall.");
-            var nativePayload = CloneDictionary(payload);
-            ReadDictionaryList(nativePayload, "participantProfiles").First(p => CharacterIdFrom(p) == "daughter")["spouseId"] = "husband";
+            var nativePayload = Program.CloneDictionary(payload);
+            ReadDictionaryList(nativePayload, "participantProfiles").First(p => Program.CharacterIdFrom(p) == "daughter")["spouseId"] = "husband";
             Add("native_current_spouse", FindDialogueFactualContradictions(TestDict("reply", "Ira is unmarried."), nativePayload, new(), "npc").Count == 1, "A nonempty current spouse ID contradicts an explicit present unmarried assertion.");
             foreach (string control in new[] { "Ira is not married to Michael.", "Ira is not married by choice.", "Ira refused the marriage.", "I arranged her marriage and watched it fail.", "Perhaps Ira is unmarried.", "Ira was unmarried before that." })
                 Add("native_control_" + rows.Count, FindDialogueFactualContradictions(TestDict("reply", control), nativePayload, new(), "npc").Count == 0, "Current native state does not erase historical conduct, qualified marriage statements or subjective views: " + control);
@@ -272,7 +272,7 @@ namespace ReignBetaServer
             try
             {
                 DialogueClaimHelperReplay.Value = _ => throw new TimeoutException("fixture");
-                var complete = CompleteConversationStructuredResponse(AgencyTestReply(null), "dialogue", out _);
+                var complete = Program.CompleteConversationStructuredResponse(AgencyTestReply(null), "dialogue", out _);
                 complete["reply"] = ReadString(prose, "reply", ""); complete.Remove("body");
                 var result = RetryDialogueIntegrityViolation(TestDict("ok", true, "content", Json.Serialize(complete)), TestDict("requestType", "dialogue"), payload, history,
                     "fixture", "fixture", "dialogue", "npc", "", _ => { writerCalls++; return TestDict("ok", false, "content", "{}"); }, false);
@@ -291,7 +291,7 @@ namespace ReignBetaServer
                     "tokenizerHash", DialogueGroundingTokenizerHash, "weightsHash", DialogueGroundingWeightsHash, "scoringKind", "grounding_binary", "backend", "cpu",
                     "remoteCalls", 0, "durationMs", 750L, "loadDurationMs", 50L, "coldLoad", false, "workBudgetMs", 8000,
                     "rows", ReadDictionaryList(request, "pairs").Select(p => {
-                        var row = CloneDictionary(p); row["status"] = "scored"; row["label"] = "supported"; row["outcome"] = "unresolved";
+                        var row = Program.CloneDictionary(p); row["status"] = "scored"; row["label"] = "supported"; row["outcome"] = "unresolved";
                         row["scores"] = TestDict("unsupported", .4, "supported", .6); row["inputTokens"] = 30;
                         row["coverage"] = "complete_pair"; row["authority"] = "comparison_hint_only"; return row;
                     }).ToList());
@@ -310,7 +310,7 @@ namespace ReignBetaServer
                         "tokenizerHash", DialogueGroundingTokenizerHash, "weightsHash", DialogueGroundingWeightsHash,
                         "scoringKind", "grounding_binary", "backend", "cpu", "remoteCalls", 0,
                         "rows", ReadDictionaryList(request, "pairs").Select(p => {
-                            var row = CloneDictionary(p); row["status"] = "time_budget"; row["outcome"] = "unresolved";
+                            var row = Program.CloneDictionary(p); row["status"] = "time_budget"; row["outcome"] = "unresolved";
                             row["coverage"] = "not_scored"; row["authority"] = "comparison_hint_only"; return row;
                         }).ToList());
                 };

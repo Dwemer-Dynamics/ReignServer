@@ -92,12 +92,12 @@ UNIQUE(campaign_id,timeline_id,hero_id));");
             string timelineId = ReadString(payload, "timelineId", "main");
             Dictionary<string, object> speaker = ReadDictionary(payload, "speaker");
             string heroId = Program.CharacterIdFrom(speaker);
-            Program.ApplyPlayerInputAudienceToPayload(payload, heroId);
+            DialogueService.ApplyPlayerInputAudienceToPayload(payload, heroId);
             string name = ReadString(speaker, "name", heroId);
             double age = ReadDouble(speaker, "age", 0d);
             string turnId = ReadString(payload, "turnId", Guid.NewGuid().ToString("N"));
             string sessionId = FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "eventId"), "child_turn_" + turnId);
-            var memoryContext = Program.PrepareRouteConversationMemory(payload, heroId, "family_chambers_child", sessionId, turnId,
+            var memoryContext = DialogueService.PrepareRouteConversationMemory(payload, heroId, "family_chambers_child", sessionId, turnId,
                 ReadStringList(payload, "participants"), childhoodOnly: true, settingsOverride: settingsOverride);
             payload = memoryContext.Payload;
             List<Dictionary<string, object>> prior;
@@ -124,18 +124,18 @@ ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$quer
             prompt.AppendLine("Time-aware scene contract: " + ReadString(payload, "castleDialoguePrompt", ""));
             prompt.AppendLine("Latest player text (empty means the ruler has just arrived): " + ReadString(payload, "playerText", ""));
             foreach (var experience in prior)
-                prompt.AppendLine(Program.RenderContinuityRecord(ReadString(experience, "experience_id", ""), "childhood_experience", heroId, "",
+                prompt.AppendLine(DialogueService.RenderContinuityRecord(ReadString(experience, "experience_id", ""), "childhood_experience", heroId, "",
                     ReadDouble(experience, "world_day", 0d), 100, true, "Childhood account at age "
                     + ReadDouble(experience, "experienced_age", 0d).ToString("0.00", CultureInfo.InvariantCulture) + ": " + ReadString(experience, "summary", "")));
             Dictionary<string, object> request = new Dictionary<string, object>
             {
                 ["requestType"] = "family_chambers_child", ["campaignId"] = campaignId,
                 ["correlationId"] = Program.EnsureCorrelationId(payload),
-                ["messages"] = Program.BuildSimplePromptEnvelope("family_chambers_child", "respond",
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope("family_chambers_child", "respond",
                     "You portray a child safely and return only valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = Program.GenerateRouteConversation(memoryContext, request,
+            Dictionary<string, object> llm = DialogueService.GenerateRouteConversation(memoryContext, request,
                 "Child family scene; exact age " + age.ToString("0.00", CultureInfo.InvariantCulture)
                 + ". Match development. No adult romance, politics, punishment, coercion, combat or campaign actions. Do not speak for another participant. Use only observed scene and supplied childhood sources.", 1200, responder);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Child response failed.") };
@@ -149,8 +149,8 @@ ORDER BY ts_rank_cd(to_tsvector('simple',summary),plainto_tsquery('simple',$quer
                 + name + " said or visibly did: " + reply;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string experienceId = "childhood_" + FamilyStableId(campaignId + "|" + timelineId + "|" + heroId + "|" + sessionId + "|" + turnId);
-            bool failedDraft = ReadBool(llm, "visibleRepairFailure", false) || Program.ConversationRepairFailed(parsed);
-            Program.PublishRouteConversation(memoryContext, reply, name, connection =>
+            bool failedDraft = ReadBool(llm, "visibleRepairFailure", false) || DialogueService.ConversationRepairFailed(parsed);
+            DialogueService.PublishRouteConversation(memoryContext, reply, name, connection =>
             {
                 if (failedDraft) return;
                 EnsureFamilyChambersSchema(connection);
@@ -177,7 +177,7 @@ ON CONFLICT(experience_id) DO NOTHING;", new Dictionary<string, object>
                 ["providerCallCount"] = memoryContext.ProviderCalls,
             };
             if (!failedDraft) ProcessFamilyReconciliationReply(payload, childResponse);
-            return Program.CompleteRouteConversationDelivery(memoryContext, childResponse);
+            return DialogueService.CompleteRouteConversationDelivery(memoryContext, childResponse);
         }
 
         internal static Dictionary<string, object> FamilyChambersMatureChildhood(Dictionary<string, object> payload)

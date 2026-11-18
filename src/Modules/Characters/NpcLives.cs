@@ -27,7 +27,7 @@ timeline_id TEXT PRIMARY KEY, value_json TEXT NOT NULL);");
             Program.ExecuteSql(c, @"INSERT INTO character_npc_lives_state(timeline_id,value_json) VALUES($timeline,$json)
 ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDict("timeline", state.TimelineId, "json", Json.Serialize(state)));
         }
-        internal static string NpcLivesGeneration(ReignDbConnection c) => ReadString(Program.ReadMemoryPrecisionState(c), "restore_generation", "");
+        internal static string NpcLivesGeneration(ReignDbConnection c) => ReadString(DialogueService.ReadMemoryPrecisionState(c), "restore_generation", "");
         private static int NpcLivesAffinity(ReignDbConnection c, string hero, string player, int native = 0)
         {
             RelationshipsService.EnsureMbtiRelationshipSchema(c);
@@ -41,7 +41,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
         internal static Dictionary<string, object> NpcLivesApi(string operation, Dictionary<string, object> p)
         {
             if (operation == "editor-list" || operation == "editor-save") return NpcStoryEditorApi(operation, p);
-            string campaign = ReadString(p, "campaignId", ""), timeline = Program.ContinuityTimeline(p);
+            string campaign = ReadString(p, "campaignId", ""), timeline = DialogueService.ContinuityTimeline(p);
             string player = ReadFirstString(p, "playerId", "playerHeroStringId");
             double day = ReadDouble(p, "worldDay", -1);
             if (campaign.Length == 0 || player.Length == 0 || !NpcLivesPolicy.Finite(day) || day < 0)
@@ -60,7 +60,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
                 if (story == null || revision < 1 || revision > story.Revision)
                     return TestDict("ok", false, "error", "That story chapter does not exist.");
                 string session = "npc_story_scene_" + storyId + "_" + revision;
-                var lines = Program.ReadOriginalConversationHistory(campaign, p, story.HeroId, session, 400, new List<Dictionary<string, object>>());
+                var lines = DialogueService.ReadOriginalConversationHistory(campaign, p, story.HeroId, session, 400, new List<Dictionary<string, object>>());
                 return TestDict("ok", true, "lines", lines, "generation", generation);
             }
             if (ReadString(p, "generation", "") != generation)
@@ -106,7 +106,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
                     NpcLivesNativeReceipt(c, state, p, player, day);
                     break;
                 case "communication_receipt":
-                    Program.AcceptCommunicationNativeReceipt(c, state, p, day);
+                    DialogueService.AcceptCommunicationNativeReceipt(c, state, p, day);
                     break;
                 case "acknowledge":
                     foreach (var row in ReadDictionaryList(p, "receipts").Take(128))
@@ -157,8 +157,8 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,'',$player,'party_announcement','closed',$ts,$ts,$day,$day,$location,$audience,$payload);",
                 TestDict("session", id, "campaign", state.CampaignId, "player", player, "ts", ts, "day", day, "location", announcement.LocationId,
-                    "audience", Json.Serialize(audience), "payload", Program.SerializeConversationTurnStoragePayload(p)));
-            Program.InsertConversationTurn(c, id + "_source", id, id, 0, id, "player", player, ReadString(p, "playerName", "Player"),
+                    "audience", Json.Serialize(audience), "payload", DialogueService.SerializeConversationTurnStoragePayload(p)));
+            DialogueService.InsertConversationTurn(c, id + "_source", id, id, 0, id, "player", player, ReadString(p, "playerName", "Player"),
                 text, "party_announcement", day, ts, announcement.LocationId, audience, p);
             return PreserveNpcAnnouncementInput(c, state, p, announcement);
         }
@@ -168,17 +168,17 @@ VALUES($session,$campaign,'',$player,'party_announcement','closed',$ts,$ts,$day,
             // Announcement publication already owns the transaction. Preserve its
             // immutable original and author receipt atomically with the visible line;
             // do not open a second admission transaction or generate an NPC reply.
-            var captured = Program.CapturePlayerInput(p);
+            var captured = DialogueService.CapturePlayerInput(p);
             if (captured.Original != announcement.Text) throw new InvalidOperationException("The announcement original differs from its published words.");
-            string input = "input_" + Program.PromptHash(state.CampaignId + "|" + state.TimelineId + "|" + announcement.PlayerId + "|" + announcement.Id);
-            string source = "input_source_" + input.Substring(6), hash = Program.ConversationExactTextHash(announcement.Text), generation = NpcLivesGeneration(c);
-            Program.EnsureConversationInputSchema(c);
+            string input = "input_" + DialogueService.PromptHash(state.CampaignId + "|" + state.TimelineId + "|" + announcement.PlayerId + "|" + announcement.Id);
+            string source = "input_source_" + input.Substring(6), hash = DialogueService.ConversationExactTextHash(announcement.Text), generation = NpcLivesGeneration(c);
+            DialogueService.EnsureConversationInputSchema(c);
             captured.InputId = input; captured.SourceId = source; captured.Generation = generation;
             p["contributionId"] = announcement.Id;
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.PreservePlayerInputSource(c, p, announcement.Id, announcement.Id, announcement.Id, announcement.PlayerId,
+            DialogueService.PreservePlayerInputSource(c, p, announcement.Id, announcement.Id, announcement.Id, announcement.PlayerId,
                 ReadString(p, "playerName", "Player"), announcement.WorldDay, now, announcement.LocationId);
-            Program.BindAcceptedInputSource(c, p, announcement.Id, announcement.Id, new[] { announcement.Id + "_source" });
+            DialogueService.BindAcceptedInputSource(c, p, announcement.Id, announcement.Id, new[] { announcement.Id + "_source" });
             Program.ExecuteSql(c, @"INSERT INTO conversation_input_receipts
 (input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
 VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,$now) ON CONFLICT(input_id) DO NOTHING;",
@@ -187,7 +187,7 @@ VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,
             var saved = Program.QuerySql(c, "SELECT source_hash,source_turn_id FROM conversation_input_receipts WHERE input_id=$id;", TestDict("id", input)).Single();
             if (ReadString(saved, "source_hash", "") != hash || ReadString(saved, "source_turn_id", "") != source)
                 throw new InvalidOperationException("The original announcement receipt failed its identity check.");
-            return TestDict("schema", Program.ConversationInputSchema, "contributionId", announcement.Id, "inputId", input,
+            return TestDict("schema", DialogueService.ConversationInputSchema, "contributionId", announcement.Id, "inputId", input,
                 "sourceId", source, "sourceHash", hash, "persisted", true, "status", "received");
         }
     }

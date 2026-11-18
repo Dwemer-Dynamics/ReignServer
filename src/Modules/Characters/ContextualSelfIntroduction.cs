@@ -82,7 +82,7 @@ namespace ReignBetaServer
             if (candidates.Count == 0) return null;
 
             string subjectId = IdentityHeroId(subject);
-            var others = Program.MergedInteractionParticipantProfiles(encounter)
+            var others = DialogueService.MergedInteractionParticipantProfiles(encounter)
                 .Concat(new[] { ReadDictionary(encounter, "observer") })
                 .Where(person => person != null && !IdentityHeroId(person)
                     .Equals(subjectId, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                     ["accepted"] = decision != null,
                     ["method"] = "current_spoken_name_context",
                     ["resolverCorrelationId"] = ReadString(request, "correlationId", ""),
-                    ["currentTextHash"] = Program.PromptHash(spoken),
+                    ["currentTextHash"] = DialogueService.PromptHash(spoken),
                     ["candidateCount"] = candidates.Count,
                     ["contextLineCount"] = context.Count,
                     ["currentTextChars"] = spoken.Length,

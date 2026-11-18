@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static string CulturalVoicePrompt(Dictionary<string, object> profile)
         {

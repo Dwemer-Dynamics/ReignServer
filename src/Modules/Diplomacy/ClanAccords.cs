@@ -220,7 +220,7 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
                 using (var transaction = connection.BeginTransaction())
                 {
                     foreach (string hero in known)
-                        Program.UpsertKnowledgeReceipt(connection, memoryEventId, hero,
+                        DialogueService.UpsertKnowledgeReceipt(connection, memoryEventId, hero,
                             participants.Contains(hero, StringComparer.OrdinalIgnoreCase) ? "participant" : "known",
                             1d, 1d, ReadDouble(evt, "worldDay", 0), "clan_accord_native_commit", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                     transaction.Commit();

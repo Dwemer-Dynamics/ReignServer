@@ -118,14 +118,14 @@ namespace ReignBetaServer
                 {
                     var state = ReadTavernHouseSession(path) ?? NewTavernHouseSession(payload);
                     ValidateTavernHouseScope(state, payload);
-                    if (Program.UsesStructuredActions(payload)) state["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
+                    if (DialogueService.UsesStructuredActions(payload)) state["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                     if (ReadString(state, "status", "") == "closed") return TavernHouseError("This visit has ended.", "closed");
                     string requestId = ReadString(payload, "requestId", "");
                     if (string.IsNullOrWhiteSpace(requestId)) return TavernHouseError("A stable requestId is required for each speaker turn.");
                     var responses = ReadDictionaryList(state, "responses");
                     var previous = responses.FirstOrDefault(x => ReadString(x, "requestId", "") == requestId);
                     string requestHash = TavernHouseHash(Json.Serialize(new[] { ReadString(payload, "playerText", ""), ReadString(payload, "speakerHeroStringId", ""), ReadString(payload, "playerTurnId", "") })
-                        + (Program.UsesStructuredActions(payload) ? Json.Serialize(ReadDictionary(payload, "structuredActionContext")) : ""));
+                        + (DialogueService.UsesStructuredActions(payload) ? Json.Serialize(ReadDictionary(payload, "structuredActionContext")) : ""));
                     if (previous != null)
                     {
                         if (planOnly)
@@ -177,12 +177,12 @@ namespace ReignBetaServer
                         + (visiting ? "Native payment and participant agreement are already complete. Speak only as your own character; respect each person's choices. This visit does not recruit anyone. Permanent recruitment requires your own explicit current agreement to join the player's clan as a companion, stating your numeric denar price or expressly free of charge, then the player's confirmation and native transfer."
                             : Program.LoadPromptTemplate("tavern_house_negotiation_role.txt") + "\nAvailable native roster (identity and pricing choices only, not present witnesses): "
                                  + Json.Serialize(roster.Select(x => new { heroId = Program.CharacterIdFrom(x), name = ReadString(x, "name", ""), isMadam = ReadBool(x, "isMadam", false) })));
-                    if (!visiting && Program.UsesStructuredActions(chat)) state["visitActionProtocolVersion"] = 1;
+                    if (!visiting && DialogueService.UsesStructuredActions(chat)) state["visitActionProtocolVersion"] = 1;
                     if (visiting) chat["sceneContext"] = ReadString(chat, "sceneContext", "")
                         + "\nCONFIRMED NATIVE VISIT RECEIPT (facts only): " + Json.Serialize(ReadDictionary(state, "receipt"));
                     using var tavernActionScope = new TavernActionScopeLease(visiting ? null : TavernVisitContext(state));
                     ApplyTavernHouseOpening(state, chat);
-                    if (planOnly) return Program.GroupConversationFloorApi(chat);
+                    if (planOnly) return DialogueService.GroupConversationFloorApi(chat);
                     var response = DispatchTavernHouseDialogue(state, requestId, requestHash, chat,
                         () => Program.PartyChatRespond(chat), pending => RecoverTavernHouseDialogue(state, pending),
                         () => SaveTavernHouseSession(path, state));
@@ -217,7 +217,7 @@ namespace ReignBetaServer
         internal static void BindTavernHouseSceneParticipants(Dictionary<string, object> state,
             Dictionary<string, object> chat, List<Dictionary<string, object>> present)
         {
-            string town = Program.ConversationLocationLabel(ReadString(state, "townName", ""));
+            string town = DialogueService.ConversationLocationLabel(ReadString(state, "townName", ""));
             string venue = "the tavern house" + (town.Length == 0 ? "" : " at " + town);
             string playerId = ReadString(state, "playerHeroStringId", "");
             var participants = present.Concat(new[] { ReadDictionary(state, "player") ?? TestDict() })
@@ -294,7 +294,7 @@ namespace ReignBetaServer
                 var row = Program.QuerySql(connection, @"SELECT text,payload_json,event_id FROM conversation_turns
 WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND role='npc' AND turn_id=$turn LIMIT 1;",
                     new Dictionary<string, object> { ["session"] = phaseSession, ["exchange"] = turn, ["speaker"] = speaker,
-                        ["turn"] = turn + "_npc_" + Program.SafeMemoryKey(speaker) }).FirstOrDefault();
+                        ["turn"] = turn + "_npc_" + DialogueService.SafeMemoryKey(speaker) }).FirstOrDefault();
                 return RecoverTavernHouseDialogueRow(state, pending, row);
             }
         }
@@ -370,13 +370,13 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
         {
             try
             {
-                if (!visiting && !Program.UsesStructuredActions(state))
+                if (!visiting && !DialogueService.UsesStructuredActions(state))
                 {
                     var extracted = ExtractTavernHouseQuote(state, ReadString(response, "reply", ""));
                     if (ReadBool(extracted, "ok", false)) { state["quote"] = ReadDictionary(extracted, "quote"); response["quote"] = state["quote"]; }
                     else if (ReadString(extracted, "code", "") != "no_offer") response["quoteError"] = ReadString(extracted, "error", "Ask the madam to restate the exact terms.");
                 }
-                var recruitment = Program.UsesStructuredActions(state) ? null : ExtractTavernHouseRecruitment(state, speakerId, requestId, ReadString(response, "reply", ""));
+                var recruitment = DialogueService.UsesStructuredActions(state) ? null : ExtractTavernHouseRecruitment(state, speakerId, requestId, ReadString(response, "reply", ""));
                 if (recruitment != null) response["recruitmentAgreement"] = recruitment;
             }
             catch (Exception ex) { response["termsError"] = "The conversation is saved; its terms could not be confirmed: " + ex.Message; }
@@ -460,7 +460,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
 
         internal static Dictionary<string, object> TavernHouseStructuredCall(Dictionary<string, object> state, string kind, string system, string content)
         {
-            var envelope = Program.BuildSimplePromptEnvelope(kind, "tavern_house", system, content);
+            var envelope = DialogueService.BuildSimplePromptEnvelope(kind, "tavern_house", system, content);
             var request = new Dictionary<string, object> { ["requestType"] = kind, ["campaignId"] = ReadString(state, "campaignId", ""),
                 ["model"] = Program.ModelForRequest(Program.LoadSettings(), "dialogue"), ["correlationId"] = Guid.NewGuid().ToString("N"),
                 ["messages"] = envelope.Messages, ["promptEnvelope"] = envelope.Diagnostics, ["promptCacheEligible"] = false,
@@ -594,7 +594,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND speaker_id=$speaker AND 
                     var memoryResults = new List<Dictionary<string, object>>();
                     foreach (string phase in new[] { "negotiation", "visit" })
                         if (ReadDictionaryList(state, "transcript").Any(x => ReadString(x, "phase", "") == phase))
-                            memoryResults.Add(Program.FinishConversationSession(ReadString(state, "campaignId", ""), ReadString(state, "conversationSessionId", "") + "_" + phase,
+                            memoryResults.Add(DialogueService.FinishConversationSession(ReadString(state, "campaignId", ""), ReadString(state, "conversationSessionId", "") + "_" + phase,
                                 "tavern_house_closed", false, ReadDouble(payload, "worldDay", 0d), DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
                     return new Dictionary<string, object> { ["ok"] = true, ["status"] = "closed", ["conversationFinish"] = memoryResults };
                 }

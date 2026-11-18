@@ -6,7 +6,7 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string LateInteractionSchema = "reign-colbert-source-v1";
         private const string LateInteractionIndexSchema = LateInteractionSchema + "+player-narrative-v3";
@@ -105,13 +105,13 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> LateInteractionIndexCall(string endpoint, string path, Dictionary<string, object> request, int timeout)
         {
-            if (!string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
             {
                 if (LateInteractionReplay.Value == null) throw new InvalidOperationException("An isolated index requires a replay adapter.");
-                var replayRequest = CloneDictionary(request); replayRequest["operation"] = path;
+                var replayRequest = Program.CloneDictionary(request); replayRequest["operation"] = path;
                 return LateInteractionReplay.Value(replayRequest);
             }
-            return TryParseJsonObject(PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
+            return TryParseJsonObject(Program.PostJsonToUrl(endpoint + path, Json.Serialize(request), timeout));
         }
 
         private static void DeferLateInteractionIndex(string campaign, LateInteractionIndexRecovery recovery,
@@ -126,12 +126,12 @@ namespace ReignBetaServer
             try
             {
                 if (LateInteractionReplayAudit.Value != null) LateInteractionReplayAudit.Value.Add(audit);
-                else LogOperational("memory.late_interaction_index_deferred", audit);
+                else Program.LogOperational("memory.late_interaction_index_deferred", audit);
             }
             catch { }
         }
 
-        private static void EnsureLateInteractionMemorySchema(ReignDbConnection connection) => ExecuteSql(connection, @"
+        private static void EnsureLateInteractionMemorySchema(ReignDbConnection connection) => Program.ExecuteSql(connection, @"
 CREATE TABLE IF NOT EXISTS memory_late_interaction_sources (
  turn_id TEXT NOT NULL,view TEXT NOT NULL,source_hash TEXT NOT NULL,text_hash TEXT NOT NULL,
  source_revision TEXT NOT NULL,model_hash TEXT NOT NULL,schema_version TEXT NOT NULL,
@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS memory_late_interaction_attempts (
             else
             {
                 // Optional search diagnostics must never reject usable dialogue.
-                try { LogOperational("memory.late_interaction_search", audit); }
+                try { Program.LogOperational("memory.late_interaction_search", audit); }
                 catch { }
             }
         }
@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS memory_late_interaction_attempts (
             var eligible = ReadDictionaryList(request,"eligible");
             var exported = views.Where(v=>eligible.Any(e=>new[]{"sourceId","sourceHash","textHash","view"}
                 .All(k=>ReadString(v,k,"")==ReadString(e,k,"")))).ToList();
-            var receipt = TestDict("request",CloneDictionary(request),"requestHash",PromptHash(CanonicalJson(request)),
+            var receipt = TestDict("request",Program.CloneDictionary(request),"requestHash",PromptHash(CanonicalJson(request)),
                 "documents",exported,"status","capture_pending");
             captures.Add(receipt);
             var capture = ReadDictionaryList(item,"capturedLateInteractionSearches")
@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS memory_late_interaction_attempts (
                 var source = eligible.FirstOrDefault(e=>ReadString(e,"sourceId","")==map(ReadString(hit,"sourceId",""))
                     && ReadString(e,"view","")==ReadString(hit,"view","") && ReadString(e,"textHash","")==ReadString(hit,"textHash",""));
                 if(source==null) { receipt["status"]="source_or_projection_mismatch"; pending.Add("colbert_source_mismatch"); return TestDict("ok",false,"status","source_or_projection_mismatch"); }
-                var bound=CloneDictionary(source); bound["score"]=ReadDouble(hit,"score",0); result.Add(bound);
+                var bound=Program.CloneDictionary(source); bound["score"]=ReadDouble(hit,"score",0); result.Add(bound);
             }
             receipt["status"]="captured_local_ranks"; receipt["captureHash"]=PromptHash(CanonicalJson(capture));
             receipt["results"]=result;
@@ -256,17 +256,17 @@ CREATE TABLE IF NOT EXISTS memory_late_interaction_attempts (
         }
 
         private static List<Dictionary<string, object>> FindLateInteractionTurns(ReignDbConnection connection,
-            MemoryQueryPlan plan, KnowledgeAccessContext knowledge, int limit, bool requirePlayerSource = true)
+            MemoryQueryPlan plan, Program.KnowledgeAccessContext knowledge, int limit, bool requirePlayerSource = true)
         {
             var empty = new List<Dictionary<string, object>>();
-            bool isolated = !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value);
+            bool isolated = !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value);
             if (isolated && LateInteractionReplay.Value == null) return empty;
             if (!isolated && DateTime.UtcNow < LateInteractionUnavailableUntilUtc) return empty;
             var timer = Stopwatch.StartNew();
             var audit = TestDict("schema", LateInteractionSchema, "applied", false, "modelHash", LateInteractionModelHash);
             try
             {
-                var settings = isolated ? TestDict() : LoadSettings();
+                var settings = isolated ? TestDict() : Program.LoadSettings();
                 string mode = isolated ? "replay" : ReadString(settings, "memoryLateInteractionMode", "shadow");
                 audit["mode"] = mode;
                 if (!new[] { "shadow", "on", "replay" }.Contains(mode) || string.IsNullOrWhiteSpace(plan.Query)) return empty;
@@ -280,7 +280,7 @@ AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTime
                 // Receipts bind exact source content to PostgreSQL's current row
                 // revision. Read metadata for the whole eligible history, not all
                 // prose and not just the current lexical candidate pool.
-                var metadata = QuerySql(connection, @"SELECT t.turn_id,t.session_id,t.exchange_id,t.speaker_id,t.status,
+                var metadata = Program.QuerySql(connection, @"SELECT t.turn_id,t.session_id,t.exchange_id,t.speaker_id,t.status,
 t.world_day,t.ts,t.accepted_sequence,t.participants_json,t.payload_json,i.source_hash,i.text_hash,i.transcript_hash,
 CASE WHEN t.speaker_id=$npc THEN 'self' ELSE 'public' END AS view
 FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
@@ -296,7 +296,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                 {
                     // Reject recall-only source sessions before scoring, including
                     // as-of limits. An unseen future answer cannot qualify a session.
-                    var players = QuerySql(connection, "SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id WHERE "
+                    var players = Program.QuerySql(connection, "SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id WHERE "
                         + eligible + " AND t.role='player' ORDER BY t.turn_id LIMIT 50001;", args);
                     if (players.Count > 50000) { audit["status"] = "source_session_limit_exceeded"; return empty; }
                     var sourceSessions = players.Where(r => PrecisionTurnVisible(r, knowledge.NpcId, knowledge, connection)
@@ -315,7 +315,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                 request["eligible"] = candidates.Select(r => TestDict("sourceId", ReadString(r, "turn_id", ""),
                     "sourceHash", ReadString(r, "source_hash", ""), "textHash", ReadString(r, "text_hash", ""), "view", ReadString(r, "view", ""))).ToList();
                 var response = isolated ? LateInteractionReplay.Value(request)
-                    : TryParseJsonObject(PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/late/search"), Json.Serialize(request), 4000));
+                    : TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/late/search"), Json.Serialize(request), 4000));
                 audit["status"] = ReadString(response, "status", "invalid_response");
                 audit["workerTiming"] = ReadDictionary(response, "timing");
                 audit["workerIndexedOriginals"] = ReadInt(response, "indexedCount", 0);
@@ -335,7 +335,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                     { audit["status"] = "invalid_source_result"; return empty; }
                     // Reload original words after the worker returns. A deleted,
                     // edited or restored-out row invalidates its cached score.
-                    var row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
+                    var row = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
                     if (row == null || !PrecisionTurnVisible(row, knowledge.NpcId, knowledge, connection)
                         || MemorySpecialistSourceHash(row) != ReadString(hit, "sourceHash", "")) continue;
                     var view = LateInteractionView(row, ReadString(hit, "view", ""));
@@ -366,7 +366,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
 
         private static void ReconcileLateInteractionMemory(string campaign, Dictionary<string, object> settings, int limit = 16)
         {
-            bool isolated = !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value);
+            bool isolated = !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value);
             if ((isolated && LateInteractionReplay.Value == null)
                 || !new[] { "shadow", "on" }.Contains(ReadString(settings, "memoryLateInteractionMode", "shadow"))) return;
             var recovery = isolated ? LateInteractionReplayRecovery.Value ?? new() : LateInteractionRecovery;
@@ -386,7 +386,7 @@ WHERE " + eligible + " ORDER BY t.turn_id LIMIT 50001;", args);
                 string epoch = ReadString(status, "indexGeneration", "");
                 phase = "source_selection";
                 List<Dictionary<string, object>> sources;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     string missing = @"SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t
 LEFT JOIN memory_late_interaction_attempts a ON a.turn_id=t.turn_id AND a.source_revision=t.xmin::text
@@ -396,13 +396,13 @@ AND (SELECT COUNT(*) FROM memory_late_interaction_sources i WHERE i.turn_id=t.tu
 AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=$schema AND i.worker_epoch=$epoch AND i.transcript_hash<>'')<2";
                     var args = TestDict("model", LateInteractionModelHash, "schema", LateInteractionIndexSchema, "epoch", epoch,
                         "now", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "limit", Math.Clamp(limit, 1, 64));
-                    sources = QuerySql(connection, missing + " ORDER BY t.accepted_sequence DESC,t.turn_id LIMIT $limit;", args)
-                        .Concat(QuerySql(connection, missing + " ORDER BY t.accepted_sequence,t.turn_id LIMIT $limit;", args))
+                    sources = Program.QuerySql(connection, missing + " ORDER BY t.accepted_sequence DESC,t.turn_id LIMIT $limit;", args)
+                        .Concat(Program.QuerySql(connection, missing + " ORDER BY t.accepted_sequence,t.turn_id LIMIT $limit;", args))
                         .GroupBy(r => ReadString(r, "turn_id", "")).Select(g => g.First()).ToList();
                 }
                 foreach (var source in sources)
                 {
-                    if (!isolated && (PriorityBackgroundWorkShouldYield() || PersistenceService.IsSaveSyncSemanticBlocked(campaign))) break;
+                    if (!isolated && (Program.PriorityBackgroundWorkShouldYield() || PersistenceService.IsSaveSyncSemanticBlocked(campaign))) break;
                     phase = "source_projection";
                     var views = new[] { "self", "public" }.Select(v => LateInteractionView(source, v)).Where(v => v != null).ToList();
                     if (views.Count == 0) { RecordLateInteractionIndexFailure(campaign, source, "empty_visible_source"); continue; }
@@ -426,10 +426,10 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
                     if (epoch.Length == 0 || epoch.Length > 128 || !LateInteractionReceiptsComplete(response, views))
                     { RecordLateInteractionIndexFailure(campaign, source, "invalid_receipts"); continue; }
                     phase = "receipt_publish";
-                    using var connection = OpenCampaignConnection(campaign);
+                    using var connection = Program.OpenCampaignConnection(campaign);
                     using var transaction = connection.BeginTransaction();
                     AcquirePostgreSqlTransactionMutationLock(connection);
-                    var current = QuerySql(connection, "SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;", TestDict("id", source["turn_id"])).SingleOrDefault();
+                    var current = Program.QuerySql(connection, "SELECT *,xmin::text AS source_revision FROM conversation_turns WHERE turn_id=$id;", TestDict("id", source["turn_id"])).SingleOrDefault();
                     if (current != null && MemorySpecialistSourceHash(current) == MemorySpecialistSourceHash(source))
                     {
                         foreach (var receipt in ReadDictionaryList(response, "sources"))
@@ -439,7 +439,7 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
                             if (expected == null) continue;
                             StoreLateInteractionReceipt(connection, current, expected, epoch);
                         }
-                        ExecuteSql(connection, "DELETE FROM memory_late_interaction_attempts WHERE turn_id=$id;", TestDict("id", source["turn_id"]));
+                        Program.ExecuteSql(connection, "DELETE FROM memory_late_interaction_attempts WHERE turn_id=$id;", TestDict("id", source["turn_id"]));
                         // Empty observer projections have no searchable text but
                         // still need a completion receipt, preventing endless work.
                         foreach (string missingView in new[] { "self", "public" }.Except(views.Select(v => ReadString(v, "view", ""))))
@@ -455,8 +455,8 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
 
         private static void RecordLateInteractionIndexFailure(string campaign, Dictionary<string, object> source, string outcome, Dictionary<string, object> response = null)
         {
-            using var connection = OpenCampaignConnection(campaign);
-            ExecuteSql(connection, @"INSERT INTO memory_late_interaction_attempts(turn_id,source_revision,model_hash,schema_version,attempts,next_attempt_ts,outcome)
+            using var connection = Program.OpenCampaignConnection(campaign);
+            Program.ExecuteSql(connection, @"INSERT INTO memory_late_interaction_attempts(turn_id,source_revision,model_hash,schema_version,attempts,next_attempt_ts,outcome)
 VALUES($id,$revision,$model,$schema,1,$next,$outcome) ON CONFLICT(turn_id) DO UPDATE SET
 attempts=CASE WHEN memory_late_interaction_attempts.source_revision=excluded.source_revision
  AND memory_late_interaction_attempts.model_hash=excluded.model_hash AND memory_late_interaction_attempts.schema_version=excluded.schema_version
@@ -471,13 +471,13 @@ model_hash=excluded.model_hash,schema_version=excluded.schema_version,next_attem
             try
             {
                 if (LateInteractionReplayAudit.Value != null) LateInteractionReplayAudit.Value.Add(audit);
-                else LogOperational("memory.late_interaction_index_source_failed", audit);
+                else Program.LogOperational("memory.late_interaction_index_source_failed", audit);
             }
             catch { }
         }
 
         private static void StoreLateInteractionReceipt(ReignDbConnection connection, Dictionary<string, object> source,
-            Dictionary<string, object> view, string epoch) => ExecuteSql(connection, @"INSERT INTO memory_late_interaction_sources
+            Dictionary<string, object> view, string epoch) => Program.ExecuteSql(connection, @"INSERT INTO memory_late_interaction_sources
 (turn_id,view,source_hash,text_hash,source_revision,model_hash,schema_version,worker_epoch,updated_ts,transcript_hash)
 VALUES($id,$view,$source,$text,$revision,$model,$schema,$epoch,$ts,$transcript)
 ON CONFLICT(turn_id,view) DO UPDATE SET source_hash=excluded.source_hash,text_hash=excluded.text_hash,

@@ -18,11 +18,11 @@ namespace ReignBetaServer
                     "clothing", "LITERAL_NATIVE_ARMOR_X")).ToList());
             Dictionary<string, object> Turn(string id, int order, string speaker, string text) => TestDict("turnId", id,
                 "turnOrder", order, "exchangeId", order < 4 ? "e1" : "e2", "speakerId", speaker,
-                "role", speaker == "player" ? "player" : "npc", "text", text, "sourceHash", Program.PromptHash(text), "frame", Frame());
+                "role", speaker == "player" ? "player" : "npc", "text", text, "sourceHash", DialogueService.PromptHash(text), "frame", Frame());
             Dictionary<string, object> Hint(Dictionary<string, object> t, string id, string actor, string quote = null) {
                 string text = ReadString(t, "text", ""); quote ??= text;
                 return TestDict("evidenceId", id, "turnId", ReadString(t, "turnId", ""), "quote", quote,
-                    "start", text.IndexOf(quote, StringComparison.Ordinal), "length", quote.Length, "sourceHash", Program.PromptHash(text), "characterIds", new[] { actor });
+                    "start", text.IndexOf(quote, StringComparison.Ordinal), "length", quote.Length, "sourceHash", DialogueService.PromptHash(text), "characterIds", new[] { actor });
             }
             Dictionary<string, object> Identity() {
                 var window = new List<Dictionary<string, object>> {
@@ -52,7 +52,7 @@ namespace ReignBetaServer
                 "wardrobeCoverage", ids.Select((id, i) => Row(id, "changes", Resolution("h" + i))).ToList());
             void Neutral(Dictionary<string, object> identity, int from) {
                 var window = ReadDictionaryList(identity, "window");
-                for (int i = from; i < 3; i++) { window[i]["text"] = ids[i] + " picks up a practice blade."; window[i]["sourceHash"] = Program.PromptHash(ReadString(window[i], "text", "")); }
+                for (int i = from; i < 3; i++) { window[i]["text"] = ids[i] + " picks up a practice blade."; window[i]["sourceHash"] = DialogueService.PromptHash(ReadString(window[i], "text", "")); }
                 identity["wardrobeCoverageEvidence"] = ReadDictionaryList(identity, "wardrobeCoverageEvidence").Take(from).ToList();
             }
             string Render(Dictionary<string, object> identity, Dictionary<string, object> scene) {
@@ -123,8 +123,8 @@ namespace ReignBetaServer
             });
             check("coverage_refused_proposal_allows_grounded_default", () => {
                 var identity = Identity(); Neutral(identity, 0); var window = ReadDictionaryList(identity, "window");
-                window[0]["text"] = "I might change into a blue practice coat."; window[0]["sourceHash"] = Program.PromptHash(ReadString(window[0], "text", ""));
-                window[1]["text"] = "Bryn says: No, keep the portrait clothes."; window[1]["sourceHash"] = Program.PromptHash(ReadString(window[1], "text", ""));
+                window[0]["text"] = "I might change into a blue practice coat."; window[0]["sourceHash"] = DialogueService.PromptHash(ReadString(window[0], "text", ""));
+                window[1]["text"] = "Bryn says: No, keep the portrait clothes."; window[1]["sourceHash"] = DialogueService.PromptHash(ReadString(window[1], "text", ""));
                 identity["wardrobeCoverageEvidence"] = new[] { Hint(window[0], "h0", "player") };
                 var scene = Scene(Identity()); scene["wardrobeOverrides"] = new object[0];
                 scene["wardrobeCoverage"] = new[] { Row("player", "portrait", Resolution("h0", "dismissed",
@@ -141,7 +141,7 @@ namespace ReignBetaServer
                 var identity = Identity(); var window = ReadDictionaryList(identity, "window");
                 const string wearing = "Bryn changes into a leather training vest.";
                 window.Last()["text"] = wearing + " " + action + " Afterwards Bryn changes into a silk gown.";
-                window.Last()["sourceHash"] = Program.PromptHash(ReadString(window.Last(), "text", ""));
+                window.Last()["sourceHash"] = DialogueService.PromptHash(ReadString(window.Last(), "text", ""));
                 identity["wardrobeCoverageEvidence"] = new[] { ReadDictionaryList(identity, "wardrobeCoverageEvidence")[0],
                     Hint(window.Last(), "h1", "bryn"), ReadDictionaryList(identity, "wardrobeCoverageEvidence")[2] };
                 var scene = Scene(identity); ReadDictionaryList(scene, "wardrobeOverrides")[1]["changes"] = new[] { TestDict("scope", "outfit", "operation", "replace",
@@ -191,7 +191,7 @@ namespace ReignBetaServer
                 var identity = Identity(); var scene = Scene(identity); identity.Remove("wardrobeCoverageContract"); identity.Remove("wardrobeCoverageEvidence"); scene.Remove("wardrobeCoverage");
                 scene["wardrobeOverrides"] = ReadDictionaryList(scene, "wardrobeOverrides").Take(1).ToList();
                 require(Render(identity, scene).Contains("plain training tunic"), "A pre-coverage job was silently given new admission semantics.");
-                require(Program.PromptHash(Json.Serialize(identity)) != Program.PromptHash(Json.Serialize(Identity())), "New coverage jobs reused the old identity.");
+                require(DialogueService.PromptHash(Json.Serialize(identity)) != DialogueService.PromptHash(Json.Serialize(Identity())), "New coverage jobs reused the old identity.");
             });
             check("coverage_selector_contract_is_mandatory_and_keeps_apparent_age_lock", () => {
                 string prompt = ChatViewEffectivePrompt(ChatViewSelectionPromptName, ChatViewCurrentSelectionPrompt);

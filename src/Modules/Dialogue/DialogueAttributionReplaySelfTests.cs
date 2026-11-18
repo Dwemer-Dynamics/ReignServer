@@ -3,7 +3,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunDialogueAttributionReplayAssertions()
         {
@@ -22,22 +22,22 @@ namespace ReignBetaServer
             var claimPlan = ReadDictionary(traced, "claimPlan");
             Check("group_fixture_does_not_invent_private_addressee", ReadDictionaryList(claimPlan, "pairs").Count == 0
                 && ReadDictionaryList(claimPlan, "claims").Exists(c => new[] { "actor_unresolved", "source_audience_unresolved" }.Contains(ReadString(c, "status", ""))));
-            var future = CloneDictionary(input); ReadDictionaryList(ReadDictionaryList(future, "cases")[0], "sources")[0]["sequence"] = 3L;
+            var future = Program.CloneDictionary(input); ReadDictionaryList(ReadDictionaryList(future, "cases")[0], "sources")[0]["sequence"] = 3L;
             Check("future_source_rejected", DialogueAttributionReplayError(future) == "invalid_source");
-            var foreign = CloneDictionary(input); ReadDictionaryList(foreign, "cases")[0]["campaignId"] = "live";
+            var foreign = Program.CloneDictionary(input); ReadDictionaryList(foreign, "cases")[0]["campaignId"] = "live";
             Check("campaign_override_rejected", DialogueAttributionReplayError(foreign) == "invalid_case");
-            var hidden = CloneDictionary(input); ReadDictionaryList(ReadDictionaryList(hidden, "cases")[0], "sources")[0]["audience"] = new[] { "player" };
+            var hidden = Program.CloneDictionary(input); ReadDictionaryList(ReadDictionaryList(hidden, "cases")[0], "sources")[0]["audience"] = new[] { "player" };
             Check("unheard_source_rejected", DialogueAttributionReplayError(hidden) == "invalid_source");
-            var injected = CloneDictionary(input); injected["path"] = "outside";
+            var injected = Program.CloneDictionary(input); injected["path"] = "outside";
             Check("external_path_rejected", DialogueAttributionReplayError(injected) == "invalid_header");
             Check("empty_case_rejected", DialogueAttributionReplayError(TestDict("schema", DialogueAttributionReplaySchema, "cases", new List<Dictionary<string, object>>())) == "invalid_cases");
-            var badCapture = CloneDictionary(input);
+            var badCapture = Program.CloneDictionary(input);
             ReadDictionaryList(badCapture, "cases")[0]["answerSupportCaptures"] = new[] { TestDict("requestHash", "not-a-hash", "response", TestDict()) };
             Check("unbound_answer_support_capture_rejected", DialogueAttributionReplayError(badCapture) == "invalid_answer_support_capture");
-            var captureWithOverride = CloneDictionary(input);
+            var captureWithOverride = Program.CloneDictionary(input);
             ReadDictionaryList(captureWithOverride, "cases")[0]["answerSupportCaptures"] = new[] { TestDict("requestHash", new string('a', 64), "response", TestDict(), "model", "foreign") };
             Check("answer_support_capture_cannot_override_model", DialogueAttributionReplayError(captureWithOverride) == "invalid_answer_support_capture");
-            var late = CloneDictionary(input);
+            var late = Program.CloneDictionary(input);
             var lateCase = ReadDictionaryList(late, "cases")[0];
             string badClaim = ReadString(ReadDictionary(lateCase, "draft"), "reply", "");
             lateCase["draft"] = TestDict("reply", "Welcome.");
@@ -54,10 +54,10 @@ namespace ReignBetaServer
                 && ReadDictionaryList(final, "continuityWrites").Count == 1);
             Check("sealed_audit_survives_real_route_adapter", ReadDictionaryList(lateTrace, "answerSupportRequests").All(r =>
                 ReadBool(r, "nativeReferenceSealed", false) && ReadBool(r, "routeAdapterPreservedRequest", false)));
-            var malformedLate = CloneDictionary(late);
+            var malformedLate = Program.CloneDictionary(late);
             ReadDictionaryList(malformedLate, "cases")[0]["lateRepairDraft"] = "not an object";
             Check("late_draft_must_be_object", DialogueAttributionReplayError(malformedLate) == "invalid_case");
-            var injectedLateKnob = CloneDictionary(late);
+            var injectedLateKnob = Program.CloneDictionary(late);
             ReadDictionaryList(injectedLateKnob, "cases")[0]["lateRepairModel"] = "external";
             Check("late_draft_cannot_override_model", DialogueAttributionReplayError(injectedLateKnob) == "invalid_case");
             return rows;

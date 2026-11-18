@@ -1172,7 +1172,7 @@ AND archetype_id='affair' AND source_event_id=$event;",
                 ? new Dictionary<string, object>()
                 : Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
             Dictionary<string, object> targetPercentages =
-                Program.TraitPercentageSnapshot(targetTraits);
+                DialogueService.TraitPercentageSnapshot(targetTraits);
             Dictionary<string, object> targetVirtues =
                 ReadDictionary(targetTraits, "courtVirtues")
                 ?? CharactersService.CalculateCourtVirtues(targetPercentages);
@@ -2602,7 +2602,7 @@ AND (tags.tag_id='favored_by' OR tags.tag_id LIKE 'favored_by:%');", parameters)
                     ["intimacyReceipts"] = PersistenceSection(intimacy),
                     ["flirtTargets"] = PersistenceSection(flirtTargets)
                 };
-                string overallHash = Program.SemanticSha256Hex(string.Join("|", sections
+                string overallHash = DialogueService.SemanticSha256Hex(string.Join("|", sections
                     .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
                     .Select(pair => pair.Key + ":" + ReadString(
                         pair.Value as Dictionary<string, object>, "hash", ""))));
@@ -2629,7 +2629,7 @@ AND (tags.tag_id='favored_by' OR tags.tag_id LIKE 'favored_by:%');", parameters)
             return new Dictionary<string, object>
             {
                 ["count"] = rows.Count,
-                ["hash"] = Program.SemanticSha256Hex(Json.Serialize(rows))
+                ["hash"] = DialogueService.SemanticSha256Hex(Json.Serialize(rows))
             };
         }
 
@@ -2705,7 +2705,7 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                     continue;
 
                 Dictionary<string, object> runtimeProfile =
-                    Program.QualificationRuntimeProfileFromTarget(targetId, snapshot);
+                    DialogueService.QualificationRuntimeProfileFromTarget(targetId, snapshot);
                 Dictionary<string, object> profile = Program.ReadJsonObject(
                     Program.CharacterFile(campaignId, targetId, "profile.json"));
                 Dictionary<string, object> traits = Program.ReadJsonObject(
@@ -2720,7 +2720,7 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                 CharactersService.EnsureTraitPercentageData(traits, targetId);
                 CourtService.EnsureCourtCharacterData(traits, profile, targetId);
                 Dictionary<string, object> percentages =
-                    Program.TraitPercentageSnapshot(traits);
+                    DialogueService.TraitPercentageSnapshot(traits);
                 Dictionary<string, object> virtues =
                     ReadDictionary(traits, "courtVirtues")
                     ?? CharactersService.CalculateCourtVirtues(percentages);
@@ -3544,7 +3544,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
                     material.Append("|").Append(relative).Append("|");
                     material.Append(File.Exists(path) ? SocialBalanceFileHash(path) : "semantic-v1");
                 }
-                result[capability.Key] = Program.SemanticSha256Hex(material.ToString()).Substring(0, 24);
+                result[capability.Key] = DialogueService.SemanticSha256Hex(material.ToString()).Substring(0, 24);
             }
             // This version identifies the unchanged shared enrollment, isolation, receipt, and
             // snapshot contract. Profile-specific harness behavior owns a separate capability
@@ -3567,7 +3567,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
                 capabilities.TryGetValue(dependency, out string fingerprint);
                 material.Append("|").Append(dependency).Append(":").Append(fingerprint ?? "missing");
             }
-            return Program.SemanticSha256Hex(material.ToString()).Substring(0, 32);
+            return DialogueService.SemanticSha256Hex(material.ToString()).Substring(0, 32);
         }
 
         private static bool IsSocialBalanceCompatibleResult(

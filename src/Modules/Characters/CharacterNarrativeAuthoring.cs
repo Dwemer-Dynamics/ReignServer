@@ -41,7 +41,7 @@ namespace ReignBetaServer
             Parallel.ForEach(profiles.Skip(offset).Take(count), new ParallelOptions { MaxDegreeOfParallelism = 3 }, profile =>
             {
                 string heroId = ReadString(profile, "heroStringId", "");
-                string file = Path.Combine(root, Program.PromptHash(heroId).Substring(0, 24) + ".json");
+                string file = Path.Combine(root, DialogueService.PromptHash(heroId).Substring(0, 24) + ".json");
                 var timer = System.Diagnostics.Stopwatch.StartNew();
                 int providerCalls = 0;
                 try
@@ -73,11 +73,11 @@ namespace ReignBetaServer
             foreach (var profile in profiles)
             {
                 string id = ReadString(profile, "heroStringId", "");
-                var narrative = Program.ReadJsonObject(Path.Combine(root, Program.PromptHash(id).Substring(0, 24) + ".json"));
+                var narrative = Program.ReadJsonObject(Path.Combine(root, DialogueService.PromptHash(id).Substring(0, 24) + ".json"));
                 var facts = NarrativePremadeFacts(profile, profiles);
                 if (!NarrativeDocumentReady(narrative) || ReadString(narrative, "heroStringId", "") != id
                     || ReadString(narrative, "inputFingerprint", "") != NarrativeAuthoringFingerprint(facts, NarrativeAuthoringPersonality(profile), "premade/" + id)) continue;
-                string narrativeFile = Program.PromptHash(id).Substring(0, 24) + ".json";
+                string narrativeFile = DialogueService.PromptHash(id).Substring(0, 24) + ".json";
                 Program.WriteJsonObject(Path.Combine(root, "narrative", "profiles", narrativeFile), narrative);
                 foreach (string part in new[] { "narrative", "background", "voice", "motivations", "saveQuirks", "hiddenHistory", "secrets", "hookPools" }) profile.Remove(part);
                 profile["narrativeFile"] = narrativeFile;

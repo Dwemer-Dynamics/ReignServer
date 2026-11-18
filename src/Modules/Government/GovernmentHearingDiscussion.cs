@@ -39,7 +39,7 @@ namespace ReignBetaServer
             var request = new Dictionary<string, object> { ["requestType"] = "government_hearing_discussion",
                 ["campaignId"] = ReadString(payload, "campaignId", "default"), ["correlationId"] = Program.EnsureCorrelationId(payload),
                 ["politicalAuthors"] = speakers.Select(x => ReadDictionary(x, "profile") ?? Program.ReadJsonObject(Program.CharacterFile(ReadString(payload, "campaignId", "default"), ReadString(x, "heroId", ""), "profile.json"))).ToList(),
-                ["messages"] = Program.BuildSimplePromptEnvelope("government_hearing_discussion", businessId, "Return bounded public hearing dialogue as JSON.", prompt.ToString()).Messages,
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope("government_hearing_discussion", businessId, "Return bounded public hearing dialogue as JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" } };
             var llm = Program.ChatWithLlm(request);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "The hearing response could not be prepared."), ["providerCallCount"] = 1 };

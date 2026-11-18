@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ConversationQuestionContract = @"
 QUESTION AND ANSWER STATE: Answer receipt and agreement are separate. An answer may be understood but unconvincing. Do not say it was never supplied. A narrower follow-up is a NEW question; do not move the original demand. Other NPCs speaking in the same player beat do not give the player an opportunity to answer. Use up to four source-linked changes to retain answers and distinct follow-ups.
@@ -63,7 +63,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
                 text = id == "current_npc" ? reply : ReadFirstString(payload, "playerText", "text", "message");
                 if (speaker.Length == 0 || !string.Equals(requestedSpeaker, speaker, StringComparison.OrdinalIgnoreCase)) return null;
                 if (WorldSimulationService.TableExists(connection, "conversation_turns"))
-                    row = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND speaker_id=$speaker
+                    row = Program.QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND speaker_id=$speaker
 AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                         TestDict("event", eventId, "speaker", speaker, "text", text)).FirstOrDefault();
                 // The floor admits the shared input before any NPC response,
@@ -73,19 +73,19 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
             }
             else if (id.Length > 0 && WorldSimulationService.TableExists(connection, "conversation_turns"))
             {
-                row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", id)).FirstOrDefault();
+                row = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", id)).FirstOrDefault();
                 // Some writers cite the exchange event ID displayed beside a turn.
                 // Resolve it only when exactly one visible, attributed original
                 // contains the exact quote; never guess across observer projections.
                 if (row == null)
                 {
-                    var candidates = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND speaker_id=$speaker AND status='active';",
+                    var candidates = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id AND speaker_id=$speaker AND status='active';",
                         TestDict("id", id, "speaker", requestedSpeaker)).Where(candidate =>
-                            PrecisionTurnVisible(candidate, owner, BuildKnowledgeAccessContext(owner, peer, "", payload), connection)
+                            PrecisionTurnVisible(candidate, owner, Program.BuildKnowledgeAccessContext(owner, peer, "", payload), connection)
                             && ReadString(candidate, "text", "").Contains(quote, StringComparison.Ordinal)).Take(2).ToList();
                     if (candidates.Count == 1) row = candidates[0];
                 }
-                if (row == null || !PrecisionTurnVisible(row, owner, BuildKnowledgeAccessContext(owner, peer, "", payload), connection)) return null;
+                if (row == null || !PrecisionTurnVisible(row, owner, Program.BuildKnowledgeAccessContext(owner, peer, "", payload), connection)) return null;
                 text = ReadString(row, "text", ""); speaker = ReadString(row, "speaker_id", "");
                 if (!string.Equals(requestedSpeaker, speaker, StringComparison.OrdinalIgnoreCase)) return null;
             }
@@ -108,7 +108,7 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                 "beatId", row == null ? ReadFirstString(payload, "sceneTurnId", "exchangeId", "turnId")
                     : ReadFirstString(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "sceneTurnId", "exchangeId", "turnId"),
                 "audienceIds", row == null ? new List<string> { owner, peer }.Where(s => s.Length > 0).Distinct().ToList()
-                    : TextListFromJson(ReadString(row, "participants_json", "[]")));
+                    : Program.TextListFromJson(ReadString(row, "participants_json", "[]")));
         }
 
         private static string QuestionSourceOrder(Dictionary<string, object> answer, Dictionary<string, object> question)
@@ -144,8 +144,8 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
             var state = ReadDictionary(write, "questionState");
             if (state == null) return "question_state_missing";
             string id = CurrentContinuityRecordId(connection, ContinuityTimeline(payload), owner, ReadString(write, "id", ""));
-            var access = BuildKnowledgeAccessContext(owner, peer, "", payload);
-            var old = id.Length == 0 ? null : QuerySql(connection,
+            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var old = id.Length == 0 ? null : Program.QuerySql(connection,
                 "SELECT * FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND kind='question' AND "
                 + MemorySourceTimelineSql("conversation_continuity", access: access) + ";",
                 TestDict("id", id, "owner", owner, "timeline", ContinuityTimeline(payload))).FirstOrDefault();
@@ -198,7 +198,7 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
             // New auto-identified questions can be retried too. An explicitly
             // supplied inaccessible ID may never borrow a different original.
             if (old == null && ReadString(write, "id", "").Length == 0)
-                old = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND "
+                old = Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND "
                     + MemorySourceTimelineSql("conversation_continuity", access: access) + ";",
                     TestDict("id", id, "owner", owner, "timeline", ContinuityTimeline(payload))).FirstOrDefault();
             if (old != null)
@@ -215,8 +215,8 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                     return "answered_question_requires_explicit_reopening";
             }
             string followUp = CurrentContinuityRecordId(connection, ContinuityTimeline(payload), owner, ReadString(state, "followUpTo", ""));
-            if (followUp.Length > 0 && (followUp == id || QuerySql(connection,
-                "SELECT record_id FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: BuildKnowledgeAccessContext(owner, peer, "", payload)) + " AND kind='question';",
+            if (followUp.Length > 0 && (followUp == id || Program.QuerySql(connection,
+                "SELECT record_id FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: Program.BuildKnowledgeAccessContext(owner, peer, "", payload)) + " AND kind='question';",
                 TestDict("id", followUp, "timeline", ContinuityTimeline(payload), "owner", owner)).Count != 1)) return "question_followup_unverified";
             write["id"] = id;
             write["status"] = answerState == "answered" || answerState == "refused" ? "resolved" : answerState == "deferred" ? "deferred" : "active";
@@ -243,19 +243,19 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
         }
 
         private static bool QuestionOriginalStillVerified(ReignDbConnection connection, Dictionary<string, object> source,
-            string observer, KnowledgeAccessContext access)
+            string observer, Program.KnowledgeAccessContext access)
         {
             string id = ReadString(source, "turnId", "");
             if (id.Length == 0) return false; // Keep the record recoverable, but do not certify a missing original.
             if (id.StartsWith("letter_", StringComparison.Ordinal))
             {
-                var letter = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).FirstOrDefault();
+                var letter = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).FirstOrDefault();
                 string body = ReadString(letter, "body", ""), span = ReadString(source, "quote", "");
                 return LetterVisibleToObserver(connection, letter, observer, access, out _)
                     && ReadString(letter, "sender_id", "") == ReadString(source, "speakerId", "")
                     && PromptHash(body) == ReadString(source, "sourceHash", "") && span.Length >= 4 && body.Contains(span, StringComparison.Ordinal);
             }
-            var row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", id)).FirstOrDefault();
+            var row = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", id)).FirstOrDefault();
             string text = ReadString(row, "text", ""), quote = ReadString(source, "quote", "");
             return row != null && PrecisionTurnVisible(row, observer, access, connection)
                 && ReadString(row, "speaker_id", "") == ReadString(source, "speakerId", "")
@@ -267,19 +267,19 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
         // not an answer. Expose bounded originals for review without interpreting
         // relevance, changing the ledger, or manufacturing consent/agreement.
         private static List<Dictionary<string, object>> QuestionUnreviewedTurns(ReignDbConnection connection,
-            Dictionary<string, object> row, Dictionary<string, object> state, string owner, KnowledgeAccessContext access)
+            Dictionary<string, object> row, Dictionary<string, object> state, string owner, Program.KnowledgeAccessContext access)
         {
             if (new[] { "answered", "refused" }.Contains(ReadString(state, "answerState", ""))) return new();
             var question = ReadDictionary(state, "question");
             string questionId = ReadString(question, "turnId", "");
             // Correspondence has its own dispatch chronology and visibility.
             if (questionId.Length == 0 || questionId.StartsWith("letter_", StringComparison.Ordinal)) return new();
-            var original = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
+            var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
                 TestDict("id", questionId)).FirstOrDefault();
             if (original == null || !PrecisionTurnVisible(original, owner, access, connection)) return new();
             var record = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             var review = ReadDictionary(record, "sourceEvidence");
-            var latestReview = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
+            var latestReview = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';",
                 TestDict("id", ReadString(row, "source_turn_id", ""))).FirstOrDefault();
             if (latestReview == null || !PrecisionTurnVisible(latestReview, owner, access, connection)
                 || ReadString(latestReview, "speaker_id", "") != owner
@@ -298,7 +298,7 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                 + " AND (speaker_id=$owner OR participants_json::jsonb @> jsonb_build_array($owner))";
             // The first response and newest three survive long conversations.
             // Lexical ID order is only a stable tie-breaker, never chronology.
-            return QuerySql(connection, "SELECT * FROM (" + eligible + " ORDER BY accepted_sequence,ts,turn_id LIMIT 1) first_turn"
+            return Program.QuerySql(connection, "SELECT * FROM (" + eligible + " ORDER BY accepted_sequence,ts,turn_id LIMIT 1) first_turn"
                 + " UNION ALL SELECT * FROM (" + eligible + " ORDER BY accepted_sequence DESC,ts DESC,turn_id LIMIT 3) recent_turns;", parameters)
                 .Where(turn => PrecisionTurnVisible(turn, owner, access, connection))
                 .GroupBy(turn => ReadString(turn, "turn_id", "")).Select(group => group.First())
@@ -308,15 +308,15 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
         private static string BuildQuestionContinuityPrompt(ReignDbConnection connection, Dictionary<string, object> payload,
             string owner, string peer, List<string> sourceIds)
         {
-            var terms = MemoryQueryTerms(ReadFirstString(payload, "playerText", "text", "message") + " " + ReadString(payload, "memoryActiveTopic", ""))
+            var terms = Program.MemoryQueryTerms(ReadFirstString(payload, "playerText", "text", "message") + " " + ReadString(payload, "memoryActiveTopic", ""))
                 .Where(t => !ExactRecallStopWords.Contains(t, StringComparer.OrdinalIgnoreCase)).Distinct().Take(16).ToList();
-            var access = BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
             var parameters = TestDict("owner", owner, "peer", peer, "timeline", ContinuityTimeline(payload),
                 "day", access.WorldDay, "timestamp", access.AsOfTimestamp);
             string eligible = @"SELECT * FROM conversation_continuity WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: access) + @"
 AND kind='question' AND status<>'invalidated' AND (peer_id='' OR peer_id=$peer)
 AND COALESCE((payload_json::jsonb->>'worldDay')::double precision,0)<=$day AND updated_ts<=$timestamp";
-            var candidates = QuerySql(connection, eligible + " ORDER BY updated_ts DESC,record_id LIMIT 4;", parameters);
+            var candidates = Program.QuerySql(connection, eligible + " ORDER BY updated_ts DESC,record_id LIMIT 4;", parameters);
             // Search the full eligible lifetime, then bound the ranked result.
             // No recency-only candidate cap makes early answers unreachable.
             if (terms.Count > 0)
@@ -328,7 +328,7 @@ AND COALESCE((payload_json::jsonb->>'worldDay')::double precision,0)<=$day AND u
                     scores.Add("CASE WHEN lower(payload_json) LIKE $term" + i + " THEN 1 ELSE 0 END");
                 }
                 string score = "(" + string.Join("+", scores) + ")";
-                candidates.AddRange(QuerySql(connection, eligible + " AND " + score + ">0 ORDER BY " + score
+                candidates.AddRange(Program.QuerySql(connection, eligible + " AND " + score + ">0 ORDER BY " + score
                     + " DESC,updated_ts DESC,record_id LIMIT 8;", parameters));
             }
             var selected = candidates.Where(r => MemoryTimeVisible(r, access, connection))

@@ -221,7 +221,7 @@ FROM relationship_observed_heroes;")
 
             if (invalidActions.Count > 0)
             {
-                Program.EnsureSemanticMemorySchema(connection);
+                DialogueService.EnsureSemanticMemorySchema(connection);
                 WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
                 string campaignId = ReignPostgreSqlStorage
                     .CampaignIdForConnection(connection);
@@ -858,7 +858,7 @@ WHERE run_id NOT IN (
                 },
                 ["sceneOpportunity"]=new Dictionary<string, object>{{"private",true},{"exposure",0.12d},{"coercive",false},{"witnessIds",new List<string>()}}
             };
-            Dictionary<string, object> context=Program.BuildConversationDecisionContext(campaignId,"autonomous_relationship",actorId,actor,Program.LoadCharacterStack(campaignId,actorId),new Dictionary<string, object>(),"","A private autonomous social opportunity.",payload,new Dictionary<string, object>{{"identityState","known"}});
+            Dictionary<string, object> context=DialogueService.BuildConversationDecisionContext(campaignId,"autonomous_relationship",actorId,actor,Program.LoadCharacterStack(campaignId,actorId),new Dictionary<string, object>(),"","A private autonomous social opportunity.",payload,new Dictionary<string, object>{{"identityState","known"}});
             return ReadDictionary(context,"romance")??new Dictionary<string, object>();
         }
 

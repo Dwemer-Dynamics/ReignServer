@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunConversationObserverProjectionAssertions()
         {
@@ -137,22 +137,22 @@ namespace ReignBetaServer
             {
                 ConversationStartApi(TestDict("campaignId", campaign, "timelineId", "main", "sessionId", "observer_scene",
                     "npcId", "npc_a", "playerId", "player", "worldDay", 10d, "participants", participants));
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     InsertConversationTurn(connection, "observer_source", "observer_scene", "observer_event", 1, "observer_exchange",
                         "npc", "npc_a", "Arin", reply, "party_chat", 10d, 20L, "town", participants, payload);
                 var writes = new List<Dictionary<string, object>> { TestDict("memoryId", "mixed_fixture", "text", "The public flower exchange included " + secret + ".",
                     "ownerId", "npc_b", "known_by", participants, "visibility", "public") };
-                StoreTurnMemoryLayers(campaign, "observer_event", "party_chat_turn", "npc_a", "player", "town", "Here is the flower.", reply,
+                Program.StoreTurnMemoryLayers(campaign, "observer_event", "party_chat_turn", "npc_a", "player", "town", "Here is the flower.", reply,
                     writes, new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(), new List<Dictionary<string, object>>(),
                     new List<Dictionary<string, object>>(), "conversation:observer_scene", 20L, participants, true, payload);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var owner = BuildKnowledgeAccessContext("npc_a", "player", "town", payload);
-                    var bystander = BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
-                    var ownerRows = QueryKnownRows(connection, "memories", owner, "status='active'", 50);
-                    var publicRows = QueryKnownRows(connection, "memories", bystander, "status='active'", 50);
-                    var ownerAuditRows = QueryKnownRows(connection, "memories", owner, "status='audit_only'", 50);
-                    var bystanderAuditRows = QueryKnownRows(connection, "memories", bystander, "status='audit_only'", 50);
+                    var owner = Program.BuildKnowledgeAccessContext("npc_a", "player", "town", payload);
+                    var bystander = Program.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
+                    var ownerRows = Program.QueryKnownRows(connection, "memories", owner, "status='active'", 50);
+                    var publicRows = Program.QueryKnownRows(connection, "memories", bystander, "status='active'", 50);
+                    var ownerAuditRows = Program.QueryKnownRows(connection, "memories", owner, "status='audit_only'", 50);
+                    var bystanderAuditRows = Program.QueryKnownRows(connection, "memories", bystander, "status='audit_only'", 50);
                     Check("mixed_write_owned_only_by_actual_speaker", ownerAuditRows.Any(r =>
                             ReadString(r, "memory_id", "") == "mixed_fixture" && ReadString(r, "owner_id", "") == "npc_a"
                             && ReadString(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "sourceValidation", "") == "incomplete"
@@ -162,19 +162,19 @@ namespace ReignBetaServer
                         && bystanderAuditRows.All(r => ReadString(r, "memory_id", "") != "mixed_fixture"));
                     Check("public_observation_survives_as_separate_supported_record", publicRows.Any(r => ReadString(r, "summary", "").Contains("turns the stem"))
                         && publicRows.All(r => !ReadString(r, "summary", "").Contains(secret)), publicRows.Select(r => ReadString(r, "summary", "")).ToList());
-                    var earlier = BuildKnowledgeAccessContext("npc_b", "player", "town", new Dictionary<string, object>(payload) { ["worldDay"] = 9d });
-                    Check("accepted_world_day_prevents_future_memory_leak", QueryKnownRows(connection, "memories", earlier, "status='active'", 50).Count == 0);
-                    var original = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='observer_source';").Single();
+                    var earlier = Program.BuildKnowledgeAccessContext("npc_b", "player", "town", new Dictionary<string, object>(payload) { ["worldDay"] = 9d });
+                    Check("accepted_world_day_prevents_future_memory_leak", Program.QueryKnownRows(connection, "memories", earlier, "status='active'", 50).Count == 0);
+                    var original = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='observer_source';").Single();
                     Check("historical_source_stays_complete_but_reader_is_scoped", ReadString(original, "text", "") == reply
                         && RenderExactHistoryTurn(original, owner).Contains(secret) && !RenderExactHistoryTurn(original, bystander).Contains(secret));
                     // Emulate an old mixed-audience record. Read-time projection
                     // repairs future use without rewriting the historical record.
-                    ExecuteSql(connection, "UPDATE memories SET participants_json=$ids,known_by_json=$ids,hidden_from_json='[]' WHERE memory_id='mixed_fixture';", TestDict("ids", Json.Serialize(participants)));
-                    var legacy = QuerySql(connection, "SELECT * FROM memories WHERE memory_id='mixed_fixture';").Single();
+                    Program.ExecuteSql(connection, "UPDATE memories SET participants_json=$ids,known_by_json=$ids,hidden_from_json='[]' WHERE memory_id='mixed_fixture';", TestDict("ids", Json.Serialize(participants)));
+                    var legacy = Program.QuerySql(connection, "SELECT * FROM memories WHERE memory_id='mixed_fixture';").Single();
                     var safe = ProjectRetrievedConversationMemories(connection, new List<Dictionary<string, object>> { legacy }, bystander);
                     Check("legacy_mixed_record_uses_observable_original", safe.Count == 1 && !ReadString(safe[0], "summary", "").Contains(secret)
                         && ReadString(safe[0], "summary", "").Contains("It survived the journey."));
-                    Check("read_projection_does_not_rewrite_history", ReadString(QuerySql(connection, "SELECT summary FROM memories WHERE memory_id='mixed_fixture';").Single(), "summary", "").Contains(secret));
+                    Check("read_projection_does_not_rewrite_history", ReadString(Program.QuerySql(connection, "SELECT summary FROM memories WHERE memory_id='mixed_fixture';").Single(), "summary", "").Contains(secret));
                     var missing = new Dictionary<string, object>(legacy) { ["event_id"] = "missing_original" };
                     Check("unverifiable_private_derivative_withheld", ProjectRetrievedConversationMemories(connection, new List<Dictionary<string, object>> { missing }, bystander).Count == 0);
                     var link = TestDict("relatedTurnId", "observer_source", "relationKind", "correction", "relatedQuote", secret);
@@ -184,18 +184,18 @@ namespace ReignBetaServer
                 clonedInput["timelineId"] = "main"; clonedInput["participants"] = participants;
                 StoreConversationExchange(campaign, clonedInput, "npc_b", "player", "Player", "Bren",
                     ReadString(clonedInput, "playerText", ""), "Good evening to you.", "private_input_acceptance", 21L);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id='private_input_acceptance' AND status='source_only';").Single();
-                    var knowledge = BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
+                    var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id='private_input_acceptance' AND status='source_only';").Single();
+                    var knowledge = Program.BuildKnowledgeAccessContext("npc_b", "player", "town", payload);
                     Check("accepted_private_original_is_retained_but_not_npc_evidence", ReadString(source, "text", "") == privatePlayerInput
                         && !PrecisionTurnVisible(source, "npc_b", knowledge)
-                        && QuerySql(connection, "SELECT turn_id FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", ReadString(source, "turn_id", ""))).Count == 0);
-                    Check("accepted_player_turn_preserves_complete_narration", ReadString(QuerySql(connection,
+                        && Program.QuerySql(connection, "SELECT turn_id FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", ReadString(source, "turn_id", ""))).Count == 0);
+                    Check("accepted_player_turn_preserves_complete_narration", ReadString(Program.QuerySql(connection,
                         "SELECT text FROM conversation_turns WHERE turn_id='private_input_acceptance_player';").Single(), "text", "").Contains("Good evening.")
-                        && ReadString(QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='private_input_acceptance_player';").Single(), "text", "") == privatePlayerInput);
-                    var session = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id='observer_scene';").Single();
-                    var allTurns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='observer_scene' ORDER BY turn_order;");
+                        && ReadString(Program.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id='private_input_acceptance_player';").Single(), "text", "") == privatePlayerInput);
+                    var session = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id='observer_scene';").Single();
+                    var allTurns = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id='observer_scene' ORDER BY turn_order;");
                     var scene = CreateConversationSceneSummary(campaign, session, allTurns, 22L,
                         TestDict("useMemoryLlmForConsolidation", false, "enableSemanticMemory", false));
                     Check("shared_scene_summary_cannot_publish_author_thoughts", !ReadString(scene, "summary", "").Contains(secret)
@@ -224,7 +224,7 @@ namespace ReignBetaServer
                 Check("actual_individual_provider_message_keeps_complete_player_input", Json.Serialize(directEnvelope.Messages).Contains("secret meeting")
                     && Json.Serialize(directEnvelope.Messages).Contains("Good evening."));
             }
-            catch (Exception ex) { Check("suite_exception", false, LimitText(ex.ToString(), 2200)); }
+            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2200)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

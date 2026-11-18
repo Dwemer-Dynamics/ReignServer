@@ -5,9 +5,9 @@ using System.Reflection;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             RunFinalConversationGauntletSchedulerSelfTests()
         {
             List<Dictionary<string, object>> checks =
@@ -390,7 +390,7 @@ WHERE table_schema=current_schema()
             FinalGauntletStore.EnsureSchema(connection);
             foreach (string runId in runIds ?? Array.Empty<string>())
             {
-                ExecuteSql(
+                Program.ExecuteSql(
                     connection,
                     "DELETE FROM final_gauntlet_runs WHERE run_id=$run;",
                     new Dictionary<string, object> { ["run"] = runId });

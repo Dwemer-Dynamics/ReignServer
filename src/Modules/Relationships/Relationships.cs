@@ -82,9 +82,9 @@ namespace ReignBetaServer
             // Defaults identify existing rows without changing their accepted ETA.
             Program.EnsureDatabaseColumn(connection, "letters", "transit_policy_version", "INTEGER NOT NULL DEFAULT 0");
             Program.EnsureDatabaseColumn(connection, "letters", "base_transit_days", "REAL NOT NULL DEFAULT 0");
-            Program.EnsureCorrespondenceMemorySchema(connection);
+            DialogueService.EnsureCorrespondenceMemorySchema(connection);
             EnsureCorrespondenceDeliverySchema(connection);
-            Program.EnsureConversationMotiveSchema(connection);
+            DialogueService.EnsureConversationMotiveSchema(connection);
             EnsureRelationshipDirectorSchema(connection);
         }
 
@@ -890,10 +890,10 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                         new Dictionary<string, object> { ["id"] = letterId }).FirstOrDefault();
                     if (delivered != null) AppendDeliveredLetterHistory(campaignId, recipientId, delivered, dispatchDay);
                 }
-                List<Dictionary<string, object>> queuedActions = !Program.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase)
+                List<Dictionary<string, object>> queuedActions = !DialogueService.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase)
                     ? QueueImmediateRebellionLetterAction(campaignId, payload, senderId, recipientId, body)
                     : new List<Dictionary<string, object>>();
-                if (!Program.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase))
+                if (!DialogueService.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase))
                     queuedActions.AddRange(QueueImmediateCampaignOrderGuidanceAction(
                         connection, campaignId, payload, senderId, recipientId, body));
                 inserted["ok"] = true;
@@ -1052,14 +1052,14 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
                 // still requires the existing delivered-letter path.
                 var continuityPayload = new Dictionary<string, object>(payload) { ["sceneTurnId"] = letterId,
                     ["worldDay"] = dispatchDay, ["timelineId"] = WorldSimulationService.ActiveWorldHistoryTimeline(connection) };
-                Program.StoreAcceptedConversationContinuity(connection, continuityPayload, senderId, recipientId,
+                DialogueService.StoreAcceptedConversationContinuity(connection, continuityPayload, senderId, recipientId,
                     letterId, body, ReadDictionaryList(payload, "continuityWrites"), ts);
             }
             var agencyContext = ReadDictionary(ReadDictionary(payload, "motiveDecision"), "conversationAgency");
             if (agencyContext != null && ReadDictionaryList(payload, "proposalDecisions").Count > 0
                 && (source == "npc_reply" || source == "npc_initiated" || source == "npc_introduction" || source == "relationship_development"))
             {
-                var agencyReceipt = Program.CommitConversationAgency(connection, payload, agencyContext,
+                var agencyReceipt = DialogueService.CommitConversationAgency(connection, payload, agencyContext,
                     FirstNonEmpty(ReadString(payload, "agencyTurnId", ""), letterId), false);
                 if (!ReadBool(agencyReceipt, "ok", false)) throw new InvalidOperationException("The letter's negotiation became stale before dispatch.");
                 payload["conversationAgencyReceipt"] = agencyReceipt;
@@ -1154,7 +1154,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             using (var connection = Program.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> storedPayload = TryParseJsonObject(ReadString(letter, "payload_json", "{}")) ?? new Dictionary<string, object>();
-                if (recipientId == playerId && Program.UsesStructuredActions(storedPayload))
+                if (recipientId == playerId && DialogueService.UsesStructuredActions(storedPayload))
                     structuredActions.Add(TestDict("letterId", letterId, "request", storedPayload,
                         "response", TestDict("ok", true, "structuredActionDecision", ReadDictionary(storedPayload, "validatedStructuredActionDecision") ?? new Dictionary<string, object>())));
                 Dictionary<string, object> recipientProfile = ReadDictionary(storedPayload, "recipient") ?? new Dictionary<string, object>();
@@ -1168,7 +1168,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                     ["target"] = ReadDictionary(storedPayload, "sender") ?? new Dictionary<string, object>()
                 };
                 Dictionary<string, object> storedMotive = ReadDictionary(storedPayload, "motiveDecision");
-                relationshipPayload["motiveDecision"] = storedMotive ?? Program.BuildConversationDecisionContext(
+                relationshipPayload["motiveDecision"] = storedMotive ?? DialogueService.BuildConversationDecisionContext(
                     campaignId, "correspondence", recipientId, recipientProfile, Program.LoadCharacterStack(campaignId, recipientId), new Dictionary<string, object>(),
                     ReadString(letter, "body", ""), "Private written correspondence.",
                     new Dictionary<string, object> { ["playerHeroStringId"] = senderId, ["recipientId"] = senderId, ["worldDay"] = day, ["mode"] = "correspondence", ["sceneOpportunity"] = new Dictionary<string, object> { ["private"] = true, ["exposure"] = 0.08d, ["witnessIds"] = new List<string>() } },
@@ -1195,11 +1195,11 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                         var dispatched = InsertLetter(connection, recipientId, ReadString(letter, "recipient_name", recipientId), senderId, ReadString(letter, "sender_name", senderId), ReadString(reply, "body", ""), "npc_reply", ReadString(reply, "reason", "reply"), letterId, ReadString(letter, "destination_id", ""), ReadString(letter, "origin_id", ""), day, day + transit, reply);
                         queuedReplies.Add(dispatched);
                         var agencyReceipt = ReadDictionary(reply, "conversationAgencyReceipt");
-                        if (agencyReceipt != null && !Program.ConversationRepairFailed(reply))
+                        if (agencyReceipt != null && !DialogueService.ConversationRepairFailed(reply))
                         {
                             var assessments = new List<Dictionary<string, object>>();
                             var reactionPayload = new Dictionary<string, object> { ["conversationAgencyReceipt"] = agencyReceipt, ["playerText"] = ReadString(letter, "body", "") };
-                            Program.ApplyAgencyRelationshipAssessment(assessments, reactionPayload, recipientId, senderId);
+                            DialogueService.ApplyAgencyRelationshipAssessment(assessments, reactionPayload, recipientId, senderId);
                             if (assessments.Count > 0)
                             {
                                 var reaction = ConversationRelationshipEvaluateApi(new Dictionary<string, object> {
@@ -1214,10 +1214,10 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                         }
                         var actionPayload = new Dictionary<string, object>(storedPayload);
                         if (agencyReceipt != null) actionPayload["conversationAgencyReceipt"] = agencyReceipt;
-                        if (!Program.UsesStructuredActions(storedPayload) && !Program.ConversationRepairFailed(reply))
+                        if (!DialogueService.UsesStructuredActions(storedPayload) && !DialogueService.ConversationRepairFailed(reply))
                         {
                             queuedActions.AddRange(QueueAcceptedRebellionLetterReply(campaignId, actionPayload, letter, reply, senderId, recipientId));
-                            if (agencyReceipt == null || ReadDictionaryList(agencyReceipt, "updates").Any(r => ReadString(r, "topic", "") == "service" && Program.AgencyAccepted(ReadString(r, "disposition", ""))))
+                            if (agencyReceipt == null || ReadDictionaryList(agencyReceipt, "updates").Any(r => ReadString(r, "topic", "") == "service" && DialogueService.AgencyAccepted(ReadString(r, "disposition", ""))))
                                 queuedActions.AddRange(QueueAcceptedCampaignOrderLetterReply(campaignId, actionPayload, letter, reply, senderId, recipientId));
                         }
                     }
@@ -1240,7 +1240,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
         {
             List<Dictionary<string, object>> candidates = BuildRebellionLetterReplyCandidates(
                 storedPayload, receivedLetter, npcReply, playerId, npcId);
-            candidates = candidates.Where(candidate => Program.BindConversationAgencyAuthority(storedPayload,
+            candidates = candidates.Where(candidate => DialogueService.BindConversationAgencyAuthority(storedPayload,
                 ReadString(candidate, "command", ""), ReadDictionary(candidate, "terms") ?? new Dictionary<string, object>(),
                 new Dictionary<string, object>(), new List<string>(), candidate)).ToList();
             if (candidates.Count == 0) return candidates;
@@ -1355,7 +1355,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 ["worldDay"] = day, ["playerHeroStringId"] = recipientId, ["interactionMode"] = "correspondence",
                 ["timelineId"] = timeline, ["deferContinuityAllocation"] = true,
             };
-            if (Program.UsesStructuredActions(receivedPayload))
+            if (DialogueService.UsesStructuredActions(receivedPayload))
             {
                 memoryContextPayload["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                 memoryContextPayload["structuredActionContext"] = ReadDictionary(receivedPayload, "structuredActionContext");
@@ -1365,7 +1365,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 memoryContextPayload, settings);
             memoryContextPayload["memoryPrecisionEvidence"] = ReadDictionary(letterMemoryPacket, "precisionEvidence");
             string memoryContext = ReadString(letterMemoryPacket, "memoryPacket", "");
-            Program.PromptEnvelope promptEnvelope = Program.BuildCorrespondencePromptEnvelope(campaignId, senderId, senderName, recipientId, recipientName, day, letterBody, profile, characteristics, relationship, memoryContext, memoryContextPayload, autonomousInitiation, firstIntroduction);
+            DialogueService.PromptEnvelope promptEnvelope = DialogueService.BuildCorrespondencePromptEnvelope(campaignId, senderId, senderName, recipientId, recipientName, day, letterBody, profile, characteristics, relationship, memoryContext, memoryContextPayload, autonomousInitiation, firstIntroduction);
             Dictionary<string, object> motiveDecision = ReadDictionary(promptEnvelope.Diagnostics, "motiveDecision") ?? new Dictionary<string, object>();
             Dictionary<string, object> llmRequest = new Dictionary<string, object>
             {
@@ -1378,23 +1378,23 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
             string correlationId = Program.EnsureCorrelationId(llmRequest);
-            if (Program.UsesStructuredActions(memoryContextPayload)) llmRequest["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
+            if (DialogueService.UsesStructuredActions(memoryContextPayload)) llmRequest["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
             memoryContextPayload["turnId"] = "mail_" + ReadString(receivedLetter, "letter_id", correlationId);
             memoryContextPayload["playerText"] = letterBody;
-            Dictionary<string, object> llm = Program.GenerateSinglePassConversation(llmRequest, memoryContextPayload, "correspondence");
-            Dictionary<string, object> parsed = Program.PrepareCorrespondenceDelivery(llm);
+            Dictionary<string, object> llm = DialogueService.GenerateSinglePassConversation(llmRequest, memoryContextPayload, "correspondence");
+            Dictionary<string, object> parsed = DialogueService.PrepareCorrespondenceDelivery(llm);
             if (parsed != null)
             {
-                if (Program.UsesStructuredActions(memoryContextPayload))
+                if (DialogueService.UsesStructuredActions(memoryContextPayload))
                 {
-                    Program.CaptureStructuredActionDecision(memoryContextPayload, parsed);
+                    DialogueService.CaptureStructuredActionDecision(memoryContextPayload, parsed);
                     parsed["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                     parsed["structuredActionContext"] = ReadDictionary(memoryContextPayload, "structuredActionContext");
                     parsed["validatedStructuredActionDecision"] = ReadDictionary(memoryContextPayload, "validatedStructuredActionDecision");
                 }
                 string body = CharactersService.RemoveSpokenNumericSkillLevels(ReadFirstString(parsed, "body", "response", "letter"), out bool skillNumericRepairApplied);
                 parsed["body"] = body;
-                parsed["timelineId"] = Program.ContinuityTimeline(memoryContextPayload);
+                parsed["timelineId"] = DialogueService.ContinuityTimeline(memoryContextPayload);
                 parsed["worldDay"] = day;
                 parsed["skillNumericRepairApplied"] = skillNumericRepairApplied;
                 parsed["shouldReply"] = ReadBool(parsed, "shouldReply", true);
@@ -1447,7 +1447,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             line["worldDay"] = day;
             line["direction"] = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "sent" : "received";
             Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
-            Program.StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
+            DialogueService.StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
             using (var pregnancyConnection = Program.OpenCampaignConnection(campaignId))
                 AcceptPregnancyDisclosures(pregnancyConnection, ReadString(letter, "timeline_id", "main"), senderId,
                     ReadString(letter, "body", ""), TryParseJsonObject(ReadString(letter, "payload_json", "{}")),
