@@ -489,8 +489,6 @@ namespace ReignBetaServer
                 {
                     ["expected"] = expectedKeys.Count,
                     ["registered"] = actualKeys.Count,
-                    ["servedByTable"] = table.Routes.Count(route => route.Handler != null),
-                    ["servedByLegacyChain"] = table.Routes.Count(route => route.Handler == null),
                     ["missing"] = missing,
                     ["added"] = added
                 });
@@ -559,76 +557,7 @@ namespace ReignBetaServer
                 precedenceMismatches.Count == 0,
                 "Every former route, prefix probe and unknown method or path resolves to the same first match (or to no route, the 404) as the former if/else order, and overlapping routes keep their former relative order.",
                 new Dictionary<string, object> { ["requests"] = requests.Count, ["mismatches"] = precedenceMismatches });
-
-            List<string> orphanedLegacyRoutes = FindLegacyRoutesWithoutChainBranch(table, out string legacySourceError);
-            add("route_table_legacy_routes_have_chain_branches",
-                legacySourceError == null && orphanedLegacyRoutes.Count == 0,
-                "Every route registered as Legacy(...) still has its branch in HandleClient's legacy chain (or in the module router that chain calls), so a migrated or deleted branch cannot leave a registration that silently returns 404.",
-                new Dictionary<string, object>
-                {
-                    ["legacyRoutes"] = table.Routes.Count(route => route.Handler == null),
-                    ["orphaned"] = orphanedLegacyRoutes,
-                    ["sourceError"] = legacySourceError ?? ""
-                });
             return results;
-        }
-
-        // Source scan of the legacy chain: HandleClient between the table dispatch and the 404 branch, plus the
-        // module routers it delegates to. A chain branch matches a Legacy route when its condition names the path
-        // (exact or prefix) and the method; a module router matches when the chain calls it and it names the path
-        // and the method.
-        private static List<string> FindLegacyRoutesWithoutChainBranch(ReignRouteTable table, out string error)
-        {
-            error = null;
-            List<string> orphaned = new List<string>();
-            string sourceRoot = FindVerificationSourceRoot();
-            string serverRoot = string.IsNullOrWhiteSpace(sourceRoot) ? "" : System.IO.Path.Combine(sourceRoot, "ReignServer");
-            string programPath = string.IsNullOrWhiteSpace(serverRoot) ? "" : VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src/Modules/Platform");
-            if (!System.IO.File.Exists(programPath))
-            {
-                error = "Platform/Program.cs source was not found beneath '" + serverRoot + "'.";
-                return orphaned;
-            }
-            string program = System.IO.File.ReadAllText(programPath).Replace("\r\n", "\n");
-            int start = program.IndexOf("if (TryDispatchRegisteredRoute(request, routeContext, out response))", StringComparison.Ordinal);
-            int end = start < 0 ? -1 : program.IndexOf("[\"error\"] = \"Unknown route.\"", start, StringComparison.Ordinal);
-            if (start < 0 || end < 0)
-            {
-                error = "The HandleClient legacy chain could not be located in Platform/Program.cs.";
-                return orphaned;
-            }
-            string chain = program.Substring(start, end - start);
-            // Each branch condition runs from its "if (" to the opening brace line of its body.
-            List<string> conditions = new List<string>();
-            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(chain,
-                @"\n {20}(?:else )?if \((?<condition>[\s\S]*?)\n {20}\{"))
-                conditions.Add(match.Groups["condition"].Value);
-            Dictionary<string, string> routers = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["TryHandleSpymasterRoute"] = "Program.SpymasterRoutes.cs"
-            };
-            List<string> routerSources = new List<string>();
-            foreach (KeyValuePair<string, string> router in routers)
-            {
-                if (!conditions.Any(condition => condition.Contains(router.Key + "(request, out response)", StringComparison.Ordinal))) continue;
-                string path = VerificationSourceLocator.ResolveUnique(serverRoot, router.Value, "src/Modules");
-                if (System.IO.File.Exists(path)) routerSources.Add(System.IO.File.ReadAllText(path));
-            }
-            foreach (ReignRoute route in table.Routes.Where(route => route.Handler == null))
-            {
-                string pathToken = route.Match == RouteMatch.Exact
-                    ? "request.Path == \"" + route.Path + "\""
-                    : "request.Path.StartsWith(\"" + route.Path + "\", StringComparison." + route.Comparison + ")";
-                string methodToken = "request.Method == \"" + route.Method + "\"";
-                bool inChain = conditions.Any(condition => condition.Contains(pathToken, StringComparison.Ordinal)
-                    && condition.Contains(methodToken, StringComparison.Ordinal));
-                bool inRouter = route.Match == RouteMatch.Exact && routerSources.Any(source =>
-                    (source.Contains("case \"" + route.Path + "\":", StringComparison.Ordinal)
-                        || source.Contains(pathToken, StringComparison.Ordinal))
-                    && source.Contains("\"" + route.Method + "\"", StringComparison.Ordinal));
-                if (!inChain && !inRouter) orphaned.Add(route.ContractKey);
-            }
-            return orphaned;
         }
     }
 }

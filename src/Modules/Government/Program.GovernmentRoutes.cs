@@ -8,7 +8,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Government module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterGovernmentRoutes(ReignRouteTable routes)
         {
 #if !REIGN_EXCLUDE_COURT

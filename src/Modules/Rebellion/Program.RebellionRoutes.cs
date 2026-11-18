@@ -8,11 +8,10 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Rebellion module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterRebellionRoutes(ReignRouteTable routes)
         {
             routes.Post("/rebellions/evaluate", request => RebellionService.EvaluateRebellions(request.JsonBody));
-            routes.Legacy("GET", "/rebellions/query");
+            routes.Get("/rebellions/query", request => RebellionService.RebellionQueryApi(request.Query));
             routes.Post("/negotiations/draft", request => RebellionService.NegotiationDraftApi(request.JsonBody));
             routes.Post("/negotiations/respond", request => RebellionService.NegotiationRespondApi(request.JsonBody));
             routes.Get("/negotiations/query", request => RebellionService.NegotiationQueryApi(request.Query));

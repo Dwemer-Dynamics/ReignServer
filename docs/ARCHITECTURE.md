@@ -91,12 +91,9 @@ The accept loop hands each connection to `Task.Run(() => HandleClient(client))`,
 
 `HandleClient` (`Platform/Program.cs`) dispatches through the route table in `Platform/RouteTable.cs`. Each module
 registers its routes in `src/Modules/<Module>/Program.<Module>Routes.cs`, giving the method, the exact path or prefix
-(with its comparison), the handler and the campaign-gate policy, and the first match in registration order wins. Only
-`GET /rebellions/query` and the Spymaster router (`TryHandleSpymasterRoute`) are still registered as `Legacy(...)` and
-served by the short remaining `if / else if` chain in `HandleClient`, which ends in the 404 response; they move when
-those modules are converted. `RouteTableContractSelfTests.cs` (interaction architecture suite) checks the table
-against the pre-table route inventory, gate decisions and precedence, and checks that every `Legacy` route still has its
-chain branch. Per request `HandleClient`:
+(with its comparison), the handler and the campaign-gate policy, and the first match in registration order wins; an
+unmatched request gets the "Unknown route." 404. `RouteTableContractSelfTests.cs` (interaction architecture suite)
+checks the table against the pre-table route inventory, gate decisions and precedence. Per request `HandleClient`:
 
 1. Reads and frames the request in `ReadRequest`, enforcing the ingress limits and access policy before any body is
    buffered, any campaign lock is taken or any route runs.
@@ -277,8 +274,8 @@ dependencies on other modules.
 
 ## Direction (2026-11 restructuring programme)
 
-These are planned, one reviewed PR at a time and without behaviour change. Step 1 has landed as an opt-in, steps 2, 3
-and 4 have partly landed, and step 7 is partial (see each step); update this document in the same PR as any step that
+These are planned, one reviewed PR at a time and without behaviour change. Step 1 has landed as an opt-in, step 2 has
+landed, steps 3 and 4 have partly landed, and step 7 is partial (see each step); update this document in the same PR as any step that
 lands.
 
 1. A verification build flavour: `*SelfTests*`, VerificationLab, test routes and the `--run-*` flags compiled only
@@ -286,8 +283,8 @@ lands.
    Landed as an opt-in: `ReignExcludeVerification=true` builds the test-free flavour (see
    [Test-free build flavour](#test-free-build-flavour-opt-in)); the default build keeps everything.
 2. A route table: per-module route registrations (method, path, handler, gate policy) replace the `HandleClient`
-   chain, and gate exemptions are declared on the routes instead of in a separate list. Landed except the
-   `Legacy(...)` Rebellion query route and Spymaster router, which still use the short chain.
+   chain, and gate exemptions are declared on the routes instead of in a separate list. Landed: every route is
+   registered in the table and the chain is gone.
 3. Shared helpers (`ReadString`, `TestDict`, `QuerySql`, `ExecuteSql` and similar) move to a static `ServerCore`.
    Partly landed: `Platform/ServerCore.cs` holds the stateless helpers (the `Read*`/`TestDict`/`TestList` family,
    `FirstNonEmpty`, the shared `Json` serializer, `UnwrapJsonResponse`, `TryParseStrictJsonObject`,

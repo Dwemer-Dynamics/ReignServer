@@ -1082,15 +1082,6 @@ namespace ReignBetaServer
                     {
                         if (ReferenceEquals(response, RouteResponseWritten)) return;
                     }
-                    else if (request.Method == "GET" && request.Path == "/rebellions/query")
-                    {
-                        response = RebellionService.RebellionQueryApi(request.Query);
-                    }
-#if !REIGN_EXCLUDE_COURT
-                    else if (TryHandleSpymasterRoute(request, out response))
-                    {
-                    }
-#endif
                     else
                     {
                         status = 404;
