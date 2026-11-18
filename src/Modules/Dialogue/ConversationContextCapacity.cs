@@ -152,7 +152,7 @@ namespace ReignBetaServer
                                 if (context == 0 || output == 0 || output > context) continue;
                                 certificates[group.Key] = new Dictionary<string, object>
                                 {
-                                    ["endpoint"] = NanoGptChatCompletionsUrl, ["model"] = group.Key,
+                                    ["endpoint"] = PortraitsService.NanoGptChatCompletionsUrl, ["model"] = group.Key,
                                     ["contextTokens"] = context, ["maxOutputTokens"] = output,
                                     ["source"] = NanoConversationModelsUrl, ["sourceHash"] = hash,
                                     ["checkedAtUtc"] = now.ToString("o"), ["validUntilUtc"] = validUntil.ToString("o")
@@ -214,7 +214,7 @@ namespace ReignBetaServer
             var certificate = ReadDictionary(ReadDictionary(settings, "verifiedConversationContextWindows"), routeKey);
             // An explicit certificate remains authoritative, including expiry. Public
             // model metadata describes only this provider's default exact model route.
-            if (certificate == null && provider == NanoGptProvider && endpoint == NanoGptChatCompletionsUrl
+            if (certificate == null && provider == NanoGptProvider && endpoint == PortraitsService.NanoGptChatCompletionsUrl
                 && routing.Count == 0 && !string.IsNullOrWhiteSpace(model) && !model.Contains(':'))
                 certificate = (catalog ?? ConversationModelCapacities).Read(model);
             if (certificate == null && provider == CodexSubscriptionProvider && endpoint == "codex-app-server://local"

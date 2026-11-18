@@ -6,7 +6,7 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         // Qualified transport controls, 2026-10-29. Atlas model markdown schemas and
         // OpenRouter /api/v1/images/models are the authority for reseller limits.

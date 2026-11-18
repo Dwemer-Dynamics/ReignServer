@@ -403,7 +403,7 @@ namespace ReignBetaServer
                 EnsureRelationshipLifecycleSchema(connection);
                 EnsureWorldTestSchema(connection);
                 EnsureIdentitySchema(connection);
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 UpsertIdentityRosterHeroesBatch(connection, heroes, 1);
                 ExecuteSql(connection, @"INSERT INTO relationship_personalities(hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 SELECT hero_id,CASE mod(CAST(substring(hero_id FROM 8) AS integer),4) WHEN 0 THEN 'ENFP' WHEN 1 THEN 'ISTJ' WHEN 2 THEN 'INTJ' ELSE 'ESFJ' END,

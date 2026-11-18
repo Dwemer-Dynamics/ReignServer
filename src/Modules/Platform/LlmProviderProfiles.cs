@@ -149,12 +149,12 @@ namespace ReignBetaServer
                 && uri.Host.Equals("openrouter.ai", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string LlmApiUrl(Dictionary<string, object> settings)
+        internal static string LlmApiUrl(Dictionary<string, object> settings)
         {
             string provider = NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
             return provider == OpenRouterProvider ? OpenRouterChatUrl
                 : provider == OllamaCloudProvider ? OllamaCloudChatUrl
-                : provider == NanoGptProvider ? NanoGptChatCompletionsUrl : ReadString(settings, "apiUrl", "");
+                : provider == NanoGptProvider ? PortraitsService.NanoGptChatCompletionsUrl : ReadString(settings, "apiUrl", "");
         }
 
         // Outbound use only: resolves a bound global key for the configured endpoint. Presence checks use ProviderKeyConfigured.

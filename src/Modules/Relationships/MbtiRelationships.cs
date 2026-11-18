@@ -2498,14 +2498,14 @@ WHERE pair_key=$pair;",
 
                     Stopwatch courtPopularityTimer = Stopwatch.StartNew();
                     List<string> changedCourtPopularitySubjects =
-                        RecomputeCourtPopularityReputationsBatch(connection,
+                        ReputationService.RecomputeCourtPopularityReputationsBatch(connection,
                             campaignId, timelineId,
                             courtPopularitySubjects, day,
                             "ambient_affinity_threshold|" + day);
                     if (changedCourtPopularitySubjects.Count > 0)
                     {
                         courtPopularityChanged = true;
-                        ReconcileSocialRelationshipsForSubjects(connection,
+                        ReputationService.ReconcileSocialRelationshipsForSubjects(connection,
                             campaignId, timelineId,
                             changedCourtPopularitySubjects, day);
                     }
@@ -2670,7 +2670,7 @@ WHERE pair_key=$pair;",
                     pendingCacheRows.Clear();
                     if (courtPopularityChanged
                         && !campaignId.StartsWith("__", StringComparison.Ordinal))
-                        SchedulePendingReputationReasonJobs(campaignId);
+                        ReputationService.SchedulePendingReputationReasonJobs(campaignId);
                     if (continuousWorker && evaluationUnitsSinceThrottle > 0)
                         ThrottleContinuousRelationshipChunk(evaluationUnitsSinceThrottle);
                         return result;
@@ -3120,7 +3120,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             public int DeltaBA;
         }
 
-        private static int RoundAwayFromZero(double value)
+        internal static int RoundAwayFromZero(double value)
         {
             return (int)Math.Round(value, MidpointRounding.AwayFromZero);
         }
@@ -3194,7 +3194,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             return baseline == ReignRelationshipBaselinePolicy.NoBaseline ? 0 : baseline;
         }
 
-        private static string RelationshipBand(int value)
+        internal static string RelationshipBand(int value)
         {
             if (value <= -70) return "nemesis";
             if (value <= -50) return "enemy";
@@ -4526,7 +4526,7 @@ target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updat
             return id;
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             ApplyAtomicDirectionalRelationshipDelta(
                 ReignDbConnection connection,
                 string campaignId,
@@ -4611,7 +4611,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
             return committed;
         }
 
-        private static void ApplyAuthoritativeRelationshipDelta(
+        internal static void ApplyAuthoritativeRelationshipDelta(
             ReignDbConnection connection,
             string campaignId,
             string observerId,

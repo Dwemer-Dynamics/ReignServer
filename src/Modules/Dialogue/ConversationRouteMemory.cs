@@ -9,7 +9,7 @@ namespace ReignBetaServer
     {
         // Thin route adapters keep domain authority in their original handlers.
         // These contracts own local evidence checks and source publication.
-        private sealed class RouteConversationMemory
+        internal sealed class RouteConversationMemory
         {
             internal string Campaign, Observer, Player, Channel, Session, Unit, Generation, InputHash;
             internal Dictionary<string, object> Payload, Request, Settings, Result;
@@ -23,7 +23,7 @@ namespace ReignBetaServer
 unit_id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, accepted_reply_hash TEXT NOT NULL,
 result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT NOT NULL);");
 
-        private static RouteConversationMemory PrepareRouteConversationMemory(Dictionary<string, object> source,
+        internal static RouteConversationMemory PrepareRouteConversationMemory(Dictionary<string, object> source,
             string observer, string channel, string nativeSession, string nativeTurn, IEnumerable<string> audience,
             bool childhoodOnly = false, Dictionary<string, object> settingsOverride = null)
         {
@@ -85,7 +85,7 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             input["messages"] = RequiredPoliticalMessages(input, ReadDictionaryList(input, "messages"));
         }
 
-        private static Dictionary<string, object> GenerateRouteConversation(RouteConversationMemory context,
+        internal static Dictionary<string, object> GenerateRouteConversation(RouteConversationMemory context,
             Dictionary<string, object> request, string domainContract, int maximumReplyCharacters,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
@@ -199,7 +199,7 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             return result;
         }
 
-        private static void PublishRouteConversation(RouteConversationMemory context, string reply, string speakerName,
+        internal static void PublishRouteConversation(RouteConversationMemory context, string reply, string speakerName,
             Action<ReignDbConnection> writeRoute, Action<string> boundary = null, bool inputOnly = false)
         {
             if (inputOnly ? ReadBool(context.Result, "ok", false) || reply.Length > 0
@@ -277,7 +277,7 @@ status=CASE WHEN $phase='closing' THEN 'closed' ELSE status END WHERE session_id
             transaction.Commit();
         }
 
-        private static Dictionary<string, object> CompleteRouteConversationDelivery(RouteConversationMemory context, Dictionary<string, object> response)
+        internal static Dictionary<string, object> CompleteRouteConversationDelivery(RouteConversationMemory context, Dictionary<string, object> response)
         {
             var parsed = TryParseJsonObject(ReadString(context.Result, "content", "{}"));
             if (parsed.TryGetValue("repairStatus", out var status)) response["repairStatus"] = status;

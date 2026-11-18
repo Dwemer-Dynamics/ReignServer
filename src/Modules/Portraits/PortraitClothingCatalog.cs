@@ -6,9 +6,9 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static readonly string[] PortraitClothingPromptFileNames =
+        internal static readonly string[] PortraitClothingPromptFileNames =
         {
             "portrait_clothing_vlandian_landowner.txt",
             "portrait_clothing_vlandian_minor_lord.txt",
@@ -72,11 +72,11 @@ namespace ReignBetaServer
             @"\s+Use (?:burgundy|deep blue|deep red|rich burgundy|moss green|deep green|forest green|dark red|cream|sand|muted blue)[^.]*\.",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        private static void RemoveSavedPortraitClothingColorGuidance()
+        internal static void RemoveSavedPortraitClothingColorGuidance()
         {
             foreach (string name in PortraitClothingPromptFileNames)
             {
-                string path = PromptPath(name);
+                string path = Program.PromptPath(name);
                 if (!File.Exists(path))
                 {
                     continue;
@@ -96,7 +96,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static string SelectPortraitClothingPromptFile(Dictionary<string, object> payload)
+        internal static string SelectPortraitClothingPromptFile(Dictionary<string, object> payload)
         {
             string culture = NormalizePortraitClothingCulture(ReadFirstString(payload, "cultureName", "cultureId"));
             if (string.IsNullOrWhiteSpace(culture))
@@ -149,14 +149,14 @@ namespace ReignBetaServer
             return string.Empty;
         }
 
-        private static IEnumerable<Dictionary<string, object>> PortraitClothingPromptMetadata()
+        internal static IEnumerable<Dictionary<string, object>> PortraitClothingPromptMetadata()
         {
             foreach (string name in PortraitClothingPromptFileNames)
             {
                 string key = name.Replace("portrait_clothing_", "").Replace(".txt", "");
-                yield return PromptMeta(
+                yield return Program.PromptMeta(
                     name,
-                    "Portrait Clothing - " + HumanizeKey(key),
+                    "Portrait Clothing - " + Program.HumanizeKey(key),
                     "image",
                     true,
                     key.EndsWith("_merchant") || key.EndsWith("_artisan") || key.EndsWith("_gang_leader") || key.EndsWith("_headman") || key.EndsWith("_rural_notable")
@@ -165,7 +165,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, string> PortraitClothingPromptDefaults()
+        internal static Dictionary<string, string> PortraitClothingPromptDefaults()
         {
             Dictionary<string, string> defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {

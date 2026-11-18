@@ -6,17 +6,17 @@ namespace ReignBetaServer
     {
         internal static void Append(List<Dictionary<string, object>> results)
         {
-            Program.AppendFamilyVisitSelfTests(results);
+            CourtService.AppendFamilyVisitSelfTests(results);
             Add(results, "family_chambers_participant_cap",
-                Program.FamilySceneParticipantCountValid(1) && Program.FamilySceneParticipantCountValid(4)
-                && !Program.FamilySceneParticipantCountValid(0) && !Program.FamilySceneParticipantCountValid(5),
+                CourtService.FamilySceneParticipantCountValid(1) && CourtService.FamilySceneParticipantCountValid(4)
+                && !CourtService.FamilySceneParticipantCountValid(0) && !CourtService.FamilySceneParticipantCountValid(5),
                 "Family scenes accept one through four NPC participants and reject every value outside that cap.");
             Add(results, "family_chambers_childhood_age_boundary",
-                !Program.FamilyChildhoodRetainedAtAdulthood(4.999d)
-                && Program.FamilyChildhoodRetainedAtAdulthood(5d)
-                && Program.FamilyChildhoodRetainedAtAdulthood(17.9d),
+                !CourtService.FamilyChildhoodRetainedAtAdulthood(4.999d)
+                && CourtService.FamilyChildhoodRetainedAtAdulthood(5d)
+                && CourtService.FamilyChildhoodRetainedAtAdulthood(17.9d),
                 "Children may recall all minor experiences, while adulthood migration retains only experiences from exact age five onward.");
-            string imageContract = Program.FamilyImageSafetyContract(2, "Evening");
+            string imageContract = CourtService.FamilyImageSafetyContract(2, "Evening");
             Add(results, "family_chambers_image_composition_contract",
                 imageContract.Contains("Show exactly two human figures total")
                 && imageContract.Contains("no background figures")

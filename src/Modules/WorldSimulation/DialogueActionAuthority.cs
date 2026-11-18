@@ -134,7 +134,7 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunDialogueActionAuthorityAssertions()
+        internal static List<Dictionary<string, object>> RunDialogueActionAuthorityAssertions()
         {
             var rows = RunDialogueMarriageActionAssertions();
             rows.AddRange(RunStructuredActionContinuityRepairAssertions());

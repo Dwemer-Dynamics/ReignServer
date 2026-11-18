@@ -198,7 +198,7 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
             if (RecomputeRelationshipEvaluationReputation(connection, campaignId, timelineId,
                     targetId, worldDay, eventId, nativeDelta, schemaReady: false)
                 && !campaignId.StartsWith("__", StringComparison.Ordinal))
-                SchedulePendingReputationReasonJobs(campaignId);
+                ReputationService.SchedulePendingReputationReasonJobs(campaignId);
         }
 
         // Derived court popularity and dependent public standing for one evaluated
@@ -210,11 +210,11 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
             string timelineId, string targetId, double worldDay, string eventId, int nativeDelta, bool schemaReady)
         {
             if (nativeDelta == 0) return false;
-            if (!schemaReady) EnsureSocialReputationSchema(connection);
-            bool popularityChanged = RecomputeCourtPopularityReputations(connection, campaignId,
+            if (!schemaReady) ReputationService.EnsureSocialReputationSchema(connection);
+            bool popularityChanged = ReputationService.RecomputeCourtPopularityReputations(connection, campaignId,
                 timelineId, targetId, worldDay, eventId + "|court_popularity");
             if (popularityChanged)
-                ReconcileSocialRelationshipsForSubjects(connection, campaignId,
+                ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId,
                     timelineId, new[] { targetId }, worldDay, schemaReady);
             return popularityChanged;
         }
@@ -385,7 +385,7 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
             return facets;
         }
 
-        private static double RelationshipTraitPercent(Dictionary<string, object> traitDocument, string key)
+        internal static double RelationshipTraitPercent(Dictionary<string, object> traitDocument, string key)
         {
             Dictionary<string, object> percentages = ReadDictionary(traitDocument, "traitPercentages")
                 ?? ReadDictionary(ReadDictionary(traitDocument, "traits"), "traitPercentages");
@@ -620,7 +620,7 @@ VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entitie
             double day = ReadDouble(payload, "worldDay", 0d);
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 string timelineId = ReadString(payload, "timelineId", "main");
                 double standingDay = day > 0d
                     ? day
@@ -663,9 +663,9 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                     ["perceptionTag"] = RelationshipTagForObserver(connection, campaignId, subjectId, targetId, nativeRelation),
                     ["observerMbti"] = observerMbti, ["targetMbti"] = targetMbti,
                     ["compatibilityChance"] = compatibility, ["lifecycle"] = lifecycle,
-                    ["subjectPublicStanding"] = ReadPublicStandingTrait(connection,
+                    ["subjectPublicStanding"] = ReputationService.ReadPublicStandingTrait(connection,
                         campaignId, timelineId, subjectId, standingDay),
-                    ["targetPublicStanding"] = ReadPublicStandingTrait(connection,
+                    ["targetPublicStanding"] = ReputationService.ReadPublicStandingTrait(connection,
                         campaignId, timelineId, targetId, standingDay),
                     ["incidents"] = incidents, ["relationshipModel"] = "mbti_directional_native_relation",
                     ["facets"] = new Dictionary<string, object>(),

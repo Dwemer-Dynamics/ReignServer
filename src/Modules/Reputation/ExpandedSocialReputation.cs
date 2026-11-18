@@ -9,29 +9,29 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReputationService
     {
         private static readonly object PendingSocialWorldHistoryLock = new object();
         private static readonly HashSet<string> PendingSocialWorldHistoryWorkers =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private const int SocialWorldHistoryBatchSize = 100;
+        internal const int SocialWorldHistoryBatchSize = 100;
         private const int SocialSubjectBatchSize = 32;
         private const int SocialSubjectFinalizationBatchSize = 16;
-        private static int SocialOutcomeActiveWorkers;
-        private static int SocialOutcomeConfiguredWorkers;
-        private static long SocialOutcomeCompletedTotal;
-        private static long SocialOutcomeLastBatchMs;
+        internal static int SocialOutcomeActiveWorkers;
+        internal static int SocialOutcomeConfiguredWorkers;
+        internal static long SocialOutcomeCompletedTotal;
+        internal static long SocialOutcomeLastBatchMs;
         private static long SocialOutcomeLastCompletedTs;
-        private static long SocialOutcomeLastTransactionMs;
-        private static long SocialOutcomeLastTransactionPerEventMs;
-        private static long SocialOutcomeTransactionConflicts;
-        private static long SocialOutcomeTransactionAttempts;
-        private static long SocialOutcomeLastBatchCompleted;
+        internal static long SocialOutcomeLastTransactionMs;
+        internal static long SocialOutcomeLastTransactionPerEventMs;
+        internal static long SocialOutcomeTransactionConflicts;
+        internal static long SocialOutcomeTransactionAttempts;
+        internal static long SocialOutcomeLastBatchCompleted;
         private static int SocialOutcomeClaimableSubjects;
         private static int SocialOutcomeAdaptiveWorkers;
-        private static string SocialOutcomeLastError = "";
+        internal static string SocialOutcomeLastError = "";
 
-        private static bool ResumePendingSocialWorldHistoryOutcomes(
+        internal static bool ResumePendingSocialWorldHistoryOutcomes(
             string campaignId, string timelineId)
         {
             if (string.IsNullOrWhiteSpace(campaignId)
@@ -42,14 +42,14 @@ namespace ReignBetaServer
             return true;
         }
 
-        private static void SchedulePendingSocialWorldHistoryOutcomes(
+        internal static void SchedulePendingSocialWorldHistoryOutcomes(
             string campaignId, string timelineId)
         {
             // Verification fixtures are synchronous and are dropped as soon
             // as their assertions finish. Scheduling ordinary background
             // social processing for them can reopen and recreate a fixture's
             // PostgreSQL schema after cleanup.
-            if (IsInternalCampaignId(campaignId)) return;
+            if (Program.IsInternalCampaignId(campaignId)) return;
             string workerKey = campaignId + "|" + timelineId;
             lock (PendingSocialWorldHistoryLock)
             {
@@ -71,11 +71,11 @@ namespace ReignBetaServer
                 // pending wave rather than repeating the same table sweep for
                 // every independently finalized subject lane.
                 using (ReignDbConnection expirationConnection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(expirationConnection);
-                    EnsureWorldTestTelemetrySchema(expirationConnection);
-                    Dictionary<string, object> latest = QuerySql(
+                    Program.EnsureWorldTestTelemetrySchema(expirationConnection);
+                    Dictionary<string, object> latest = Program.QuerySql(
                         expirationConnection, @"SELECT MAX(e.world_day) AS world_day
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -142,8 +142,8 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
             }
             catch (Exception ex)
             {
-                SocialOutcomeLastError = LimitText(ex.ToString(), 2000);
-                LogOperational("world_history.social_parallel_drain_failed",
+                SocialOutcomeLastError = Program.LimitText(ex.ToString(), 2000);
+                Program.LogOperational("world_history.social_parallel_drain_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId,
@@ -167,13 +167,13 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
         private static int RefreshSocialSubjectWorkQueue(string campaignId,
             string timelineId)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                EnsureWorldHistorySchema(connection);
+                Program.EnsureWorldHistorySchema(connection);
                 EnsureSocialReputationSchema(connection);
                 EnsureSocialSubjectWorkSchema(connection);
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"UPDATE social_subject_work_queue
+                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue
 SET status='pending',claim_owner='',claim_expires_ts=0,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='processing' AND claim_expires_ts<$ts;",
@@ -184,7 +184,7 @@ AND status='processing' AND claim_expires_ts<$ts;",
                     });
                 if (ReignPostgreSqlDialect.IsPostgreSql(connection))
                 {
-                    ExecuteSql(connection, @"
+                    Program.ExecuteSql(connection, @"
 WITH pending AS (
  SELECT e.sequence,e.subject_id
  FROM world_history_events e
@@ -211,7 +211,7 @@ ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
                             ["timeline"] = timelineId,
                             ["ts"] = now
                         });
-                    Dictionary<string, object> summary = QuerySql(connection, @"
+                    Dictionary<string, object> summary = Program.QuerySql(connection, @"
 SELECT COUNT(*) AS event_count,
        COUNT(DISTINCT e.subject_id)
          FILTER (WHERE e.subject_id<>'')
@@ -230,7 +230,7 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                         postgreSqlSubjects);
                     return ReadInt(summary, "event_count", 0);
                 }
-                List<Dictionary<string, object>> pending = QuerySql(connection, @"
+                List<Dictionary<string, object>> pending = Program.QuerySql(connection, @"
 SELECT e.sequence,e.event_id,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -252,7 +252,7 @@ ORDER BY e.sequence,e.event_id;",
                         StringComparer.OrdinalIgnoreCase))
                 {
                     long first = subject.Min(row => ReadLong(row, "sequence", 0));
-                    ExecuteSql(connection, @"INSERT INTO social_subject_work_queue(
+                    Program.ExecuteSql(connection, @"INSERT INTO social_subject_work_queue(
 campaign_id,timeline_id,subject_id,status,first_sequence,pending_count,
 claim_owner,claim_expires_ts,updated_ts,last_error)
 VALUES($campaign,$timeline,$subject,'pending',$sequence,$count,'',0,$ts,'')
@@ -280,23 +280,23 @@ status=CASE WHEN social_subject_work_queue.status='processing'
             }
         }
 
-        private static void EnsureSocialSubjectWorkSchema(
+        internal static void EnsureSocialSubjectWorkSchema(
             ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_subject_work_queue(
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_subject_work_queue(
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,
 status TEXT NOT NULL DEFAULT 'pending',first_sequence INTEGER NOT NULL DEFAULT 0,
 pending_count INTEGER NOT NULL DEFAULT 0,claim_owner TEXT NOT NULL DEFAULT '',
 claim_expires_ts INTEGER NOT NULL DEFAULT 0,updated_ts INTEGER NOT NULL,
 last_error TEXT NOT NULL DEFAULT '',
 PRIMARY KEY(campaign_id,timeline_id,subject_id));");
-            EnsureDatabaseColumn(connection, "social_subject_work_queue",
+            Program.EnsureDatabaseColumn(connection, "social_subject_work_queue",
                 "needs_finalize", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "social_subject_work_queue",
+            Program.EnsureDatabaseColumn(connection, "social_subject_work_queue",
                 "last_world_day", "REAL NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "social_subject_work_queue",
+            Program.EnsureDatabaseColumn(connection, "social_subject_work_queue",
                 "last_event_id", "TEXT NOT NULL DEFAULT ''");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_social_subject_work_claim
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_social_subject_work_claim
 ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subject_id);");
         }
 
@@ -307,16 +307,16 @@ ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subje
             try
             {
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     Dictionary<string, object> socialCatalog =
                         ReadGlobalSocialCatalog();
-                    while (!ShutdownRequested)
+                    while (!Program.ShutdownRequested)
                     {
                         string subjectId = ClaimSocialSubject(connection,
                             campaignId, timelineId, owner);
                         if (string.IsNullOrWhiteSpace(subjectId)) return;
-                        CampaignDataGate.EnterReadLock();
+                        Program.CampaignDataGate.EnterReadLock();
                         try
                         {
                             try
@@ -333,17 +333,17 @@ ON social_subject_work_queue(campaign_id,timeline_id,status,first_sequence,subje
                                     Interlocked.Increment(
                                         ref SocialOutcomeTransactionConflicts);
                                 using (ReignDbConnection recoveryConnection =
-                                    OpenCampaignConnection(campaignId))
+                                    Program.OpenCampaignConnection(campaignId))
                                 {
                                     EnsureSocialSubjectWorkSchema(
                                         recoveryConnection);
-                                    ExecuteSql(recoveryConnection, @"UPDATE social_subject_work_queue SET
+                                    Program.ExecuteSql(recoveryConnection, @"UPDATE social_subject_work_queue SET
 status='pending',claim_owner='',claim_expires_ts=0,updated_ts=$ts,last_error=$error
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                                         new Dictionary<string, object>
                                         {
                                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                                            ["error"] = LimitText(ex.Message, 1000),
+                                            ["error"] = Program.LimitText(ex.Message, 1000),
                                             ["campaign"] = campaignId,
                                             ["timeline"] = timelineId,
                                             ["subject"] = subjectId
@@ -354,7 +354,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         }
                         finally
                         {
-                            CampaignDataGate.ExitReadLock();
+                            Program.CampaignDataGate.ExitReadLock();
                         }
                     }
                 }
@@ -371,7 +371,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             using (ReignDbTransaction transaction = connection.BeginTransaction())
             {
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                Dictionary<string, object> row = QuerySql(connection, @"
+                Dictionary<string, object> row = Program.QuerySql(connection, @"
 SELECT subject_id FROM social_subject_work_queue
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (status='pending' OR (status='processing' AND claim_expires_ts<$ts))
@@ -388,7 +388,7 @@ LIMIT 1 FOR UPDATE SKIP LOCKED;",
                     transaction.Commit();
                     return "";
                 }
-                ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 status='processing',claim_owner=$owner,claim_expires_ts=$expires,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
 AND (status='pending' OR claim_expires_ts<$ts);",
@@ -416,7 +416,7 @@ AND (status='pending' OR claim_expires_ts<$ts);",
                 new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             List<string> batchEventIds = new List<string>();
             {
-                Dictionary<string, object> lane = QuerySql(connection, @"SELECT
+                Dictionary<string, object> lane = Program.QuerySql(connection, @"SELECT
 last_world_day,last_event_id FROM social_subject_work_queue
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject
 LIMIT 1;", new Dictionary<string, object>
@@ -427,7 +427,7 @@ LIMIT 1;", new Dictionary<string, object>
                 lastWorldDay = ReadDouble(lane, "last_world_day", 0d);
                 lastEventId = ReadString(lane, "last_event_id", "");
                 rows = ReignPostgreSqlDialect.IsPostgreSql(connection)
-                    ? QuerySql(connection, @"
+                    ? Program.QuerySql(connection, @"
 SELECT e.sequence,e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -441,7 +441,7 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
                             ["subject"] = subjectId,
                             ["limit"] = SocialSubjectBatchSize
                         })
-                    : QuerySql(connection, @"
+                    : Program.QuerySql(connection, @"
 SELECT e.sequence,e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -457,7 +457,7 @@ ORDER BY e.sequence,e.event_id;",
                     .Take(SocialSubjectBatchSize).ToList();
                 Stopwatch eventTransactionTimer = Stopwatch.StartNew();
                 Interlocked.Increment(ref SocialOutcomeTransactionAttempts);
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (Dictionary<string, object> row in rows)
@@ -509,12 +509,12 @@ ORDER BY e.sequence,e.event_id;",
                             + DeterministicSocialId(string.Join("|",
                                 campaignId, timelineId, subjectId,
                                 batchEventIds.First(), batchEventIds.Last()));
-                        RecordWorldTestCounterSchemaReady(connection,
+                        Program.RecordWorldTestCounterSchemaReady(connection,
                             campaignId, timelineId,
                             (int)Math.Floor(lastWorldDay + 0.000001d),
                             "rumors", telemetryKey, batchTelemetry);
                     }
-                    ExecuteSql(connection, "COMMIT;");
+                    Program.ExecuteSql(connection, "COMMIT;");
                     eventTransactionTimer.Stop();
                     RecordSocialOutcomeTransactionDuration(
                         eventTransactionTimer.ElapsedMilliseconds,
@@ -522,12 +522,12 @@ ORDER BY e.sequence,e.event_id;",
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
                 if (processed > 0)
                 {
-                    ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                    Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 needs_finalize=1,last_world_day=$day,last_event_id=$event,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         new Dictionary<string, object>
@@ -541,7 +541,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 }
                 bool more = HasPendingSocialWorldHistoryOutcomesForSubject(
                     connection, timelineId, subjectId);
-                ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 status=$status,claim_owner='',claim_expires_ts=0,pending_count=$count,
 updated_ts=$ts,last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
@@ -562,14 +562,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             string campaignId, string timelineId)
         {
             Dictionary<string, object> socialCatalog = ReadGlobalSocialCatalog();
-            while (!ShutdownRequested)
+            while (!Program.ShutdownRequested)
             {
                 List<Dictionary<string, object>> lanes;
                 using (ReignDbConnection readConnection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialSubjectWorkSchema(readConnection);
-                    lanes = QuerySql(readConnection, @"
+                    lanes = Program.QuerySql(readConnection, @"
 SELECT subject_id,last_world_day,last_event_id
 FROM social_subject_work_queue
 WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -584,13 +584,13 @@ LIMIT $limit;", new Dictionary<string, object>
                 }
                 if (lanes.Count == 0) return;
 
-                CampaignDataGate.EnterReadLock();
+                Program.CampaignDataGate.EnterReadLock();
                 try
                 {
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(campaignId))
+                        Program.OpenCampaignConnection(campaignId))
                     {
-                        ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                        Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                         try
                         {
                             foreach (Dictionary<string, object> lane in lanes)
@@ -607,7 +607,7 @@ LIMIT $limit;", new Dictionary<string, object>
                                 ReconcileSocialRelationshipsForSubjects(
                                     connection, campaignId, timelineId,
                                     new[] { subjectId }, worldDay, true, true);
-                                ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
+                                Program.ExecuteSql(connection, @"UPDATE social_subject_work_queue SET
 needs_finalize=0,updated_ts=$ts,last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND status='completed';",
@@ -620,11 +620,11 @@ AND subject_id=$subject AND status='completed';",
                                         ["subject"] = subjectId
                                     });
                             }
-                            ExecuteSql(connection, "COMMIT;");
+                            Program.ExecuteSql(connection, "COMMIT;");
                         }
                         catch
                         {
-                            try { ExecuteSql(connection, "ROLLBACK;"); }
+                            try { Program.ExecuteSql(connection, "ROLLBACK;"); }
                             catch { }
                             throw;
                         }
@@ -632,7 +632,7 @@ AND subject_id=$subject AND status='completed';",
                 }
                 finally
                 {
-                    CampaignDataGate.ExitReadLock();
+                    Program.CampaignDataGate.ExitReadLock();
                 }
             }
         }
@@ -728,7 +728,7 @@ AND subject_id=$subject AND status='completed';",
         {
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                return QuerySql(connection, @"
+                return Program.QuerySql(connection, @"
 SELECT 1 AS present FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND e.subject_id=$subject
@@ -740,7 +740,7 @@ LIMIT 1;", new Dictionary<string, object>
                     ["subject"] = subjectId
                 }).Count > 0;
             }
-            return QuerySql(connection, @"
+            return Program.QuerySql(connection, @"
 SELECT e.payload_json FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
@@ -758,16 +758,16 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
         {
             try
             {
-                CampaignDataGate.EnterReadLock();
+                Program.CampaignDataGate.EnterReadLock();
                 try
                 {
                     List<Dictionary<string, object>> pending;
                     bool processedAny = false;
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
-                        EnsureWorldHistorySchema(connection);
+                        Program.EnsureWorldHistorySchema(connection);
                         EnsureSocialReputationSchema(connection);
-                        pending = QuerySql(connection, @"
+                        pending = Program.QuerySql(connection, @"
 SELECT e.event_id,e.world_day,e.event_type,e.summary,e.payload_json
 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -784,7 +784,7 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
                     }
                     foreach (Dictionary<string, object> row in pending)
                     {
-                        if (PriorityBackgroundWorkShouldYield()) break;
+                        if (Program.PriorityBackgroundWorkShouldYield()) break;
                         Dictionary<string, object> item = new Dictionary<string, object>
                         {
                             ["eventId"] = ReadString(row, "event_id", ""),
@@ -803,13 +803,13 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
                         {
                             RecordSocialWorldHistoryFailure(campaignId, timelineId,
                                 ReadString(row, "event_id", ""), ex);
-                            LogOperational("world_history.social_outcome_failed",
+                            Program.LogOperational("world_history.social_outcome_failed",
                                 new Dictionary<string, object>
                                 {
                                     ["campaignId"] = campaignId,
                                     ["timelineId"] = timelineId,
                                     ["eventId"] = ReadString(row, "event_id", ""),
-                                    ["error"] = LimitText(ex.Message, 800)
+                                    ["error"] = Program.LimitText(ex.Message, 800)
                                 });
                         }
                     }
@@ -818,7 +818,7 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
                 }
                 finally
                 {
-                    CampaignDataGate.ExitReadLock();
+                    Program.CampaignDataGate.ExitReadLock();
                 }
             }
             finally
@@ -835,9 +835,9 @@ ORDER BY e.sequence,e.event_id LIMIT $limit;",
         {
             try
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    return QuerySql(connection, @"
+                    return Program.QuerySql(connection, @"
 SELECT 1 FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
 AND NOT EXISTS (
@@ -860,18 +860,18 @@ LIMIT 1;", new Dictionary<string, object>
 
         private static void EnsureExpandedSocialReputationSchema(ReignDbConnection connection)
         {
-            Dictionary<string, object> occurrenceTable = QuerySql(connection,
+            Dictionary<string, object> occurrenceTable = Program.QuerySql(connection,
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='rumor_occurrences' LIMIT 1;").FirstOrDefault();
             string occurrenceSql = ReadString(occurrenceTable, "sql", "");
             if (!string.IsNullOrWhiteSpace(occurrenceSql)
                 && occurrenceSql.IndexOf("UNIQUE(campaign_id,timeline_id,archetype_id,thread_key,world_day)", StringComparison.OrdinalIgnoreCase) >= 0
-                && ReadString(QuerySql(connection,
+                && ReadString(Program.QuerySql(connection,
                     "SELECT value FROM schema_meta WHERE key='expanded_social_occurrence_keys_v2' LIMIT 1;").FirstOrDefault(), "value", "") != "1")
             {
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
-                    ExecuteSql(connection, @"CREATE TABLE rumor_occurrences_v2 (
+                    Program.ExecuteSql(connection, @"CREATE TABLE rumor_occurrences_v2 (
 occurrence_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 archetype_id TEXT NOT NULL,thread_key TEXT NOT NULL,source_event_id TEXT NOT NULL DEFAULT '',
 world_day REAL NOT NULL,expires_day REAL NOT NULL,status TEXT NOT NULL DEFAULT 'active',
@@ -879,52 +879,52 @@ exposure_chance REAL NOT NULL DEFAULT 0,exposure_roll REAL NOT NULL DEFAULT 1,
 catalog_revision INTEGER NOT NULL,participants_json TEXT NOT NULL DEFAULT '[]',
 provenance_summary TEXT NOT NULL DEFAULT '',snapshot_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-                    ExecuteSql(connection, @"INSERT INTO rumor_occurrences_v2
+                    Program.ExecuteSql(connection, @"INSERT INTO rumor_occurrences_v2
 SELECT occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,
 world_day,expires_day,status,exposure_chance,exposure_roll,catalog_revision,participants_json,
 provenance_summary,snapshot_json,created_ts,updated_ts FROM rumor_occurrences;");
-                    ExecuteSql(connection, "DROP TABLE rumor_occurrences;");
-                    ExecuteSql(connection, "ALTER TABLE rumor_occurrences_v2 RENAME TO rumor_occurrences;");
-                    ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('expanded_social_occurrence_keys_v2','1');");
-                    ExecuteSql(connection, "COMMIT;");
+                    Program.ExecuteSql(connection, "DROP TABLE rumor_occurrences;");
+                    Program.ExecuteSql(connection, "ALTER TABLE rumor_occurrences_v2 RENAME TO rumor_occurrences;");
+                    Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('expanded_social_occurrence_keys_v2','1');");
+                    Program.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }
 
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_outcome_receipts (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS social_outcome_receipts (
 event_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 subject_id TEXT NOT NULL DEFAULT '',archetype_id TEXT NOT NULL DEFAULT '',
 counter_applied INTEGER NOT NULL DEFAULT 0,completed INTEGER NOT NULL DEFAULT 0,
 result_json TEXT NOT NULL DEFAULT '{}',attempt_count INTEGER NOT NULL DEFAULT 0,
 last_error TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL);");
-            EnsureDatabaseColumn(connection, "social_outcome_receipts", "attempt_count", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "social_outcome_receipts", "last_error", "TEXT NOT NULL DEFAULT ''");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_counterevidence (
+            Program.EnsureDatabaseColumn(connection, "social_outcome_receipts", "attempt_count", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "social_outcome_receipts", "last_error", "TEXT NOT NULL DEFAULT ''");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_counterevidence (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,tag_id TEXT NOT NULL,
 consecutive_count INTEGER NOT NULL DEFAULT 0,last_event_id TEXT NOT NULL DEFAULT '',
 last_outcome_day REAL NOT NULL DEFAULT 0,last_chance REAL NOT NULL DEFAULT 0,last_roll REAL NOT NULL DEFAULT 1,
 updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,subject_id,tag_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_lifecycle_events (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_lifecycle_events (
 lifecycle_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,tag_id TEXT NOT NULL,event_type TEXT NOT NULL,
 source_event_id TEXT NOT NULL DEFAULT '',world_day REAL NOT NULL DEFAULT 0,
 details_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_reputation_lifecycle_subject ON reputation_lifecycle_events(campaign_id,timeline_id,subject_id,tag_id,world_day);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_reputation_lifecycle_subject ON reputation_lifecycle_events(campaign_id,timeline_id,subject_id,tag_id,world_day);");
 
-            if (QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rumor_occurrences' LIMIT 1;").Any()
-                && ReadString(QuerySql(connection,
+            if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rumor_occurrences' LIMIT 1;").Any()
+                && ReadString(Program.QuerySql(connection,
                     "SELECT value FROM schema_meta WHERE key='builtin_rumor_duration_45_v2' LIMIT 1;").FirstOrDefault(), "value", "") != "1")
             {
-                ExecuteSql(connection, @"UPDATE rumor_occurrences
+                Program.ExecuteSql(connection, @"UPDATE rumor_occurrences
 SET expires_day=MAX(expires_day,world_day+45),updated_ts=$ts
 WHERE status='active' AND archetype_id IN ('affair','marital_strife');",
                     new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('builtin_rumor_duration_45_v2','1');");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('builtin_rumor_duration_45_v2','1');");
             }
         }
 
@@ -1037,7 +1037,7 @@ WHERE status='active' AND archetype_id IN ('affair','marital_strife');",
                     if (existing != null)
                     {
                         Dictionary<string, object> mappings =
-                            DictionaryOrDefault(existing, "roleMappings",
+                            Program.DictionaryOrDefault(existing, "roleMappings",
                                 new Dictionary<string, object>());
                         List<string> mappedTags = mappings.TryGetValue(role,
                                 out object mappedValue)
@@ -1191,7 +1191,7 @@ WHERE status='active' AND archetype_id IN ('affair','marital_strife');",
             return result;
         }
 
-        private static void ProcessSocialWorldHistoryEvent(string campaignId, string timelineId,
+        internal static void ProcessSocialWorldHistoryEvent(string campaignId, string timelineId,
             Dictionary<string, object> item, bool scheduleReasonJobs = true,
             ReignDbConnection sharedConnection = null,
             bool deferSubjectReconciliation = false,
@@ -1200,7 +1200,7 @@ WHERE status='active' AND archetype_id IN ('affair','marital_strife');",
         {
             if (!string.Equals(ReadFirstString(item, "eventType", "event_type", "type"), "social_outcome", StringComparison.OrdinalIgnoreCase))
                 return;
-            Dictionary<string, object> payload = DictionaryOrDefault(item, "payload", item);
+            Dictionary<string, object> payload = Program.DictionaryOrDefault(item, "payload", item);
             string eventId = FirstNonEmpty(ReadFirstString(item, "eventId", "event_id", "id"), ReadString(payload, "sourceEventId", ""));
             string subjectId = ReadFirstString(payload, "subjectId", "heroId");
             string archetypeId = ReadString(payload, "archetypeId", "");
@@ -1212,17 +1212,17 @@ WHERE status='active' AND archetype_id IN ('affair','marital_strife');",
 
             bool ownsConnection = sharedConnection == null;
             ReignDbConnection connection = sharedConnection
-                ?? OpenCampaignConnection(campaignId);
+                ?? Program.OpenCampaignConnection(campaignId);
             try
             {
                 if (ownsConnection) EnsureSocialReputationSchema(connection);
-                Dictionary<string, object> receipt = QuerySql(connection,
+                Dictionary<string, object> receipt = Program.QuerySql(connection,
                     "SELECT * FROM social_outcome_receipts WHERE event_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 if (ReadInt(receipt, "completed", 0) != 0) return;
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 if (receipt == null)
-                    ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(event_id,campaign_id,timeline_id,subject_id,archetype_id,updated_ts)
+                    Program.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(event_id,campaign_id,timeline_id,subject_id,archetype_id,updated_ts)
 VALUES($event,$campaign,$timeline,$subject,$archetype,$ts);",
                         new Dictionary<string, object> { ["event"] = eventId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["archetype"] = archetypeId, ["ts"] = ts });
 
@@ -1231,7 +1231,7 @@ VALUES($event,$campaign,$timeline,$subject,$archetype,$ts);",
                 {
                     result = RegisterWhoremongerNpcEntry(connection, campaignId, timelineId,
                         eventId, subjectId, worldDay, payload, sharedConnection != null, socialCatalog);
-                    ExecuteSql(connection, "UPDATE social_outcome_receipts SET counter_applied=1,completed=1,result_json=$result,updated_ts=$ts WHERE event_id=$event;",
+                    Program.ExecuteSql(connection, "UPDATE social_outcome_receipts SET counter_applied=1,completed=1,result_json=$result,updated_ts=$ts WHERE event_id=$event;",
                         new Dictionary<string, object> { ["event"] = eventId,
                             ["result"] = Json.Serialize(result), ["ts"] = ts });
                     return;
@@ -1247,7 +1247,7 @@ VALUES($event,$campaign,$timeline,$subject,$archetype,$ts);",
                         ReconcileSocialRelationshipsForSubjects(connection,
                             campaignId, timelineId, new[] { subjectId }, worldDay);
                     }
-                    ExecuteSql(connection, "UPDATE social_outcome_receipts SET counter_applied=1,completed=1,result_json=$result,updated_ts=$ts WHERE event_id=$event;",
+                    Program.ExecuteSql(connection, "UPDATE social_outcome_receipts SET counter_applied=1,completed=1,result_json=$result,updated_ts=$ts WHERE event_id=$event;",
                         new Dictionary<string, object>
                         {
                             ["event"] = eventId, ["result"] = Json.Serialize(result),
@@ -1265,7 +1265,7 @@ VALUES($event,$campaign,$timeline,$subject,$archetype,$ts);",
                         explicitCounterTags, eventId, worldDay,
                         ReadBool(payload, "counterRumorOnly", false),
                         socialCatalog);
-                    ExecuteSql(connection, "UPDATE social_outcome_receipts SET counter_applied=1,updated_ts=$ts WHERE event_id=$event;",
+                    Program.ExecuteSql(connection, "UPDATE social_outcome_receipts SET counter_applied=1,updated_ts=$ts WHERE event_id=$event;",
                         new Dictionary<string, object> { ["event"] = eventId, ["ts"] = ts });
                 }
 
@@ -1309,7 +1309,7 @@ VALUES($event,$campaign,$timeline,$subject,$archetype,$ts);",
                     ReconcileSocialRelationshipsForSubjects(connection,
                         campaignId, timelineId, new[] { subjectId }, worldDay);
                 }
-                ExecuteSql(connection, "UPDATE social_outcome_receipts SET completed=1,result_json=$result,updated_ts=$ts WHERE event_id=$event;",
+                Program.ExecuteSql(connection, "UPDATE social_outcome_receipts SET completed=1,result_json=$result,updated_ts=$ts WHERE event_id=$event;",
                     new Dictionary<string, object> { ["event"] = eventId, ["result"] = Json.Serialize(result), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
             }
             finally
@@ -1320,20 +1320,20 @@ VALUES($event,$campaign,$timeline,$subject,$archetype,$ts);",
                 SchedulePendingReputationReasonJobs(campaignId);
         }
 
-        private static void RecordSocialWorldHistoryFailure(string campaignId, string timelineId,
+        internal static void RecordSocialWorldHistoryFailure(string campaignId, string timelineId,
             string eventId, Exception error,
             ReignDbConnection sharedConnection = null)
         {
             if (string.IsNullOrWhiteSpace(eventId)) return;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            string message = LimitText(error == null ? "Unknown social outcome failure." : error.Message, 1000);
+            string message = Program.LimitText(error == null ? "Unknown social outcome failure." : error.Message, 1000);
             bool ownsConnection = sharedConnection == null;
             ReignDbConnection connection = sharedConnection
-                ?? OpenCampaignConnection(campaignId);
+                ?? Program.OpenCampaignConnection(campaignId);
             try
             {
                 EnsureSocialReputationSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
+                Program.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
 event_id,campaign_id,timeline_id,attempt_count,last_error,completed,result_json,updated_ts)
 VALUES($event,$campaign,$timeline,1,$error,0,$result,$ts)
 ON CONFLICT(event_id) DO UPDATE SET
@@ -1371,7 +1371,7 @@ result_json=excluded.result_json,updated_ts=excluded.updated_ts;",
             Dictionary<string, object> archetype = archetypes.FirstOrDefault(x =>
                 string.Equals(ReadString(x, "id", ""), archetypeId, StringComparison.OrdinalIgnoreCase));
             if (archetype != null)
-                outcomeTags.AddRange(DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>())
+                outcomeTags.AddRange(Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>())
                     .Values.SelectMany(ValueTextList));
             // An archetype whose ID is also a tag ID has an unambiguous
             // canonical outcome tag. Always include it: legacy or customized
@@ -1396,7 +1396,7 @@ result_json=excluded.result_json,updated_ts=excluded.updated_ts;",
                         TextList(candidate, "counterpartTagIds").Contains(
                             outcomeTag, StringComparer.OrdinalIgnoreCase))
                     .Select(candidate => ReadString(candidate, "id", "")));
-                ExecuteSql(connection, @"UPDATE reputation_counterevidence SET consecutive_count=0,last_event_id=$event,
+                Program.ExecuteSql(connection, @"UPDATE reputation_counterevidence SET consecutive_count=0,last_event_id=$event,
 last_outcome_day=$day,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag;",
                     new Dictionary<string, object>
@@ -1410,10 +1410,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
             foreach (string counterTag in counterTags)
             {
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='countered',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='countered',updated_ts=$ts
 WHERE subject_id=$subject AND tag_id=$tag AND status='active';",
                     new Dictionary<string, object> { ["subject"] = subjectId, ["tag"] = counterTag, ["ts"] = ts });
-                ExecuteSql(connection, @"DELETE FROM shared_tag_exposure_streaks
+                Program.ExecuteSql(connection, @"DELETE FROM shared_tag_exposure_streaks
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag;",
                     new Dictionary<string, object>
                     {
@@ -1421,10 +1421,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
                         ["subject"] = subjectId, ["tag"] = counterTag
                     });
                 foreach (Dictionary<string, object> counterArchetype in archetypes.Where(x =>
-                    DictionaryOrDefault(x, "roleMappings", new Dictionary<string, object>()).Values
+                    Program.DictionaryOrDefault(x, "roleMappings", new Dictionary<string, object>()).Values
                         .SelectMany(ValueTextList).Contains(counterTag, StringComparer.OrdinalIgnoreCase)))
                 {
-                    ExecuteSql(connection, @"DELETE FROM rumor_exposure_streaks
+                    Program.ExecuteSql(connection, @"DELETE FROM rumor_exposure_streaks
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id=$archetype AND thread_key=$thread;",
                         new Dictionary<string, object>
                         {
@@ -1435,17 +1435,17 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id=$archetyp
                 }
 
                 if (rumorOnly) continue;
-                bool activeReputation = QuerySql(connection, @"SELECT 1 FROM character_reputations
+                bool activeReputation = Program.QuerySql(connection, @"SELECT 1 FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active' LIMIT 1;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = counterTag }).Any();
                 if (!activeReputation) continue;
-                Dictionary<string, object> prior = QuerySql(connection, @"SELECT * FROM reputation_counterevidence
+                Dictionary<string, object> prior = Program.QuerySql(connection, @"SELECT * FROM reputation_counterevidence
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = counterTag }).FirstOrDefault();
                 int count = ReadInt(prior, "consecutive_count", 0) + 1;
                 double chance = Math.Min(1d, count * 0.05d);
                 double roll = DeterministicSocialRoll(string.Join("|", campaignId, timelineId, subjectId, counterTag, eventId, "counter"));
-                ExecuteSql(connection, @"INSERT INTO reputation_counterevidence(campaign_id,timeline_id,subject_id,tag_id,
+                Program.ExecuteSql(connection, @"INSERT INTO reputation_counterevidence(campaign_id,timeline_id,subject_id,tag_id,
 consecutive_count,last_event_id,last_outcome_day,last_chance,last_roll,updated_ts)
 VALUES($campaign,$timeline,$subject,$tag,$count,$event,$day,$chance,$roll,$ts)
 ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO UPDATE SET
@@ -1457,10 +1457,10 @@ consecutive_count=$count,last_event_id=$event,last_outcome_day=$day,last_chance=
                         ["chance"] = chance, ["roll"] = roll, ["ts"] = ts
                     });
                 if (roll >= chance) continue;
-                ExecuteSql(connection, @"UPDATE character_reputations SET status='removed_by_counterevidence',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE character_reputations SET status='removed_by_counterevidence',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active';",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = counterTag, ["ts"] = ts });
-                ExecuteSql(connection, @"INSERT OR IGNORE INTO reputation_lifecycle_events(lifecycle_id,campaign_id,timeline_id,
+                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO reputation_lifecycle_events(lifecycle_id,campaign_id,timeline_id,
 subject_id,tag_id,event_type,source_event_id,world_day,details_json,created_ts)
 VALUES($id,$campaign,$timeline,$subject,$tag,'removed_by_counterevidence',$event,$day,$details,$ts);",
                     new Dictionary<string, object>
@@ -1470,7 +1470,7 @@ VALUES($id,$campaign,$timeline,$subject,$tag,'removed_by_counterevidence',$event
                         ["tag"] = counterTag, ["event"] = eventId, ["day"] = worldDay,
                         ["details"] = Json.Serialize(new Dictionary<string, object> { ["count"] = count, ["chance"] = chance, ["roll"] = roll }), ["ts"] = ts
                     });
-                ExecuteSql(connection, @"UPDATE reputation_counterevidence SET consecutive_count=0,updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE reputation_counterevidence SET consecutive_count=0,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = counterTag, ["ts"] = ts });
             }
@@ -1485,7 +1485,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
                 ?? ReadActiveSocialCatalog(connection);
             Dictionary<string, Dictionary<string, object>> definitions = ReadDictionaryList(catalog, "tags")
                 .ToDictionary(x => ReadString(x, "id", ""), x => x, StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> active = QuerySql(connection, @"SELECT tag_id,snapshot_json FROM character_reputations
+            List<Dictionary<string, object>> active = Program.QuerySql(connection, @"SELECT tag_id,snapshot_json FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND status='active';",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId });
             List<Dictionary<string, object>> activeDefinitions = active.Select(row =>
@@ -1525,19 +1525,19 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
             double worldDay, string sourceEventId)
         {
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            bool currentlyActive = QuerySql(connection, @"SELECT 1 FROM character_reputations
+            bool currentlyActive = Program.QuerySql(connection, @"SELECT 1 FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active' LIMIT 1;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = tagId }).Any();
             if (active == currentlyActive) return;
             if (!active)
             {
-                ExecuteSql(connection, @"UPDATE character_reputations SET status='derived_requirement_lost',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE character_reputations SET status='derived_requirement_lost',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active';",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = tagId, ["ts"] = ts });
                 return;
             }
             if (!definitions.TryGetValue(tagId, out Dictionary<string, object> definition)) return;
-            ExecuteSql(connection, @"INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
+            Program.ExecuteSql(connection, @"INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
 source_occurrence_id,archetype_id,subject_role,description,reputation_value,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
 VALUES($campaign,$timeline,$subject,$tag,$source,'derived','derived',$description,$value,$day,$revision,$snapshot,'active',$ts)
 ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO UPDATE SET
@@ -1563,7 +1563,7 @@ reputation_value=$value,acquired_day=$day,catalog_revision=$revision,snapshot_js
         private static List<string> activeReputationLabelsForReason(ReignDbConnection connection, string campaignId,
             string timelineId, string subjectId)
         {
-            return QuerySql(connection, @"SELECT description FROM character_reputations
+            return Program.QuerySql(connection, @"SELECT description FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND status='active'
 AND subject_role<>'derived' ORDER BY acquired_day DESC LIMIT 20;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId })

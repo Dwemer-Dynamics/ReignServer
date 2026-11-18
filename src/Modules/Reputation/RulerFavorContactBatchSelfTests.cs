@@ -5,7 +5,7 @@ using Reign.Core.Contracts.Court;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReputationService
     {
         private static List<Dictionary<string, object>> RunRulerFavorContactBatchSelfTests()
         {
@@ -16,12 +16,12 @@ namespace ReignBetaServer
             string campaign = "__favor_bulk_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var c = OpenCampaignConnection(campaign);
+                using var c = Program.OpenCampaignConnection(campaign);
                 // Commit schema readiness before rollback-based comparisons.
                 EnsureSocialReputationSchema(c);
-                EnsureIdentitySchema(c);
+                Program.EnsureIdentitySchema(c);
                 EnsurePublicStandingSchema(c);
-                EnsureWorldTestTelemetrySchema(c);
+                Program.EnsureWorldTestTelemetrySchema(c);
                 EnsureRulerFavorContactSchema(c);
                 foreach (double day in new[] { 99d, 100d, 101d })
                 {
@@ -51,13 +51,13 @@ namespace ReignBetaServer
                             "favorite_" + i, "size", null);
                     int queries;
                     List<string> changed;
-                    using (var timing = new SqlReadTimingContext())
+                    using (var timing = new Program.SqlReadTimingContext())
                     {
                         changed = ExpireRulerFavorContact(c, campaign, "main", 100d);
                         queries = timing.Queries;
                     }
                     reads[count] = queries;
-                    int contacts = ReadInt(QuerySql(c,
+                    int contacts = ReadInt(Program.QuerySql(c,
                         "SELECT COUNT(*) AS count FROM court_ruler_favor_contact;")
                         .First(), "count", -1);
                     int expectedReads = 1 + (count + RulerFavorContactLookupBatchSize - 1)
@@ -83,17 +83,17 @@ namespace ReignBetaServer
         private static void SeedRulerFavorBatchTag(ReignDbConnection c, string campaign,
             string timeline, string ruler, string favorite, string suffix, double? anchor)
         {
-            ExecuteSql(c, @"INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult,is_player,is_ruler,kingdom_id)
+            Program.ExecuteSql(c, @"INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult,is_player,is_ruler,kingdom_id)
 VALUES($ruler,$ruler,1,1,0,1,'fixture_realm') ON CONFLICT(hero_id) DO NOTHING;",
                 TestDict("ruler", ruler));
-            ExecuteSql(c, @"INSERT INTO character_reputations
+            Program.ExecuteSql(c, @"INSERT INTO character_reputations
 (campaign_id,timeline_id,subject_id,tag_id,acquired_day,catalog_revision,snapshot_json,updated_ts)
 VALUES($campaign,$timeline,$ruler,$tag,0,1,$snapshot,0);",
                 TestDict("campaign", campaign, "timeline", timeline, "ruler", ruler,
                     "tag", "ruler_favoring:" + suffix,
                     "snapshot", Json.Serialize(TestDict("linkedHeroId", favorite, "fixture", suffix))));
             if (anchor.HasValue)
-                ExecuteSql(c, @"INSERT INTO court_ruler_favor_contact
+                Program.ExecuteSql(c, @"INSERT INTO court_ruler_favor_contact
 (campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
 VALUES($campaign,$timeline,$ruler,$favorite,$anchor,10)
 ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;",
@@ -116,7 +116,7 @@ ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;",
             SeedRulerFavorBatchTag(c, campaign, "main", "case", "favorite", "lower", 95d);
             SeedRulerFavorBatchTag(c, campaign, "main", "blank", "  ", "blank", null);
             SeedRulerFavorBatchTag(c, campaign, "other", "boundary", "favorite", "other", 0d);
-            ExecuteSql(c, @"INSERT INTO court_ruler_favor_contact
+            Program.ExecuteSql(c, @"INSERT INTO court_ruler_favor_contact
 (campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
 VALUES($campaign,'main','null_anchor','favorite',NULL,60);
 UPDATE court_ruler_favor_contact SET expired_day=80 WHERE ruler_id='old';
@@ -146,7 +146,7 @@ VALUES('mixed','duplicate','ruler_favoring:duplicate_a','{""linkedHeroId"":""fav
                 ("rumor_subject_tags", "occurrence_id,subject_id,tag_id"),
                 ("character_public_standing", "campaign_id,timeline_id,subject_id") })
             {
-                var rows = QuerySql(c, "SELECT * FROM " + table.Item1 + " ORDER BY " + table.Item2 + ";");
+                var rows = Program.QuerySql(c, "SELECT * FROM " + table.Item1 + " ORDER BY " + table.Item2 + ";");
                 foreach (var row in rows)
                 {
                     row.Remove("updated_ts");
@@ -172,28 +172,28 @@ VALUES('mixed','duplicate','ruler_favoring:duplicate_a','{""linkedHeroId"":""fav
                     ["ruler"] = rulerId, ["favorite"] = favoriteId, ["day"] = day, ["tag"] = ReadString(tag, "tag_id", ""),
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
                 // The old exchange timestamp is evidence; proximity is deliberately not contact.
-                ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
+                Program.ExecuteSql(connection, @"INSERT INTO court_ruler_favor_contact
 (campaign_id,timeline_id,ruler_id,favorite_id,last_contact_day,grace_day)
 VALUES($campaign,$timeline,$ruler,$favorite,
 (SELECT last_world_day FROM court_player_favoring_exchanges WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite AND exchange_count>0),$day)
 ON CONFLICT(campaign_id,timeline_id,ruler_id,favorite_id) DO NOTHING;", p);
-                var contact = QuerySql(connection, @"SELECT * FROM court_ruler_favor_contact WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p).First();
+                var contact = Program.QuerySql(connection, @"SELECT * FROM court_ruler_favor_contact WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p).First();
                 object contactDay;
                 double anchor = contact.TryGetValue("last_contact_day", out contactDay) && contactDay != null && contactDay != DBNull.Value
                     ? ReadDouble(contact, "last_contact_day", day) : ReadDouble(contact, "grace_day", day);
                 if (!ReignFamilyVisitRules.FavorExpired(anchor, day)) continue;
-                ExecuteSql(connection, @"UPDATE character_reputations SET status='forgotten',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE character_reputations SET status='forgotten',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$ruler AND tag_id=$tag AND status='active';", p);
-                ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='forgotten',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='forgotten',updated_ts=$ts
 WHERE subject_id=$ruler AND tag_id=$tag AND status='active' AND occurrence_id IN
 (SELECT occurrence_id FROM rumor_occurrences WHERE campaign_id=$campaign AND timeline_id=$timeline);", p);
-                ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='forgotten',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='forgotten',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='active'
 AND occurrence_id IN (SELECT occurrence_id FROM rumor_subject_tags WHERE subject_id=$ruler AND tag_id=$tag AND status='forgotten')
 AND NOT EXISTS (SELECT 1 FROM rumor_subject_tags live WHERE live.occurrence_id=rumor_occurrences.occurrence_id AND live.status='active');", p);
-                ExecuteSql(connection, @"UPDATE court_ruler_favor_contact SET expired_day=$day
+                Program.ExecuteSql(connection, @"UPDATE court_ruler_favor_contact SET expired_day=$day
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p);
-                ExecuteSql(connection, @"UPDATE court_player_favoring_exchanges SET exchange_count=0
+                Program.ExecuteSql(connection, @"UPDATE court_player_favoring_exchanges SET exchange_count=0
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND ruler_id=$ruler AND favorite_id=$favorite;", p);
                 changed.Add(rulerId);
             }

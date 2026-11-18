@@ -138,7 +138,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
             {
                 if (row == null) return new List<Dictionary<string, object>>();
                 if (!sources.TryGetValue(row, out List<Dictionary<string, object>> parsed))
-                    sources[row] = parsed = ParsePublicStandingSources(ReadString(row, "sources_json", "[]"));
+                    sources[row] = parsed = ReputationService.ParsePublicStandingSources(ReadString(row, "sources_json", "[]"));
                 return parsed;
             }
 
@@ -194,7 +194,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject LI
         // A missing entry is refused, never read from disk. Each document is
         // parsed once at capture and the same instance is returned on every
         // read, like the shared catalog: readers must not mutate either.
-        private sealed class RelationshipFileSnapshot
+        internal sealed class RelationshipFileSnapshot
         {
             private static readonly string[] FileNames = { "traits.json", "profile.json" };
             private readonly Dictionary<string, Dictionary<string, Dictionary<string, object>>> documents =
@@ -266,7 +266,7 @@ JOIN jsonb_array_elements_text(CAST($requestedHeroes AS jsonb)) requested
 ON requested.value=source." + idColumn + ";", requested);
         }
 
-        private static void EnsureWorldRelationshipSchema(ReignDbConnection connection)
+        internal static void EnsureWorldRelationshipSchema(ReignDbConnection connection)
         {
             const string marker =
                 "postgresql_world_relationship_schema_revision";
@@ -294,7 +294,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         private static void EnsureWorldRelationshipSchemaCore(
             ReignDbConnection connection)
         {
-            EnsurePublicStandingSchema(connection);
+            ReputationService.EnsurePublicStandingSchema(connection);
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_pair_provenance (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,pair_key TEXT NOT NULL,
 source TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,required INTEGER NOT NULL DEFAULT 0,
@@ -320,7 +320,7 @@ ON public_standing_invalidations(status,updated_ts,campaign_id,timeline_id,subje
                 "TEXT NOT NULL DEFAULT ''");
         }
 
-        private static void RecordRelationshipPairProvenance(ReignDbConnection connection,
+        internal static void RecordRelationshipPairProvenance(ReignDbConnection connection,
             string campaignId, string timelineId, string pairKey, string source,
             bool required, double worldDay, Dictionary<string, object> details = null)
         {
@@ -347,13 +347,13 @@ OR relationship_pair_provenance.details_json<>$details;",
                 });
         }
 
-        private static Dictionary<string, object> ReadPublicStandingRow(
+        internal static Dictionary<string, object> ReadPublicStandingRow(
             ReignDbConnection connection, string campaignId, string timelineId,
             string subjectId)
         {
             RelationshipStandingContext context = RelationshipStandingContext.For(connection, campaignId, timelineId);
             if (context != null) return context.ReadStanding(subjectId);
-            EnsurePublicStandingSchema(connection);
+            ReputationService.EnsurePublicStandingSchema(connection);
             return QuerySql(connection, @"SELECT subject_id,standing_value,sources_json,
 revision,last_changed_day,updated_ts,calculation_status,last_error
 FROM character_public_standing
@@ -365,14 +365,14 @@ LIMIT 1;", new Dictionary<string, object>
             }).FirstOrDefault();
         }
 
-        private static int PublicStandingValue(ReignDbConnection connection,
+        internal static int PublicStandingValue(ReignDbConnection connection,
             string campaignId, string timelineId, string subjectId)
         {
             return ReadInt(ReadPublicStandingRow(connection, campaignId, timelineId,
                 subjectId), "standing_value", 0);
         }
 
-        private static Dictionary<string, object> ResolveObserverPublicStanding(
+        internal static Dictionary<string, object> ResolveObserverPublicStanding(
             ReignDbConnection connection, string campaignId, string timelineId,
             string observerId, string subjectId, Dictionary<string, object> standing = null)
         {
@@ -381,12 +381,12 @@ LIMIT 1;", new Dictionary<string, object>
             RelationshipStandingContext context = RelationshipStandingContext.For(connection, campaignId, timelineId);
             List<Dictionary<string, object>> sources = context != null
                 ? context.ReadSources(standing)
-                : ParsePublicStandingSources(ReadString(standing, "sources_json", "[]"));
-            List<Dictionary<string, object>> favoring = sources.Where(IsRulerFavoringStandingSource).ToList();
+                : ReputationService.ParsePublicStandingSources(ReadString(standing, "sources_json", "[]"));
+            List<Dictionary<string, object>> favoring = sources.Where(ReputationService.IsRulerFavoringStandingSource).ToList();
             // Inside a file-input scope (terminal acceptance) the traits/profile
             // documents come only from its snapshot; FileLock is never entered there.
             RelationshipFileSnapshot files = RelationshipStandingContext.FilesFor(connection, campaignId, timelineId);
-            double spouseAdjustment = WhoremongerSpouseStandingAdjustment(campaignId,
+            double spouseAdjustment = ReputationService.WhoremongerSpouseStandingAdjustment(campaignId,
                 observerId, subjectId, sources, files);
             if (favoring.Count == 0)
             {
@@ -396,7 +396,7 @@ LIMIT 1;", new Dictionary<string, object>
                     ["favoring"] = 0, ["scope"] = "none", ["jealousyFactor"] = 1d,
                     ["whoremongerSpouseAdjustment"] = spouseAdjustment };
             }
-            double nonFavoring = sources.Where(source => !IsRulerFavoringStandingSource(source))
+            double nonFavoring = sources.Where(source => !ReputationService.IsRulerFavoringStandingSource(source))
                 .Sum(source => ReadDouble(source, "effectiveContribution", 0d)) + spouseAdjustment;
             Dictionary<string, object> subject = context != null ? context.ReadRoster(subjectId) : QuerySql(connection,
                 "SELECT kingdom_id,current_charm FROM identity_roster WHERE hero_id=$id LIMIT 1;",
@@ -427,7 +427,7 @@ LIMIT 1;", new Dictionary<string, object>
             else if (sameKingdom)
             {
                 int raw = established ? -10 : -5;
-                favorValue = raw * (1d - SocialCharmMitigation(ReadInt(subject, "current_charm", 0)))
+                favorValue = raw * (1d - ReputationService.SocialCharmMitigation(ReadInt(subject, "current_charm", 0)))
                     * jealousyFactor;
                 scope = "kingdom_non_favorite";
             }
@@ -440,7 +440,7 @@ LIMIT 1;", new Dictionary<string, object>
                 ["scope"] = scope, ["favorite"] = favorite, ["sameKingdom"] = sameKingdom,
                 ["jealousy"] = ReadInt(new Dictionary<string, object> { ["value"] = jealousy }, "value", 50),
                 ["jealousyFactor"] = jealousyFactor,
-                ["charmMitigation"] = SocialCharmMitigation(ReadInt(subject, "current_charm", 0))
+                ["charmMitigation"] = ReputationService.SocialCharmMitigation(ReadInt(subject, "current_charm", 0))
             };
         }
 
@@ -512,7 +512,7 @@ ORDER BY source;", new Dictionary<string, object>
             return attitude;
         }
 
-        private static void QueuePublicStandingInvalidation(ReignDbConnection connection,
+        internal static void QueuePublicStandingInvalidation(ReignDbConnection connection,
             string campaignId, string timelineId, string subjectId, int revision,
             double worldDay)
         {
@@ -791,7 +791,7 @@ AND standing_revision=$revision;",
             }
         }
 
-        private static bool RefreshEffectivePairProjection(ReignDbConnection connection,
+        internal static bool RefreshEffectivePairProjection(ReignDbConnection connection,
             string campaignId, string timelineId, Dictionary<string, object> pair,
             double worldDay, string reason)
         {
@@ -1030,7 +1030,7 @@ AND (active<>0 OR required<>0);",
             return desired;
         }
 
-        private static bool ReadPoliticalFlag(Dictionary<string, object> row,
+        internal static bool ReadPoliticalFlag(Dictionary<string, object> row,
             string databaseKey, string payloadKey)
         {
             // PostgreSQL identity rows expose integer 0/1 flags while heartbeat
@@ -1622,7 +1622,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 }))
             {
                 revisionCount += Math.Max(0, ReadInt(row, "revision", 1) - 1);
-                foreach (Dictionary<string, object> source in ParsePublicStandingSources(
+                foreach (Dictionary<string, object> source in ReputationService.ParsePublicStandingSources(
                     ReadString(row, "sources_json", "[]")))
                 {
                     string category = FirstNonEmpty(

@@ -826,7 +826,7 @@ updated_ts=$ts WHERE hero_id=$hero;",
             };
         }
 
-        private static string BuildCharacterMbtiPromptBlock(
+        internal static string BuildCharacterMbtiPromptBlock(
             string campaignId,
             string heroId,
             Dictionary<string, object> profile,

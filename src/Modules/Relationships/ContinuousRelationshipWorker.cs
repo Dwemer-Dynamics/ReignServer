@@ -437,7 +437,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
             return true;
         }
 
-        private static object CampaignRelationshipWriteLock(string campaignId)
+        internal static object CampaignRelationshipWriteLock(string campaignId)
         {
             string key = string.IsNullOrWhiteSpace(campaignId) ? "default" : campaignId;
             lock (CampaignRelationshipWriteLocksGuard)

@@ -7,9 +7,9 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string ChatViewVersion = "reign-chat-view-v1";
+        internal const string ChatViewVersion = "reign-chat-view-v1";
 
-        private static void EnsureChatViewSchema(ReignDbConnection connection)
+        internal static void EnsureChatViewSchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS chat_view_frames (
 turn_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,exchange_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS chat_view_jobs (
 job_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,timeline_id TEXT NOT NULL,player_id TEXT NOT NULL,
 created_ts INTEGER NOT NULL,payload_json TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_id,timeline_id,created_ts);");
-            EnsureChatViewWardrobeSchema(connection);
+            PortraitsService.EnsureChatViewWardrobeSchema(connection);
         }
 
         // Called inside the accepted-source transaction. No providers, files, or game effects.
@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_view_jobs_session ON chat_view_jobs(session_
             var frame = TestDict("actors", actors, "expectedNpcIds", expected,
                 "scene", ReadString(request, "sceneContext", ""), "locationId", ReadFirstString(request, "locationId", "settlementId"),
                 "sceneInterface", ReadString(request, "sceneInterface", ""), "room", ReadString(request, "castleRoomName", ""),
-                "wardrobeScene", ChatViewWardrobeSceneKey(request));
+                "wardrobeScene", PortraitsService.ChatViewWardrobeSceneKey(request));
             string json = Json.Serialize(frame);
             if (json.Length > 65536) return;
             ExecuteSql(connection, @"INSERT OR IGNORE INTO chat_view_frames(turn_id,session_id,exchange_id,timeline_id,frame_json)
@@ -54,7 +54,7 @@ VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "ses
                 "exchange", exchange, "timeline", ContinuityTimeline(request), "frame", json));
         }
 
-        private static Dictionary<string, object> ChatViewScope(ReignDbConnection connection, Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ChatViewScope(ReignDbConnection connection, Dictionary<string, object> payload)
         {
             string session = ReadString(payload, "sessionId", ""), player = ReadString(payload, "playerId", "");
             string timeline = ReadString(payload, "timelineId", "");
@@ -69,7 +69,7 @@ VALUES($turn,$session,$exchange,$timeline,$frame);", TestDict("turn", turn, "ses
             return scope;
         }
 
-        private static List<Dictionary<string, object>> ReadChatViewWindow(ReignDbConnection connection, Dictionary<string, object> payload)
+        internal static List<Dictionary<string, object>> ReadChatViewWindow(ReignDbConnection connection, Dictionary<string, object> payload)
         {
             ChatViewScope(connection, payload);
             string session = ReadString(payload, "sessionId", ""), timeline = ReadString(payload, "timelineId", "");
@@ -122,7 +122,7 @@ AND t.status='active' ORDER BY t.turn_order;", TestDict("session", session, "exc
             return rows;
         }
 
-        private static bool ChatViewJobVisible(ReignDbConnection connection, Dictionary<string, object> job, Dictionary<string, object> request)
+        internal static bool ChatViewJobVisible(ReignDbConnection connection, Dictionary<string, object> job, Dictionary<string, object> request)
         {
             if (job == null || ReadString(job, "playerId", "") != ReadString(request, "playerId", "")) return false;
             var window = ReadDictionaryList(ReadDictionary(job, "identity"), "window");

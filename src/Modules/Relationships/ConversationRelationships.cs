@@ -764,7 +764,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 bool courtPopularityChanged = false;
                 foreach (string targetId in assessments
                     .Where(x => ReadInt(x, "finalDelta", 0) != 0
@@ -773,19 +773,19 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    bool popularityChanged = RecomputeCourtPopularityReputations(connection, campaignId,
+                    bool popularityChanged = ReputationService.RecomputeCourtPopularityReputations(connection, campaignId,
                         FirstNonEmpty(timelineId, "main"), targetId, worldDay,
                         exchangeId + "|court_popularity|" + targetId);
                     if (popularityChanged)
                     {
                         courtPopularityChanged = true;
-                        ReconcileSocialRelationshipsForSubjects(connection, campaignId,
+                        ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId,
                             FirstNonEmpty(timelineId, "main"), new[] { targetId }, worldDay);
                     }
                 }
                 if (courtPopularityChanged
                     && !campaignId.StartsWith("__", StringComparison.Ordinal))
-                    SchedulePendingReputationReasonJobs(campaignId);
+                    ReputationService.SchedulePendingReputationReasonJobs(campaignId);
                 foreach (KeyValuePair<string, bool> receipt in receiptIdempotency)
                 {
                     Dictionary<string, object> stored = QuerySql(connection,

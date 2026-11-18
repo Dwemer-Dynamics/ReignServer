@@ -148,17 +148,17 @@ namespace ReignBetaServer
                         "The isolated ZIP contains redacted text and a checksum manifest record.", null);
                 }
             }
-            string explicitCurrentFlirtation = ExplicitCurrentPlayerFlirtationQuote(
+            string explicitCurrentFlirtation = ReputationService.ExplicitCurrentPlayerFlirtationQuote(
                 "I am flirting with you right now because I am attracted to you, and I want to know whether you welcome my interest.");
             add("social_signal_server_derived_explicit_current",
                 explicitCurrentFlirtation == "I am flirting with you right now"
-                && SocialSignalSemanticsAreCompleted("flirtation", explicitCurrentFlirtation, false),
+                && ReputationService.SocialSignalSemanticsAreCompleted("flirtation", explicitCurrentFlirtation, false),
                 "An unmistakable present-tense player flirtation has an exact server-derived evidence quote even when a provider omits its optional proposal.",
                 explicitCurrentFlirtation);
             add("social_signal_server_derived_hypothetical_suppressed",
-                string.IsNullOrWhiteSpace(ExplicitCurrentPlayerFlirtationQuote(
+                string.IsNullOrWhiteSpace(ReputationService.ExplicitCurrentPlayerFlirtationQuote(
                     "If I said I am flirting with you right now, would you welcome it?"))
-                && string.IsNullOrWhiteSpace(ExplicitCurrentPlayerFlirtationQuote(
+                && string.IsNullOrWhiteSpace(ReputationService.ExplicitCurrentPlayerFlirtationQuote(
                     "I am not flirting with you right now.")),
                 "Hypothetical, quoted, and negated flirtation language cannot create a server-derived current signal.",
                 null);
@@ -2539,7 +2539,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     using (ReignDbConnection connection = OpenCampaignConnection(oldResumeCampaign))
                     {
                         EnsureWorldHistorySchema(connection);
-                        EnsureSocialReputationSchema(connection);
+                        ReputationService.EnsureSocialReputationSchema(connection);
                         ExecuteSql(connection, @"INSERT INTO world_history_events(
 event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,payload_json,created_utc)
 VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
@@ -2552,7 +2552,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                             });
                     }
                     bool unrelatedScheduled =
-                        ResumePendingSocialWorldHistoryOutcomes(newResumeCampaign, "main");
+                        ReputationService.ResumePendingSocialWorldHistoryOutcomes(newResumeCampaign, "main");
                     add("social_world_history_resume_is_campaign_scoped",
                         !unrelatedScheduled,
                         "Opening a new campaign never scans or schedules pending derived social work from historical campaigns.",
@@ -3258,7 +3258,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "Ordinary terminal failures remain immutable; the narrow government-refusal repair is not a generic status override.", null);
                 ReadDictionary(legacyRefusal, "result")["resultCode"] = "government_refused";
                 WriteActionQueueUnlocked(campaignId, new List<Dictionary<string, object>> { legacyRefusalRow });
-                WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
+                DiplomacyService.WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
                 {
                     new Dictionary<string, object>
                     {
@@ -3271,7 +3271,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 recordedRefusal["serverActionId"] = "legacy_government_refusal_action";
                 var correctedRefusal = ReportAction(recordedRefusal);
                 var duplicateRefusal = ReportAction(recordedRefusal);
-                var correctedEvent = ReadDiplomaticEventQueue(campaignId).Single();
+                var correctedEvent = DiplomacyService.ReadDiplomaticEventQueue(campaignId).Single();
                 add("government_refusal_repairs_action_and_announcement_once",
                     ReadBool(correctedRefusal, "ok", false) && ReadBool(duplicateRefusal, "ok", false)
                     && ReadString(ReadActionQueueUnlocked(campaignId).Single(), "status", "") == "rejected"
@@ -3300,7 +3300,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                         ["command"] = "give_gold"
                     }
                 });
-                WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
+                DiplomacyService.WriteDiplomaticEventQueue(campaignId, new List<Dictionary<string, object>>
                 {
                     new Dictionary<string, object>
                     {
@@ -3331,7 +3331,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                 List<Dictionary<string, object>> repairedQueue;
                 lock (FileLock) repairedQueue = ReadActionQueueUnlocked(campaignId);
                 Dictionary<string, object> repairedEvent =
-                    ReadDiplomaticEventQueue(campaignId).FirstOrDefault()
+                    DiplomacyService.ReadDiplomaticEventQueue(campaignId).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 add("action_status_audit_repairs_prior_regressions",
                     ReadString(repairedQueue.FirstOrDefault(), "status", "") == "completed"

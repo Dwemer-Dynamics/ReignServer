@@ -184,7 +184,7 @@ result_summary=$result,payload_json=$payload,updated_ts=$ts;", new Dictionary<st
 
         internal static Dictionary<string, object> SpymasterSocialStatusApi(Dictionary<string, object> payload)
         {
-            return Program.SocialCharacterStatusApi(payload ?? new Dictionary<string, object>());
+            return ReputationService.SocialCharacterStatusApi(payload ?? new Dictionary<string, object>());
         }
 
         internal static Dictionary<string, object> SpymasterSocialApplyApi(Dictionary<string, object> payload)
@@ -202,7 +202,7 @@ result_summary=$result,payload_json=$payload,updated_ts=$ts;", new Dictionary<st
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                Program.EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 double roll = Program.StableUnit(string.Join("|", campaignId, timelineId, missionId, "social_apply"));
                 if (type.Contains("mitigate") && type.Contains("rumor"))
                 {
@@ -213,7 +213,7 @@ WHERE subject_id=$subject AND tag_id=$tag AND status='active';", new Dictionary<
                     else
                         Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET rumor_value=CAST(rumor_value*$factor AS INTEGER),updated_ts=$ts
 WHERE subject_id=$subject AND tag_id=$tag AND status='active';", new Dictionary<string, object> { ["ts"] = ts, ["subject"] = subjectId, ["tag"] = itemId, ["factor"] = ReignSpymasterCore.SocialMitigationFactor });
-                    Program.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
+                    ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
                     return new Dictionary<string, object> { ["ok"] = true, ["outcome"] = status, ["roll"] = roll };
                 }
                 if (type.Contains("mitigate") && type.Contains("reputation"))
@@ -227,7 +227,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
                         Program.ExecuteSql(connection, @"UPDATE character_reputations SET reputation_value=CAST(reputation_value*$factor AS INTEGER),updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag AND status='active';",
                             new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = itemId, ["factor"] = ReignSpymasterCore.SocialMitigationFactor, ["ts"] = ts });
-                    Program.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
+                    ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
                     return new Dictionary<string, object> { ["ok"] = true, ["outcome"] = removed ? "removed" : "greatly_mitigated", ["roll"] = roll };
                 }
 
@@ -275,7 +275,7 @@ VALUES($occurrence,$subject,$tag,'target',$description,$value,0,'active','[]',$s
                             ["description"] = description, ["value"] = value, ["snapshot"] = Json.Serialize(new Dictionary<string, object>
                             { ["label"] = "Fabricated rumor", ["description"] = description, ["fabricated"] = true }), ["ts"] = ts });
                 }
-                Program.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
+                ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
                 return new Dictionary<string, object> { ["ok"] = true, ["outcome"] = positive ? "positive_reputation_created" : severe ? "harmful_reputation_created" : "harmful_rumor_created", ["tagId"] = tagId };
             }
         }
@@ -294,7 +294,7 @@ VALUES($occurrence,$subject,$tag,'target',$description,$value,0,'active','[]',$s
             int delta = ReignSpymasterCore.RelationLoss(tier, harmful, ruler);
             int after = 0;
             if (!string.IsNullOrWhiteSpace(actorId) && !string.IsNullOrWhiteSpace(playerId) && actorId != playerId)
-                after = Program.ApplyPoliticalPressureDelta(campaignId, timelineId, ReadDouble(payload, "worldDay", 0d),
+                after = DiplomacyService.ApplyPoliticalPressureDelta(campaignId, timelineId, ReadDouble(payload, "worldDay", 0d),
                     new Dictionary<string, object> { ["kingdomId"] = actorId }, new Dictionary<string, object> { ["kingdomId"] = playerId },
                     delta, "covert_interference", "spymaster-exposure:" + ReadString(mission, "MissionId", ""));
             return new Dictionary<string, object> { ["ok"] = true, ["pressureDelta"] = delta, ["pressureAfter"] = after };

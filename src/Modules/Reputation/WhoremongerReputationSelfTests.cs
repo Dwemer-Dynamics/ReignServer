@@ -7,7 +7,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReputationService
     {
         private static void RunWhoremongerSelfTests(ReignDbConnection connection, string campaignId,
             Action<string, bool, string, object> add)
@@ -38,15 +38,15 @@ namespace ReignBetaServer
                 "Repeated built-in catalog migrations preserve the feature's explicit 30-day duration.", archetype);
 
             foreach (string id in new[] { "wm_player", "wm_refresh", "wm_late", "wm_spouse", "wm_npc", "wm_missing" })
-                UpsertIdentityRosterHero(connection, new Dictionary<string, object>
+                Program.UpsertIdentityRosterHero(connection, new Dictionary<string, object>
                 {
                     ["heroStringId"] = id, ["name"] = id, ["isAlive"] = true, ["isAdult"] = true,
                     ["isPlayer"] = id == "wm_player" || id == "wm_refresh" || id == "wm_late", ["clanTier"] = 1,
                     ["currentCharm"] = id == "wm_player" ? 100 : 0
                 }, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            WriteJsonObject(CharacterFile(campaignId, "wm_player", "profile.json"),
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_player", "profile.json"),
                 new Dictionary<string, object> { ["spouseId"] = "wm_spouse" });
-            WriteJsonObject(CharacterFile(campaignId, "wm_spouse", "profile.json"),
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_spouse", "profile.json"),
                 new Dictionary<string, object> { ["spouseId"] = "wm_player" });
             string timeline = "whoremonger_test";
             for (int n = 1; n <= 3; n++)
@@ -58,8 +58,8 @@ namespace ReignBetaServer
             bool conflict = false;
             try { RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_player", fourthId, "town_a", 3.5d); }
             catch (InvalidDataException) { conflict = true; }
-            var standing = ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
-            var spouse = ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
+            var standing = Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
+            var spouse = Program.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
             add("whoremonger_cross_town_receipt_and_spouse_rumor",
                 ReadInt(fourth, "visitCount", 0) == 4 && ReadBool(fourth, "exposed", false)
                 && ReadDouble(fourth, "chance", 0) == .1d && Json.Serialize(fourth) == Json.Serialize(replay)
@@ -69,8 +69,8 @@ namespace ReignBetaServer
 
             string fifthId = WhoremongerTestReceipt(campaignId, timeline, "wm_player", "visit:", .2d, true, true);
             var fifth = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_player", fifthId, "town_a", 4.5d);
-            standing = ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
-            spouse = ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
+            standing = Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
+            spouse = Program.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
             add("whoremonger_promotion_replaces_penalty",
                 ReadInt(fifth, "streakCount", 0) == 2 && ReadBool(fifth, "promoted", false)
                 && ReadDouble(fifth, "promotionChance", 0) == .3d
@@ -80,10 +80,10 @@ namespace ReignBetaServer
                     .Count(IsWhoremongerStandingSource) == 1,
                 "Second successful exposure can promote at 30%; reputation replaces rumor and spouse base remains -20.", fifth);
 
-            WriteJsonObject(CharacterFile(campaignId, "wm_player", "profile.json"), new Dictionary<string, object>());
-            WriteJsonObject(CharacterFile(campaignId, "wm_spouse", "profile.json"), new Dictionary<string, object>());
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_player", "profile.json"), new Dictionary<string, object>());
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_spouse", "profile.json"), new Dictionary<string, object>());
             add("whoremonger_current_spouse_recalculation",
-                ReadInt(ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing), "value", 0) == -8,
+                ReadInt(Program.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing), "value", 0) == -8,
                 "Ending the marriage immediately removes the spouse substitution without mutating the personal relation.", null);
 
             Dictionary<string, object> latest = fifth;
@@ -96,14 +96,14 @@ namespace ReignBetaServer
                 && !ReadBool(latest, "inactivityReset", true),
                 "Visits less than 30 days apart retain all stacks beyond 30 total elapsed days and reach a 100% roll.", latest);
             ExpireWhoremongerActivity(connection, campaignId, timeline, lastDay + 29.999d);
-            var before = QuerySql(connection, "SELECT visit_count FROM whoremonger_activity WHERE subject_id='wm_player' AND timeline_id='whoremonger_test';").Single();
+            var before = Program.QuerySql(connection, "SELECT visit_count FROM whoremonger_activity WHERE subject_id='wm_player' AND timeline_id='whoremonger_test';").Single();
             ExpireWhoremongerActivity(connection, campaignId, timeline, lastDay + 30d);
-            var resetState = QuerySql(connection, "SELECT visit_count,last_activity_day FROM whoremonger_activity WHERE subject_id='wm_player' AND timeline_id='whoremonger_test';").Single();
+            var resetState = Program.QuerySql(connection, "SELECT visit_count,last_activity_day FROM whoremonger_activity WHERE subject_id='wm_player' AND timeline_id='whoremonger_test';").Single();
             var restarted = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_player", "after_break", "town_b", lastDay + 30d);
             add("whoremonger_exact_reset_preserves_reputation",
                 ReadInt(before, "visit_count", 0) == 13 && ReadInt(resetState, "visit_count", -1) == 0
                 && ReadInt(restarted, "visitCount", 0) == 1 && ReadDouble(restarted, "chance", -1) == 0d
-                && ReadInt(ReadPublicStandingRow(connection, campaignId, timeline, "wm_player"), "standing_value", 0) == -8,
+                && ReadInt(Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player"), "standing_value", 0) == -8,
                 "At exactly 30 inactive days all visit and promotion stacks reset while established reputation remains.", restarted);
 
             for (int n = 1; n <= 3; n++)
@@ -113,7 +113,7 @@ namespace ReignBetaServer
             string failedRefresh = WhoremongerTestReceipt(campaignId, timeline, "wm_refresh", "visit:", .2d, false, null);
             var refresh = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_refresh", failedRefresh, "town_b", 33.25d);
             ExpireWhoremongerActivity(connection, campaignId, timeline, 34.25d);
-            var activeRefresh = ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh");
+            var activeRefresh = Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh");
             string nextRefresh = WhoremongerTestReceipt(campaignId, timeline, "wm_refresh", "visit:", .3d, true, false);
             var continuedPromotion = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_refresh", nextRefresh, "town_a", 55.25d);
             ExpireWhoremongerActivity(connection, campaignId, timeline, 85.25d);
@@ -122,10 +122,10 @@ namespace ReignBetaServer
                 && ReadInt(activeRefresh, "standing_value", 0) == -5
                 && ReadInt(continuedPromotion, "streakCount", 0) == 2
                 && !ReadBool(continuedPromotion, "promoted", true)
-                && ReadInt(ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh"), "standing_value", -1) == 0,
+                && ReadInt(Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh"), "standing_value", -1) == 0,
                 "A failed exposure refreshes the rumor and retains promotion progress even when successful exposures are more than 30 days apart.", refresh);
 
-            WriteJsonObject(CharacterFile(campaignId, "wm_npc", "traits.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_npc", "traits.json"), new Dictionary<string, object>
             { ["courtVirtues"] = new Dictionary<string, object> { ["honor"] = 0d, ["judgment"] = 0d } });
             var npcPayload = new Dictionary<string, object> { ["genuineTownEntry"] = true, ["isTown"] = true,
                 ["isPlayer"] = false, ["isPrisoner"] = false, ["isAlive"] = true, ["isAdult"] = true,
@@ -140,7 +140,7 @@ namespace ReignBetaServer
                 ReadBool(npc, "exposed", false) && ReadDouble(npc, "chance", 0) == .25d
                 && !ReadBool(npcFailed, "exposed", true)
                 && ReadDouble(npcFailed, "inactivityDeadline", 0) == 31.25d
-                && ReadInt(ReadPublicStandingRow(connection, campaignId, timeline, "wm_npc"), "standing_value", -1) == 0,
+                && ReadInt(Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_npc"), "standing_value", -1) == 0,
                 "NPCs roll immediately without visit ramp; failed town entries never refresh their successful-exposure deadline.", npcFailed);
             npcPayload["isTown"] = false;
             var nonTown = RegisterWhoremongerNpcEntry(connection, campaignId, timeline, "village_entry", "wm_npc", 40, npcPayload, false);
@@ -161,7 +161,7 @@ namespace ReignBetaServer
             npcPayload["townId"] = "town_a";
             var unavailableNpc = RegisterWhoremongerNpcEntry(connection, campaignId, timeline,
                 "unavailable_npc_entry", "wm_departed", 41d, npcPayload, false);
-            var unavailableReceipt = QuerySql(connection, @"SELECT subject_id,world_day,result_json
+            var unavailableReceipt = Program.QuerySql(connection, @"SELECT subject_id,world_day,result_json
 FROM whoremonger_event_receipts WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND event_id='entry:unavailable_npc_entry';", new Dictionary<string, object>
             {
@@ -201,13 +201,13 @@ AND event_id='entry:unavailable_npc_entry';", new Dictionary<string, object>
             var lateNpc = RegisterWhoremongerNpcEntry(connection, campaignId,
                 lateTimeline, "late_npc_older", "wm_npc", 10d,
                 latePayload, false);
-            var lateState = QuerySql(connection, @"SELECT last_event_day FROM whoremonger_activity
+            var lateState = Program.QuerySql(connection, @"SELECT last_event_day FROM whoremonger_activity
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id='wm_npc';",
                 new Dictionary<string, object>
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline
                 }).Single();
-            ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
+            Program.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
 event_id,campaign_id,timeline_id,subject_id,archetype_id,counter_applied,
 completed,result_json,attempt_count,last_error,updated_ts)
 VALUES('late_npc_recovery',$campaign,$timeline,'','',0,-1,'{}',3,$error,1);",
@@ -216,7 +216,7 @@ VALUES('late_npc_recovery',$campaign,$timeline,'','',0,-1,'{}',3,$error,1);",
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline,
                     ["error"] = WhoremongerOutOfOrderError
                 });
-            ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
+            Program.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
 event_id,campaign_id,timeline_id,subject_id,archetype_id,counter_applied,
 completed,result_json,attempt_count,last_error,updated_ts)
 VALUES('departed_npc_recovery',$campaign,$timeline,'','',0,-1,'{}',3,$error,1);",
@@ -225,7 +225,7 @@ VALUES('departed_npc_recovery',$campaign,$timeline,'','',0,-1,'{}',3,$error,1);"
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline,
                     ["error"] = WhoremongerTemporalIdentityError
                 });
-            ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
+            Program.ExecuteSql(connection, @"INSERT INTO social_outcome_receipts(
 event_id,campaign_id,timeline_id,subject_id,archetype_id,counter_applied,
 completed,result_json,attempt_count,last_error,updated_ts)
 VALUES('stalled_npc_recovery',$campaign,$timeline,'','',0,0,'{}',0,'',1);",
@@ -233,9 +233,9 @@ VALUES('stalled_npc_recovery',$campaign,$timeline,'','',0,0,'{}',0,'',1);",
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline
                 });
-            EnsureWorldHistorySchema(connection);
+            Program.EnsureWorldHistorySchema(connection);
             EnsureSocialSubjectWorkSchema(connection);
-            ExecuteSql(connection, @"INSERT INTO world_history_events(
+            Program.ExecuteSql(connection, @"INSERT INTO world_history_events(
 event_id,campaign_id,timeline_id,sequence,world_day,event_type,subject_id,created_utc)
 VALUES('late_npc_recovery',$campaign,$timeline,900001,10,'social_outcome','wm_npc',$utc),
 ('departed_npc_recovery',$campaign,$timeline,900002,11,'social_outcome','wm_npc',$utc),
@@ -253,10 +253,10 @@ claim_expires_ts=0,updated_ts=1,last_error='';", new Dictionary<string, object>
                     ["utc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
                 });
             EnsureWhoremongerSchema(connection);
-            var recovered = QuerySql(connection, @"SELECT event_id,completed,attempt_count,last_error
+            var recovered = Program.QuerySql(connection, @"SELECT event_id,completed,attempt_count,last_error
 FROM social_outcome_receipts WHERE event_id IN ('late_npc_recovery','departed_npc_recovery','stalled_npc_recovery')
 ORDER BY event_id;");
-            var recoveredQueue = QuerySql(connection, @"SELECT status,first_sequence,pending_count,last_error
+            var recoveredQueue = Program.QuerySql(connection, @"SELECT status,first_sequence,pending_count,last_error
 FROM social_subject_work_queue WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id='wm_npc';", new Dictionary<string, object>
                 {
@@ -277,7 +277,7 @@ AND subject_id='wm_npc';", new Dictionary<string, object>
                 && HasPendingSocialWorldHistoryOutcomes(campaignId, lateTimeline),
                 "Late or temporally ineligible NPC town-entry outcomes are retained as obsolete receipts without rolling back newer activity; exhausted and already-cleared stalled receipts make their exact subject queue claimable again.", recoveredQueue);
 
-            using (var reloaded = OpenCampaignConnection(campaignId))
+            using (var reloaded = Program.OpenCampaignConnection(campaignId))
             {
                 var persistedReplay = RegisterWhoremongerVisit(reloaded, campaignId, timeline, "wm_player", fourthId, "town_b", 3.5d);
                 add("whoremonger_persisted_receipt_replay",
@@ -299,13 +299,13 @@ AND subject_id='wm_npc';", new Dictionary<string, object>
             var b = RegisterWhoremongerVisit(connection, campaignId, timeline, subject, "late_b", "town_b", 12d);
             var a = RegisterWhoremongerVisit(connection, campaignId, timeline, subject, "late_a_paid10", "town_a", 13d);
             Dictionary<string, object> aRetry;
-            using (var reopened = OpenCampaignConnection(campaignId))
+            using (var reopened = Program.OpenCampaignConnection(campaignId))
                 aRetry = RegisterWhoremongerVisit(reopened, campaignId, timeline, subject, "late_a_paid10", "town_a", 14d);
             var bReplay = RegisterWhoremongerVisit(connection, campaignId, timeline, subject, "late_b", "town_b", 12d);
             var args = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timeline, ["subject"] = subject };
-            var activity = QuerySql(connection, @"SELECT visit_count,last_event_day,last_activity_day FROM whoremonger_activity
+            var activity = Program.QuerySql(connection, @"SELECT visit_count,last_event_day,last_activity_day FROM whoremonger_activity
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args).Single();
-            var receipts = QuerySql(connection, @"SELECT event_id,world_day FROM whoremonger_event_receipts
+            var receipts = Program.QuerySql(connection, @"SELECT event_id,world_day FROM whoremonger_event_receipts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args);
             bool oldEventRejected = false, changedTownRejected = false, changedSubjectRejected = false;
             try { RegisterWhoremongerVisit(connection, campaignId, timeline, subject, "new_backdated", "town_c", 11d); }
@@ -331,10 +331,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             var exposed = RegisterWhoremongerVisit(connection, campaignId, exposedTimeline, subject, exposedId, "town_a", 13d);
             var exposedRetry = RegisterWhoremongerVisit(connection, campaignId, exposedTimeline, subject, exposedId, "town_a", 14d);
             args["timeline"] = exposedTimeline;
-            var streak = QuerySql(connection, @"SELECT streak_count,last_exposure_day FROM rumor_exposure_streaks
+            var streak = Program.QuerySql(connection, @"SELECT streak_count,last_exposure_day FROM rumor_exposure_streaks
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND archetype_id='whoremonger'
 AND thread_key=$subject||'|whoremonger';", args).Single();
-            activity = QuerySql(connection, @"SELECT visit_count,last_activity_day FROM whoremonger_activity
+            activity = Program.QuerySql(connection, @"SELECT visit_count,last_activity_day FROM whoremonger_activity
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", args).Single();
             add("whoremonger_later_day_retry_cannot_stack_or_refresh",
                 ReadBool(exposed, "exposed", false) && Json.Serialize(exposed) == Json.Serialize(exposedRetry)

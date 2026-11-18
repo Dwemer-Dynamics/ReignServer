@@ -6,11 +6,11 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         private const string CapitalAmbassadorServerTestConfirmation = "run Reign capital ambassador server matrix";
 
-        private static Dictionary<string, object> CapitalAmbassadorTestApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CapitalAmbassadorTestApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string confirmation = ReadString(payload, "confirmation", "");
@@ -149,9 +149,9 @@ namespace ReignBetaServer
                     grantedPermission = ReadDictionaryList(grantedCharter,"permissions").FirstOrDefault(x=>ReadBool(x,"granted",false));
                 }
                 charterRevision--;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    ExecuteSql(connection,"UPDATE foreign_ambassador_postings SET authority_revision=$revision,authority_charter_json=$charter WHERE posting_id=$posting;",
+                    Program.ExecuteSql(connection,"UPDATE foreign_ambassador_postings SET authority_revision=$revision,authority_charter_json=$charter WHERE posting_id=$posting;",
                         new Dictionary<string,object>{{"revision",charterRevision},{"charter",Json.Serialize(grantedCharter)},{"posting",postingId}});
                 }
                 Dictionary<string,object> context = new Dictionary<string,object>
@@ -197,11 +197,11 @@ namespace ReignBetaServer
                 string referralId = ReadString(referralDecision,"referralId","");
                 string referralHash = ReadString(referralDecision,"exactTermsHash","");
                 Dictionary<string,object> referralRow;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    referralRow = QuerySql(connection,"SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
+                    referralRow = Program.QuerySql(connection,"SELECT * FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
                         new Dictionary<string,object>{{"id",referralId}}).FirstOrDefault();
-                    ExecuteSql(connection,"UPDATE ambassador_referrals SET status='countered',counter_terms_json=$terms WHERE referral_id=$id;",
+                    Program.ExecuteSql(connection,"UPDATE ambassador_referrals SET status='countered',counter_terms_json=$terms WHERE referral_id=$id;",
                         new Dictionary<string,object>{{"terms",ReadString(referralRow,"exact_terms_json","{}")},{"id",referralId}});
                 }
                 Dictionary<string,object> staleCounter = ForeignAmbassadorReferralRespondApi(new Dictionary<string,object>
@@ -229,9 +229,9 @@ namespace ReignBetaServer
                 Dictionary<string,object> persistedDecision = PersistOfficialAmbassadorDecision(campaignId,officialPayload,exchange,DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 List<Dictionary<string,object>> archive = ReadOfficialAmbassadorArchiveLines(campaignId,officialPayload,20);
                 Dictionary<string,object> decisionRow;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    decisionRow = QuerySql(connection,"SELECT * FROM ambassador_decisions WHERE decision_id=$id LIMIT 1;",
+                    decisionRow = Program.QuerySql(connection,"SELECT * FROM ambassador_decisions WHERE decision_id=$id LIMIT 1;",
                         new Dictionary<string,object>{{"id",ReadString(persistedDecision,"decisionId","")}}).FirstOrDefault();
                 }
                 AddCapitalAmbassadorTestAssertion(assertions, "server_official_archive_and_decision_persistence",
@@ -246,7 +246,7 @@ namespace ReignBetaServer
                     {"expectedRevision",ReadLong(resident,"revision",0)},{"postingId",postingId},{"originRulerHeroStringId","ruler_successor"},
                     {"originRulerName","Successor"},{"charm",ReadInt(established,"charm",200)},{"rulerTrust",10},{"worldDay",24d}
                 });
-                List<Dictionary<string,object>> successorHistory = ReadJsonLinesFromPath(CharacterFile(campaignId,"ruler_successor","history","dialogue.jsonl"));
+                List<Dictionary<string,object>> successorHistory = Program.ReadJsonLinesFromPath(Program.CharacterFile(campaignId,"ruler_successor","history","dialogue.jsonl"));
                 AddCapitalAmbassadorTestAssertion(assertions, "server_successor_archive_and_charter_refresh",
                     ReadBool(authorityRefresh,"ok",false) && ReadLong(authorityRefresh,"authorityRevision",0)>charterRevision
                     && successorHistory.Count(x=>ReadString(x,"channel","")=="ambassador_official")>=2,
@@ -277,19 +277,19 @@ namespace ReignBetaServer
                     "Official tone applies only discrete pressure, caps net daily change at +/-6, and permits later offset without a native relation mutation.",
                     new Dictionary<string,object>{{"strongHostile",pressureOne},{"cappedHostile",pressureTwo},{"offset",pressureThree}});
 
-                Dictionary<string,object> providerTimeout = ClassifySyntheticProviderFault("timeout");
+                Dictionary<string,object> providerTimeout = Program.ClassifySyntheticProviderFault("timeout");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_provider_failure_class_once",
                     ReadBool(providerTimeout,"retryable",false) && !ReadBool(providerTimeout,"terminal",true)
                     && ReadInt(providerTimeout,"maxAttempts",0)==2,
                     "The representative provider-timeout class is bounded and retryable without implying an ambassador decision.", providerTimeout);
 
-                Dictionary<string,object> transportWrite = ClassifySyntheticProviderFault("interrupted_write");
+                Dictionary<string,object> transportWrite = Program.ClassifySyntheticProviderFault("interrupted_write");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_transport_failure_class_once",
                     !ReadBool(transportWrite,"retryable",true) && ReadBool(transportWrite,"terminal",false)
                     && ReadString(transportWrite,"failureKind","")=="invalid_provider_response",
                     "The representative interrupted-transport class fails closed as an invalid response.", transportWrite);
 
-                Dictionary<string,object> retryLimit = ClassifySyntheticProviderFault("retry_limit");
+                Dictionary<string,object> retryLimit = Program.ClassifySyntheticProviderFault("retry_limit");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_retry_exhaustion_class_once",
                     !ReadBool(retryLimit,"retryable",true) && ReadBool(retryLimit,"terminal",false)
                     && ReadInt(retryLimit,"maxAttempts",0)==1,
@@ -303,8 +303,8 @@ namespace ReignBetaServer
                     {"postingId",postingId},{"reason","war_recalled"},{"worldDay",25.5d}
                 });
                 string pendingStatus;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    pendingStatus = ReadString(QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    pendingStatus = ReadString(Program.QuerySql(connection,"SELECT status FROM ambassador_referrals WHERE referral_id=$id LIMIT 1;",
                         new Dictionary<string,object>{{"id",ReadString(pending,"referralId","")}}).FirstOrDefault(),"status","");
                 AddCapitalAmbassadorTestAssertion(assertions, "server_war_recall_and_referral_cancellation",
                     ReadBool(ended,"ok",false) && ReadString(ended,"status","")=="ended" && pendingStatus=="cancelled_war",
@@ -375,11 +375,11 @@ namespace ReignBetaServer
         {
             try
             {
-                InvalidateCampaignSchemaCaches(campaignId);
+                Program.InvalidateCampaignSchemaCaches(campaignId);
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                Program.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
                 return !ReignPostgreSqlStorage.CampaignExists(campaignId)
-                    && !Directory.Exists(CampaignDirectory(campaignId));
+                    && !Directory.Exists(Program.CampaignDirectory(campaignId));
             }
             catch
             {

@@ -47,7 +47,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void InvalidatePromptRuntimeCache(string name = "")
+        internal static void InvalidatePromptRuntimeCache(string name = "")
         {
             lock (PromptRuntimeCacheLock)
             {

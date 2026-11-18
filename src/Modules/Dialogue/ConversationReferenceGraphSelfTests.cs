@@ -386,7 +386,7 @@ SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$
                         Enumerable.Range(0, 30).Select(i => "chain_recent_" + i).ToList())), capacity);
                     var body = TestDict("model", budgetModel, "messages", envelope.Messages, "max_tokens", 16000, "response_format", TestDict("type", "json_object"));
                     var final = BuildContinuityProviderPreflight(budgetSettings, TestDict("promptEnvelope", envelope.Diagnostics), body,
-                        NanoGptChatCompletionsUrl, budgetModel, budgetCatalog);
+                        PortraitsService.NanoGptChatCompletionsUrl, budgetModel, budgetCatalog);
                     Check("chain_budget_preserves_thirty_whole_records_" + route, exactRecent.All(selection.LiveTurn.Contains)
                         && !selection.LiveTurn.Contains(new string('g', 40)) && ReadBool(final, "fits", false)
                         && ReadInt(final, "inputTokenEstimate", int.MaxValue) <= 120000, final);
@@ -394,7 +394,7 @@ SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$
                     body["tools"] = new[] { TestDict("type", "function", "function", TestDict("name", "chain_fixture",
                         "description", new string('界', headroom + 128), "parameters", TestDict("type", "object", "properties", TestDict()))) };
                     var late = BuildContinuityProviderPreflight(budgetSettings, TestDict("promptEnvelope", envelope.Diagnostics), body,
-                        NanoGptChatCompletionsUrl, budgetModel, budgetCatalog);
+                        PortraitsService.NanoGptChatCompletionsUrl, budgetModel, budgetCatalog);
                     Check("chain_budget_rechecks_late_multibyte_wrapper_" + route, ReadBool(final, "fits", false) && !ReadBool(late, "fits", true)
                         && ReadInt(late, "inputTokenEstimate", 0) > ReadInt(final, "inputTokenEstimate", 0), late);
                 }

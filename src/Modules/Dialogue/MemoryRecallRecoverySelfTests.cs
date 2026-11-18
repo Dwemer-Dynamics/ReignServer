@@ -80,8 +80,8 @@ namespace ReignBetaServer
                 "maxTokens", 8000, "messages", new[] { TestDict("role", "system", "content", "Repair only from supplied originals.") });
             BindDeliveredRecallRepairEvidence(proofRequest, completeProofPayload, "npc");
             var proofSettings = TestDict("llmProvider", NanoGptProvider, "reasoningMode", "off");
-            string proofRoute = NanoGptProvider + ":recall-proof-fixture:" + PromptHash(NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
-            var proofCertificate = TestDict("endpoint", NanoGptChatCompletionsUrl, "model", "recall-proof-fixture", "contextTokens", 1048576,
+            string proofRoute = NanoGptProvider + ":recall-proof-fixture:" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
+            var proofCertificate = TestDict("endpoint", PortraitsService.NanoGptChatCompletionsUrl, "model", "recall-proof-fixture", "contextTokens", 1048576,
                 "maxOutputTokens", 8000, "source", "isolated-contract", "validUntilUtc", DateTimeOffset.UtcNow.AddHours(1).ToString("o"));
             proofSettings["verifiedConversationContextWindows"] = TestDict(proofRoute, proofCertificate);
             Dictionary<string, object> ProofWire(Dictionary<string, object> request, Dictionary<string, object> suppliedSettings = null) =>

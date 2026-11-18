@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         private static void AppendCourtLifeCreatorProfileTests(List<Dictionary<string, object>> results, string campaign)
         {
@@ -19,7 +19,7 @@ namespace ReignBetaServer
                 "speakerRole", role, "speakerName", "Nera", "actorId", actor, "matterId", "patronage_creator_test",
                 "turnId", "creator_question", "phase", "conversation", "playerText", "No order yet.  \r\nExplain the smaller commission.");
             var profile = CourtLifeCreatorProfile(payload, actor);
-            Check("catalog_creator_has_virtual_non_noble_profile", profile != null && CharacterIdFrom(profile) == actor
+            Check("catalog_creator_has_virtual_non_noble_profile", profile != null && Program.CharacterIdFrom(profile) == actor
                 && !ReadBool(profile, "isNativeHero", true) && !ReadBool(profile, "isLord", true)
                 && ReadString(profile, "politicalTimelineId", "") == timeline);
             foreach (var variant in new[] {
@@ -28,7 +28,7 @@ namespace ReignBetaServer
                 TestDict("capitalSettlementStringId", "other_capital"), TestDict("hostSettlementStringId", "other_host"),
                 TestDict("playerIsKingdomRuler", false), TestDict("matterId", "international_other") })
             {
-                var changed = CloneDictionary(payload);
+                var changed = Program.CloneDictionary(payload);
                 foreach (var entry in variant) changed[entry.Key] = entry.Value;
                 Check("rejects_" + variant.Keys.Single(), CourtLifeCreatorProfile(changed, actor) == null);
             }
@@ -36,39 +36,39 @@ namespace ReignBetaServer
             Dictionary<string, object> Writer(Dictionary<string, object> request)
             {
                 calls++;
-                requiredPolitics = ReadDictionaryList(request, "politicalAuthors").Any(p => CharacterIdFrom(p) == actor)
+                requiredPolitics = ReadDictionaryList(request, "politicalAuthors").Any(p => Program.CharacterIdFrom(p) == actor)
                     && ReadDictionaryList(request, "messages").Any(m => ReadString(m, "content", "")
                         .Contains("REQUIRED PRIVATE POLITICAL BELIEFS — " + actor, StringComparison.Ordinal));
                 var diagnostics = ReadDictionary(request, "promptEnvelope");
                 var continuity = ReadDictionary(ReadDictionary(diagnostics, "continuityPreflight"), "continuityEvidence");
                 var messages = ReadDictionaryList(request, "messages");
-                requiredEvidence = MissingContinuityContent(ConversationEvidenceText(diagnostics, messages), continuity).Count == 0;
-                var altered = messages.Select(CloneDictionary).ToList();
+                requiredEvidence = Program.MissingContinuityContent(Program.ConversationEvidenceText(diagnostics, messages), continuity).Count == 0;
+                var altered = messages.Select(Program.CloneDictionary).ToList();
                 foreach (var message in altered) message["content"] = ReadString(message, "content", "")
                     .Replace("Explain the smaller commission.", "Explain a different commission.", StringComparison.Ordinal);
-                alteredEvidenceRejected = MissingContinuityContent(ConversationEvidenceText(diagnostics, altered), continuity).Count > 0;
+                alteredEvidenceRejected = Program.MissingContinuityContent(Program.ConversationEvidenceText(diagnostics, altered), continuity).Count > 0;
                 return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "I can compose a short piece for your household.")));
             }
             var settings = TestDict("highMemoryMode", false, "memoryPrecisionMode", "legacy", "enableSemanticMemory", false,
                 "enableMinimeMemoryWorker", false, "enableMinimeMemoryReranking", false, "mainModel", "fixture-main");
             var response = CourtLifeRespond(payload, settings, Writer);
             Check("production_route_accepts_creator_without_native_profile", ReadBool(response, "ok", false)
-                && calls == 1 && requiredPolitics && ReadJsonObject(CharacterFile(campaign, actor, "profile.json")).Count == 0);
+                && calls == 1 && requiredPolitics && Program.ReadJsonObject(Program.CharacterFile(campaign, actor, "profile.json")).Count == 0);
             Check("provider_preflight_retains_canonical_required_evidence", requiredEvidence);
             Check("provider_preflight_still_rejects_altered_evidence", alteredEvidenceRejected);
-            Check("political_revision_is_persisted_in_exact_timeline", ReadJsonObject(CharacterFile(campaign, actor,
-                "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json")).Count > 0);
+            Check("political_revision_is_persisted_in_exact_timeline", Program.ReadJsonObject(Program.CharacterFile(campaign, actor,
+                "politics", "revision-1-" + Program.SafeMemoryKey(timeline) + ".json")).Count > 0);
             var replay = CourtLifeRespond(payload, settings, Writer);
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 Check("replay_preserves_sources_without_provider_duplicate", ReadBool(replay, "ok", false)
-                    && calls == 1 && ReadInt(QuerySql(connection,
+                    && calls == 1 && ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS n FROM court_life_turns WHERE actor_id=$id;", TestDict("id", actor)).Single(), "n", 0) == 1);
-                Check("original_player_whitespace_is_stored_without_editing", ReadString(QuerySql(connection,
+                Check("original_player_whitespace_is_stored_without_editing", ReadString(Program.QuerySql(connection,
                     "SELECT player_text FROM court_life_turns WHERE actor_id=$id;", TestDict("id", actor)).Single(), "player_text", "")
                     == ReadString(payload, "playerText", ""));
             }
-            var forged = CloneDictionary(payload); forged["actorId"] = "missing_native_court_lord";
+            var forged = Program.CloneDictionary(payload); forged["actorId"] = "missing_native_court_lord";
             forged["turnId"] = "forged_creator";
             Check("native_identity_cannot_use_creator_profile", !ReadBool(CourtLifeRespond(forged, settings, Writer), "ok", true) && calls == 1);
             forged["source"] = "International";

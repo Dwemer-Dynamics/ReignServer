@@ -8,7 +8,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         internal static readonly string[] CastleChatCultures =
             { "aserai", "battania", "empire", "khuzait", "nord", "sturgia", "vlandia" };
@@ -19,7 +19,7 @@ namespace ReignBetaServer
             "throne_room", "baths", "battlements", "guest_bedrooms", "royal_bedroom"
         };
 
-        private static string[] CastleChatPromptFileNames()
+        internal static string[] CastleChatPromptFileNames()
         {
             return (from culture in CastleChatCultures
                     from room in CastleChatRooms
@@ -47,7 +47,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static Dictionary<string, object> CastleChatPromptsApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CastleChatPromptsApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string culture = ReadString(payload, "culture", "generic").Trim().ToLowerInvariant();
@@ -62,30 +62,30 @@ namespace ReignBetaServer
             if (ReadBool(payload, "reset", false))
             {
                 Dictionary<string, string> defaults = CastleChatPromptDefaults();
-                File.WriteAllText(PromptPath(imageName), defaults[imageName], Encoding.UTF8);
-                File.WriteAllText(PromptPath(dialogueName), defaults[dialogueName], Encoding.UTF8);
-                InvalidatePromptRuntimeCache();
+                File.WriteAllText(Program.PromptPath(imageName), defaults[imageName], Encoding.UTF8);
+                File.WriteAllText(Program.PromptPath(dialogueName), defaults[dialogueName], Encoding.UTF8);
+                Program.InvalidatePromptRuntimeCache();
             }
             else if (payload.ContainsKey("imagePrompt") || payload.ContainsKey("dialoguePrompt"))
             {
-                string image = ReadString(payload, "imagePrompt", File.Exists(PromptPath(imageName)) ? File.ReadAllText(PromptPath(imageName)) : string.Empty);
-                string dialogue = ReadString(payload, "dialoguePrompt", File.Exists(PromptPath(dialogueName)) ? File.ReadAllText(PromptPath(dialogueName)) : string.Empty);
+                string image = ReadString(payload, "imagePrompt", File.Exists(Program.PromptPath(imageName)) ? File.ReadAllText(Program.PromptPath(imageName)) : string.Empty);
+                string dialogue = ReadString(payload, "dialoguePrompt", File.Exists(Program.PromptPath(dialogueName)) ? File.ReadAllText(Program.PromptPath(dialogueName)) : string.Empty);
                 if (string.IsNullOrWhiteSpace(image) || string.IsNullOrWhiteSpace(dialogue))
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Both Castle Chat prompts are required." };
-                File.WriteAllText(PromptPath(imageName), image, Encoding.UTF8);
-                File.WriteAllText(PromptPath(dialogueName), dialogue, Encoding.UTF8);
-                InvalidatePromptRuntimeCache();
+                File.WriteAllText(Program.PromptPath(imageName), image, Encoding.UTF8);
+                File.WriteAllText(Program.PromptPath(dialogueName), dialogue, Encoding.UTF8);
+                Program.InvalidatePromptRuntimeCache();
             }
 
-            EnsurePromptTemplates();
-            string resolvedImage = File.ReadAllText(PromptPath(imageName), Encoding.UTF8);
-            string resolvedDialogue = File.ReadAllText(PromptPath(dialogueName), Encoding.UTF8);
+            Program.EnsurePromptTemplates();
+            string resolvedImage = File.ReadAllText(Program.PromptPath(imageName), Encoding.UTF8);
+            string resolvedDialogue = File.ReadAllText(Program.PromptPath(dialogueName), Encoding.UTF8);
             if (string.Equals(ownershipMode, "foreign", StringComparison.Ordinal))
             {
                 resolvedImage = ComposeForeignCastleChatPrompt(resolvedImage,
-                    File.ReadAllText(PromptPath("castle_chat_foreign_keep_image.txt"), Encoding.UTF8), payload);
+                    File.ReadAllText(Program.PromptPath("castle_chat_foreign_keep_image.txt"), Encoding.UTF8), payload);
                 resolvedDialogue = ComposeForeignCastleChatPrompt(resolvedDialogue,
-                    File.ReadAllText(PromptPath("castle_chat_foreign_keep_dialogue.txt"), Encoding.UTF8), payload);
+                    File.ReadAllText(Program.PromptPath("castle_chat_foreign_keep_dialogue.txt"), Encoding.UTF8), payload);
             }
             string revision;
             using (SHA256 sha = SHA256.Create()) revision = BitConverter.ToString(sha.ComputeHash(

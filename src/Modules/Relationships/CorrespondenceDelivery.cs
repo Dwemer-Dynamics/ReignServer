@@ -67,7 +67,7 @@ VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now) ON CON
             foreach (var letter in arrived)
             {
                 using (var connection = OpenCampaignConnection(campaign))
-                    RecordCompletedFavorCorrespondence(connection, campaign, timeline, letter, day);
+                    ReputationService.RecordCompletedFavorCorrespondence(connection, campaign, timeline, letter, day);
                 AppendDeliveredLetterHistory(campaign, player, letter, day);
             }
         }

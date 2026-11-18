@@ -22,6 +22,17 @@ prompts and scene generation. `ExcludeCourt=true` compiles this folder (and Spym
   `shared/Reign.Shared.Source/Core/ReignCastleChatCore.cs`.
 - `PatronageHistory.cs`.
 
+## Service class
+
+Every file except `Program.CourtRoutes.cs` holds `internal static partial class CourtService` (not a `Program`
+partial), apart from the test classes that were already their own types (`CastleChatSelfTests`,
+`CastleSceneImageContractSelfTests`, `FamilyChambersSelfTests`, `WarCouncilScrollSelfTests`). It calls `Program`
+members with an explicit `Program.` qualifier, and `Program` and the other modules call it as `CourtService.X`; the
+members used across that boundary are `internal`. `Program.CourtRoutes.cs` stays part of `Program` and registers the
+service handlers, and Spymaster's route file passes its handlers to `CourtService.CapitalCourtApi`. Characters,
+Dialogue, Relationships and Platform call into it for court character data (`EnsureCourtCharacterData`,
+`LoadCourtCharacterScheme`) and court context in prompts.
+
 ## Routes
 
 `/court/session/open|tick|close`, `/court/agenda/build`, `/court/home`, `/court/view`,
@@ -51,7 +62,7 @@ Test routes: `/court/foreign-ambassadors/test`, `GET /court/tests`.
 
 ## Self-tests
 
-`RunCourtSelfTests` (CLI `--run-court-tests`, route `/court/tests`), `RunCourtCharacterSelfTests`. Test files compiled
+`CourtService.RunCourtSelfTests` (CLI `--run-court-tests`, route `/court/tests`), `CourtService.RunCourtCharacterSelfTests`. Test files compiled
 into the server: `CastleChatSelfTests.cs`, `CastleSceneImageContractSelfTests.cs`,
 `CourtLifeCreatorProfileSelfTests.cs`, `FamilyChambersSelfTests.cs`, `FamilyVisitSelfTests.cs`,
 `WarCouncilScrollSelfTests.cs`, and the `CapitalAmbassadorTestSystem.cs` harness.

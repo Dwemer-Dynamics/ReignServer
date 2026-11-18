@@ -10,7 +10,7 @@ namespace ReignBetaServer
         // Only the synchronous HTTP owner can suspend its read lease. Background
         // workers and write owners keep their existing snapshot exclusion.
         [ThreadStatic] private static CampaignRequestLease CurrentCampaignRequestLease;
-        private static long CampaignReplacementGeneration;
+        internal static long CampaignReplacementGeneration;
         // Isolated concurrency contracts signal the actual monitor wait, rather
         // than relying on scheduling delays. Never installed by runtime code.
         [ThreadStatic] private static Action<object> CampaignWorkLockWaitObserverForTests;
@@ -52,7 +52,7 @@ namespace ReignBetaServer
             return eligible ? WithCampaignReadLeaseSuspended(wait) : wait();
         }
 
-        private static T WithCampaignReadLeaseSuspended<T>(Func<T> wait)
+        internal static T WithCampaignReadLeaseSuspended<T>(Func<T> wait)
         {
             ThrowIfCampaignRequestReplaced();
             CampaignRequestLease lease = CurrentCampaignRequestLease;

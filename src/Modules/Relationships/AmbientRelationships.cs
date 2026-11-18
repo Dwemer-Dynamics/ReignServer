@@ -782,7 +782,7 @@ VALUES($id,$a,$b,'betrayed','active',80,80,'ambient self-test','','','[]',18,18,
             return results;
         }
 
-        private sealed class AmbientPairContext
+        internal sealed class AmbientPairContext
         {
             public string PairKey = "";
             public string HeroAId = "";

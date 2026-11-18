@@ -126,7 +126,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             var row = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 GossipFields("pair", AmbientPairKey(observer, subject))).FirstOrDefault();
             return row == null ? InitialReignAffinity(observerProfile, subjectProfile)
-                : EffectiveDirectionalAffinity(row, GossipSameId(ReadString(row, "hero_a_id", ""), observer));
+                : ReputationService.EffectiveDirectionalAffinity(row, GossipSameId(ReadString(row, "hero_a_id", ""), observer));
         }
 
         private static bool GossipKnown(ReignDbConnection c, string observer, string target,

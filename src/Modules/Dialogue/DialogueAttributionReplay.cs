@@ -86,8 +86,8 @@ namespace ReignBetaServer
                         string hash = PromptHash(CanonicalJson(check));
                         var wireSettings = TestDict("reasoningMode", "selective", "reasoningEffort", "high");
                         var wire = BuildChatRequestBody(wireSettings, check, ReadDictionaryList(check, "messages"), "");
-                        ConfigurePromptCacheRouting(wireSettings, check, wire, NanoGptChatCompletionsUrl, "", "dialogue_answer_support");
-                        ConfigureReasoningRouting(wireSettings, check, wire, NanoGptChatCompletionsUrl, "", "dialogue_answer_support");
+                        ConfigurePromptCacheRouting(wireSettings, check, wire, PortraitsService.NanoGptChatCompletionsUrl, "", "dialogue_answer_support");
+                        ConfigureReasoningRouting(wireSettings, check, wire, PortraitsService.NanoGptChatCompletionsUrl, "", "dialogue_answer_support");
                         supportRequests.Add(TestDict("requestHash", hash, "request", check, "wireTemplate", wire,
                             "nativeReferenceSealed", IsSealedAnswerSupportAudit(check), "routeAdapterPreservedRequest", beforeAdapter == hash,
                             "wireTemplateScope", "isolated_NanoGPT_HIGH_template_model_is_bound_by_subscription_dispatcher"));

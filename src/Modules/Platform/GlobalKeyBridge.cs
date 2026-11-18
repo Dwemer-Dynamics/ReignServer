@@ -24,7 +24,7 @@ namespace ReignBetaServer
         private const string NanoGptOrigin = "https://nano-gpt.com:443";
         private const string AtlasOrigin = "https://api.atlascloud.ai:443";
         private const string OpenRouterOrigin = "https://openrouter.ai:443";
-        private const string GlobalKeyUnavailableError = "The selected Global API key is unavailable. No provider request was sent; start DwemerDistro or choose another key in API Settings.";
+        internal const string GlobalKeyUnavailableError = "The selected Global API key is unavailable. No provider request was sent; start DwemerDistro or choose another key in API Settings.";
         private const int GlobalKeyRequestLimit = 16 * 1024, GlobalKeyReplyLimit = 256 * 1024;
         private static readonly SemaphoreSlim GlobalKeyWriteGate = new SemaphoreSlim(1, 1);
         // Test seams: an in-process fake transport, a per-thread allowance kept for legacy fixtures (local key writes are now
@@ -126,7 +126,7 @@ namespace ReignBetaServer
         // Presence check (no secret is resolved). A Reign-only key or binding counts directly; otherwise, unless the caller
         // needs a store-independent answer (cache fingerprints), an automatic global candidate counts too, read from the
         // shared status cache (at most one bounded status call per TTL for the whole process).
-        private static bool ProviderKeyConfigured(Dictionary<string, object> settings, string slot, bool includeAutomatic = true)
+        internal static bool ProviderKeyConfigured(Dictionary<string, object> settings, string slot, bool includeAutomatic = true)
         {
             if (HasGlobalKeyBindingEntry(settings, slot) || !string.IsNullOrWhiteSpace(ReadString(settings, slot, ""))) return true;
             if (!includeAutomatic || !AutoGlobalKeySelectionAllowed(slot)) return false;
@@ -174,7 +174,7 @@ namespace ReignBetaServer
             settings["globalKeyMigrations"] = migrations;
         }
 
-        private static string LlmApiKeySlot(Dictionary<string, object> settings)
+        internal static string LlmApiKeySlot(Dictionary<string, object> settings)
         {
             string provider = NormalizeLlmProvider(ReadString(settings, "llmProvider", ""));
             return provider == OpenRouterProvider ? "openRouterApiKey" : provider == OllamaCloudProvider ? "ollamaCloudApiKey"
@@ -204,7 +204,7 @@ namespace ReignBetaServer
         // 4. Otherwise "".
         // Callers must check ProviderKeyUnavailable before dispatch: "" from a bound or automatic global key is a refusal,
         // never "no auth".
-        private static string ProviderSecret(Dictionary<string, object> settings, string slot, params string[] destinations)
+        internal static string ProviderSecret(Dictionary<string, object> settings, string slot, params string[] destinations)
         {
             AutoGlobalKeyFailedSlot = null;
             destinations = destinations ?? Array.Empty<string>();
@@ -263,7 +263,7 @@ namespace ReignBetaServer
         }
 
         // Must directly follow the ProviderSecret call for the same slot on the same thread.
-        private static bool ProviderKeyUnavailable(Dictionary<string, object> settings, string slot, string resolved)
+        internal static bool ProviderKeyUnavailable(Dictionary<string, object> settings, string slot, string resolved)
         {
             if (!string.IsNullOrEmpty(resolved)) return false;
             return HasGlobalKeyBindingEntry(settings, slot) || AutoGlobalKeyFailedSlot == slot;

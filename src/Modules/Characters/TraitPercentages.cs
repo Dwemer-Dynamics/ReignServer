@@ -49,7 +49,7 @@ namespace ReignBetaServer
                 ["judgment"] = new[] { V("patience",3), V("emotionalStability",3), V("discipline",2), V("pragmatism",2), V("curiosity",1), V("knowledgeMotivation",2), V("tact",1), V("impulsiveness",3,true), V("irritability",2,true), V("jealousy",1,true), V("envy",1,true) }
             };
 
-        private static Dictionary<string, object> TraitPercentageBands()
+        internal static Dictionary<string, object> TraitPercentageBands()
         {
             return new Dictionary<string, object>
             {
@@ -73,7 +73,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static int StableTraitPercentage(string heroId, string traitKey, int modifier)
+        internal static int StableTraitPercentage(string heroId, string traitKey, int modifier)
         {
             TraitPercentageBand(modifier, out int minimum, out int maximum);
             int width=maximum-minimum+1;
@@ -143,7 +143,7 @@ namespace ReignBetaServer
             return changed;
         }
 
-        private static Dictionary<string,object> CalculateCourtVirtues(Dictionary<string,object> percentages)
+        internal static Dictionary<string,object> CalculateCourtVirtues(Dictionary<string,object> percentages)
         {
             percentages=percentages??new Dictionary<string,object>();Dictionary<string,object> result=new Dictionary<string,object>(StringComparer.OrdinalIgnoreCase);
             foreach(string virtue in CourtVirtueKeys)
@@ -216,7 +216,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string,object> VirtueDefinition(string low,string high){return new Dictionary<string,object>{{"lowNegative",low},{"highPositive",high}};}
 
-        private static bool TraitPercentageDocumentReady(Dictionary<string,object> traits)
+        internal static bool TraitPercentageDocumentReady(Dictionary<string,object> traits)
         {
             Dictionary<string,object> foundation=ReadDictionary(traits,"foundationTraits")??ReadDictionary(traits,"hiddenReignTraits")??new Dictionary<string,object>();
             Dictionary<string,object> percentages=ReadDictionary(traits,"traitPercentages")??new Dictionary<string,object>();

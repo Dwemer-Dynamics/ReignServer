@@ -591,7 +591,7 @@ updated_ts INTEGER NOT NULL);");
             string clothingSource = "hourly_override";
             if (!roomAttireContext && includeDetailedAppearance)
             {
-                string confirmedOutfit = ConfirmedOutfitDescription(campaignId, id,
+                string confirmedOutfit = PortraitsService.ConfirmedOutfitDescription(campaignId, id,
                     string.IsNullOrWhiteSpace(clothing) ? 0 : ReadLong(stored, "updated_ts", 0));
                 if (!string.IsNullOrWhiteSpace(confirmedOutfit))
                 {
@@ -726,7 +726,7 @@ updated_ts INTEGER NOT NULL);");
                     || DateTime.UtcNow - SharedPortraitFolderIndexUtc > TimeSpan.FromMinutes(5))
                 {
                     Dictionary<string, string> refreshed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    string root = SharedPortraitCacheRootForServer();
+                    string root = PortraitsService.SharedPortraitCacheRootForServer();
                     if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
                     {
                         foreach (string folder in Directory.GetDirectories(root))
@@ -964,7 +964,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
             List<Dictionary<string, object>> candidates = new List<Dictionary<string, object>>();
             if (includeShared)
             {
-                foreach (SharedPortraitEntry entry in ReadSharedPortraitEntries())
+                foreach (PortraitsService.SharedPortraitEntry entry in PortraitsService.ReadSharedPortraitEntries())
                 {
                     string active = File.Exists(Path.Combine(entry.Folder, "custom.png")) ? Path.Combine(entry.Folder, "custom.png") : entry.PortraitPath;
                     candidates.Add(new Dictionary<string, object>
@@ -1094,7 +1094,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
         private static string FormalOutfitPromptFallback(Dictionary<string, object> candidate)
         {
             Dictionary<string, object> metadata = ReadDictionary(candidate, "metadata") ?? new Dictionary<string, object>();
-            string promptFile = SelectPortraitClothingPromptFile(metadata);
+            string promptFile = PortraitsService.SelectPortraitClothingPromptFile(metadata);
             string guidance = string.IsNullOrWhiteSpace(promptFile) ? "" : LoadPromptTemplate(promptFile);
             if (string.IsNullOrWhiteSpace(guidance))
             {
@@ -1142,10 +1142,10 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
             var routingSettings = new Dictionary<string, object> { ["sceneryProvider"] = "NanoGPT", ["sceneryNanoGptImageModel"] = "normal-model", ["adultSceneryProvider"] = "AtlasCloud", ["adultSceneryAtlasImageModel"] = "adult-model" };
             foreach (string room in new[] { "Baths", "baths", "GuestBedrooms", "guest_bedrooms", "RoyalBedroom", "royal_bedroom" })
             {
-                var imageProfile = ResolveImageGenerationProfile(routingSettings, CastleScenePromptPurpose(new Dictionary<string, object> { ["room"] = room }));
+                var imageProfile = PortraitsService.ResolveImageGenerationProfile(routingSettings, CourtService.CastleScenePromptPurpose(new Dictionary<string, object> { ["room"] = room }));
                 add("adult_room_image_profile_" + room, imageProfile.Name == "adultScenery" && imageProfile.Provider == "AtlasCloud" && imageProfile.AtlasModel == "adult-model", imageProfile.Name);
             }
-            add("ordinary_castle_room_keeps_normal_image_profile", ImageGenerationProfileName(CastleScenePromptPurpose(new Dictionary<string, object> { ["room"] = "MainHall" })) == "scenery", null);
+            add("ordinary_castle_room_keeps_normal_image_profile", PortraitsService.ImageGenerationProfileName(CourtService.CastleScenePromptPurpose(new Dictionary<string, object> { ["room"] = "MainHall" })) == "scenery", null);
             foreach (var expected in expectedBaths)
             {
                 string resource = assembly.GetManifestResourceNames().FirstOrDefault(x => x.EndsWith("." + expected.Key, StringComparison.OrdinalIgnoreCase));
@@ -1234,7 +1234,7 @@ VALUES($id,$location,$class,$clothing,$turn,$mode,$hour,$expires,$revision,$ts);
             add("castle_room_retains_location_personality_witnesses_without_outfit",
                 !roomPrompt.Contains("ACTIVE CLOTHING") && !roomPrompt.Contains("concise active outfit")
                 && roomPrompt.Contains("the Baths") && roomPrompt.Contains("ISTJ") && roomPrompt.Contains("Witness 24"), roomPrompt);
-            foreach (string room in CastleChatRooms)
+            foreach (string room in CourtService.CastleChatRooms)
             {
                 add("castle_route_" + room, UsesCastleRoomAttireContext(new Dictionary<string, object>
                     { ["sceneInterface"] = "castle_keep_location", ["castleRoomName"] = room, ["mode"] = "party_chat" }), room);

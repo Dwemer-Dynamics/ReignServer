@@ -13,7 +13,7 @@ using ReignPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string SharedPortraitGenerationMetadataFileName = ".ai_generation.json";
         private const int SharedPortraitConcurrentBatchSize = 5;
@@ -30,7 +30,7 @@ namespace ReignBetaServer
             SharedPortraitGenerationMetadataFileName
         };
 
-        private sealed class SharedPortraitEntry
+        internal sealed class SharedPortraitEntry
         {
             public string Folder = "";
             public string CacheKey = "";
@@ -80,7 +80,7 @@ namespace ReignBetaServer
         private static SharedPortraitGenerationJobState ActiveSharedPortraitGenerationJob =
             new SharedPortraitGenerationJobState();
 
-        private static string SharedPortraitCacheRootForServer()
+        internal static string SharedPortraitCacheRootForServer()
         {
             var installation = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent();
             if (installation != null) return installation.SharedPortraitRoot;
@@ -88,7 +88,7 @@ namespace ReignBetaServer
             return string.IsNullOrWhiteSpace(root) ? "" : Path.Combine(root, "_shared");
         }
 
-        private static Dictionary<string, object> SharedPortraitCatalogApi()
+        internal static Dictionary<string, object> SharedPortraitCatalogApi()
         {
             List<SharedPortraitEntry> entries = ReadSharedPortraitEntries();
             ReadSharedPortraitProvider(out string provider, out string model, out string providerError);
@@ -111,7 +111,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> OpenSharedPortraitCacheFolderApi()
+        internal static Dictionary<string, object> OpenSharedPortraitCacheFolderApi()
         {
             string root = SharedPortraitCacheRootForServer();
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
@@ -153,7 +153,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> GenerateOneSharedPortraitApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> GenerateOneSharedPortraitApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string cacheKey = ReadString(payload, "cacheKey", "");
@@ -212,7 +212,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static Dictionary<string, object> DeleteOneSharedPortraitApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> DeleteOneSharedPortraitApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string cacheKey = ReadString(payload, "cacheKey", "");
@@ -254,7 +254,7 @@ namespace ReignBetaServer
                         ["deleted"] = deleted
                     };
                 }
-                LogOperational("portrait.shared_generation.deleted", new Dictionary<string, object>
+                Program.LogOperational("portrait.shared_generation.deleted", new Dictionary<string, object>
                 {
                     ["cacheKey"] = entry.CacheKey,
                     ["characterName"] = entry.CharacterName,
@@ -300,7 +300,7 @@ namespace ReignBetaServer
             return deleted;
         }
 
-        private static Dictionary<string, object> StartMissingSharedPortraitBuildApi()
+        internal static Dictionary<string, object> StartMissingSharedPortraitBuildApi()
         {
             return StartSharedPortraitBuildApi();
         }
@@ -357,7 +357,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> SharedPortraitGenerationStatusApi()
+        internal static Dictionary<string, object> SharedPortraitGenerationStatusApi()
         {
             lock (SharedPortraitGenerationJobLock)
             {
@@ -365,7 +365,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> CancelSharedPortraitGenerationApi()
+        internal static Dictionary<string, object> CancelSharedPortraitGenerationApi()
         {
             lock (SharedPortraitGenerationJobLock)
             {
@@ -416,7 +416,7 @@ namespace ReignBetaServer
                     job.Remaining = 0;
                     job.CompletedUtc = DateTime.UtcNow.ToString("o");
                 }
-                LogOperational("portrait.shared_generation.completed", SharedPortraitGenerationJobSnapshot(job));
+                Program.LogOperational("portrait.shared_generation.completed", SharedPortraitGenerationJobSnapshot(job));
             }
             catch (Exception ex)
             {
@@ -428,7 +428,7 @@ namespace ReignBetaServer
                     job.CompletedUtc = DateTime.UtcNow.ToString("o");
                     AddSharedPortraitGenerationError(job, job.CurrentCacheKey, job.CurrentCharacterName, ex.Message);
                 }
-                LogOperational("portrait.shared_generation.failed", SharedPortraitGenerationJobSnapshot(job));
+                Program.LogOperational("portrait.shared_generation.failed", SharedPortraitGenerationJobSnapshot(job));
             }
         }
 
@@ -603,7 +603,7 @@ namespace ReignBetaServer
             return entry.PortraitPath;
         }
 
-        private static void WriteSharedPortraitAtomic(string path, byte[] bytes)
+        internal static void WriteSharedPortraitAtomic(string path, byte[] bytes)
         {
             if (string.IsNullOrWhiteSpace(path) || bytes == null)
             {
@@ -633,7 +633,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static List<SharedPortraitEntry> ReadSharedPortraitEntries()
+        internal static List<SharedPortraitEntry> ReadSharedPortraitEntries()
         {
             string root = SharedPortraitCacheRootForServer();
             var entries = new List<SharedPortraitEntry>();
@@ -823,7 +823,7 @@ namespace ReignBetaServer
             out string model,
             out string error)
         {
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             provider = NormalizeImageProvider(ReadString(settings, "portraitProvider", "NanoGPT"));
             if (IsCodexImageProvider(provider))
             {
@@ -835,7 +835,7 @@ namespace ReignBetaServer
             if (provider == "OpenRouter")
             {
                 model = ReadString(settings, "portraitOpenRouterImageModel", DefaultOpenRouterImageModel);
-                error = !ProviderKeyConfigured(settings, "openRouterApiKey")
+                error = !Program.ProviderKeyConfigured(settings, "openRouterApiKey")
                     ? "Save your OpenRouter key in API Settings." : "";
                 return string.IsNullOrWhiteSpace(error);
             }
@@ -843,7 +843,7 @@ namespace ReignBetaServer
             model = atlas
                 ? ReadString(settings, "portraitAtlasImageModel", DefaultAtlasImageModel)
                 : ReadString(settings, "portraitNanoGptImageModel", "gpt-image-1.5");
-            error = !ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
+            error = !Program.ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
                 ? "No " + provider + " image API key is configured in AI Image Generation."
                 : "";
             return string.IsNullOrWhiteSpace(error);
@@ -936,17 +936,7 @@ namespace ReignBetaServer
             });
         }
 
-        private static string Sha256Hex(byte[] bytes)
-        {
-            using (SHA256 sha = SHA256.Create())
-            {
-                return BitConverter.ToString(sha.ComputeHash(bytes ?? new byte[0]))
-                    .Replace("-", "")
-                    .ToLowerInvariant();
-            }
-        }
-
-        private static List<Dictionary<string, object>> RunSharedPortraitGenerationSelfTests()
+        internal static List<Dictionary<string, object>> RunSharedPortraitGenerationSelfTests()
         {
             var rows = new List<Dictionary<string, object>>();
             List<SharedPortraitEntry> entries = ReadSharedPortraitEntries();
@@ -1147,7 +1137,7 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunPortraitProviderAdapterContractTests()
+        internal static List<Dictionary<string, object>> RunPortraitProviderAdapterContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
             Dictionary<string, object> seedreamV5Payload = BuildAtlasImagePayload(
@@ -1195,7 +1185,7 @@ namespace ReignBetaServer
                 ["portraitInferenceSteps"] = 31,
                 ["portraitGuidanceScale"] = 4.2d
             };
-            bool migrated = NormalizePortraitImageSettings(legacySettings);
+            bool migrated = Program.NormalizePortraitImageSettings(legacySettings);
             AddSharedPortraitSelfTest(
                 rows,
                 "image_profile_migration_clones_portrait_once",
@@ -1212,7 +1202,7 @@ namespace ReignBetaServer
 
             legacySettings["portraitProvider"] = "NanoGPT";
             legacySettings["portraitAtlasImageModel"] = AtlasModelWan25ImageEdit;
-            bool normalizedAgain = NormalizePortraitImageSettings(legacySettings);
+            bool normalizedAgain = Program.NormalizePortraitImageSettings(legacySettings);
             AddSharedPortraitSelfTest(
                 rows,
                 "image_profile_migration_does_not_overwrite_scenery",
@@ -1265,7 +1255,7 @@ namespace ReignBetaServer
                 "Every portrait provider receives the same measurable full-body, face-scale, centering, and scenery-exclusion contract.");
 
             Dictionary<string, object> nativeSettings = new Dictionary<string, object>();
-            bool nativeSettingsInitialized = NormalizePortraitImageSettings(nativeSettings);
+            bool nativeSettingsInitialized = Program.NormalizePortraitImageSettings(nativeSettings);
             AddSharedPortraitSelfTest(
                 rows,
                 "native_portrait_source_required_by_default",
@@ -1274,7 +1264,7 @@ namespace ReignBetaServer
                     && nativeSettings.ContainsKey("portraitNativeSourceGeneratorPath"),
                 "Portrait generation defaults to the packaged native 768x1024 source generator and fails closed when that source cannot be produced.");
 
-            string controlCenterHtml = ControlCenterHtml();
+            string controlCenterHtml = Program.ControlCenterHtml();
             AddSharedPortraitSelfTest(
                 rows,
                 "split_image_profiles_control_center_contract",

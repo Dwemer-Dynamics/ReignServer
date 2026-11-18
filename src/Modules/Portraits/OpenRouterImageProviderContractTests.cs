@@ -4,14 +4,14 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static List<Dictionary<string, object>> RunOpenRouterImageProviderContractTests()
         {
             var rows = new List<Dictionary<string, object>>();
             Action<string, bool> check = (id, passed) => AddSharedPortraitSelfTest(rows, "openrouter_image_" + id, passed, id);
             var settings = new Dictionary<string, object> { ["openRouterApiKey"] = "fixture-router", ["apiKey"] = "fixture-other" };
-            NormalizePortraitImageSettings(settings);
+            Program.NormalizePortraitImageSettings(settings);
             byte[] source = { 1, 2, 3 }, generated = { 4, 5, 6 };
             foreach (string prefix in ImageProfilePrefixes)
             {
@@ -20,7 +20,7 @@ namespace ReignBetaServer
                 {
                     settings[prefix + "OpenRouterImageModel"] = model;
                     var restored = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings));
-                    NormalizePortraitImageSettings(restored);
+                    Program.NormalizePortraitImageSettings(restored);
                     var profile = ResolveImageGenerationProfile(restored, prefix);
                     bool wire = false;
                     var result = GenerateOpenRouterImage(restored, profile, "fixture edit", source, prefix.Contains("cenery") ? "2720x1530" : "768x1024",

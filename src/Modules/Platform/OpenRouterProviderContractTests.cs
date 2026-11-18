@@ -12,9 +12,9 @@ namespace ReignBetaServer
             Action<string, bool> check = (id, passed) => rows.Add(new Dictionary<string, object> {
                 ["id"] = "openrouter_" + id, ["passed"] = passed, ["summary"] = id });
             var settings = new Dictionary<string, object> { ["llmProvider"] = "openai_compatible",
-                ["apiUrl"] = NanoGptChatCompletionsUrl, ["apiKey"] = "fixture-nano", ["dialogueModel"] = "legacy-dialogue",
+                ["apiUrl"] = PortraitsService.NanoGptChatCompletionsUrl, ["apiKey"] = "fixture-nano", ["dialogueModel"] = "legacy-dialogue",
                 ["selectorModel"] = "legacy-selector", ["actionPlannerModel"] = "legacy-planner", ["actionRouterModel"] = "legacy-router" };
-            check("migration", NormalizeLlmProviderSettings(settings) && LlmApiUrl(settings) == NanoGptChatCompletionsUrl
+            check("migration", NormalizeLlmProviderSettings(settings) && LlmApiUrl(settings) == PortraitsService.NanoGptChatCompletionsUrl
                 && LlmApiKey(settings) == "fixture-nano" && ReadString(settings, "llmProvider", "") == NanoGptProvider
                 && ReadString(settings, "openRouterApiKey", "") == "" && !NormalizeLlmProviderSettings(settings));
             var legacyModels = ChatModelProfile(settings, "");

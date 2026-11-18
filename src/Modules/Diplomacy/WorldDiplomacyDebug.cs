@@ -5,9 +5,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DiplomacyService
     {
-        private static Dictionary<string, object> QueueRandomDiplomacyDebugEvent(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> QueueRandomDiplomacyDebugEvent(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!ReadBool(payload, "debugMcmEnabled", false))
@@ -15,7 +15,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The MCM debug gate is not enabled." };
             }
 
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string commandId = ReadFirstString(payload, "commandId", "debugCommandId");
             if (string.IsNullOrWhiteSpace(commandId))
             {
@@ -24,12 +24,12 @@ namespace ReignBetaServer
 
             Dictionary<string, object> existingEvent;
             Dictionary<string, object> existingRecord;
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 existingEvent = ReadDiplomaticEventQueue(campaignId).FirstOrDefault(x =>
                     string.Equals(ReadString(x, "debugCommandId", ""), commandId, StringComparison.OrdinalIgnoreCase));
                 string existingActionId = ReadString(existingEvent, "actionId", "");
-                Dictionary<string, object> actionRow = ReadActionQueueUnlocked(campaignId).FirstOrDefault(x =>
+                Dictionary<string, object> actionRow = Program.ReadActionQueueUnlocked(campaignId).FirstOrDefault(x =>
                     string.Equals(ReadString(x, "id", ""), existingActionId, StringComparison.OrdinalIgnoreCase));
                 existingRecord = ReadDictionary(actionRow, "record");
             }

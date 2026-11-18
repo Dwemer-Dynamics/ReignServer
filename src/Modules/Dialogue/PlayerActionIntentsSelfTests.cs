@@ -138,7 +138,7 @@ namespace ReignBetaServer
             Func<ReignDbConnection, string> derivedSnapshot = c => Json.Serialize(new object[] { QuerySql(c, derivedMetricSql, derivedArgs),
                 QuerySql(c, "SELECT subject_id,standing_value,revision FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id;", derivedArgs),
                 QuerySql(c, "SELECT subject_id,tag_id,status,reputation_value FROM character_reputations WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id,tag_id;", derivedArgs) });
-            Func<string> derivedCommitted = () => { using (var c = OpenCampaignConnection(campaign)) { EnsureSocialReputationSchema(c); EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
+            Func<string> derivedCommitted = () => { using (var c = OpenCampaignConnection(campaign)) { ReputationService.EnsureSocialReputationSchema(c); ReputationService.EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
             string derivedBefore = derivedCommitted();
             int derivedMetricsBefore, derivedMetricsInTransaction = -1;
             using (var c = OpenCampaignConnection(campaign)) derivedMetricsBefore = QuerySql(c, derivedMetricSql, derivedArgs).Count;
@@ -234,7 +234,7 @@ VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peac
             Dictionary<string, object> priorStanding, ordinaryStanding;
             using (var c = OpenCampaignConnection(campaign))
             {
-                EnsureSocialReputationSchema(c);
+                ReputationService.EnsureSocialReputationSchema(c);
                 priorStanding = QuerySql(c, @"SELECT standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts,calculation_status,last_error
 FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey).FirstOrDefault();
                 ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)

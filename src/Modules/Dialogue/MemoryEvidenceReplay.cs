@@ -214,7 +214,7 @@ namespace ReignBetaServer
             if (IsRetiredMemoryRequest(purpose)) error = "memory_llm_stage_retired";
             if (model.Length == 0 && error.Length == 0) error = "missing_fixture_model";
             var wire = TestDict("schema", "reign-memory-provider-wire-capture-v1", "status", error.Length == 0 ? "captured" : "blocked",
-                "requestType", purpose, "model", model, "provider", NanoGptProvider, "apiUrl", NanoGptChatCompletionsUrl,
+                "requestType", purpose, "model", model, "provider", NanoGptProvider, "apiUrl", PortraitsService.NanoGptChatCompletionsUrl,
                 "providerCalls", 0, "certificateEligible", false, "scope", "initial_json_shared_builders_nano_fixture",
                 "excluded", new[] { "credentials_and_http_headers", "http_dispatch", "runtime_queue_and_cooldowns", "retries", "other_providers", "native_and_semantic_acceptance" });
             captured["providerWireCapture"] = wire;
@@ -228,14 +228,14 @@ namespace ReignBetaServer
             }
             if (EffectiveReasoningEffort(settings, payload, purpose) != "none") ApplyPrivateReasoningPolicyToMessages(messages);
             var body = BuildChatRequestBody(settings, payload, messages, model);
-            ConfigurePromptCacheRouting(settings, payload, body, NanoGptChatCompletionsUrl, model, purpose);
-            wire["reasoningRouting"] = ConfigureReasoningRouting(settings, payload, body, NanoGptChatCompletionsUrl, model, purpose);
+            ConfigurePromptCacheRouting(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, model, purpose);
+            wire["reasoningRouting"] = ConfigureReasoningRouting(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, model, purpose);
             string json = Json.Serialize(body);
             wire["requestJson"] = json;
             wire["requestSha256"] = PromptHash(json);
             var continuityPreflight = ReadDictionary(ReadDictionary(payload, "promptEnvelope"), "continuityPreflight") != null
                 || purpose.IndexOf("continuity_repair", StringComparison.OrdinalIgnoreCase) >= 0
-                ? BuildContinuityProviderPreflight(settings, payload, body, NanoGptChatCompletionsUrl, ReadString(body, "model", model)) : null;
+                ? BuildContinuityProviderPreflight(settings, payload, body, PortraitsService.NanoGptChatCompletionsUrl, ReadString(body, "model", model)) : null;
             int hardCharacterLimit = ConversationPromptHardCharacterLimit(settings, continuityPreflight);
             bool fits = json.Length <= hardCharacterLimit && (continuityPreflight == null || ReadBool(continuityPreflight, "fits", false));
             wire["providerPreflight"] = TestDict("fits", fits, "requestCharacters", json.Length,
@@ -605,8 +605,8 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             if (ReadDictionary(fixture, "contextCapacity") is { } capturedCapacity)
             {
                 var certificate = CloneDictionary(capturedCapacity);
-                certificate["endpoint"] = NanoGptChatCompletionsUrl;
-                string routeKey = NanoGptProvider + ":" + model + ":" + PromptHash(NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
+                certificate["endpoint"] = PortraitsService.NanoGptChatCompletionsUrl;
+                string routeKey = NanoGptProvider + ":" + model + ":" + PromptHash(PortraitsService.NanoGptChatCompletionsUrl + "|" + CanonicalJson(TestDict())).Substring(0, 20);
                 writerSettings["verifiedConversationContextWindows"] = TestDict(routeKey, certificate);
             }
             var empty = TestDict();

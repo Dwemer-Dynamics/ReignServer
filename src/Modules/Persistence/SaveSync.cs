@@ -81,14 +81,14 @@ namespace ReignBetaServer
             finally { CampaignDataGate.ExitWriteLock(); }
         }
 
-        private static Dictionary<string, object> SaveSyncRegisterCore(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SaveSyncRegisterCore(Dictionary<string, object> payload)
         {
             Stopwatch timer = Stopwatch.StartNew();
             string campaignId = ReadString(payload, "campaignId", "");
             string savePointId = ReadString(payload, "savePointId", "");
             ValidateSaveSyncId(campaignId, "campaignId");
             ValidateSaveSyncId(savePointId, "savePointId");
-            if (ChatViewPending(campaignId)) return TestDict("ok", false, "result", "chat_view_pending", "retryable", true,
+            if (PortraitsService.ChatViewPending(campaignId)) return TestDict("ok", false, "result", "chat_view_pending", "retryable", true,
                 "error", "Save Sync is waiting for scene images to finish; no inconsistent image checkpoint was captured.");
             if (payload.ContainsKey("worldHistoryOutboxDrained")
                 && !ReadBool(payload, "worldHistoryOutboxDrained", false))
@@ -2964,8 +2964,8 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 RebellionService.EnsureRebellionSchema(connection);
                 EnsureRelationshipDirectorSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
-                EnsureCourtSchema(connection);
-                EnsureSocialReputationSchema(connection);
+                CourtService.EnsureCourtSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 long ts = marker == "old" ? 10 : 1;
                 ExecuteSql(connection, "INSERT OR REPLACE INTO events(event_id,campaign_id,ts,world_day,event_type,summary,created_utc) VALUES($id,$campaign,$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
                 ExecuteSql(connection, "INSERT OR REPLACE INTO memories(memory_id,event_id,owner_id,ts,world_day,summary) VALUES($id,$event,'hero_a',$ts,$day,$id);", new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });

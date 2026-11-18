@@ -114,7 +114,7 @@ namespace ReignBetaServer
                 var settings = new Dictionary<string, object> { ["llmProvider"] = "openrouter", ["openRouterApiKey"] = "",
                     ["nanoGptApiKey"] = "fixture-local", ["globalKeyBindings"] = new Dictionary<string, object> { ["openRouterApiKey"] = binding } };
 
-                check("unbound_slot_keeps_local_value", ProviderSecret(settings, "nanoGptApiKey", NanoGptChatCompletionsUrl) == "fixture-local" && calls.Count == 0);
+                check("unbound_slot_keeps_local_value", ProviderSecret(settings, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == "fixture-local" && calls.Count == 0);
                 bool read = LlmApiKey(settings) == secret && ProviderSecret(settings, "openRouterApiKey", "https://openrouter.ai/api/v1/images") == secret;
                 var resolves = calls.Where(c => ReadString(c, "op", "") == "resolve").ToList();
                 check("bound_slot_reads_current_value_every_use", read && resolves.Count == 2
@@ -158,14 +158,14 @@ namespace ReignBetaServer
                     && resolvesOf(keyId) == 1);
                 var auto = TestDict("llmProvider", NanoGptProvider, "nanoGptApiKey", "fixture-reign-only-nano");
                 calls.Clear();
-                bool localFirst = ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == "fixture-reign-only-nano" && calls.Count == 0;
+                bool localFirst = ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == "fixture-reign-only-nano" && calls.Count == 0;
                 auto["nanoGptApiKey"] = "";
-                check("auto_picks_single_matching_key", localFirst && ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == secret
+                check("auto_picks_single_matching_key", localFirst && ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == secret
                     && resolvesOf(other) == 1 && !HasGlobalKeyBindingEntry(auto, "nanoGptApiKey")
                     && ProviderKeyConfigured(auto, "nanoGptApiKey") && !ProviderKeyConfigured(auto, "nanoGptApiKey", false));
                 calls.Clear();
                 check("auto_destination_origin_mismatch_no_auto", ProviderSecret(auto, "nanoGptApiKey", "https://nano-gpt.com.attacker.invalid/v1") == ""
-                    && ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl, "https://other.invalid/") == ""
+                    && ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl, "https://other.invalid/") == ""
                     && !ProviderKeyUnavailable(auto, "nanoGptApiKey", "") && calls.Count == 0);
                 check("auto_zero_matches_no_key", ProviderSecret(TestDict(), "portraitAtlasApiKey", "https://api.atlascloud.ai/api/v1/model/generateImage") == ""
                     && !ProviderKeyUnavailable(TestDict(), "portraitAtlasApiKey", "") && !calls.Any(c => ReadString(c, "op", "") == "resolve"));
@@ -173,7 +173,7 @@ namespace ReignBetaServer
                 store.Add(new Dictionary<string, object> { ["key_id"] = secondNano, ["provider"] = "nano_gpt", ["origin"] = NanoGptOrigin, ["label"] = "Second", ["preview"] = "...yy", ["revision"] = 1, ["configured"] = true });
                 InvalidateGlobalKeyStatusCache();
                 calls.Clear();
-                check("auto_two_matches_never_guesses", ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == ""
+                check("auto_two_matches_never_guesses", ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == ""
                     && !ProviderKeyUnavailable(auto, "nanoGptApiKey", "") && !ProviderKeyConfigured(auto, "nanoGptApiKey")
                     && !calls.Any(c => ReadString(c, "op", "") == "resolve")
                     && ReadString(GlobalKeyRow(auto, "nanoGptApiKey", GlobalKeyTarget(auto, "nanoGptApiKey", catalog), store), "source", "") == "none");
@@ -182,7 +182,7 @@ namespace ReignBetaServer
                 resolveOutcome = "unavailable";
                 bool autoBinding;
                 string autoKey = ResolveLlmRequestApiKey(auto, null, out autoBinding);
-                bool autoUnavailable = ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == ""
+                bool autoUnavailable = ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == ""
                     && ProviderKeyUnavailable(auto, "nanoGptApiKey", "");
                 var autoRefused = ChatWithLlm(new Dictionary<string, object> { ["requestType"] = "dialogue", ["singleProviderAttempt"] = true }, null, null, auto);
                 check("auto_failed_resolve_is_unavailable", autoKey == "" && autoBinding && autoUnavailable
@@ -192,8 +192,8 @@ namespace ReignBetaServer
                 calls.Clear();
                 Func<int> statusCalls = () => calls.Count(c => ReadString(c, "op", "") == "status");
                 bool gated = ProviderKeyConfigured(auto, "nanoGptApiKey") && ProviderKeyConfigured(auto, "nanoGptApiKey");
-                bool resolvedOnce = ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == secret
-                    && ProviderSecret(auto, "nanoGptApiKey", NanoGptChatCompletionsUrl) == secret;
+                bool resolvedOnce = ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == secret
+                    && ProviderSecret(auto, "nanoGptApiKey", PortraitsService.NanoGptChatCompletionsUrl) == secret;
                 int warmStatus = statusCalls();
                 InvalidateGlobalKeyStatusCache();
                 ProviderKeyConfigured(auto, "nanoGptApiKey");

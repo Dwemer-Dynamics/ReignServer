@@ -8,20 +8,20 @@ using ReignPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         private const string CastleSceneRenderContract = "castle_scene_16x9_room_attire_v3";
         private const int CastleSceneOutputWidth = 1536;
         private const int CastleSceneOutputHeight = 864;
 
-        private static string CastleScenePromptPurpose(Dictionary<string, object> payload)
+        internal static string CastleScenePromptPurpose(Dictionary<string, object> payload)
         {
             string room = ReadString(payload, "room", "").Replace("_", "").Replace(" ", "").ToLowerInvariant();
             return room == "baths" || room == "guestbedrooms" || room == "royalbedroom"
                 ? "adultScenery" : "castle_scene";
         }
 
-        private static Dictionary<string, object> CastleSceneGenerate(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CastleSceneGenerate(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -34,9 +34,9 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(cacheKey) || string.IsNullOrWhiteSpace(prompt) || string.IsNullOrWhiteSpace(contactSheet))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "cacheKey, prompt, and contactSheetBase64 are required." };
 
-            string folder = Path.Combine(CampaignDirectory(campaignId), "castle_chat", SafePathSegment(timelineId, "main"));
+            string folder = Path.Combine(Program.CampaignDirectory(campaignId), "castle_chat", Program.SafePathSegment(timelineId, "main"));
             Directory.CreateDirectory(folder);
-            string safeKey = SafePathSegment(cacheKey, "scene");
+            string safeKey = Program.SafePathSegment(cacheKey, "scene");
             string imagePath = Path.Combine(folder, safeKey + ".png");
             string manifestPath = Path.Combine(folder, safeKey + ".json");
             if (File.Exists(imagePath) && File.Exists(manifestPath))
@@ -47,8 +47,8 @@ namespace ReignBetaServer
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The cached castle scene could not be normalized to 16:9." };
                 bool cacheRequiredNormalization = cachedSourceWidth != CastleSceneOutputWidth || cachedSourceHeight != CastleSceneOutputHeight;
                 if (cacheRequiredNormalization)
-                    WriteSharedPortraitAtomic(imagePath, normalizedCached);
-                Dictionary<string, object> cachedManifest = ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
+                    PortraitsService.WriteSharedPortraitAtomic(imagePath, normalizedCached);
+                Dictionary<string, object> cachedManifest = Program.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
                 cachedManifest["renderContract"] = renderContract;
                 cachedManifest["sourceWidth"] = cachedSourceWidth;
                 cachedManifest["sourceHeight"] = cachedSourceHeight;
@@ -56,7 +56,7 @@ namespace ReignBetaServer
                 cachedManifest["outputHeight"] = CastleSceneOutputHeight;
                 cachedManifest["normalization"] = "fill_center_crop";
                 if (cacheRequiredNormalization) cachedManifest["normalizedUtc"] = DateTime.UtcNow.ToString("O");
-                WriteSharedPortraitAtomic(manifestPath, Encoding.UTF8.GetBytes(Json.Serialize(cachedManifest)));
+                PortraitsService.WriteSharedPortraitAtomic(manifestPath, Encoding.UTF8.GetBytes(Json.Serialize(cachedManifest)));
                 return new Dictionary<string, object> { ["ok"] = true, ["cached"] = true, ["cacheKey"] = cacheKey,
                     ["renderContract"] = renderContract,
                     ["imageBase64"] = Convert.ToBase64String(normalizedCached), ["manifestPath"] = manifestPath };
@@ -80,10 +80,10 @@ namespace ReignBetaServer
             // These rooms must use the configured Adult Scenery & Events
             // provider/model, never a caller override or the normal scene profile.
             if (CastleScenePromptPurpose(payload) == "adultScenery") imagePayload.Remove("provider");
-            Dictionary<string, object> generated = PortraitGenerate(imagePayload);
+            Dictionary<string, object> generated = PortraitsService.PortraitGenerate(imagePayload);
             if (!ReadBool(generated, "ok", false))
             {
-                LogOperational("castle_scene.generate_failed", new Dictionary<string, object>
+                Program.LogOperational("castle_scene.generate_failed", new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["timelineId"] = timelineId,
@@ -97,7 +97,7 @@ namespace ReignBetaServer
             bytes = NormalizeCastleScene16By9(bytes, out int sourceWidth, out int sourceHeight);
             if (bytes == null || bytes.Length == 0)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The generated castle scene could not be normalized to 16:9." };
-            WriteSharedPortraitAtomic(imagePath, bytes);
+            PortraitsService.WriteSharedPortraitAtomic(imagePath, bytes);
             Dictionary<string, object> manifest = new Dictionary<string, object>
             {
                 ["cacheKey"] = cacheKey, ["campaignId"] = campaignId, ["timelineId"] = timelineId,
@@ -109,10 +109,10 @@ namespace ReignBetaServer
                 ["outputWidth"] = CastleSceneOutputWidth, ["outputHeight"] = CastleSceneOutputHeight,
                 ["normalization"] = "fill_center_crop"
             };
-            WriteSharedPortraitAtomic(manifestPath, Encoding.UTF8.GetBytes(Json.Serialize(manifest)));
+            PortraitsService.WriteSharedPortraitAtomic(manifestPath, Encoding.UTF8.GetBytes(Json.Serialize(manifest)));
             generated["cacheKey"] = cacheKey; generated["manifestPath"] = manifestPath; generated["cached"] = false;
             generated["imageBase64"] = Convert.ToBase64String(bytes);
-            LogOperational("castle_scene.generated", new Dictionary<string, object>
+            Program.LogOperational("castle_scene.generated", new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId,
                 ["timelineId"] = timelineId,

@@ -16,7 +16,7 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         private static readonly object VerificationLock = new object();
-        private static readonly string VerificationDir = Path.Combine(TestsDir, "verification");
+        internal static readonly string VerificationDir = Path.Combine(TestsDir, "verification");
         private static readonly string VerificationRunsDir = Path.Combine(VerificationDir, "runs");
         private static readonly string VerificationFailuresDir = Path.Combine(VerificationDir, "failures");
         // Keep mutable sandboxes beneath the packaged test-data tree, but make the
@@ -487,18 +487,18 @@ namespace ReignBetaServer
             }
             if (string.Equals(requestedSuite, "codex_images", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "contracts.codex_images", "portraits_images", RunPortraitProviderAdapterContractTests());
+                AddSubsystemListSummary(checks, "contracts.codex_images", "portraits_images", PortraitsService.RunPortraitProviderAdapterContractTests());
                 return;
             }
             if (string.Equals(requestedSuite, "outfit_changes", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
-                AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
+                AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", PortraitsService.RunOutfitChangeContractTests());
+                AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", PortraitsService.RunPortraitRefreshContractTests());
                 return;
             }
             if (string.Equals(requestedSuite, "chat_view", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
+                AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", PortraitsService.RunChatViewContractTests());
                 return;
             }
             if (string.Equals(requestedSuite, "character_narrative", StringComparison.OrdinalIgnoreCase)
@@ -529,7 +529,7 @@ namespace ReignBetaServer
                     RunCampaignCommandSystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (!includeBaselines && explicitSuite && ShouldRunVerificationSuite(requestedSuite, "social_reputation"))
-                AddSubsystemListSummary(checks, "contracts.social_reputation", "social_reputation", RunRumorSubsystemSelfTests());
+                AddSubsystemListSummary(checks, "contracts.social_reputation", "social_reputation", ReputationService.RunRumorSubsystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (!includeBaselines && explicitSuite && ShouldRunVerificationSuite(requestedSuite, "spymaster"))
                 AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
@@ -554,7 +554,7 @@ namespace ReignBetaServer
 
             if ((includeBaselines || explicitSuite) && ShouldRunVerificationSuite(requestedSuite, "baselines"))
             {
-                AddSelfTestSummary(checks, "baseline.diplomacy", "world_diplomacy", RunWorldDiplomacySelfTests());
+                AddSelfTestSummary(checks, "baseline.diplomacy", "world_diplomacy", DiplomacyService.RunWorldDiplomacySelfTests());
                 AddSelfTestSummary(checks, "baseline.world_history", "world_history", RunWorldHistorySelfTests());
                 AddSelfTestSummary(checks, "baseline.initialization_readiness", "save_load", RunInitializationReadinessSelfTests());
                 AddSelfTestSummary(checks, "baseline.rebellion", "rebellion", RebellionService.RunRebellionSelfTests());
@@ -568,7 +568,7 @@ namespace ReignBetaServer
                 RunCampaignCommandOfflineSimulationChecks(checks, sandbox, seed);
             if (ShouldStop(checks, failFast)) return;
             if (!string.IsNullOrWhiteSpace(requestedSuite) && ShouldRunVerificationSuite(requestedSuite, "social_reputation"))
-                AddSubsystemListSummary(checks, "architecture.social_reputation", "social_reputation", RunRumorSubsystemSelfTests());
+                AddSubsystemListSummary(checks, "architecture.social_reputation", "social_reputation", ReputationService.RunRumorSubsystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (ShouldRunVerificationSuite(requestedSuite, "spymaster")) AddSubsystemListSummary(checks, "architecture.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
@@ -613,7 +613,7 @@ namespace ReignBetaServer
             AddSubsystemListSummary(checks, "contracts.castle_scene_context", "conversation_modes", RunConversationSceneStateSelfTests());
             AddSubsystemListSummary(checks, "contracts.sovereign_conduct", "conversation_modes", RunPoliticalDangerPostureSelfTests());
             AddSubsystemListSummary(checks, "contracts.sovereign_identity", "knowledge_identity", RunIdentitySubsystemSelfTests());
-            AddSubsystemListSummary(checks, "contracts.court_and_resident_ambassadors", "court_system", RunCourtSelfTests());
+            AddSubsystemListSummary(checks, "contracts.court_and_resident_ambassadors", "court_system", CourtService.RunCourtSelfTests());
             bool courtAuthorityStability = !Reign.Core.Contracts.Court.ReignCourtAuthorityStability.ShouldInterrupt(1)
                 && !Reign.Core.Contracts.Court.ReignCourtAuthorityStability.ShouldInterrupt(2)
                 && Reign.Core.Contracts.Court.ReignCourtAuthorityStability.ShouldInterrupt(3)
@@ -628,11 +628,11 @@ namespace ReignBetaServer
                     ["requiredConsecutiveFailures"] = Reign.Core.Contracts.Court.ReignCourtAuthorityStability.RequiredConsecutiveFailures
                 });
 #endif
-            AddSubsystemListSummary(checks, "contracts.portrait_derivatives", "portraits_images", RunPortraitDerivativeSelfTests());
-            AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", RunOutfitChangeContractTests());
-            AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", RunPortraitRefreshContractTests());
-            AddSubsystemListSummary(checks, "contracts.image_generation_profiles", "portraits_images", RunPortraitProviderAdapterContractTests());
-            AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
+            AddSubsystemListSummary(checks, "contracts.portrait_derivatives", "portraits_images", PortraitsService.RunPortraitDerivativeSelfTests());
+            AddSubsystemListSummary(checks, "contracts.outfit_changes", "portraits_images", PortraitsService.RunOutfitChangeContractTests());
+            AddSubsystemListSummary(checks, "contracts.portrait_refresh", "portraits_images", PortraitsService.RunPortraitRefreshContractTests());
+            AddSubsystemListSummary(checks, "contracts.image_generation_profiles", "portraits_images", PortraitsService.RunPortraitProviderAdapterContractTests());
+            AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", PortraitsService.RunChatViewContractTests());
             if (includeExpensiveSubsystems)
             {
                 AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
@@ -697,23 +697,23 @@ namespace ReignBetaServer
             List<string> missingPrompts = PromptFileNames.Where(name => !File.Exists(Path.Combine(PromptsDir, name))).ToList();
             AddVerificationCheck(checks, "contracts.prompts", "contracts", missingPrompts.Count == 0, missingPrompts.Count == 0 ? "All registered prompt files exist." : "Missing registered prompt files.", new Dictionary<string, object> { ["registered"] = PromptFileNames.Length, ["missing"] = missingPrompts });
 
-            string[] portraitPromptLayers = { "portrait_identity.txt", "portrait_composition.txt", PortraitBodyPromptFile, "portrait_prompt_style.txt", "portrait_output_rules.txt" };
+            string[] portraitPromptLayers = { "portrait_identity.txt", "portrait_composition.txt", PortraitsService.PortraitBodyPromptFile, "portrait_prompt_style.txt", "portrait_output_rules.txt" };
             bool portraitPromptCatalogValid = portraitPromptLayers.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase));
 			bool redundantGenericClothingRemoved = !PromptFileNames.Contains("portrait_clothing.txt", StringComparer.OrdinalIgnoreCase)
 				&& !File.Exists(Path.Combine(PromptsDir, "portrait_clothing.txt"));
-			bool portraitClothingCatalogValid = PortraitClothingPromptFileNames.Length == 56
-				&& PortraitClothingPromptFileNames.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
-				&& PortraitClothingPromptFileNames.All(name => File.Exists(Path.Combine(PromptsDir, name)));
-			bool portraitPhysicalConfidenceCatalogValid = PortraitPhysicalConfidencePromptFileNames.Length == 5
-				&& PortraitPhysicalConfidencePromptFileNames.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
-				&& PortraitPhysicalConfidencePromptFileNames.All(name => File.Exists(Path.Combine(PromptsDir, name)));
+			bool portraitClothingCatalogValid = PortraitsService.PortraitClothingPromptFileNames.Length == 56
+				&& PortraitsService.PortraitClothingPromptFileNames.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+				&& PortraitsService.PortraitClothingPromptFileNames.All(name => File.Exists(Path.Combine(PromptsDir, name)));
+			bool portraitPhysicalConfidenceCatalogValid = PortraitsService.PortraitPhysicalConfidencePromptFileNames.Length == 5
+				&& PortraitsService.PortraitPhysicalConfidencePromptFileNames.All(name => PromptFileNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+				&& PortraitsService.PortraitPhysicalConfidencePromptFileNames.All(name => File.Exists(Path.Combine(PromptsDir, name)));
             string portraitExclusions = DefaultPromptText("portrait_output_rules.txt", DefaultPromptTemplates());
             bool portraitOutputSafetyValid = portraitExclusions.IndexOf("white footer", StringComparison.OrdinalIgnoreCase) >= 0
                 && portraitExclusions.IndexOf("captions", StringComparison.OrdinalIgnoreCase) >= 0
                 && portraitExclusions.IndexOf("ages", StringComparison.OrdinalIgnoreCase) >= 0;
 			AddVerificationCheck(checks, "contracts.portrait_prompt_library", "contracts", portraitPromptCatalogValid && redundantGenericClothingRemoved && portraitClothingCatalogValid && portraitPhysicalConfidenceCatalogValid && portraitOutputSafetyValid,
 				portraitPromptCatalogValid && redundantGenericClothingRemoved && portraitClothingCatalogValid && portraitPhysicalConfidenceCatalogValid && portraitOutputSafetyValid ? "Shared portrait layers exclude the redundant generic clothing prompt; 21 culture/rank and 35 culture/notable-occupation clothing prompts plus five female physical-confidence prompts are editable; output text/footer exclusions are registered." : "Portrait prompt library contract is incomplete.",
-				new Dictionary<string, object> { ["layers"] = portraitPromptLayers, ["clothingPrompts"] = PortraitClothingPromptFileNames.Length, ["physicalConfidencePrompts"] = PortraitPhysicalConfidencePromptFileNames.Length, ["outputSafety"] = portraitOutputSafetyValid });
+				new Dictionary<string, object> { ["layers"] = portraitPromptLayers, ["clothingPrompts"] = PortraitsService.PortraitClothingPromptFileNames.Length, ["physicalConfidencePrompts"] = PortraitsService.PortraitPhysicalConfidencePromptFileNames.Length, ["outputSafety"] = portraitOutputSafetyValid });
 
             Dictionary<string, object> portraitSample = new Dictionary<string, object>
             {
@@ -726,8 +726,8 @@ namespace ReignBetaServer
 				["flirtatiousnessPercentage"] = 90,
 				["confidencePercentage"] = 60
             };
-            string assembledPortraitPrompt = BuildPortraitPrompt(portraitSample, "Character information:\nAge: 27\nCulture: Empire");
-			string vlandianLandownerPrompt = BuildPortraitPrompt(new Dictionary<string, object>
+            string assembledPortraitPrompt = PortraitsService.BuildPortraitPrompt(portraitSample, "Character information:\nAge: 27\nCulture: Empire");
+			string vlandianLandownerPrompt = PortraitsService.BuildPortraitPrompt(new Dictionary<string, object>
 			{
 				["characterName"] = "Alary",
 				["ageYears"] = 40,
@@ -738,7 +738,7 @@ namespace ReignBetaServer
 				["flirtatiousnessPercentage"] = 100,
 				["confidencePercentage"] = 100
 			}, "");
-			string battanianMinorLordPrompt = BuildPortraitPrompt(new Dictionary<string, object>
+			string battanianMinorLordPrompt = PortraitsService.BuildPortraitPrompt(new Dictionary<string, object>
 			{
 				["characterName"] = "Maireas",
 				["ageYears"] = 33,
@@ -749,7 +749,7 @@ namespace ReignBetaServer
 				["flirtatiousnessPercentage"] = 20,
 				["confidencePercentage"] = 20
 			}, "");
-			string aseraiMerchantPrompt = BuildPortraitPrompt(new Dictionary<string, object>
+			string aseraiMerchantPrompt = PortraitsService.BuildPortraitPrompt(new Dictionary<string, object>
 			{
 				["characterName"] = "Jawwal",
 				["ageYears"] = 44,
@@ -767,14 +767,14 @@ namespace ReignBetaServer
 			{
 				foreach (string notableOccupation in notableOccupations)
 				{
-					string selected = SelectPortraitClothingPromptFile(new Dictionary<string, object>
+					string selected = PortraitsService.SelectPortraitClothingPromptFile(new Dictionary<string, object>
 					{
 						["cultureName"] = notableCulture,
 						["occupation"] = notableOccupation,
 						["isNotable"] = true
 					});
 					notableClothingSelectionValid &= !string.IsNullOrWhiteSpace(selected)
-						&& PortraitClothingPromptFileNames.Contains(selected, StringComparer.OrdinalIgnoreCase)
+						&& PortraitsService.PortraitClothingPromptFileNames.Contains(selected, StringComparer.OrdinalIgnoreCase)
 						&& !string.IsNullOrWhiteSpace(DefaultPromptText(selected, DefaultPromptTemplates()));
 				}
 			}
@@ -794,7 +794,7 @@ namespace ReignBetaServer
 					["gender"] = "woman",
 					["physicalConfidence"] = new Dictionary<string, object> { ["score"] = portraitBoundaryScores[boundaryIndex] }
 				};
-				string selected = SelectPortraitPhysicalConfidencePromptFile(boundaryPayload);
+				string selected = PortraitsService.SelectPortraitPhysicalConfidencePromptFile(boundaryPayload);
 				portraitBoundariesValid &= selected.IndexOf(portraitBoundaryProfiles[boundaryIndex].Replace("-", "_"), StringComparison.OrdinalIgnoreCase) >= 0;
 			}
 			bool portraitPhysicalConfidenceValid = ReadInt(portraitPhysicalConfidence, "score", -1) == 83
@@ -2688,7 +2688,7 @@ namespace ReignBetaServer
                 && portraitClientTextScoped.IndexOf("GenerateStepImageEdit", StringComparison.OrdinalIgnoreCase) < 0
                 && controlCenterSource.IndexOf("<option value='step-image-edit-2'>", StringComparison.OrdinalIgnoreCase) < 0
                 && controlCenterSource.Contains("NormalizePortraitImageSettings")
-                && controlCenterSource.Contains("foreach (string prefix in ImageProfilePrefixes)")
+                && controlCenterSource.Contains("foreach (string prefix in PortraitsService.ImageProfilePrefixes)")
                 && controlCenterSource.Contains("settings[modelKey] = \"gpt-image-1.5\"");
             AddVerificationCheck(checks, "contracts.step_image_edit_removed", "portraits_images", stepRemoved,
                 stepRemoved ? "Step Image Edit 2 adapters and UI selection are removed; saved Step settings migrate to gpt-image-1.5." : "Step Image Edit 2 remains reachable or its settings migration is missing.", null);
@@ -2749,13 +2749,13 @@ namespace ReignBetaServer
                 && nativeGeneratorAppText.Contains("--reign-data-root", StringComparison.Ordinal)
                 && nativeGeneratorAppText.Contains("NativeEngineRenderService", StringComparison.Ordinal)
                 && nativeGeneratorCatalogText.Contains("FindCampaign(moduleRoot, requestedCampaignId, reignDataRoot)", StringComparison.Ordinal)
-                && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", NativeGeneratorPath(DataDir))", StringComparison.Ordinal)
+                && nativePortraitSourceText.Contains("AppendProcessArgument(arguments, \"--reign-data-root\", NativeGeneratorPath(Program.DataDir))", StringComparison.Ordinal)
                 && serverClientText.Contains("[\"civilianEquipment\"] = BuildPortraitCivilianEquipment(hero)", StringComparison.Ordinal)
                 && serverClientText.Contains("character[\"civilianEquipment\"] as JArray", StringComparison.Ordinal)
                 && clientProjectContractText.Contains("PublishBundledNativePortraitGenerator", StringComparison.Ordinal)
                 && clientProjectContractText.Contains("native-portrait-generator", StringComparison.Ordinal)
                 && clientProjectContractText.Contains("Bannerlord.NativePortraitRenderHost.exe", StringComparison.Ordinal);
-            var backgroundPortraitAudit = AuditBackgroundPortraitEntrypoints(clientRoot);
+            var backgroundPortraitAudit = PortraitsService.AuditBackgroundPortraitEntrypoints(clientRoot);
             AddVerificationCheck(checks, "contracts.background_portrait_entrypoints", "portraits_images",
                 ReadBool(backgroundPortraitAudit, "ok", false),
                 "Every character generation action uses the background coordinator; render widgets never initiate generation and Look actions retain screen focus.", backgroundPortraitAudit);
@@ -3073,7 +3073,7 @@ namespace ReignBetaServer
             trace("notable_mbti:start");
             AddSubsystemListSummary(checks, "pipeline.notable_mbti", "memory_relationships", RunNotableMbtiSelfTests());
             trace("rumors:start");
-            AddSubsystemListSummary(checks, "pipeline.rumors", "knowledge_identity", RunRumorSubsystemSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.rumors", "knowledge_identity", ReputationService.RunRumorSubsystemSelfTests());
             trace("character_editor:start");
             AddSubsystemListSummary(checks, "pipeline.character_editor", "character_construction", RunCharacterEditorSubsystemSelfTests());
             trace("categorized_memory:start");
@@ -3418,7 +3418,7 @@ namespace ReignBetaServer
             }
             if (string.Equals(requestedSuite, "codex_images", StringComparison.OrdinalIgnoreCase))
             {
-                RunCodexImageLiveVerification(checks, sandbox, options);
+                PortraitsService.RunCodexImageLiveVerification(checks, sandbox, options);
                 return;
             }
             Dictionary<string, object> settings = LoadSettings();
@@ -3657,7 +3657,7 @@ namespace ReignBetaServer
             return (cases ?? new List<Dictionary<string, object>>()).Count(row => Json.Serialize(row).IndexOf("prompt_override", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
-        private static Dictionary<string, object> ClassifySyntheticProviderFault(string fault)
+        internal static Dictionary<string, object> ClassifySyntheticProviderFault(string fault)
         {
             bool retryable = fault == "timeout" || fault == "429" || fault == "500" || fault == "vector_unavailable";
             return new Dictionary<string, object>
@@ -3720,7 +3720,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static void AddVerificationCheck(List<Dictionary<string, object>> checks, string id, string suite, bool passed, string summary, Dictionary<string, object> data, string status = null)
+        internal static void AddVerificationCheck(List<Dictionary<string, object>> checks, string id, string suite, bool passed, string summary, Dictionary<string, object> data, string status = null)
         {
             Dictionary<string, object> row = new Dictionary<string, object>
             {
@@ -3747,7 +3747,7 @@ namespace ReignBetaServer
             return ShouldCancelVerification() || (failFast && checks.Any(x => !CheckPassed(x)));
         }
 
-        private static bool ShouldCancelVerification()
+        internal static bool ShouldCancelVerification()
         {
             return VerificationCancelRequested || File.Exists(VerificationCancelPath);
         }
@@ -4189,7 +4189,7 @@ namespace ReignBetaServer
             return document.SelectSingleNode("//*[@Id='" + id + "']") as XmlElement;
         }
 
-        private static bool VerificationTranscriptBackingsValid(XmlElement transcript)
+        internal static bool VerificationTranscriptBackingsValid(XmlElement transcript)
         {
             if (transcript == null) return false;
             var copy = (XmlElement)transcript.CloneNode(true);

@@ -6,11 +6,11 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class ReputationService
     {
         private static void EnsureCharacterSocialProfileSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_activations (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_activations (
 activation_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,tag_id TEXT NOT NULL,source_occurrence_id TEXT NOT NULL DEFAULT '',
 source_event_id TEXT NOT NULL DEFAULT '',activation_day REAL NOT NULL DEFAULT 0,
@@ -19,23 +19,23 @@ evidence_json TEXT NOT NULL DEFAULT '{}',reason_text TEXT NOT NULL DEFAULT '',
             reason_status TEXT NOT NULL DEFAULT 'recorded',provider TEXT NOT NULL DEFAULT '',
 model TEXT NOT NULL DEFAULT '',generation_attempts INTEGER NOT NULL DEFAULT 0,
 last_error TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_reputation_activations_subject
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_reputation_activations_subject
 ON reputation_activations(campaign_id,timeline_id,subject_id,tag_id,activation_day DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_reason_jobs (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS reputation_reason_jobs (
 job_id TEXT PRIMARY KEY,activation_id TEXT NOT NULL UNIQUE,campaign_id TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'retired',attempt_count INTEGER NOT NULL DEFAULT 0,
 last_error TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_reputation_reason_jobs_status ON reputation_reason_jobs(status,updated_ts);");
-            EnsureDatabaseColumn(connection, "character_reputations", "reason_activation_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "character_reputations", "reason_text", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "character_reputations", "reason_status", "TEXT NOT NULL DEFAULT ''");
-            string recordedMigration = ReadString(QuerySql(connection,
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_reputation_reason_jobs_status ON reputation_reason_jobs(status,updated_ts);");
+            Program.EnsureDatabaseColumn(connection, "character_reputations", "reason_activation_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "character_reputations", "reason_text", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "character_reputations", "reason_status", "TEXT NOT NULL DEFAULT ''");
+            string recordedMigration = ReadString(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='reputation_reasons_are_recorded_v1' LIMIT 1;")
                 .FirstOrDefault(), "value", "");
             if (recordedMigration != "1")
             {
                 NormalizeRecordedReputationReasons(connection);
-                ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
+                Program.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
 VALUES('reputation_reasons_are_recorded_v1','1')
 ON CONFLICT(key) DO UPDATE SET value='1';");
             }
@@ -49,7 +49,7 @@ ON CONFLICT(key) DO UPDATE SET value='1';");
             string fallback = FirstNonEmpty(incidentDescription, description, "This reputation became established through recorded events.");
             string activationId = "reputation_activation_" + Guid.NewGuid().ToString("N");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT INTO reputation_activations(activation_id,campaign_id,timeline_id,subject_id,tag_id,
+            Program.ExecuteSql(connection, @"INSERT INTO reputation_activations(activation_id,campaign_id,timeline_id,subject_id,tag_id,
 source_occurrence_id,source_event_id,activation_day,description,incident_description,evidence_json,reason_text,reason_status,
 created_ts,updated_ts)
 VALUES($activation,$campaign,$timeline,$subject,$tag,$occurrence,$event,$day,$description,$incident,$evidence,$fallback,'recorded',$ts,$ts);",
@@ -61,7 +61,7 @@ VALUES($activation,$campaign,$timeline,$subject,$tag,$occurrence,$event,$day,$de
                     ["incident"] = fallback, ["evidence"] = Json.Serialize(evidence ?? new Dictionary<string, object>()),
                     ["fallback"] = fallback, ["ts"] = ts
                 });
-            ExecuteSql(connection, @"UPDATE character_reputations
+            Program.ExecuteSql(connection, @"UPDATE character_reputations
 SET reason_activation_id=$activation,reason_text=$fallback,reason_status='recorded',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag;",
                 new Dictionary<string, object>
@@ -75,13 +75,13 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
         private static string SocialOccurrenceIncident(ReignDbConnection connection, string occurrenceId, string fallback)
         {
             if (string.IsNullOrWhiteSpace(occurrenceId)) return fallback ?? "";
-            Dictionary<string, object> row = QuerySql(connection,
+            Dictionary<string, object> row = Program.QuerySql(connection,
                 "SELECT provenance_summary FROM rumor_occurrences WHERE occurrence_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = occurrenceId }).FirstOrDefault();
             return FirstNonEmpty(ReadString(row, "provenance_summary", ""), fallback);
         }
 
-        private static void SchedulePendingReputationReasonJobs(string campaignId)
+        internal static void SchedulePendingReputationReasonJobs(string campaignId)
         {
             // Reputation reasons are authoritative producer evidence. Richer
             // phrasing belongs to the interaction prompt, never a background
@@ -91,16 +91,16 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
         private static void NormalizeRecordedReputationReasons(ReignDbConnection connection)
         {
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"UPDATE reputation_activations
+            Program.ExecuteSql(connection, @"UPDATE reputation_activations
 SET reason_text=COALESCE(NULLIF(incident_description,''),NULLIF(description,''),'A recorded event established this reputation.'),
 reason_status='recorded',provider='',model='',last_error='',updated_ts=$ts;",
                 new Dictionary<string, object> { ["ts"] = ts });
-            ExecuteSql(connection, @"UPDATE character_reputations
+            Program.ExecuteSql(connection, @"UPDATE character_reputations
 SET reason_text=COALESCE(NULLIF((SELECT a.incident_description FROM reputation_activations a
     WHERE a.activation_id=character_reputations.reason_activation_id),''),NULLIF(reason_text,''),NULLIF(description,''),'A recorded event established this reputation.'),
 reason_status='recorded',updated_ts=$ts
 WHERE reason_activation_id<>'';", new Dictionary<string, object> { ["ts"] = ts });
-            ExecuteSql(connection, @"UPDATE reputation_reason_jobs
+            Program.ExecuteSql(connection, @"UPDATE reputation_reason_jobs
 SET status='retired',last_error='Background LLM reason generation was retired; the recorded incident is authoritative.',updated_ts=$ts
 WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
         }
@@ -110,12 +110,12 @@ WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
         // still not guaranteed (busy, stopping or canceled before start skips it); the result
         // (queued, completed, yielded, failed or skipped_<reason>) is exposed through
         // /api/background/status as reputationReasonResumeOutcome.
-        private static string ReputationReasonResumeOutcome = "";
+        internal static string ReputationReasonResumeOutcome = "";
 
-        private static void ResumePendingReputationReasonJobs()
+        internal static void ResumePendingReputationReasonJobs()
         {
             System.Threading.Volatile.Write(ref ReputationReasonResumeOutcome, "queued");
-            TryEnqueuePriorityBackgroundWork("reputation.reason.resume", "maintenance", () =>
+            Program.TryEnqueuePriorityBackgroundWork("reputation.reason.resume", "maintenance", () =>
             {
                 string outcome = "failed";
                 try { outcome = ReconcileRecordedReputationReasonsAtStartup(); }
@@ -125,13 +125,13 @@ WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
 
         private static string ReconcileRecordedReputationReasonsAtStartup()
         {
-            string root = CampaignsRoot();
+            string root = Program.CampaignsRoot();
             if (!Directory.Exists(root)) return "completed";
             foreach (string directory in Directory.GetDirectories(root))
             {
-                if (PriorityBackgroundWorkShouldYield()) return "yielded";
+                if (Program.PriorityBackgroundWorkShouldYield()) return "yielded";
                 string campaignId = Path.GetFileName(directory);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
                     NormalizeRecordedReputationReasons(connection);
@@ -140,7 +140,7 @@ WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
             return "completed";
         }
 
-        private static Dictionary<string, object> CharacterSocialStandingProjection(
+        internal static Dictionary<string, object> CharacterSocialStandingProjection(
             ReignDbConnection connection, string campaignId, string subjectId)
         {
             EnsureSocialReputationSchema(connection);
@@ -160,7 +160,7 @@ WHERE status<>'retired';", new Dictionary<string, object> { ["ts"] = ts });
             Dictionary<string, Dictionary<string, object>> tags = ReadDictionaryList(catalog, "tags")
                 .Where(tag => !string.IsNullOrWhiteSpace(ReadString(tag, "id", "")))
                 .ToDictionary(tag => ReadString(tag, "id", ""), tag => tag, StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> rumors = QuerySql(connection, @"SELECT rst.tag_id,rst.subject_role,rst.description,
+            List<Dictionary<string, object>> rumors = Program.QuerySql(connection, @"SELECT rst.tag_id,rst.subject_role,rst.description,
 rst.rumor_value,rst.snapshot_json,ro.occurrence_id,ro.archetype_id,ro.source_event_id,ro.world_day,ro.expires_day,
 ro.provenance_summary,ro.snapshot_json AS occurrence_snapshot_json
 FROM rumor_subject_tags rst JOIN rumor_occurrences ro ON ro.occurrence_id=rst.occurrence_id
@@ -170,7 +170,7 @@ ORDER BY ro.world_day DESC,ro.created_ts DESC;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["day"] = worldDay });
             foreach (Dictionary<string, object> row in rumors)
                 EnrichSocialProfileRow(row, tags, false);
-            List<Dictionary<string, object>> reputations = QuerySql(connection, @"SELECT tag_id,description,reputation_value,
+            List<Dictionary<string, object>> reputations = Program.QuerySql(connection, @"SELECT tag_id,description,reputation_value,
 acquired_day,reason_text,reason_status,reason_activation_id,snapshot_json,archetype_id,subject_role
 FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND status='active'
 ORDER BY acquired_day DESC,updated_ts DESC;",
@@ -222,7 +222,7 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
             foreach (Dictionary<string, object> archetype in ReadDictionaryList(catalog, "archetypes")
                 .Where(item => ReadBool(item, "enabled", true) && !ReadBool(item, "directReputation", false)))
             {
-                foreach (KeyValuePair<string, object> role in DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>()))
+                foreach (KeyValuePair<string, object> role in Program.DictionaryOrDefault(archetype, "roleMappings", new Dictionary<string, object>()))
                 {
                     List<Dictionary<string, object>> mapped = ValueTextList(role.Value)
                         .Where(byId.ContainsKey).Select(id => byId[id])
@@ -255,31 +255,31 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
 
         private static string ResolveCharacterSocialTimeline(ReignDbConnection connection)
         {
-            if (QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_test_native_heartbeats';").Any())
+            if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_test_native_heartbeats';").Any())
             {
-                string timeline = ReadString(QuerySql(connection,
+                string timeline = ReadString(Program.QuerySql(connection,
                     "SELECT timeline_id FROM world_test_native_heartbeats ORDER BY world_day DESC,updated_ts DESC LIMIT 1;").FirstOrDefault(), "timeline_id", "");
                 if (!string.IsNullOrWhiteSpace(timeline)) return timeline;
             }
-            string rumorTimeline = ReadString(QuerySql(connection,
+            string rumorTimeline = ReadString(Program.QuerySql(connection,
                 "SELECT timeline_id FROM rumor_occurrences ORDER BY world_day DESC,updated_ts DESC LIMIT 1;").FirstOrDefault(), "timeline_id", "");
             return FirstNonEmpty(rumorTimeline, "main");
         }
 
         private static double ResolveCharacterSocialWorldDay(ReignDbConnection connection, string campaignId, string timelineId)
         {
-            double day = LatestKnownWorldDay(connection, campaignId);
-            if (QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_test_native_heartbeats';").Any())
-                day = Math.Max(day, ReadDouble(QuerySql(connection,
+            double day = Program.LatestKnownWorldDay(connection, campaignId);
+            if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_test_native_heartbeats';").Any())
+                day = Math.Max(day, ReadDouble(Program.QuerySql(connection,
                     "SELECT MAX(world_day) AS day FROM world_test_native_heartbeats WHERE timeline_id=$timeline;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault(), "day", 0d));
             return day;
         }
 
-        private static Dictionary<string, object> CharacterEditorSocialRumorAddApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CharacterEditorSocialRumorAddApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), LatestCampaignId());
+            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), Program.LatestCampaignId());
             string subjectId = ReadFirstString(payload, "heroStringId", "heroId", "subjectId");
             string archetypeId = ReadString(payload, "archetypeId", "");
             string role = ReadString(payload, "role", "");
@@ -292,7 +292,7 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
             if (string.IsNullOrWhiteSpace(idempotencyKey))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "idempotencyKey is required." };
             Dictionary<string, object> result;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 string timelineId = FirstNonEmpty(ReadString(payload, "timelineId", ""), ResolveCharacterSocialTimeline(connection));
@@ -315,10 +315,10 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
             return result;
         }
 
-        private static Dictionary<string, object> CharacterEditorSocialReputationAddApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CharacterEditorSocialReputationAddApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), LatestCampaignId());
+            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), Program.LatestCampaignId());
             string subjectId = ReadFirstString(payload, "heroStringId", "heroId", "subjectId");
             string tagId = ReadString(payload, "tagId", "");
             string incident = (ReadString(payload, "incidentDescription", "") ?? "").Trim();
@@ -330,7 +330,7 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
             if (string.IsNullOrWhiteSpace(idempotencyKey))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "idempotencyKey is required." };
             Dictionary<string, object> response;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
                 string timelineId = FirstNonEmpty(ReadString(payload, "timelineId", ""), ResolveCharacterSocialTimeline(connection));
@@ -345,19 +345,19 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
                     || !ReadBool(tag, "manualEligible", true))
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "That Reputation is unavailable for manual addition." };
                 string sourceEventId = "control_center_reputation_" + DeterministicSocialId(idempotencyKey);
-                Dictionary<string, object> duplicateActivation = QuerySql(connection,
+                Dictionary<string, object> duplicateActivation = Program.QuerySql(connection,
                     "SELECT activation_id FROM reputation_activations WHERE campaign_id=$campaign AND source_event_id=$event LIMIT 1;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["event"] = sourceEventId }).FirstOrDefault();
                 if (duplicateActivation != null)
                     return new Dictionary<string, object> { ["ok"] = true, ["duplicate"] = true, ["socialStanding"] = CharacterSocialStandingProjection(connection, campaignId, subjectId) };
-                if (QuerySql(connection, @"SELECT 1 FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
+                if (Program.QuerySql(connection, @"SELECT 1 FROM character_reputations WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND tag_id=$tag AND status='active' LIMIT 1;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["subject"] = subjectId, ["tag"] = tagId }).Any())
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "This character already has that active Reputation." };
                 Dictionary<string, object> snapshot = SocialTagSnapshot(tag, participant);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 int revision = ReadInt(catalog, "revision", BuiltInSocialCatalogRevision);
-                ExecuteSql(connection, @"INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
+                Program.ExecuteSql(connection, @"INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
 source_occurrence_id,archetype_id,subject_role,description,reputation_value,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
 VALUES($campaign,$timeline,$subject,$tag,'','manual_control_center','manual',$description,$value,$day,$revision,$snapshot,'active',$ts)
 ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO UPDATE SET source_occurrence_id='',archetype_id='manual_control_center',
@@ -385,17 +385,17 @@ snapshot_json=$snapshot,status='active',updated_ts=$ts;",
             return response;
         }
 
-        private static Dictionary<string, object> CharacterEditorSocialReasonRetryApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CharacterEditorSocialReasonRetryApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), LatestCampaignId());
+            string campaignId = FirstNonEmpty(ReadString(payload, "campaignId", ""), Program.LatestCampaignId());
             string activationId = ReadString(payload, "activationId", "");
             if (string.IsNullOrWhiteSpace(activationId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "activationId is required." };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureSocialReputationSchema(connection);
-                Dictionary<string, object> activation = QuerySql(connection,
+                Dictionary<string, object> activation = Program.QuerySql(connection,
                     "SELECT incident_description,description FROM reputation_activations WHERE activation_id=$activation LIMIT 1;",
                     new Dictionary<string, object> { ["activation"] = activationId }).FirstOrDefault();
                 if (activation == null)
@@ -403,14 +403,14 @@ snapshot_json=$snapshot,status='active',updated_ts=$ts;",
                 string reason = FirstNonEmpty(ReadString(activation, "incident_description", ""),
                     ReadString(activation, "description", ""), "A recorded event established this reputation.");
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"UPDATE reputation_activations
+                Program.ExecuteSql(connection, @"UPDATE reputation_activations
 SET reason_text=$reason,reason_status='recorded',provider='',model='',last_error='',updated_ts=$ts
 WHERE activation_id=$activation;",
                     new Dictionary<string, object> { ["activation"] = activationId, ["reason"] = reason, ["ts"] = ts });
-                ExecuteSql(connection, @"UPDATE character_reputations
+                Program.ExecuteSql(connection, @"UPDATE character_reputations
 SET reason_text=$reason,reason_status='recorded',updated_ts=$ts WHERE reason_activation_id=$activation;",
                     new Dictionary<string, object> { ["activation"] = activationId, ["reason"] = reason, ["ts"] = ts });
-                ExecuteSql(connection, @"UPDATE reputation_reason_jobs
+                Program.ExecuteSql(connection, @"UPDATE reputation_reason_jobs
 SET status='retired',last_error='Background LLM reason generation was retired.',updated_ts=$ts
 WHERE activation_id=$activation;",
                     new Dictionary<string, object> { ["activation"] = activationId, ["ts"] = ts });
@@ -421,9 +421,9 @@ WHERE activation_id=$activation;",
         private static Dictionary<string, object> CharacterSocialParticipant(
             ReignDbConnection connection, string campaignId, string subjectId, string role)
         {
-            Dictionary<string, object> roster = QuerySql(connection, "SELECT * FROM identity_roster WHERE hero_id=$id LIMIT 1;",
+            Dictionary<string, object> roster = Program.QuerySql(connection, "SELECT * FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = subjectId }).FirstOrDefault();
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, subjectId, "profile.json"));
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "profile.json"));
             bool alive = roster != null ? ReadInt(roster, "is_alive", 1) != 0 : ReadBool(profile, "isAlive", true);
             bool adult = roster != null ? ReadInt(roster, "is_adult", 1) != 0 : !ReadBool(profile, "isChild", false);
             if (!alive || !adult) return null;

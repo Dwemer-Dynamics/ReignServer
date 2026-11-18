@@ -290,7 +290,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                     var view = BuildIdentityView(acquaintance, TestDict("mode", "party_chat", "canonicalName", ReadString(other, "name", ""), "subject", other, "appearance", TestDict()));
                     var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey(id, target))).FirstOrDefault();
                     int native = ReadInt(FindRelationshipPair(ReadDictionaryList(p, "relationshipPairs"), id, target), "nativeRelation", 0);
-                    int affinity = pair == null ? native : EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == id, native);
+                    int affinity = pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == id, native);
                     bool known = IdentityStateVerified(acquaintance), ruler = ReadBool(other, "isRuler", false), noble = ReadBool(other, "isLord", false);
                     string formalAddress = ruler ? string.Join("/", SovereignFormalAddresses(other)) : "";
                     string authority = ruler ? (ReadString(h, "sovereignHeroStringId", "") == target ? "own sovereign" : "foreign sovereign")

@@ -94,7 +94,7 @@ namespace ReignBetaServer
             routes.Get("/api/background/status", request => PriorityBackgroundStatus());
             routes.Get("/api/prompts", request => ReadPromptTemplatesApi());
             routes.Post("/api/prompts", request => SavePromptTemplatesApi(request.JsonBody));
-            routes.Post("/api/castle-chat/prompts", request => CastleChatPromptsApi(request.JsonBody));
+            routes.Post("/api/castle-chat/prompts", request => CourtService.CastleChatPromptsApi(request.JsonBody));
             routes.Get("/api/logs", request => ReadLogApi(request.Query));
             routes.Get("/api/diagnostics/conversations", request => ConversationDiagnosticsListApi(request.Query));
             routes.Get("/api/diagnostics/conversations/trace", request => ConversationDiagnosticsTraceApi(request.Query));
@@ -173,9 +173,9 @@ namespace ReignBetaServer
             routes.Get("/portraits/status", request => PortraitStatus(request.JsonBody, request.Query));
             routes.Post("/portraits/status", request => PortraitStatus(request.JsonBody, request.Query));
             routes.Post("/portraits/request", request => PortraitRequest(request.JsonBody));
-            routes.Post("/castle-chat/scene/generate", request => RunInteractiveRequest(() => CastleSceneGenerate(request.JsonBody)));
-            routes.Post("/family-chambers/scene/generate", request => RunInteractiveRequest(() => FamilyChambersSceneGenerate(request.JsonBody)));
-            routes.Post("/family-chambers/childhood/mature", request => FamilyChambersMatureChildhood(request.JsonBody));
+            routes.Post("/castle-chat/scene/generate", request => RunInteractiveRequest(() => CourtService.CastleSceneGenerate(request.JsonBody)));
+            routes.Post("/family-chambers/scene/generate", request => RunInteractiveRequest(() => CourtService.FamilyChambersSceneGenerate(request.JsonBody)));
+            routes.Post("/family-chambers/childhood/mature", request => CourtService.FamilyChambersMatureChildhood(request.JsonBody));
             routes.Post("/portraits/diagnose", request => PortraitDiagnose(request.JsonBody));
             routes.Get("/actions/catalog", request => ActionCatalog());
             routes.Get("/actions/failures", request => ActionFailures(request.JsonBody, request.Query));

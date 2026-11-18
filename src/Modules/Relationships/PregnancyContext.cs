@@ -157,7 +157,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
         private static void ApplyConfirmedPregnancyExposure(ReignDbConnection c, string campaign, string timeline, PregnancyFacts f, double day)
         {
             if (!f.MotherExposed || !f.Illicit) return;
-            EnsureSocialReputationSchema(c);
+            ReputationService.EnsureSocialReputationSchema(c);
             foreach (var parent in new[] { TestDict("id", f.MotherId, "value", -50), TestDict("id", f.FatherExposed ? f.BiologicalFatherId : "", "value", -5) })
             {
                 string subject = ReadString(parent, "id", "");
@@ -167,12 +167,12 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
                     TestDict("campaign", campaign, "timeline", timeline, "subject", subject, "event", eventId)).Count > 0) continue;
                 var evidence = TestDict("pregnancyId", f.PregnancyId, "motherId", f.MotherId, "illicit", true,
                     "fatherNamed", f.FatherExposed, "biologicalFatherId", f.FatherExposed ? f.BiologicalFatherId : "");
-                ApplyCourtDynamicSocialOutcome(c, campaign, timeline, subject,
+                ReputationService.ApplyCourtDynamicSocialOutcome(c, campaign, timeline, subject,
                     TestDict("dynamicReputationTagId", "the_unchaste", "dynamicActive", true, "dynamicValue", ReadInt(parent, "value", -5),
                         "directReputationProducer", "pregnancy_exposure", "dynamicEvidence", evidence,
                         "dynamicDescription", subject == f.MotherId ? "Her publicly exposed illicit pregnancy is a severe court scandal." : "He is the publicly identified biological father of an illicit pregnancy."),
                     eventId, day, out _);
-                ReconcileSocialRelationshipsForSubjects(c, campaign, timeline, new[] { subject }, day);
+                ReputationService.ReconcileSocialRelationshipsForSubjects(c, campaign, timeline, new[] { subject }, day);
             }
         }
 

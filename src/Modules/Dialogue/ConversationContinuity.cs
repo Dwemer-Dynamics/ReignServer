@@ -914,7 +914,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             public int? SelectionRank;
         }
 
-        private static string RenderContinuityRecord(string id, string kind, string observer, string session,
+        internal static string RenderContinuityRecord(string id, string kind, string observer, string session,
             double day, int priority, bool required, string body, int? selectionRank = null)
         {
             Func<string, string> key = s => Regex.Replace(s ?? "", @"[^\p{L}\p{Nd}_:.,-]", "_");
@@ -1060,7 +1060,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             // Exact required-source and current-generation checks remain enforced.
         }
 
-        private static List<string> MissingContinuityContent(string rendered, Dictionary<string, object> evidence, bool serialized = false)
+        internal static List<string> MissingContinuityContent(string rendered, Dictionary<string, object> evidence, bool serialized = false)
         {
             var missing = new List<string>();
             foreach (var record in ReadDictionaryList(evidence, "requiredContent"))

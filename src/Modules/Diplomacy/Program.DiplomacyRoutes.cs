@@ -10,15 +10,15 @@ namespace ReignBetaServer
         // HTTP routes owned by the Diplomacy module, in their former router order (see RouteTable.cs).
         private static void RegisterDiplomacyRoutes(ReignRouteTable routes)
         {
-            routes.Post("/diplomacy/director/evaluate", request => EvaluateWorldDiplomacy(request.JsonBody));
-            routes.Post("/diplomacy/debug/random-event", request => QueueRandomDiplomacyDebugEvent(request.JsonBody));
-            routes.Get("/political-pressure/notices", request => NextPoliticalPressureNotices(request.Query));
-            routes.Post("/political-pressure/acknowledge", request => AcknowledgePoliticalPressureNotice(request.JsonBody));
+            routes.Post("/diplomacy/director/evaluate", request => DiplomacyService.EvaluateWorldDiplomacy(request.JsonBody));
+            routes.Post("/diplomacy/debug/random-event", request => DiplomacyService.QueueRandomDiplomacyDebugEvent(request.JsonBody));
+            routes.Get("/political-pressure/notices", request => DiplomacyService.NextPoliticalPressureNotices(request.Query));
+            routes.Post("/political-pressure/acknowledge", request => DiplomacyService.AcknowledgePoliticalPressureNotice(request.JsonBody));
 #if !REIGN_EXCLUDE_COURT
-            routes.Post("/clan-accords/sync", request => ClanAccordsSyncApi(request.JsonBody));
+            routes.Post("/clan-accords/sync", request => DiplomacyService.ClanAccordsSyncApi(request.JsonBody));
 #endif
-            routes.Get("/diplomacy/events/next", request => NextDiplomaticEvents(request.JsonBody, request.Query));
-            routes.Post("/diplomacy/events/acknowledge", request => AcknowledgeDiplomaticEvent(request.JsonBody));
+            routes.Get("/diplomacy/events/next", request => DiplomacyService.NextDiplomaticEvents(request.JsonBody, request.Query));
+            routes.Post("/diplomacy/events/acknowledge", request => DiplomacyService.AcknowledgeDiplomaticEvent(request.JsonBody));
         }
     }
 }

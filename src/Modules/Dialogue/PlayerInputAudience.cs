@@ -101,7 +101,7 @@ VALUES($id,$session,$event,$order,$exchange,'player_source',$player,$name,$text,
                         "retrievalEligible", false, "observerProjectionVersion", 2))));
         }
 
-        private static void ApplyPlayerInputAudienceToPayload(Dictionary<string, object> payload,
+        internal static void ApplyPlayerInputAudienceToPayload(Dictionary<string, object> payload,
             string listenerId, bool allowInterpretation = true)
         {
             if (payload == null) return;

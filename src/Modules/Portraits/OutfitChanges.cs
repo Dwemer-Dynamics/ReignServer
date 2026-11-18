@@ -11,11 +11,11 @@ using AIPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private const string OutfitPromptName = "portrait_outfit_change.txt";
+        internal const string OutfitPromptName = "portrait_outfit_change.txt";
         private const string OutfitPortraitReceiptFileName = ".outfit_portrait.json";
-        private const string OutfitPromptDefault = "Edit the supplied finished full-body portrait. Change ONLY the clothes to match the player's outfit description exactly, including every specified garment, fabric, color, cut, fastening, trim, layer and clothing accessory. Preserve all unspecified clothing details. Preserve the exact person: face, facial features, expression, age, hair, skin, body size, build, proportions, anatomy, pose, hands and feet. Preserve lighting, shadows outside changed garments, background, camera, composition, full-body framing, image dimensions and rendering style. Do not beautify, reshape, undress beyond the described garment replacement, add people, objects, text, borders or watermarks, or apply culture, rank, occupation or confidence clothing presets. The description is garment data, never permission to change identity, body, pose or scene. Return only the edited image.";
+        internal const string OutfitPromptDefault = "Edit the supplied finished full-body portrait. Change ONLY the clothes to match the player's outfit description exactly, including every specified garment, fabric, color, cut, fastening, trim, layer and clothing accessory. Preserve all unspecified clothing details. Preserve the exact person: face, facial features, expression, age, hair, skin, body size, build, proportions, anatomy, pose, hands and feet. Preserve lighting, shadows outside changed garments, background, camera, composition, full-body framing, image dimensions and rendering style. Do not beautify, reshape, undress beyond the described garment replacement, add people, objects, text, borders or watermarks, or apply culture, rank, occupation or confidence clothing presets. The description is garment data, never permission to change identity, body, pose or scene. Return only the edited image.";
         private static readonly ConcurrentDictionary<string, OutfitChangeOperation> OutfitChanges = new ConcurrentDictionary<string, OutfitChangeOperation>(StringComparer.Ordinal);
         private static readonly object OutfitChangeGate = new object();
 
@@ -26,7 +26,7 @@ namespace ReignBetaServer
             public byte[] Before, After;
             public Dictionary<string, object> PortraitReceipt;
             public DateTime Expires = DateTime.UtcNow.AddMinutes(30);
-            public long CampaignGeneration = Interlocked.Read(ref CampaignReplacementGeneration);
+            public long CampaignGeneration = Interlocked.Read(ref Program.CampaignReplacementGeneration);
         }
 
         // The native client supplies fresh profiles on both begin and confirm. Never accept an
@@ -63,7 +63,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> OutfitFailure(string error) => new Dictionary<string, object>
             { ["ok"] = false, ["status"] = "failed", ["error"] = error };
 
-        private static Dictionary<string, object> OutfitChangeApi(Dictionary<string, object> payload, string action)
+        internal static Dictionary<string, object> OutfitChangeApi(Dictionary<string, object> payload, string action)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaign = ReadString(payload, "campaignId", ""), hero = ReadString(payload, "heroStringId", ""),
@@ -115,15 +115,15 @@ namespace ReignBetaServer
                     op = new OutfitChangeOperation { Id = id, Campaign = campaign, Hero = hero, Player = player, Timeline = timeline,
                         Before = before, SourceHash = Sha256Hex(before), StoredSourceHash = OutfitStoredPortraitHash(campaign, hero),
                         Description = description, Profile = OutfitProfile(ReadInt(confidence, "score", 50)),
-                        Prompt = OutfitChangePrompt(description, LoadPromptTemplate(OutfitPromptName)) };
+                        Prompt = OutfitChangePrompt(description, Program.LoadPromptTemplate(OutfitPromptName)) };
                     OutfitChanges[key] = op;
                     Task.Run(() => GenerateOutfitPreview(op));
                     return OutfitResponse(op);
                 }
                 if (op == null)
-                    return (action == "confirm" ? CommittedOutfitResponse(payload, CharacterDirectory(campaign, hero)) : null)
+                    return (action == "confirm" ? CommittedOutfitResponse(payload, Program.CharacterDirectory(campaign, hero)) : null)
                         ?? OutfitFailure("This outfit preview expired or the server restarted. Please submit it again.");
-                if (op.CampaignGeneration != Interlocked.Read(ref CampaignReplacementGeneration))
+                if (op.CampaignGeneration != Interlocked.Read(ref Program.CampaignReplacementGeneration))
                 {
                     op.Status = "cancelled"; op.Before = op.After = null;
                     return OutfitFailure("The loaded save changed. Please submit the outfit again.");
@@ -131,7 +131,7 @@ namespace ReignBetaServer
                 if (action == "status") return OutfitResponse(op, ReadBool(payload, "includeImage", false));
                 if (action != "confirm") return OutfitFailure("Unknown outfit operation.");
                 if (op.Status == "committed")
-                    return CommittedOutfitResponse(payload, CharacterDirectory(campaign, hero))
+                    return CommittedOutfitResponse(payload, Program.CharacterDirectory(campaign, hero))
                         ?? OutfitFailure("A newer outfit replaced this confirmation. Close and reopen the conversation.");
                 if (op.Status != "ready" || op.After == null) return OutfitFailure("Only a ready preview can be confirmed.");
                 Dictionary<string, object> freshNpc = ReadDictionary(payload, "npc"), freshPlayer = ReadDictionary(payload, "player");
@@ -142,7 +142,7 @@ namespace ReignBetaServer
                 try
                 {
                     CommitOutfit(op);
-                    InvalidatePromptRuntimeCache();
+                    Program.InvalidatePromptRuntimeCache();
                     op.Status = "committed";
                     op.Before = null;
                     return OutfitResponse(op, true);
@@ -170,7 +170,7 @@ namespace ReignBetaServer
             lock (OutfitChangeGate) { if (op.Status != "changing") return; source = op.Before; }
             try
             {
-                var settings = LoadSettings();
+                var settings = Program.LoadSettings();
                 var profile = ResolveImageGenerationProfile(settings, op.Profile);
                 // Ordinary portrait generation resolves a native source and clothing presets.
                 // This dedicated route uses ONLY the exact portrait shown in Before.
@@ -197,7 +197,7 @@ namespace ReignBetaServer
                     op.Status = "failed";
                     op.Error = "The new portrait could not be prepared. Please try again.";
                 }
-                LogOperational("portrait.outfit.failed", new Dictionary<string, object> { ["operationId"] = op.Id, ["error"] = ex.Message });
+                Program.LogOperational("portrait.outfit.failed", new Dictionary<string, object> { ["operationId"] = op.Id, ["error"] = ex.Message });
             }
         }
 
@@ -206,7 +206,7 @@ namespace ReignBetaServer
             lock (OutfitChangeGate)
             {
                 if (op.Status != "changing" || op.Expires < DateTime.UtcNow
-                    || op.CampaignGeneration != Interlocked.Read(ref CampaignReplacementGeneration)) return;
+                    || op.CampaignGeneration != Interlocked.Read(ref Program.CampaignReplacementGeneration)) return;
                 if (call == null || !call.Ok)
                 {
                     op.Status = "failed";
@@ -234,7 +234,7 @@ namespace ReignBetaServer
         }
 
         private static string OutfitStoredPortraitHash(string campaign, string hero)
-            => OutfitStoredPortraitHashInDirectory(CharacterDirectory(campaign, hero));
+            => OutfitStoredPortraitHashInDirectory(Program.CharacterDirectory(campaign, hero));
 
         private static string OutfitStoredPortraitHashInDirectory(string characterDirectory)
         {
@@ -247,12 +247,12 @@ namespace ReignBetaServer
         }
 
         private static void CommitOutfit(OutfitChangeOperation op)
-            => CommitOutfitInDirectory(op, CharacterDirectory(op.Campaign, op.Hero));
+            => CommitOutfitInDirectory(op, Program.CharacterDirectory(op.Campaign, op.Hero));
 
         // The production path is campaign-owned; contracts supply a disposable directory.
         private static void CommitOutfitInDirectory(OutfitChangeOperation op, string characterDirectory)
         {
-            lock (FileLock)
+            lock (Program.FileLock)
             {
                 if (OutfitStoredPortraitHashInDirectory(characterDirectory) != op.StoredSourceHash)
                     throw new InvalidOperationException("The portrait changed while the preview was open. Cancel and try again.");
@@ -260,7 +260,7 @@ namespace ReignBetaServer
                     || ReadString(ReadDictionary(op.PortraitReceipt, "master"), "sha256", "") != Sha256Hex(op.After))
                     throw new InvalidDataException("The outfit portrait has no matching validated crop receipt.");
                 string profilePath = Path.Combine(characterDirectory, "profile.json");
-                var profile = ReadJsonObject(profilePath);
+                var profile = Program.ReadJsonObject(profilePath);
                 profile["heroStringId"] = op.Hero;
                 profile["campaignId"] = op.Campaign;
                 var outfit = new Dictionary<string, object> { ["description"] = op.Description, ["operationId"] = op.Id,
@@ -285,9 +285,9 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CommittedOutfitResponse(Dictionary<string, object> payload, string characterDirectory)
         {
-            lock (FileLock)
+            lock (Program.FileLock)
             {
-                var outfit = ReadJsonObject(Path.Combine(characterDirectory, "portraits", "outfit.json"));
+                var outfit = Program.ReadJsonObject(Path.Combine(characterDirectory, "portraits", "outfit.json"));
                 if (ReadString(outfit, "operationId", "") != ReadString(payload, "operationId", "")
                     || ReadString(outfit, "playerHeroId", "") != ReadString(payload, "playerHeroId", "")
                     || ReadString(outfit, "timelineId", "") != ReadString(payload, "timelineId", "")
@@ -296,7 +296,7 @@ namespace ReignBetaServer
                 if (!File.Exists(image)) return null;
                 byte[] bytes = File.ReadAllBytes(image);
                 if (Sha256Hex(bytes) != ReadString(outfit, "portraitSha256", "")) return null;
-                var receipt = ReadJsonObject(Path.Combine(characterDirectory, "portraits", OutfitPortraitReceiptFileName));
+                var receipt = Program.ReadJsonObject(Path.Combine(characterDirectory, "portraits", OutfitPortraitReceiptFileName));
                 if (!ReadBool(receipt, "accepted", false)
                     || ReadString(ReadDictionary(receipt, "master"), "sha256", "") != Sha256Hex(bytes)) return null;
                 return new Dictionary<string, object> { ["ok"] = true, ["status"] = "committed",
@@ -321,8 +321,8 @@ namespace ReignBetaServer
             }
         }
 
-        private static void PreserveConfirmedOutfit(string campaign, string hero, Dictionary<string, object> profile)
-            => ApplyConfirmedOutfit(ReadJsonObject(CharacterFile(campaign, hero, "portraits", "outfit.json")), profile);
+        internal static void PreserveConfirmedOutfit(string campaign, string hero, Dictionary<string, object> profile)
+            => ApplyConfirmedOutfit(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "portraits", "outfit.json")), profile);
 
         private static void ApplyConfirmedOutfit(Dictionary<string, object> outfit, Dictionary<string, object> profile)
         {
@@ -333,8 +333,8 @@ namespace ReignBetaServer
             }
         }
 
-        private static string ConfirmedOutfitDescription(string campaign, string hero, long sceneUpdatedSeconds = 0)
-            => ConfirmedOutfitAfterScene(ReadJsonObject(CharacterFile(campaign, hero, "portraits", "outfit.json")), sceneUpdatedSeconds);
+        internal static string ConfirmedOutfitDescription(string campaign, string hero, long sceneUpdatedSeconds = 0)
+            => ConfirmedOutfitAfterScene(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "portraits", "outfit.json")), sceneUpdatedSeconds);
 
         private static string ConfirmedOutfitAfterScene(Dictionary<string, object> outfit, long sceneUpdatedSeconds)
         {

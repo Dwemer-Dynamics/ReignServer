@@ -22,7 +22,7 @@ namespace ReignBetaServer
                     EnsureConversationAgencySchema(connection); EnsureIntoxicationSchema(connection);
                     EnsureAcceptedConversationUnitSchema(connection);
                     EnsureIdentitySchema(connection); EnsureConversationSceneStateSchema(connection);
-                    EnsureSocialReputationSchema(connection); EnsureConversationContinuitySchema(connection);
+                    ReputationService.EnsureSocialReputationSchema(connection); EnsureConversationContinuitySchema(connection);
                     ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""player"",""listener""]','{""timelineId"":""agency_timeline""}');", TestDict("campaign", campaign));
@@ -234,7 +234,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 }
                 var contextUnit = Unit("context_effects", group: true); Context(contextUnit);
                 int identityBefore = Count("identity_evidence");
-                var preview = NormalizeAndPersistConversationSocialSignals(campaign, contextUnit.Parsed, contextUnit.Payload,
+                var preview = ReputationService.NormalizeAndPersistConversationSocialSignals(campaign, contextUnit.Parsed, contextUnit.Payload,
                     "npc", "player", contextUnit.PlayerText, contextUnit.Reply, contextUnit.ConceptionGate, contextUnit.EventId, 20d, persist: false);
                 Check("social_preview_has_no_durable_effects", ReadDictionaryList(preview, "signals").Count == 1 && Count("court_social_signal_evidence") == 0);
                 bool contextFailed = false;

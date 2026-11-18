@@ -5,9 +5,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
-        private static Dictionary<string, object> AuditBackgroundPortraitEntrypoints(string clientRoot)
+        internal static Dictionary<string, object> AuditBackgroundPortraitEntrypoints(string clientRoot)
         {
             // Keyed by the client type that owns each entry point, wherever its source file lives.
             var targets = new Dictionary<string, string>

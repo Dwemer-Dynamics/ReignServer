@@ -15,7 +15,7 @@ namespace ReignBetaServer
         private const double DirectorPairCooldownDays = 7d;
         private const int PostgreSqlRelationshipDirectorSchemaRevision = 3;
 
-        private static void EnsureRelationshipDirectorSchema(ReignDbConnection connection)
+        internal static void EnsureRelationshipDirectorSchema(ReignDbConnection connection)
         {
             const string marker =
                 "postgresql_relationship_director_schema_revision";
@@ -798,10 +798,10 @@ WHERE run_id NOT IN (
             double maritalMultiplier=PairStoryKindMultiplier(connection,heroA,heroB,"marital_conflict",day);
             double romanceMultiplier=PairStoryKindMultiplier(connection,heroA,heroB,"romance",day);
             List<KeyValuePair<string,double>> eligible=new List<KeyValuePair<string,double>>();
-            eligible.Add(new KeyValuePair<string,double>("practical_favor",(24d+14d*affinity+8d*exposure)*favorMultiplier*CourtCharacterEventWeight(postureA,postureB,"favors","bargaining")));
-            eligible.Add(new KeyValuePair<string,double>("shared_confidence",(18d+24d*affinity+12d*exposure)*secretMultiplier*CourtCharacterEventWeight(postureA,postureB,"secrets","information")));
-            if(ReadBool(edge,"sameClan",false)||ReadBool(edge,"family",false))eligible.Add(new KeyValuePair<string,double>("family_duty_cooperation",(20d+18d*affinity)*CourtCharacterEventWeight(postureA,postureB,"protection","favors")));
-            if(ReadBool(edge,"spouses",false))eligible.Add(new KeyValuePair<string,double>("private_spousal_confidence",(18d+22d*affinity)*CourtCharacterEventWeight(postureA,postureB,"secrets","mediation")));
+            eligible.Add(new KeyValuePair<string,double>("practical_favor",(24d+14d*affinity+8d*exposure)*favorMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"favors","bargaining")));
+            eligible.Add(new KeyValuePair<string,double>("shared_confidence",(18d+24d*affinity+12d*exposure)*secretMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"secrets","information")));
+            if(ReadBool(edge,"sameClan",false)||ReadBool(edge,"family",false))eligible.Add(new KeyValuePair<string,double>("family_duty_cooperation",(20d+18d*affinity)*CourtService.CourtCharacterEventWeight(postureA,postureB,"protection","favors")));
+            if(ReadBool(edge,"spouses",false))eligible.Add(new KeyValuePair<string,double>("private_spousal_confidence",(18d+22d*affinity)*CourtService.CourtCharacterEventWeight(postureA,postureB,"secrets","mediation")));
             double rivalryThread=PairStoryKindIntensity(connection,heroA,heroB,"rivalry",day,false);
             double maritalThread=PairStoryKindIntensity(connection,heroA,heroB,"marital_conflict",day,false);
             double romanceThread=PairStoryKindIntensity(connection,heroA,heroB,"romance",day,true);
@@ -809,7 +809,7 @@ WHERE run_id NOT IN (
                 Math.Max(Math.Max(ReadDouble(ra,"envy",0d),ReadDouble(rb,"envy",0d)),Math.Max(ReadDouble(ra,"resentment",0d),ReadDouble(rb,"resentment",0d))))/100d;
             if(tension>=0.025d||ambition>=0.25d||competition>=0.10d||rivalryThread>0d)
                 eligible.Add(new KeyValuePair<string,double>(rivalryThread>=50d?"political_obstruction":"political_rivalry_argument",
-                    (10d+45d*Math.Max(tension,competition)+20d*ambition)*rivalryMultiplier*CourtCharacterEventWeight(postureA,postureB,"rivalry","threats","schemes")));
+                    (10d+45d*Math.Max(tension,competition)+20d*ambition)*rivalryMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"rivalry","threats","schemes")));
             if(ReadBool(edge,"spouses",false)&&(tension>=0.025d||competition>=0.10d||maritalThread>0d))
                 eligible.Add(new KeyValuePair<string,double>("marital_argument",(8d+35d*Math.Max(tension,competition))*maritalMultiplier));
             if(ReadBool(edge,"spouses",false)&&(maritalThread>=60d||ReadDouble(ra,"resentment",0d)>=25d||ReadDouble(rb,"resentment",0d)>=25d||ReadDouble(edge,"nativeRelation",0d)<=-15d
@@ -817,16 +817,16 @@ WHERE run_id NOT IN (
                 eligible.Add(new KeyValuePair<string,double>("marital_separation",((maritalThread>=80d?45d:20d)+45d*tension)*maritalMultiplier));
             bool reciprocalRomance=new[]{"lovers","soulmates"}.Contains(ReadString(edge,"sharedRelationshipTag",""),StringComparer.OrdinalIgnoreCase);
             bool flirtEligible=reciprocalRomance&&ReadBool(edge,"coLocated",false)&&DirectorRomanceEligible(postureA,40d)&&DirectorRomanceEligible(postureB,40d);
-            if(flirtEligible)eligible.Add(new KeyValuePair<string,double>("mutual_romantic_flirtation",(16d+12d*exposure)*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction")));
+            if(flirtEligible)eligible.Add(new KeyValuePair<string,double>("mutual_romantic_flirtation",(16d+12d*exposure)*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction")));
             bool confidenceEligible=reciprocalRomance&&DirectorRomanceEligible(postureA,40d)&&DirectorRomanceEligible(postureB,40d);
-            if(confidenceEligible&&romanceThread>=25d)eligible.Add(new KeyValuePair<string,double>("romantic_confidence",(14d+10d*exposure)*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction","secrets")));
+            if(confidenceEligible&&romanceThread>=25d)eligible.Add(new KeyValuePair<string,double>("romantic_confidence",(14d+10d*exposure)*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"flirtation","strategic_seduction","secrets")));
             bool outsideMarriage=(!string.IsNullOrWhiteSpace(ReadString(a,"spouseId",""))&&!ReadString(a,"spouseId","").Equals(heroB,StringComparison.OrdinalIgnoreCase))
                 ||(!string.IsNullOrWhiteSpace(ReadString(b,"spouseId",""))&&!ReadString(b,"spouseId","").Equals(heroA,StringComparison.OrdinalIgnoreCase));
             bool bothUnmarried=string.IsNullOrWhiteSpace(ReadString(a,"spouseId",""))&&string.IsNullOrWhiteSpace(ReadString(b,"spouseId",""));
             if(reciprocalRomance&&StoryPhysicalRomanceEligible(ReadBool(edge,"coLocated",false),bothUnmarried,romanceThread,50d,postureA,postureB))
-                eligible.Add(new KeyValuePair<string,double>("romantic_intimacy",(12d+8d*exposure)*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"strategic_seduction","flirtation")));
+                eligible.Add(new KeyValuePair<string,double>("romantic_intimacy",(12d+8d*exposure)*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"strategic_seduction","flirtation")));
             if(reciprocalRomance&&StoryPhysicalRomanceEligible(ReadBool(edge,"coLocated",false),outsideMarriage,romanceThread,75d,postureA,postureB))
-                eligible.Add(new KeyValuePair<string,double>("secret_affair_intimacy",(10d+8d*exposure)*romanceMultiplier*CourtCharacterEventWeight(postureA,postureB,"strategic_seduction")));
+                eligible.Add(new KeyValuePair<string,double>("secret_affair_intimacy",(10d+8d*exposure)*romanceMultiplier*CourtService.CourtCharacterEventWeight(postureA,postureB,"strategic_seduction")));
             return SelectWeightedPassiveEvent(eligible,ReadString(edge,"pairKey","")+"|"+Math.Floor(day/DirectorRunIntervalDays));
         }
 
@@ -1481,8 +1481,8 @@ SET divorce_b_completed=1,updated_ts=$ts WHERE pair_key=$pair;",
                 PairKey = divorcedPairKey, HeroAId = divorcedHero,
                 HeroBId = formerSpouse
             };
-            Dictionary<string, object> rumor = RegisterSocialOccurrence(
-                connection, campaignId, BuildRelationshipSocialOccurrence(
+            Dictionary<string, object> rumor = ReputationService.RegisterSocialOccurrence(
+                connection, campaignId, ReputationService.BuildRelationshipSocialOccurrence(
                     divorcedPair, (int)Math.Floor(worldDay), "divorce",
                     new Dictionary<string, object>
                     {
@@ -1619,8 +1619,8 @@ WHERE director_action_id=$id;",new Dictionary<string, object>{{"id",id}});
                             double divorceWorldDay=ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d));
 							string divorceTimeline=FirstNonEmpty(ReadString(payload,"timelineId",""),
 								ReadString(actionPayload,"timelineId",""),"main");
-                            Dictionary<string, object> rumor=RegisterSocialOccurrence(connection,campaignId,
-                                BuildRelationshipSocialOccurrence(pair,(int)Math.Floor(divorceWorldDay),"divorce",
+                            Dictionary<string, object> rumor=ReputationService.RegisterSocialOccurrence(connection,campaignId,
+                                ReputationService.BuildRelationshipSocialOccurrence(pair,(int)Math.Floor(divorceWorldDay),"divorce",
                                     new Dictionary<string, object>{{"heroStringId",a},{"name",a}},
                                     new Dictionary<string, object>{{"heroStringId",b},{"name",b}},b,a,true,true,
 									"The marriage ended in divorce.",divorceTimeline));
@@ -1814,7 +1814,7 @@ AND subject_id IN ($a,$b) AND status='active';", args);
 			ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='resolved_by_divorce',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", args);
-			ReconcileSocialRelationshipsForSubjects(connection, campaignId,
+			ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId,
 				timelineId, new[] { heroA, heroB }, worldDay);
 			StoreWorldMemoryEvent(new Dictionary<string, object>
 			{
@@ -1894,7 +1894,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
             };
         }
 
-        private static void FinalizeMarriage(ReignDbConnection connection,string campaignId,string evaluationId,double day,bool storeMemory=true)
+        internal static void FinalizeMarriage(ReignDbConnection connection,string campaignId,string evaluationId,double day,bool storeMemory=true)
         {
             Dictionary<string, object> row=QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",evaluationId}}).FirstOrDefault();
             if(row==null)return;
@@ -1913,7 +1913,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
             if(storeMemory)StoreMarriageMemory(connection,campaignId,evaluationId,day);
         }
 
-        private static void StoreMarriageMemory(ReignDbConnection connection,string campaignId,string evaluationId,double day)
+        internal static void StoreMarriageMemory(ReignDbConnection connection,string campaignId,string evaluationId,double day)
         {
             var row=QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",evaluationId}}).FirstOrDefault();
             if(row==null)return;

@@ -6,7 +6,7 @@ using Reign.Core.Contracts.ClanAccords;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DiplomacyService
     {
         private static List<Dictionary<string, object>> RunClanAccordSelfTests()
         {

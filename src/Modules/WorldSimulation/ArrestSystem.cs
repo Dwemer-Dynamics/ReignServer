@@ -119,7 +119,7 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object>
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureSocialReputationSchema(connection);
+                ReputationService.EnsureSocialReputationSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
                 EnsureRelationshipDirectorSchema(connection);
                 ExecuteSql(connection, "BEGIN IMMEDIATE;");

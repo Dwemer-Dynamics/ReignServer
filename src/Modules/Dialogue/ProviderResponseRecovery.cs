@@ -33,7 +33,7 @@ namespace ReignBetaServer
             void Check(string name, bool passed) => results.Add(TestDict("caseId", "provider_recovery_" + name,
                 "passed", passed, "summary", name));
             var settings = TestDict("reasoningMode", "selective", "reasoningEffort", "high");
-            foreach (string url in new[] { NanoGptChatCompletionsUrl,
+            foreach (string url in new[] { PortraitsService.NanoGptChatCompletionsUrl,
                 "https://nano-gpt.com/api/subscription/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions" })
             foreach (string model in new[] { "z-ai/glm-5.3", "z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash-uncensored",
                 "zai-org/GLM-5.3", "glm-5.3:fast:reasoning-exclude" })
@@ -56,18 +56,18 @@ namespace ReignBetaServer
             {
                 var body = TestDict();
                 ConfigureReasoningRouting(CloneDictionary(settings), TestDict("reasoningDisabled", true), body,
-                    NanoGptChatCompletionsUrl, model, "repair");
+                    PortraitsService.NanoGptChatCompletionsUrl, model, "repair");
                 Check("unrelated_disabled_" + PromptHash(model).Substring(0, 8),
                     ReadString(ReadDictionary(body, "reasoning"), "effort", "") == "none");
             }
             Check("custom_endpoint_unchanged", !RequiresGlm53Reasoning("https://example.invalid/v1/chat/completions", "z-ai/glm-5.3"));
-            string cooldownKey = ReasoningRouteKey(NanoGptChatCompletionsUrl, "z-ai/glm-5.3-flash");
+            string cooldownKey = ReasoningRouteKey(PortraitsService.NanoGptChatCompletionsUrl, "z-ai/glm-5.3-flash");
             try
             {
                 lock (PromptCacheStateLock) ReasoningFallbackCooldowns[cooldownKey] = DateTime.UtcNow.AddMinutes(1);
                 var body = TestDict("reasoning_effort", "none");
                 ConfigureReasoningRouting(CloneDictionary(settings), TestDict("reasoningDisabled", true), body,
-                    NanoGptChatCompletionsUrl, "z-ai/glm-5.3-flash", "repair");
+                    PortraitsService.NanoGptChatCompletionsUrl, "z-ai/glm-5.3-flash", "repair");
                 Check("mandatory_model_cooldown_never_defaults_to_max", !body.ContainsKey("reasoning_effort")
                     && ReadString(ReadDictionary(body, "reasoning"), "effort", "") == "low");
             }

@@ -33,7 +33,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET value_json=EXCLUDED.value_json;", TestDic
             EnsureMbtiRelationshipSchema(c);
             var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                 TestDict("pair", AmbientPairKey(hero, player))).FirstOrDefault();
-            return pair == null ? native : EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == hero, native);
+            return pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == hero, native);
         }
         private static Dictionary<string, object> NpcLivesSnapshot(ReignDbConnection c, NpcLivesState state, string invitation = "") =>
             TestDict("ok", true, "generation", NpcLivesGeneration(c), "state", state, "invitationId", invitation);

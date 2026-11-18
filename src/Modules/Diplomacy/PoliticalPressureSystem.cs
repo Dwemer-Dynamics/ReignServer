@@ -7,7 +7,7 @@ using Reign.Core.Contracts.Diplomacy;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DiplomacyService
     {
         private const int PoliticalPressureIncidentChance = 43;
         private static readonly string[] PoliticalPressureVirtues =
@@ -27,25 +27,25 @@ namespace ReignBetaServer
         private static readonly List<PoliticalPressureArchetype> PoliticalPressureCatalog =
             BuildPoliticalPressureCatalog();
 
-        private static void EnsurePoliticalPressureSchema(ReignDbConnection connection)
+        internal static void EnsurePoliticalPressureSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_delta_receipts (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_delta_receipts (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,actor_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,
 incident_id TEXT NOT NULL,requested_delta INTEGER NOT NULL,world_day REAL NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,incident_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_daily_rolls (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_daily_rolls (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
 chance INTEGER NOT NULL,roll INTEGER NOT NULL,passed INTEGER NOT NULL,status TEXT NOT NULL,
 origin_kingdom_id TEXT NOT NULL DEFAULT '',incident_id TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,day_key));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_state (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_state (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,actor_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,
 actor_kingdom_name TEXT NOT NULL DEFAULT '',target_kingdom_name TEXT NOT NULL DEFAULT '',
 actor_ruler_id TEXT NOT NULL DEFAULT '',target_ruler_id TEXT NOT NULL DEFAULT '',pressure_value INTEGER NOT NULL DEFAULT 0,
 dominant_channel TEXT NOT NULL DEFAULT '',updated_day REAL NOT NULL DEFAULT 0,last_incident_id TEXT NOT NULL DEFAULT '',
 last_action_day REAL NOT NULL DEFAULT -1,revision INTEGER NOT NULL DEFAULT 1,
 PRIMARY KEY(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_incidents (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_incidents (
 incident_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
 archetype_id TEXT NOT NULL,polarity TEXT NOT NULL,channel TEXT NOT NULL,severity TEXT NOT NULL,severity_rank INTEGER NOT NULL,
 pressure_amount INTEGER NOT NULL,relationship_penalty INTEGER NOT NULL,
@@ -59,22 +59,22 @@ headline TEXT NOT NULL,narrative TEXT NOT NULL,llm_selector_status TEXT NOT NULL
 notice_status TEXT NOT NULL DEFAULT 'ready',correlation_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'completed',
 payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 UNIQUE(campaign_id,timeline_id,day_key));");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_pressure_incidents_pair
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_pressure_incidents_pair
 ON political_pressure_incidents(campaign_id,timeline_id,origin_kingdom_id,target_kingdom_id,world_day DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_native_effects (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_native_effects (
 effect_id TEXT PRIMARY KEY,incident_id TEXT NOT NULL,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,
 effect_type TEXT NOT NULL,target_id TEXT NOT NULL,amount INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
 before_value REAL NOT NULL DEFAULT -1,after_value REAL NOT NULL DEFAULT -1,receipt_day REAL NOT NULL DEFAULT -1,
 error TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_pressure_effects_pending
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_pressure_effects_pending
 ON political_pressure_native_effects(campaign_id,timeline_id,status,world_day);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_action_rolls (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_action_rolls (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
 actor_kingdom_id TEXT NOT NULL,target_kingdom_id TEXT NOT NULL,pressure_value INTEGER NOT NULL,polarity TEXT NOT NULL,
 channel TEXT NOT NULL,chance INTEGER NOT NULL,roll INTEGER NOT NULL,passed INTEGER NOT NULL,selected INTEGER NOT NULL DEFAULT 0,
 status TEXT NOT NULL,action_id TEXT NOT NULL DEFAULT '',outcome TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,day_key,actor_kingdom_id,target_kingdom_id));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_activity (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS political_pressure_activity (
 activity_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,
 incident_id TEXT NOT NULL DEFAULT '',actor_kingdom_id TEXT NOT NULL DEFAULT '',target_kingdom_id TEXT NOT NULL DEFAULT '',
 actor_ruler_id TEXT NOT NULL DEFAULT '',target_ruler_id TEXT NOT NULL DEFAULT '',event_type TEXT NOT NULL,
@@ -82,11 +82,11 @@ polarity TEXT NOT NULL DEFAULT '',channel TEXT NOT NULL DEFAULT '',severity TEXT
 before_value INTEGER NOT NULL DEFAULT 0,after_value INTEGER NOT NULL DEFAULT 0,roll INTEGER NOT NULL DEFAULT 0,chance INTEGER NOT NULL DEFAULT 0,
 action_id TEXT NOT NULL DEFAULT '',correlation_id TEXT NOT NULL DEFAULT '',reason TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_pressure_activity_timeline
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_pressure_activity_timeline
 ON political_pressure_activity(campaign_id,timeline_id,world_day DESC,event_type);");
         }
 
-        private static Dictionary<string, object> EvaluatePoliticalPressure(
+        internal static Dictionary<string, object> EvaluatePoliticalPressure(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -108,10 +108,10 @@ ON political_pressure_activity(campaign_id,timeline_id,world_day DESC,event_type
 
             int currentDay = (int)Math.Floor(worldDay + 0.000001d);
             int lastProcessedDay;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                lastProcessedDay = ReadInt(QuerySql(connection, @"
+                lastProcessedDay = ReadInt(Program.QuerySql(connection, @"
 SELECT MAX(day_key) AS latest_day FROM political_pressure_daily_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                     new Dictionary<string, object>
@@ -166,10 +166,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
             if (!TryClaimPoliticalPressureDailyRoll(campaignId, timelineId,
                 day, worldDay, dailyRoll))
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsurePoliticalPressureSchema(connection);
-                    Dictionary<string, object> existing = QuerySql(connection, @"SELECT * FROM political_pressure_daily_rolls
+                    Dictionary<string, object> existing = Program.QuerySql(connection, @"SELECT * FROM political_pressure_daily_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day LIMIT 1;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day }).FirstOrDefault();
                     return new Dictionary<string, object> { ["ok"] = true, ["status"] = "already_processed", ["day"] = day,
@@ -266,10 +266,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day LIMIT 1;"
                     target, origin, -pressureAmount, channel, incidentId);
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO political_pressure_incidents(
+                Program.ExecuteSql(connection, @"INSERT INTO political_pressure_incidents(
 incident_id,campaign_id,timeline_id,day_key,world_day,archetype_id,polarity,channel,severity,severity_rank,
 pressure_amount,relationship_penalty,origin_kingdom_id,target_kingdom_id,origin_kingdom_name,target_kingdom_name,
 origin_ruler_id,target_ruler_id,origin_ruler_name,target_ruler_name,origin_war_count,target_war_count,hostile_chance,polarity_roll,
@@ -318,7 +318,7 @@ $targetStance,$originBefore,$originAfter,$targetBefore,$targetAfter,$headline,$n
 
 #if !REIGN_EXCLUDE_COURT
             if (originStance == "awaiting_player" || targetStance == "awaiting_player")
-                QueueInternationalPoliticalIncident(campaignId, timelineId, worldDay, incidentId,
+                CourtService.QueueInternationalPoliticalIncident(campaignId, timelineId, worldDay, incidentId,
                     world, origin, target, originLords, targetLords, severityRank, archetype.Headline,
                     archetype.Description, channel, originStance, targetStance, polarity);
 #endif
@@ -326,10 +326,10 @@ $targetStance,$originBefore,$originAfter,$targetBefore,$targetAfter,$headline,$n
             string narrative = GeneratePoliticalPressureNarrative(campaignId, incidentId,
                 archetype, severity, origin, target, originLords, targetLords,
                 originStance, targetStance, out string narrationStatus);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                ExecuteSql(connection, @"UPDATE political_pressure_incidents SET narrative=$narrative,
+                Program.ExecuteSql(connection, @"UPDATE political_pressure_incidents SET narrative=$narrative,
 llm_selector_status=$selector,llm_narration_status=$narration,notice_status='ready',updated_ts=$ts WHERE incident_id=$id;",
                     new Dictionary<string, object> { ["narrative"] = narrative, ["selector"] = selectorStatus,
                         ["narration"] = narrationStatus, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = incidentId });
@@ -345,7 +345,7 @@ llm_selector_status=$selector,llm_narration_status=$narration,notice_status='rea
                     ["pressureAmount"] = pressureAmount, ["selectorStatus"] = selectorStatus,
                     ["narrationStatus"] = narrationStatus
                 });
-            InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            Program.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return new Dictionary<string, object> { ["ok"] = true, ["status"] = "incident_created",
                 ["incidentId"] = incidentId, ["polarity"] = polarity, ["severity"] = severity };
         }
@@ -354,10 +354,10 @@ llm_selector_status=$selector,llm_narration_status=$narration,notice_status='rea
             int day, double worldDay, int roll, bool passed, string status, string originKingdomId, string incidentId)
         {
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO political_pressure_daily_rolls(campaign_id,timeline_id,day_key,world_day,
+                Program.ExecuteSql(connection, @"INSERT INTO political_pressure_daily_rolls(campaign_id,timeline_id,day_key,world_day,
 chance,roll,passed,status,origin_kingdom_id,incident_id,created_ts)
 VALUES($campaign,$timeline,$day,$worldDay,$chance,$roll,$passed,$status,$origin,$incident,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
@@ -368,7 +368,7 @@ status=excluded.status,origin_kingdom_id=excluded.origin_kingdom_id,incident_id=
                     ["chance"] = PoliticalPressureIncidentChance, ["roll"] = roll, ["passed"] = passed ? 1 : 0,
                     ["status"] = status ?? "", ["origin"] = originKingdomId ?? "", ["incident"] = incidentId ?? "", ["ts"] = ts
                 });
-                RecordWorldTestCounter(connection, campaignId, timelineId, day, "political_pressures",
+                Program.RecordWorldTestCounter(connection, campaignId, timelineId, day, "political_pressures",
                     "daily:" + day.ToString(CultureInfo.InvariantCulture), new Dictionary<string, object>
                     {
                         ["dailyRolls"] = 1, [passed ? "dailyRollsPassed" : "dailyRollsFailed"] = 1,
@@ -381,10 +381,10 @@ status=excluded.status,origin_kingdom_id=excluded.origin_kingdom_id,incident_id=
             string timelineId, int day, double worldDay, int roll)
         {
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                return QuerySql(connection, @"INSERT INTO political_pressure_daily_rolls(
+                return Program.QuerySql(connection, @"INSERT INTO political_pressure_daily_rolls(
 campaign_id,timeline_id,day_key,world_day,chance,roll,passed,status,
 origin_kingdom_id,incident_id,created_ts)
 VALUES($campaign,$timeline,$day,$worldDay,$chance,$roll,0,'processing','','',$ts)
@@ -406,13 +406,13 @@ RETURNING day_key;", new Dictionary<string, object>
         private static Dictionary<string, object> SelectPoliticalPressureOrigin(string campaignId,
             string timelineId, int day, List<Dictionary<string, object>> kingdoms)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 return kingdoms.OrderByDescending(kingdom =>
                 {
                     string id = ReadString(kingdom, "kingdomId", "");
-                    double last = ReadDouble(QuerySql(connection, @"SELECT MAX(world_day) AS day FROM political_pressure_incidents
+                    double last = ReadDouble(Program.QuerySql(connection, @"SELECT MAX(world_day) AS day FROM political_pressure_incidents
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$kingdom;",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["kingdom"] = id })
                         .FirstOrDefault(), "day", -1000d);
@@ -428,14 +428,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$kin
             string originId = ReadString(origin, "kingdomId", "");
             HashSet<string> enemies = new HashSet<string>(ReadStringList(origin, "enemies"), StringComparer.OrdinalIgnoreCase);
             int warCount = enemies.Count;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 List<Dictionary<string, object>> eligible = kingdoms.Where(x =>
                     !ReadString(x, "kingdomId", "").Equals(originId, StringComparison.OrdinalIgnoreCase)).Where(x =>
                 {
                     string targetId = ReadString(x, "kingdomId", "");
-                    double last = ReadDouble(QuerySql(connection, @"SELECT MAX(world_day) AS day FROM political_pressure_incidents
+                    double last = ReadDouble(Program.QuerySql(connection, @"SELECT MAX(world_day) AS day FROM political_pressure_incidents
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND
 ((origin_kingdom_id=$origin AND target_kingdom_id=$target) OR (origin_kingdom_id=$target AND target_kingdom_id=$origin));",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
@@ -497,10 +497,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND
         {
             string originId = ReadString(origin, "kingdomId", "");
             string targetId = ReadString(target, "kingdomId", "");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                HashSet<string> recent = new HashSet<string>(QuerySql(connection, @"SELECT archetype_id FROM political_pressure_incidents
+                HashSet<string> recent = new HashSet<string>(Program.QuerySql(connection, @"SELECT archetype_id FROM political_pressure_incidents
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$origin AND target_kingdom_id=$target AND world_day>$cutoff;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["origin"] = originId, ["target"] = targetId, ["cutoff"] = day - 14d })
@@ -547,7 +547,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$ori
             return 0;
         }
 
-        private static List<Dictionary<string, object>> SelectPoliticalPressureClans(string campaignId,
+        internal static List<Dictionary<string, object>> SelectPoliticalPressureClans(string campaignId,
             string timelineId, int day, List<Dictionary<string, object>> clans, string kingdomId, string rulerHeroId,
             int severityRank, string side)
         {
@@ -563,7 +563,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$ori
                 .ThenBy(x => ReadString(x, "clanId", ""), StringComparer.OrdinalIgnoreCase).Take(count).ToList();
         }
 
-        private static List<string> PoliticalPressureLeadLords(List<Dictionary<string, object>> clans)
+        internal static List<string> PoliticalPressureLeadLords(List<Dictionary<string, object>> clans)
         {
             return (clans ?? new List<Dictionary<string, object>>()).Select(x =>
                     FirstNonEmpty(ReadFirstString(x, "leaderName", "name"),
@@ -609,7 +609,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$ori
                     ["target"] = CompactPoliticalPressureRulerContext(target, origin, targetLords)
                 })
             };
-            Dictionary<string, object> llm = ChatWithLlm(request);
+            Dictionary<string, object> llm = Program.ChatWithLlm(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             if (ValidatePoliticalPressureTraitRoutes(parsed))
@@ -700,7 +700,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$ori
                     {
                         ["id"] = ReadString(x, "id", "").Trim().ToLowerInvariant(),
                         ["highFavors"] = ReadString(x, "highFavors", "").Trim().ToLowerInvariant(),
-                        ["reason"] = LimitText(ReadString(x, "reason", "Contextual court judgment."), 120)
+                        ["reason"] = Program.LimitText(ReadString(x, "reason", "Contextual court judgment."), 120)
                     }).ToList()
                 };
             }
@@ -756,7 +756,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$ori
                     });
             }
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 foreach (Dictionary<string, object> settlement in (settlements ?? new List<Dictionary<string, object>>()).Where(x =>
@@ -766,7 +766,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND origin_kingdom_id=$ori
                     string settlementId = ReadString(settlement, "settlementId", "");
                     if (string.IsNullOrWhiteSpace(settlementId)) continue;
                     string effectId = incidentId + ":" + side + ":loyalty:" + settlementId;
-                    ExecuteSql(connection, @"INSERT INTO political_pressure_native_effects(effect_id,incident_id,campaign_id,timeline_id,
+                    Program.ExecuteSql(connection, @"INSERT INTO political_pressure_native_effects(effect_id,incident_id,campaign_id,timeline_id,
 world_day,effect_type,target_id,amount,status,created_ts,updated_ts)
 VALUES($id,$incident,$campaign,$timeline,$day,'settlement_loyalty',$target,-10,'pending',$ts,$ts)
 ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
@@ -775,7 +775,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
                         ["timeline"] = timelineId, ["day"] = worldDay, ["target"] = settlementId, ["ts"] = ts
                     });
                 }
-                RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                Program.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", incidentId + ":domestic:" + side, new Dictionary<string, object>
                     {
                         ["rulersRefusingLords"] = 1,
@@ -833,10 +833,10 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
                     ["originDecision"] = originStance, ["targetDecision"] = targetStance
                 })
             };
-            Dictionary<string, object> llm = ChatWithLlm(request);
+            Dictionary<string, object> llm = Program.ChatWithLlm(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
-            string narrative = LimitText(ReadString(parsed, "narrative", ""), 900);
+            string narrative = Program.LimitText(ReadString(parsed, "narrative", ""), 900);
             if (!string.IsNullOrWhiteSpace(narrative))
             {
                 status = "llm";
@@ -854,19 +854,19 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
                 : stance == "support_lords" ? "publicly supported the petitioning lords" : "refused the petition to preserve foreign relations";
         }
 
-        private static int ReadPoliticalPressureValue(string campaignId, string timelineId, string actorId, string targetId)
+        internal static int ReadPoliticalPressureValue(string campaignId, string timelineId, string actorId, string targetId)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 return ReadPoliticalPressureValue(connection, campaignId, timelineId, actorId, targetId);
             }
         }
 
-        private static int ReadPoliticalPressureValue(ReignDbConnection connection, string campaignId,
+        internal static int ReadPoliticalPressureValue(ReignDbConnection connection, string campaignId,
             string timelineId, string actorId, string targetId)
         {
-            return ReadInt(QuerySql(connection, @"SELECT pressure_value FROM political_pressure_state
+            return ReadInt(Program.QuerySql(connection, @"SELECT pressure_value FROM political_pressure_state
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$actor AND target_kingdom_id=$target LIMIT 1;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["actor"] = actorId, ["target"] = targetId }).FirstOrDefault(), "pressure_value", 0);
@@ -880,12 +880,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$acto
             if (ReadBool(actor, "isPlayerKingdom", false) || string.IsNullOrWhiteSpace(actorId)
                 || string.IsNullOrWhiteSpace(targetId) || actorId.Equals(targetId, StringComparison.OrdinalIgnoreCase)) return 0;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
-                if (!string.IsNullOrWhiteSpace(incidentId) && QuerySql(connection, @"INSERT INTO political_pressure_delta_receipts
+                if (!string.IsNullOrWhiteSpace(incidentId) && Program.QuerySql(connection, @"INSERT INTO political_pressure_delta_receipts
 (campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,incident_id,requested_delta,world_day)
 VALUES($campaign,$timeline,$actor,$target,$incident,$delta,$day)
 ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,incident_id) DO NOTHING RETURNING incident_id;",
@@ -898,7 +898,7 @@ ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,incident_
                 int before = ReadPoliticalPressureValue(connection, campaignId, timelineId, actorId, targetId);
                 int after = Clamp(before + delta, -100, 100);
                 string dominant = after == 0 ? "" : channel ?? "";
-                Dictionary<string, object> changed = QuerySql(connection, @"INSERT INTO political_pressure_state(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,
+                Dictionary<string, object> changed = Program.QuerySql(connection, @"INSERT INTO political_pressure_state(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,
 actor_kingdom_name,target_kingdom_name,actor_ruler_id,target_ruler_id,pressure_value,dominant_channel,updated_day,last_incident_id,revision)
 VALUES($campaign,$timeline,$actor,$target,$actorName,$targetName,$actorRuler,$targetRuler,$value,$channel,$day,$incident,1)
 ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id) DO UPDATE SET
@@ -913,7 +913,7 @@ pressure_value=MAX(-100,MIN(100,political_pressure_state.pressure_value+$delta))
                     }).FirstOrDefault();
                 after = ReadInt(changed, "pressure_value", after);
                 transaction.Commit();
-                RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                Program.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", incidentId + ":pressure:" + actorId, new Dictionary<string, object>
                     {
                         ["pressureMovement"] = Math.Abs(after - before), [after > before ? "hostilePressureAdded" : "peacefulPressureAdded"] = Math.Abs(after - before),
@@ -931,10 +931,10 @@ pressure_value=MAX(-100,MIN(100,political_pressure_state.pressure_value+$delta))
             int day = (int)Math.Floor(worldDay + 0.000001d);
             Dictionary<string, Dictionary<string, object>> byId = kingdoms.ToDictionary(x => ReadString(x, "kingdomId", ""),
                 x => x, StringComparer.OrdinalIgnoreCase);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT * FROM political_pressure_state
+                List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT * FROM political_pressure_state
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND (pressure_value>=10 OR pressure_value<=-10)
 ORDER BY ABS(pressure_value) DESC,updated_day,actor_kingdom_id,target_kingdom_id;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
@@ -955,7 +955,7 @@ ORDER BY ABS(pressure_value) DESC,updated_day,actor_kingdom_id,target_kingdom_id
                     int roll = StableRulerD100(campaignId, timelineId, day, "pressure-action:" + actorId + ":" + targetId);
                     bool didPass = roll <= chance;
                     long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ExecuteSql(connection, @"INSERT INTO political_pressure_action_rolls(campaign_id,timeline_id,day_key,world_day,
+                    Program.ExecuteSql(connection, @"INSERT INTO political_pressure_action_rolls(campaign_id,timeline_id,day_key,world_day,
 actor_kingdom_id,target_kingdom_id,pressure_value,polarity,channel,chance,roll,passed,selected,status,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$worldDay,$actor,$target,$value,$polarity,$channel,$chance,$roll,$passed,0,'evaluated',$ts,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key,actor_kingdom_id,target_kingdom_id) DO NOTHING;",
@@ -976,7 +976,7 @@ ON CONFLICT(campaign_id,timeline_id,day_key,actor_kingdom_id,target_kingdom_id) 
                 if (selected == null) return null;
                 string selectedActor = ReadString(selected, "actor_kingdom_id", "");
                 string selectedTarget = ReadString(selected, "target_kingdom_id", "");
-                ExecuteSql(connection, @"UPDATE political_pressure_action_rolls SET selected=1,status='selected',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE political_pressure_action_rolls SET selected=1,status='selected',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND actor_kingdom_id=$actor AND target_kingdom_id=$target;",
                     new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId,
                         ["timeline"] = timelineId, ["day"] = day, ["actor"] = selectedActor, ["target"] = selectedTarget });
@@ -1004,15 +1004,15 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND actor
             string actorId = ReadString(actor, "kingdomId", "");
             string targetId = ReadString(target, "kingdomId", "");
             int before;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 before = ReadPoliticalPressureValue(connection, campaignId, timelineId, actorId, targetId);
-                ExecuteSql(connection, @"UPDATE political_pressure_state SET pressure_value=0,dominant_channel='',last_action_day=$day,
+                Program.ExecuteSql(connection, @"UPDATE political_pressure_state SET pressure_value=0,dominant_channel='',last_action_day=$day,
 revision=revision+1 WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$actor AND target_kingdom_id=$target;",
                     new Dictionary<string, object> { ["day"] = worldDay, ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["actor"] = actorId, ["target"] = targetId });
-                ExecuteSql(connection, @"UPDATE political_pressure_action_rolls SET status='resolved',action_id=$action,outcome=$outcome,updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE political_pressure_action_rolls SET status='resolved',action_id=$action,outcome=$outcome,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$actor AND target_kingdom_id=$target AND selected=1 AND status='selected';",
                     new Dictionary<string, object> { ["action"] = actionId ?? "", ["outcome"] = outcome ?? "",
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId,
@@ -1036,7 +1036,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$acto
                     ["directionId"] = directionId, ["eventId"] = eventId, ["pressureConsumed"] = Math.Abs(before),
                     ["hostileBacklash"] = accepted ? 0 : 8, ["relationshipPenalty"] = accepted ? 0 : -25
                 });
-            InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            Program.InvalidateWorldTestOverviewCache(campaignId, timelineId);
         }
 
         private static void RecordPoliticalPressureNoAction(string campaignId, string timelineId,
@@ -1047,12 +1047,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$acto
             string actorId = ReadString(actor, "kingdomId", "");
             string targetId = ReadString(target, "kingdomId", "");
             int pressure;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 pressure = ReadPoliticalPressureValue(connection, campaignId,
                     timelineId, actorId, targetId);
-                ExecuteSql(connection, @"UPDATE political_pressure_action_rolls
+                Program.ExecuteSql(connection, @"UPDATE political_pressure_action_rolls
 SET status='resolved',outcome='no_credible_action',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND actor_kingdom_id=$actor AND target_kingdom_id=$target
@@ -1069,16 +1069,16 @@ AND selected=1 AND status='selected';", new Dictionary<string, object>
                 0, 0, "", "political-pressure-no-action:" + directionId, reason, null);
         }
 
-        private static Dictionary<string, object> NextPoliticalPressureNotices(Dictionary<string, string> query)
+        internal static Dictionary<string, object> NextPoliticalPressureNotices(Dictionary<string, string> query)
         {
             PoliticalPressureNoticesRequest request = PoliticalPressureNoticesRequest.FromQuery(query);
             string campaignId = request.CampaignId;
             string timelineId = request.TimelineId;
             int limit = request.Limit;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                List<Dictionary<string, object>> incidents = QuerySql(connection, @"SELECT * FROM political_pressure_incidents
+                List<Dictionary<string, object>> incidents = Program.QuerySql(connection, @"SELECT * FROM political_pressure_incidents
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND notice_status IN ('ready','fetched')
 ORDER BY world_day,incident_id LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
@@ -1086,14 +1086,14 @@ ORDER BY world_day,incident_id LIMIT " + limit.ToString(CultureInfo.InvariantCul
                 {
                     incident["news_description"] = PoliticalPressureCatalog.FirstOrDefault(a => a.Id == ReadString(incident, "archetype_id", ""))?.Description ?? "";
                     string id = ReadString(incident, "incident_id", "");
-                    incident["nativeEffects"] = QuerySql(connection, @"SELECT effect_id,effect_type,target_id,amount,status
+                    incident["nativeEffects"] = Program.QuerySql(connection, @"SELECT effect_id,effect_type,target_id,amount,status
 FROM political_pressure_native_effects WHERE incident_id=$incident ORDER BY effect_id;",
                         new Dictionary<string, object> { ["incident"] = id });
-                    ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='fetched',updated_ts=$ts WHERE incident_id=$id;",
+                    Program.ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='fetched',updated_ts=$ts WHERE incident_id=$id;",
                         new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
                 }
                 // Current directed state, including zeros after consumed diplomacy; incident history is not readiness.
-                var readinessRows = QuerySql(connection, @"SELECT actor_kingdom_id,target_kingdom_id,pressure_value,dominant_channel
+                var readinessRows = Program.QuerySql(connection, @"SELECT actor_kingdom_id,target_kingdom_id,pressure_value,dominant_channel
 FROM political_pressure_state WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY actor_kingdom_id,target_kingdom_id LIMIT 1025;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
@@ -1102,7 +1102,7 @@ ORDER BY actor_kingdom_id,target_kingdom_id LIMIT 1025;",
             }
         }
 
-        private static Dictionary<string, object> AcknowledgePoliticalPressureNotice(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> AcknowledgePoliticalPressureNotice(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             PoliticalPressureAcknowledgeRequest request = PoliticalPressureAcknowledgeRequest.FromDictionary(payload);
@@ -1111,15 +1111,15 @@ ORDER BY actor_kingdom_id,target_kingdom_id LIMIT 1025;",
             string incidentId = request.IncidentId;
             double receiptDay = request.WorldDay;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                if (ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM political_pressure_incidents WHERE incident_id=$id;",
+                if (ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM political_pressure_incidents WHERE incident_id=$id;",
                     new Dictionary<string, object> { ["id"] = incidentId }).FirstOrDefault(), "count", 0) == 0)
                     return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
                 foreach (PoliticalPressureEffectReceipt receipt in request.EffectReceipts)
                 {
-                    ExecuteSql(connection, @"UPDATE political_pressure_native_effects SET status=$status,before_value=$before,
+                    Program.ExecuteSql(connection, @"UPDATE political_pressure_native_effects SET status=$status,before_value=$before,
 after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=$id AND status='pending';",
                         new Dictionary<string, object>
                         {
@@ -1128,13 +1128,13 @@ after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=
                             ["day"] = receiptDay, ["error"] = receipt.Error, ["ts"] = ts, ["id"] = receipt.EffectId
                         });
                 }
-                ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$id;",
+                Program.ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$id;",
                     new Dictionary<string, object> { ["ts"] = ts, ["id"] = incidentId });
             }
             RecordPoliticalPressureActivity(campaignId, timelineId, receiptDay, incidentId, null, null,
                 "message_receipt", "", "", "", "acknowledged", 0, 0, 0, 0, "", incidentId,
                 "Game message displayed and native effects reported.", payload);
-            InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            Program.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return PoliticalPressureAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
 
@@ -1146,10 +1146,10 @@ after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=
         {
             string activityId = correlation + ":" + eventType + ":" + (actionId ?? "") + ":" + (incidentId ?? "");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO political_pressure_activity(activity_id,campaign_id,timeline_id,world_day,
+                Program.ExecuteSql(connection, @"INSERT INTO political_pressure_activity(activity_id,campaign_id,timeline_id,world_day,
 incident_id,actor_kingdom_id,target_kingdom_id,actor_ruler_id,target_ruler_id,event_type,polarity,channel,severity,status,
 before_value,after_value,roll,chance,action_id,correlation_id,reason,payload_json,created_ts)
 VALUES($id,$campaign,$timeline,$day,$incident,$actor,$target,$actorRuler,$targetRuler,$type,$polarity,$channel,$severity,
@@ -1165,7 +1165,7 @@ $status,$before,$after,$roll,$chance,$action,$correlation,$reason,$payload,$ts) 
                         ["chance"] = chance, ["action"] = actionId ?? "", ["correlation"] = correlation ?? "",
                         ["reason"] = reason ?? "", ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
                     });
-                RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                Program.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", activityId, new Dictionary<string, object>
                     {
                         ["activity:" + (eventType ?? "unknown")] = 1, ["status:" + (status ?? "unknown")] = 1
@@ -1173,39 +1173,39 @@ $status,$before,$after,$roll,$chance,$action,$correlation,$reason,$payload,$ts) 
             }
         }
 
-        private static Dictionary<string, object> BuildWorldTestPoliticalPressures(ReignDbConnection connection,
+        internal static Dictionary<string, object> BuildWorldTestPoliticalPressures(ReignDbConnection connection,
             string campaignId, string timelineId, double latestDay)
         {
             EnsurePoliticalPressureSchema(connection);
             EnsureKingdomLeaderDiplomacySchema(connection);
-            Dictionary<string, object> daily = QuerySql(connection, @"SELECT COUNT(*) AS total,
+            Dictionary<string, object> daily = Program.QuerySql(connection, @"SELECT COUNT(*) AS total,
 SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed,MAX(world_day) AS latest,
 MIN(day_key) AS earliest_day,MAX(day_key) AS latest_day FROM political_pressure_daily_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, object>
             { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> incidents = QuerySql(connection, @"SELECT COUNT(*) AS total,
+            Dictionary<string, object> incidents = Program.QuerySql(connection, @"SELECT COUNT(*) AS total,
 SUM(CASE WHEN polarity='hostile' THEN 1 ELSE 0 END) AS hostile,SUM(CASE WHEN polarity='peaceful' THEN 1 ELSE 0 END) AS peaceful,
 SUM(CASE WHEN origin_stance='support_lords' THEN 1 ELSE 0 END)+SUM(CASE WHEN target_stance='support_lords' THEN 1 ELSE 0 END) AS supported,
 SUM(CASE WHEN origin_stance='preserve_relations' THEN 1 ELSE 0 END)+SUM(CASE WHEN target_stance='preserve_relations' THEN 1 ELSE 0 END) AS refused,
 MAX(world_day) AS latest FROM political_pressure_incidents WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> pressure = QuerySql(connection, @"SELECT COUNT(*) AS directions,
+            Dictionary<string, object> pressure = Program.QuerySql(connection, @"SELECT COUNT(*) AS directions,
 SUM(CASE WHEN pressure_value>0 THEN 1 ELSE 0 END) AS hostile,SUM(CASE WHEN pressure_value<0 THEN 1 ELSE 0 END) AS peaceful,
 SUM(CASE WHEN pressure_value=0 THEN 1 ELSE 0 END) AS neutral,AVG(ABS(pressure_value)) AS average_magnitude,
 MAX(ABS(pressure_value)) AS maximum_magnitude FROM political_pressure_state
 WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, object>
             { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> actions = QuerySql(connection, @"SELECT COUNT(*) AS total,
+            Dictionary<string, object> actions = Program.QuerySql(connection, @"SELECT COUNT(*) AS total,
 SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed,SUM(CASE WHEN selected=1 THEN 1 ELSE 0 END) AS selected,
 SUM(CASE WHEN status='resolved' AND outcome LIKE '%refus%' THEN 1 ELSE 0 END) AS refused FROM political_pressure_action_rolls
 WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, object>
             { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> effects = QuerySql(connection, @"SELECT COUNT(*) AS total,
+            Dictionary<string, object> effects = Program.QuerySql(connection, @"SELECT COUNT(*) AS total,
 SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) AS applied,
 SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed FROM political_pressure_native_effects
 WHERE campaign_id=$campaign AND timeline_id=$timeline;", new Dictionary<string, object>
             { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> foreignRulerChoices = QuerySql(connection, @"SELECT
+            Dictionary<string, object> foreignRulerChoices = Program.QuerySql(connection, @"SELECT
 SUM(CASE WHEN event_kind='political_pressure_foreign_relations_preserved' THEN 1 ELSE 0 END) AS preserved,
 SUM(CASE WHEN event_kind='political_pressure_foreign_relations_sacrificed' THEN 1 ELSE 0 END) AS sacrificed,
 SUM(CASE WHEN event_kind='political_pressure_foreign_relations_preserved' THEN affinity_delta ELSE 0 END) AS gained,
@@ -1214,11 +1214,11 @@ FROM ruler_diplomatic_incidents WHERE campaign_id=$campaign AND timeline_id=$tim
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .FirstOrDefault() ?? new Dictionary<string, object>();
             List<string> anomalies = new List<string>();
-            int outOfRange = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM political_pressure_state
+            int outOfRange = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM political_pressure_state
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND (pressure_value<-100 OR pressure_value>100);",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault(), "count", 0);
             if (outOfRange > 0) anomalies.Add(outOfRange + " directional pressure values are outside -100..100.");
-            int overdue = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM political_pressure_native_effects
+            int overdue = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM political_pressure_native_effects
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='pending' AND world_day<$cutoff;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["cutoff"] = latestDay - 1d })
                 .FirstOrDefault(), "count", 0);
@@ -1226,7 +1226,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND status='pending' AND w
             int failedEffects = ReadInt(effects, "failed", 0);
             if (failedEffects > 0) anomalies.Add(failedEffects
                 + " political-pressure native effects failed to apply.");
-            int incompleteVotes = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM political_pressure_incidents
+            int incompleteVotes = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM political_pressure_incidents
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND
 (trait_rolls_json IS NULL OR trait_rolls_json='' OR origin_stance='' OR target_stance='');",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }).FirstOrDefault(), "count", 0);
@@ -1239,12 +1239,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND
             if (missingDaily > 0)
                 anomalies.Add(missingDaily
                     + " political-pressure campaign-day rolls are missing between the first and latest processed days.");
-            List<Dictionary<string, object>> matrix = QuerySql(connection, @"SELECT actor_kingdom_id,target_kingdom_id,
+            List<Dictionary<string, object>> matrix = Program.QuerySql(connection, @"SELECT actor_kingdom_id,target_kingdom_id,
 actor_kingdom_name,target_kingdom_name,actor_ruler_id,target_ruler_id,pressure_value,dominant_channel,
 updated_day,last_incident_id,last_action_day,revision FROM political_pressure_state
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY actor_kingdom_name,target_kingdom_name;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
-            Dictionary<string, int> channels = QuerySql(connection, @"SELECT channel,COUNT(*) AS count FROM political_pressure_incidents
+            Dictionary<string, int> channels = Program.QuerySql(connection, @"SELECT channel,COUNT(*) AS count FROM political_pressure_incidents
 WHERE campaign_id=$campaign AND timeline_id=$timeline GROUP BY channel;",
                 new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId })
                 .ToDictionary(x => ReadString(x, "channel", "unknown"), x => ReadInt(x, "count", 0), StringComparer.OrdinalIgnoreCase);
@@ -1275,7 +1275,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline GROUP BY channel;",
             };
         }
 
-        private static List<Dictionary<string, object>> QueryPoliticalPressureActivity(ReignDbConnection connection,
+        internal static List<Dictionary<string, object>> QueryPoliticalPressureActivity(ReignDbConnection connection,
             string campaignId, string timelineId, Dictionary<string, string> query, int limit)
         {
             EnsurePoliticalPressureSchema(connection);
@@ -1285,7 +1285,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline GROUP BY channel;",
                 "target_pressure_before", "target_pressure_after", "severity_rank", "pressure_amount", "polarity",
                 "origin_lords_json", "target_lords_json", "trait_routes_json", "trait_rolls_json", "headline", "narrative" };
             string projection = string.Join(",", incidentColumns.Select(column => "i." + column + " AS detail_" + column));
-            List<Dictionary<string, object>> rows = QuerySql(connection,
+            List<Dictionary<string, object>> rows = Program.QuerySql(connection,
                 "SELECT a.*,i.incident_id AS detail_id," + projection + @" FROM political_pressure_activity a
 LEFT JOIN political_pressure_incidents i ON i.incident_id=a.incident_id
 AND i.campaign_id=a.campaign_id AND i.timeline_id=a.timeline_id
@@ -1376,7 +1376,7 @@ WHERE a.campaign_id=$campaign AND a.timeline_id=$timeline ORDER BY a.world_day D
             return result;
         }
 
-        private static List<Dictionary<string, object>> RunPoliticalPressureSelfTests()
+        internal static List<Dictionary<string, object>> RunPoliticalPressureSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => rows.Add(new Dictionary<string, object>
@@ -1422,9 +1422,9 @@ WHERE a.campaign_id=$campaign AND a.timeline_id=$timeline ORDER BY a.world_day D
                         TryClaimPoliticalPressureDailyRoll(campaignId, "main", 9, 9.5d, 17)),
                     System.Threading.Tasks.Task.Run(() => secondClaim =
                         TryClaimPoliticalPressureDailyRoll(campaignId, "main", 9, 9.5d, 17)));
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    int claimRows = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count
+                    int claimRows = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM political_pressure_daily_rolls
 WHERE campaign_id=$campaign AND timeline_id='main' AND day_key=9;",
                         new Dictionary<string, object> { ["campaign"] = campaignId })
@@ -1432,7 +1432,7 @@ WHERE campaign_id=$campaign AND timeline_id='main' AND day_key=9;",
                     add("daily_processing_claim_is_concurrency_safe",
                         firstClaim != secondClaim && claimRows == 1,
                         "Concurrent daily pressure workers leave one durable claim and exactly one worker owns side effects.");
-                    ExecuteSql(connection, @"INSERT INTO political_pressure_state(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,pressure_value)
+                    Program.ExecuteSql(connection, @"INSERT INTO political_pressure_state(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id,pressure_value)
 VALUES($campaign,'main','ours','hostile',60),($campaign,'main','ours','resolved',0),($campaign,'other','ours','foreign-timeline',100);",
                         new Dictionary<string, object> { ["campaign"] = campaignId });
                     var readinessResponse = NextPoliticalPressureNotices(new Dictionary<string, string> { ["campaignId"] = campaignId, ["timelineId"] = "main" });
@@ -1448,7 +1448,7 @@ VALUES($campaign,'main','ours','hostile',60),($campaign,'main','ours','resolved'
             {
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                Program.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             return rows;
         }

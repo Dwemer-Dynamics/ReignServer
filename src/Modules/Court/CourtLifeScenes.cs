@@ -4,12 +4,12 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CourtService
     {
         private static Dictionary<string, object> CourtLifeSceneError(string message)
             => new Dictionary<string, object> { ["ok"] = false, ["error"] = message };
 
-        private static Dictionary<string, object> CourtLifeScene(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CourtLifeScene(Dictionary<string, object> payload)
         {
             string campaign = ReadString(payload, "campaignId", "default"), timeline = ReadString(payload, "timelineId", "main");
             string matter = ReadString(payload, "matterId", ""), templateId = ReadString(payload, "templateId", "");
@@ -23,7 +23,7 @@ namespace ReignBetaServer
                 return CourtLifeSceneError("An exact international hearing and its participants are required.");
             string sceneKey = "court_scene:" + timeline + ":" + matter;
             var key = new Dictionary<string, object> { ["id"] = sceneKey, ["timeline"] = timeline, ["matter"] = matter };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
                 var saved = ReadCourtLifeScene(connection, key);
@@ -54,17 +54,17 @@ namespace ReignBetaServer
                 + "\nNamed payment parties: " + Json.Serialize(ReadDictionaryList(payload, "paymentParties"))
                 + "\nExisting case context: " + Json.Serialize(sceneContext)
                 + "\nAvailable actions: " + Json.Serialize(options);
-            var llm = ChatWithLlm(new Dictionary<string, object> {
-                ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaign, ["correlationId"] = EnsureCorrelationId(payload),
-                ["messages"] = BuildSimplePromptEnvelope("court_life_scene", "preparation", "Prepare one consistent disputed case without executing actions.", prompt).Messages,
+            var llm = Program.ChatWithLlm(new Dictionary<string, object> {
+                ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaign, ["correlationId"] = Program.EnsureCorrelationId(payload),
+                ["messages"] = Program.BuildSimplePromptEnvelope("court_life_scene", "preparation", "Prepare one consistent disputed case without executing actions.", prompt).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" } });
-            if (!ReadBool(llm, "ok", false)) return CourtLifeSceneError(LlmFailureForDisplay(llm));
+            if (!ReadBool(llm, "ok", false)) return CourtLifeSceneError(Program.LlmFailureForDisplay(llm));
             var scene = NormalizeCourtLifeScene(TryParseJsonObject(ReadString(llm, "content", "")));
             if (scene == null) return CourtLifeSceneError("The hearing's shared account was incomplete. Return and retry the audience.");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureCourtLifeSceneStore(connection);
-                ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,'case_scene','scene','',$scene,$ts);",
+                Program.ExecuteSql(connection, "INSERT OR IGNORE INTO court_life_turns(turn_id,timeline_id,matter_id,actor_id,phase,player_text,reply_text,created_ts) VALUES($id,$timeline,$matter,'case_scene','scene','',$scene,$ts);",
                     new Dictionary<string, object>(key) { ["scene"] = Json.Serialize(scene), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 // Concurrent retries return the winning immutable account, never a second story.
                 scene = ReadCourtLifeScene(connection, key);
@@ -103,13 +103,13 @@ namespace ReignBetaServer
         }
 
         private static void EnsureCourtLifeSceneStore(ReignDbConnection connection)
-            => ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_life_turns(
+            => Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS court_life_turns(
 turn_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,matter_id TEXT NOT NULL,actor_id TEXT NOT NULL,
 phase TEXT NOT NULL,player_text TEXT NOT NULL,reply_text TEXT NOT NULL,created_ts INTEGER NOT NULL);");
 
         private static Dictionary<string, object> ReadCourtLifeScene(ReignDbConnection connection, Dictionary<string, object> key)
         {
-            var row = QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE turn_id=$id AND timeline_id=$timeline AND matter_id=$matter AND actor_id='case_scene' AND phase='scene';", key).FirstOrDefault();
+            var row = Program.QuerySql(connection, "SELECT reply_text FROM court_life_turns WHERE turn_id=$id AND timeline_id=$timeline AND matter_id=$matter AND actor_id='case_scene' AND phase='scene';", key).FirstOrDefault();
             return row == null ? null : NormalizeCourtLifeScene(TryParseJsonObject(ReadString(row, "reply_text", "")));
         }
 

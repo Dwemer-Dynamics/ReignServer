@@ -34,7 +34,7 @@ namespace ReignBetaServer
         private static readonly Dictionary<string, ProviderState> ProviderStates = new Dictionary<string, ProviderState>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, ProviderCachedResponse> ProviderResponses = new Dictionary<string, ProviderCachedResponse>(StringComparer.Ordinal);
 
-        private static string ProviderPostJson(string apiUrl, string apiKey, string requestJson, Dictionary<string, object> settings,
+        internal static string ProviderPostJson(string apiUrl, string apiKey, string requestJson, Dictionary<string, object> settings,
             Dictionary<string, object> diagnostics, string correlationId, string requestType, string model,
             Action<string> contentDelta = null, Func<bool> canceled = null)
         {

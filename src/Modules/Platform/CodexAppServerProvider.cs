@@ -77,7 +77,7 @@ namespace ReignBetaServer
         }
 
         private static readonly object CodexLifecycleLock = new object();
-        private static readonly object CodexStateLock = new object();
+        internal static readonly object CodexStateLock = new object();
         private static readonly object CodexWriteLock = new object();
         private static readonly Dictionary<long, CodexRpcWaiter> CodexPending = new Dictionary<long, CodexRpcWaiter>();
         private static readonly Dictionary<string, CodexTurnWaiter> CodexTurns = new Dictionary<string, CodexTurnWaiter>(StringComparer.OrdinalIgnoreCase);
@@ -102,7 +102,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> CodexAccount = new Dictionary<string, object>();
         private static bool CodexAccountIdentityVerificationRequired;
         private static long CodexAccountNotificationGeneration;
-        private static List<Dictionary<string, object>> CodexModels = new List<Dictionary<string, object>>();
+        internal static List<Dictionary<string, object>> CodexModels = new List<Dictionary<string, object>>();
 
         private static string NormalizeLlmProvider(string value)
         {
@@ -164,7 +164,7 @@ namespace ReignBetaServer
                 + "To set it: sudo reignctl stop, edit " + SettingsPath + ", then sudo reignctl start.";
         }
 
-        private static bool UsesCodexSubscription(Dictionary<string, object> settings)
+        internal static bool UsesCodexSubscription(Dictionary<string, object> settings)
         {
             return NormalizeLlmProvider(ReadString(settings, "llmProvider", OpenAiCompatibleProvider)) == CodexSubscriptionProvider;
         }
@@ -729,7 +729,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static ProcessStartInfo CreateCodexAppServerStartInfo(string executable, string workingDirectory)
+        internal static ProcessStartInfo CreateCodexAppServerStartInfo(string executable, string workingDirectory)
         {
             return new ProcessStartInfo
             {
@@ -810,7 +810,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static string SerializeCodexTransportFrame(Dictionary<string, object> message)
+        internal static string SerializeCodexTransportFrame(Dictionary<string, object> message)
         {
             string json = Json.Serialize(message ?? new Dictionary<string, object>());
             StringBuilder ascii = null;
@@ -1058,7 +1058,7 @@ namespace ReignBetaServer
             return Math.Max(5000, Math.Min(600000, ReadInt(settings, "providerRequestTimeoutMs", 120000)));
         }
 
-        private static string CodexWorkingDirectory()
+        internal static string CodexWorkingDirectory()
         {
             return Path.Combine(DataDir, "codex-provider");
         }
@@ -1145,7 +1145,7 @@ namespace ReignBetaServer
             }.Select(value => (value ?? "").Trim().ToLowerInvariant()));
         }
 
-        private static string ReadNestedId(Dictionary<string, object> source, string key)
+        internal static string ReadNestedId(Dictionary<string, object> source, string key)
         {
             Dictionary<string, object> nested = ReadDictionary(source, key);
             return nested == null ? ReadString(source, key + "Id", ReadString(source, "id", "")) : ReadString(nested, "id", "");

@@ -9,11 +9,11 @@ using ReignPortraits;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private const string NativePortraitGeneratorExecutable = "Bannerlord.NativeCharacterImageGenerator.App.exe";
         private const string NativePortraitRenderContract = "ai_source_wan_portrait_v5";
-        private const string ResidentOutfitRenderContract = "ai_source_resident_full_outfit_v1";
+        internal const string ResidentOutfitRenderContract = "ai_source_resident_full_outfit_v1";
         private const int NativePortraitSourceWidth = 768;
         private const int NativePortraitSourceHeight = 1024;
         private const int NativePortraitGeneratorTimeoutMs = 180000;
@@ -130,12 +130,12 @@ namespace ReignBetaServer
                         || string.IsNullOrWhiteSpace(ReadString(snapshot, "bodyKey", "")))
                         throw new InvalidDataException("Native portrait snapshot identity or facial appearance is invalid.");
                     string snapshotPath = Path.Combine(jobRoot, "character.json");
-                    WriteJsonObject(snapshotPath, snapshot);
+                    Program.WriteJsonObject(snapshotPath, snapshot);
                     AppendProcessArgument(arguments, "--character-snapshot", NativeGeneratorPath(snapshotPath));
                 }
                 AppendProcessArgument(arguments, "--reign-render-portrait-source");
                 AppendProcessArgument(arguments, "--campaign-id", ReadString(payload, "campaignId", ""));
-                AppendProcessArgument(arguments, "--reign-data-root", NativeGeneratorPath(DataDir));
+                AppendProcessArgument(arguments, "--reign-data-root", NativeGeneratorPath(Program.DataDir));
                 AppendProcessArgument(arguments, "--hero-id", ReadFirstString(payload, "heroStringId", "heroId", "characterId"));
                 AppendProcessArgument(arguments, "--character-object-id", ReadString(payload, "characterObjectId", ""));
                 AppendProcessArgument(arguments, "--cache-key", ReadString(payload, "cacheKey", ""));
@@ -172,7 +172,7 @@ namespace ReignBetaServer
 
                 source = File.ReadAllBytes(outputPath);
                 RequirePortraitSourceContract(source, "Native portrait source");
-                var generatorResult = ReadJsonObject(resultPath);
+                var generatorResult = Program.ReadJsonObject(resultPath);
                 string expectedRenderContract = PreserveResidentClothing(payload) ? ResidentOutfitRenderContract : NativePortraitRenderContract;
                 if (ReadString(generatorResult, "renderContract", "") != expectedRenderContract)
                     throw new InvalidDataException("The native source did not use the required framing contract: " + expectedRenderContract);
@@ -207,9 +207,9 @@ namespace ReignBetaServer
             // The game renderer remains Windows-native; only a locally installed helper is callable.
             string bridge = Environment.GetEnvironmentVariable("REIGN_NATIVE_GENERATOR")
                 ?? ReadString(settings, "portraitNativeSourceGeneratorPath", "");
-            string bridgeRecord = Path.Combine(DataDir, "windows-bridge.json");
+            string bridgeRecord = Path.Combine(Program.DataDir, "windows-bridge.json");
             if (string.IsNullOrWhiteSpace(bridge) && File.Exists(bridgeRecord))
-                bridge = ReadString(ReadJsonObject(bridgeRecord), "nativeGenerator", "");
+                bridge = ReadString(Program.ReadJsonObject(bridgeRecord), "nativeGenerator", "");
             if (!bridge.StartsWith("/mnt/", StringComparison.Ordinal)
                 || !string.Equals(Path.GetFileName(bridge), NativePortraitGeneratorExecutable, StringComparison.Ordinal)
                 || !File.Exists(bridge)) return "";

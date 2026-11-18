@@ -378,7 +378,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             return Json.Serialize(fallback);
         }
 
-        private static bool IsCompactConversationMetadataScalar(object value)
+        internal static bool IsCompactConversationMetadataScalar(object value)
         {
             if (value == null || value is bool || value is byte || value is short || value is int
                 || value is long || value is float || value is double || value is decimal)
@@ -730,7 +730,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             Dictionary<string, object> courtSocial;
             try
             {
-                courtSocial = ProcessCompletedConversationCourtStanding(
+                courtSocial = ReputationService.ProcessCompletedConversationCourtStanding(
                     campaignId, session, turns, worldDay, interrupted);
             }
             catch (Exception ex)
@@ -750,7 +750,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             Dictionary<string, object> ambassadorReport;
             try
             {
-                ambassadorReport = FinalizeOfficialAmbassadorScene(campaignId, session, turns, scene, worldDay, ts);
+                ambassadorReport = CourtService.FinalizeOfficialAmbassadorScene(campaignId, session, turns, scene, worldDay, ts);
             }
             catch (Exception ex)
             {
@@ -1025,7 +1025,7 @@ WHERE session_id=$id;", new Dictionary<string, object>
             }
         }
 
-        private static void InsertConversationTurn(ReignDbConnection connection, string turnId, string sessionId, string eventId,
+        internal static void InsertConversationTurn(ReignDbConnection connection, string turnId, string sessionId, string eventId,
             int turnOrder, string exchangeId, string role, string speakerId, string speakerName, string text, string channel,
             double worldDay, long ts, string locationId, List<string> participants, Dictionary<string, object> payload)
         {
@@ -1626,7 +1626,7 @@ VALUES($document_type,$document_id,$source_type,$source_id,$ordinal,'{}');", new
             });
         }
 
-        private static void UpsertKnowledgeReceipt(ReignDbConnection connection, string eventId, string npcId, string acquisitionType,
+        internal static void UpsertKnowledgeReceipt(ReignDbConnection connection, string eventId, string npcId, string acquisitionType,
             double confidence, double reliability, double worldDay, string sourceId, long ts)
         {
             if (string.IsNullOrWhiteSpace(eventId) || string.IsNullOrWhiteSpace(npcId))
@@ -1687,7 +1687,7 @@ VALUES($id,$event,$npc,$type,$confidence,$reliability,$day,$source,'active','{}'
             return Regex.Replace((value ?? "").Trim().ToLowerInvariant(), @"[^a-z0-9]+", "_").Trim('_');
         }
 
-        private static string SafeMemoryKey(string value)
+        internal static string SafeMemoryKey(string value)
         {
             string key = Regex.Replace((value ?? "unknown").Trim(), @"[^A-Za-z0-9_-]+", "_");
             return string.IsNullOrWhiteSpace(key) ? "unknown" : key;

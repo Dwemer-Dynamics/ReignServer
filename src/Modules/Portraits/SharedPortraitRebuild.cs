@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PortraitsService
     {
         private static string StoreGeneratedSharedPortrait(Dictionary<string, object> payload, string cacheKey, string prompt,
             byte[] sourceImage, byte[] imageBytes, PortraitImageCallResult call,
