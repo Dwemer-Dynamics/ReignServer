@@ -663,11 +663,11 @@ namespace ReignBetaServer
             string controlCenterMarkup = File.ReadAllText(Path.Combine(serverRoot, "ui", "index.html"));
             string notableMbtiPath = VerificationSourceLocator.ResolveUnique(serverRoot, "NotableMbtiProfiles.cs", "src");
             string mbtiProgramSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src"));
-            string cachingSource = VerificationSourceLocator.ReadSourceFileGroupText(VerificationSourceLocator.ResolveUnique(serverRoot, "PromptCaching.cs", "src"));
-            string diplomacySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src"));
+            string cachingSource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "PromptCaching.cs", "src");
+            string diplomacySource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "WorldDiplomacyDirector.cs", "src");
             string sceneSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ConversationSceneState.cs", "src"));
-            string memorySource = VerificationSourceLocator.ReadSourceFileGroupText(VerificationSourceLocator.ResolveUnique(serverRoot, "CategorizedMemory.cs", "src"));
-            string portraitSource = VerificationSourceLocator.ReadSourceFileGroupText(VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src"));
+            string memorySource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "CategorizedMemory.cs", "src");
+            string portraitSource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "PortraitGeneration.cs", "src");
             bool mbtiPromptCoverage = File.Exists(notableMbtiPath)
                 && mbtiProgramSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
                 && cachingSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
@@ -1760,8 +1760,7 @@ namespace ReignBetaServer
 
             string diplomacyDebugServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDebug.cs", "src");
             string diplomacyDebugServerText = File.Exists(diplomacyDebugServerPath) ? File.ReadAllText(diplomacyDebugServerPath) : "";
-            string diplomacyDirectorPath = VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src");
-            string diplomacyDirectorText = File.Exists(diplomacyDirectorPath) ? File.ReadAllText(diplomacyDirectorPath) : "";
+            string diplomacyDirectorText = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "WorldDiplomacyDirector.cs", "src");
             string diplomacyDebugActionsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string diplomacyBehaviorText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string individualRelationPatchText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
@@ -1861,21 +1860,10 @@ namespace ReignBetaServer
                         relationshipOverviewStart,
                         relationshipOverviewEnd - relationshipOverviewStart)
                     : "";
-            string mbtiRelationshipPath = VerificationSourceLocator.ResolveUnique(serverRoot, "MbtiRelationships.cs", "src");
-            string mbtiRelationshipText = File.Exists(mbtiRelationshipPath)
-                ? File.ReadAllText(mbtiRelationshipPath) : "";
-            int relationshipLoopStart = mbtiRelationshipText.IndexOf(
-                "internal static Dictionary<string, object> MbtiRelationshipSnapshotApi(",
-                StringComparison.Ordinal);
-            int relationshipLoopEnd = relationshipLoopStart < 0 ? -1
-                : mbtiRelationshipText.IndexOf(
-                    "internal static Dictionary<string, object> RelationshipNativeSyncReportApi(",
-                    relationshipLoopStart, StringComparison.Ordinal);
-            string relationshipLoopSource =
-                relationshipLoopStart >= 0 && relationshipLoopEnd > relationshipLoopStart
-                    ? mbtiRelationshipText.Substring(
-                        relationshipLoopStart, relationshipLoopEnd - relationshipLoopStart)
-                    : "";
+            // The relationship loop is the MbtiRelationshipSnapshotApi declaration, in whichever
+            // MbtiRelationships partial file it lives.
+            string relationshipLoopSource = VerificationSourceLocator.ReadServerSplitMemberSourceText(
+                serverRoot, "MbtiRelationships.cs", "MbtiRelationshipSnapshotApi", "src");
             bool worldTestAuthoritativeOverviewValid =
                 relationshipOverviewSource.Contains("relationship_pair_chemistry")
                 && !relationshipOverviewSource.Contains("world_test_relationship_memberships")
@@ -1944,8 +1932,7 @@ namespace ReignBetaServer
                 liveHeartbeatRecoveryPlaneValid
                     ? "After Save Sync alignment completes, the live heartbeat reports actual campaign/save identity so guarded enrollment can fail closed on mismatches."
                     : "The live heartbeat can still be suppressed by a redundant client-side campaign match before the guarded server sees actual identity.", null);
-            string portraitServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src");
-            string portraitServerText = VerificationSourceLocator.ReadSourceFileGroupText(portraitServerPath);
+            string portraitServerText = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "PortraitGeneration.cs", "src");
             bool portraitIdentityValid = portraitContextText.Contains("public int? AgeYears")
                 && portraitContextText.Contains("public string Gender")
 				&& portraitContextText.Contains("public int? ClanTier")
@@ -2988,7 +2975,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["behaviorPath"] = characterBehaviorPath, ["clientPath"] = serverClientPath });
 
             string profileLibraryPath = VerificationSourceLocator.ResolveUnique(serverRoot, "CharacterProfileLibrary.cs", "src");
-            string profileLibraryText = VerificationSourceLocator.ReadSourceFileGroupText(profileLibraryPath);
+            string profileLibraryText = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "CharacterProfileLibrary.cs", "src");
             bool noBackgroundWorker = !profileLibraryText.Contains("CharacterEnrichmentWorkerLoop")
                 && !profileLibraryText.Contains("ProcessNextCharacterEnrichment")
                 && programText.Contains("[\"backgroundCharacterEnrichmentEnabled\"] = false");
