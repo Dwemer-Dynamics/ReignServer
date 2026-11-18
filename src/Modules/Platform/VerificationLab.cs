@@ -1867,11 +1867,11 @@ namespace ReignBetaServer
             string mbtiRelationshipText = File.Exists(mbtiRelationshipPath)
                 ? File.ReadAllText(mbtiRelationshipPath) : "";
             int relationshipLoopStart = mbtiRelationshipText.IndexOf(
-                "private static Dictionary<string, object> MbtiRelationshipSnapshotApi(",
+                "internal static Dictionary<string, object> MbtiRelationshipSnapshotApi(",
                 StringComparison.Ordinal);
             int relationshipLoopEnd = relationshipLoopStart < 0 ? -1
                 : mbtiRelationshipText.IndexOf(
-                    "private static Dictionary<string, object> RelationshipNativeSyncReportApi(",
+                    "internal static Dictionary<string, object> RelationshipNativeSyncReportApi(",
                     relationshipLoopStart, StringComparison.Ordinal);
             string relationshipLoopSource =
                 relationshipLoopStart >= 0 && relationshipLoopEnd > relationshipLoopStart

@@ -30,6 +30,16 @@ The clan-conflict notice routes use the typed contracts in
 `shared/Reign.Core.Contracts/Relationships/ClanConflictNoticeContracts.cs` (see
 [TypedContracts](../../../docs/server/TypedContracts.md)).
 
+## Service class
+
+The module's `Program` partials are now `internal static partial class RelationshipsService` in their existing files.
+It calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call it as
+`RelationshipsService.X`; the members used across that boundary are `internal`. `Program.RelationshipsRoutes.cs` stays
+part of `Program` and registers the service handlers. Dialogue, Reputation, Characters, WorldSimulation and Platform
+call into it for relationship state, MBTI profiles, correspondence and the relationship worker. Its static state (the
+relationship hero document cache, worker and scheduling state) lives in `RelationshipsService`. The self-tests listed
+below are `RelationshipsService` members.
+
 ## Routes
 
 `/relationships/evaluate`, `/relationships/context`, `/relationships/effective/batch`,

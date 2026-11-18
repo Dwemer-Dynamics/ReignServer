@@ -23,6 +23,16 @@ wanderers and the tavern house. The basic character upsert/construct routes are 
 - Tavern house: `TavernHouseConversation.cs`, `TavernHouseActions.cs`.
 - `narrative-editor-ui-contract.mjs`: Control Center UI contract script.
 
+## Service class
+
+The module's `Program` partials are now `internal static partial class CharactersService` in their existing files. It
+calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call it as
+`CharactersService.X`; the members used across that boundary are `internal`. `Program.CharactersRoutes.cs` stays part
+of `Program` and registers the service handlers. Dialogue, Relationships, WorldSimulation, Reputation, Court and
+Platform call into it for identity, traits, profiles and NPC lives. Its static state (narrative and political-profile
+locks, the character editor authority cache, the town profile queue) lives in `CharactersService`. The self-tests
+listed below are `CharactersService` members.
+
 ## Routes
 
 `/identity/encounter`, `/identity/introduction`, `/identity/query`, `/identity/reset`,

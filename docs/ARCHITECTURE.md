@@ -58,15 +58,17 @@ flowchart LR
 
 ## Process composition
 
-Most of `src/` is one `internal static partial class Program` (namespace `ReignBetaServer`): 362 of the 483 `.cs`
-files under `src/Modules` contribute to it. For those files, module folders are a file layout, not a type or namespace
-boundary; any of them can call any private static member. The exceptions are a few helper types (for example
-`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes), the stateless helpers
-in `Platform/ServerCore.cs`, and the module service classes `SpymasterService`, `RebellionService`,
-`GovernmentService`, `DiplomacyService`, `CourtService`, `PortraitsService` and `ReputationService` (see
-[Direction](#direction-2026-11-restructuring-programme), steps 3 and 4).
+`internal static partial class Program` (namespace `ReignBetaServer`) is now the Platform core plus Dialogue: 245 of
+the 483 `.cs` files under `src/Modules` contribute to it (46 Platform files, 188 Dialogue files and the eleven
+`Program.<Module>Routes.cs` route files). For those files, module folders are a file layout, not a type or namespace
+boundary; any of them can call any private static member. Every other domain module is its own
+`internal static partial class <Module>Service`: `CharactersService`, `WorldSimulationService`, `RelationshipsService`,
+`PersistenceService`, `ReputationService`, `DiplomacyService`, `CourtService`, `PortraitsService`, `GovernmentService`,
+`RebellionService` and `SpymasterService`. The other exceptions are a few helper types (for example
+`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes) and the stateless
+helpers in `Platform/ServerCore.cs` (see [Direction](#direction-2026-11-restructuring-programme), steps 3 and 4).
 `src/Modules/Platform/Program.cs` alone is about 27.9k lines and still contains much of the core dialogue, memory,
-character, action and portrait request handling.
+action and portrait request handling.
 
 `Main` (`Platform/Program.cs`) runs in this order:
 
@@ -291,14 +293,17 @@ lands.
    `FirstNonEmpty`, the shared `Json` serializer, `UnwrapJsonResponse`, `TryParseStrictJsonObject`,
    `TryParseJsonObject`, `CanonicalJson`, `CanonicalizeJsonValue`, and the stateless PostgreSQL helpers
    `AddSqlParameters`, `IsTransientDatabaseContention`, `IsStalePostgreSqlPreparedPlan`, `ResetPostgreSqlPreparedPlans`,
-   `IsPostgreSqlSchemaMutation`, `AcquirePostgreSqlTransactionMutationLock`, and both overloads each of `Clamp` and
-   `Sha256Hex`, whose overloads used to sit in different modules). A `global using static` makes them
+   `IsPostgreSqlSchemaMutation`, `AcquirePostgreSqlTransactionMutationLock`, and every overload of `Clamp`,
+   `Sha256Hex`, `ParseInt` and `WriteText`, whose overloads used to sit in different modules, plus the pure
+   `HttpStatusText` that `WriteText` uses; the `ParseInt(string, int)` overload stays verification-build only). A `global using static` makes them
    callable unqualified from every type. Helpers that touch `Program` state (`QuerySql`, `ExecuteSql`, campaign
    connections, settings) stay in `Program`. Every overload of a moved name moves with it, so no method group is split.
 4. The `partial class Program` is split per module into `<Module>Service` and `<Module>Store` classes, leaf modules
-   first. Partly landed: Spymaster (`SpymasterService`), Rebellion (`RebellionService`), Government
-   (`GovernmentService`), Diplomacy (`DiplomacyService`), Court (`CourtService`), Portraits (`PortraitsService`) and
-   Reputation (`ReputationService`) are their own `internal static partial class`es, in their existing files. They
+   first. Mostly landed: Spymaster (`SpymasterService`), Rebellion (`RebellionService`), Government
+   (`GovernmentService`), Diplomacy (`DiplomacyService`), Court (`CourtService`), Portraits (`PortraitsService`),
+   Reputation (`ReputationService`), Characters (`CharactersService`), WorldSimulation (`WorldSimulationService`),
+   Relationships (`RelationshipsService`) and Persistence (`PersistenceService`) are their own
+   `internal static partial class`es, in their existing files. They
    call back into `Program` with explicit `Program.` qualifiers; `Program` and the other modules call them as
    `<Module>Service.X`, and the members used across that boundary are `internal` (every overload of a name together).
    Each module's static state (locks, caches, job state, counters) moved with it and is still a single static
@@ -306,10 +311,13 @@ lands.
    of with `Program` does not change behaviour. The module route files (`Program.<Module>Routes.cs`) stay part of
    `Program` and name the service handlers. Test classes that were already separate types (for example
    `CastleChatSelfTests`) are unchanged apart from qualifiers. None of these modules has SQL-only code that separates
-   cleanly without moving code between files, so there is no `<Module>Store` yet. Characters, WorldSimulation,
-   Relationships, Persistence, Dialogue and Platform are still `Program` partials: they are the most coupled modules
-   (Characters and WorldSimulation each expose well over a hundred members used across the rest of the server), so
-   they are left for later steps.
+   cleanly without moving code between files, so there is no `<Module>Store` yet. One method group stays split on
+   purpose: the private `V` factories in `CharactersService` (`string, int, bool`) and `RelationshipsService`
+   (`int, int, int, int`) each build a nested type of their own module, are called only from their own file, and
+   their parameter lists cannot convert into each other. Still `Program` partials: Dialogue (188 files, about 2.1k
+   members, referenced about 15k times from the rest of the server, so its split is a separate step) and the
+   Platform core, which stays `Program`: the entry point, `HandleClient` and the route table, settings, the campaign
+   connection and `QuerySql`/`ExecuteSql` state, providers and the verification lab.
 5. Per-campaign versioned migrations: each module's `Ensure*` DDL becomes ordered migrations under one runner,
    following the `reign_meta` pattern, and runtime `Ensure*` calls leave hot paths.
 6. Typed request and response DTOs in `Reign.Core.Contracts` for client-facing routes, module by module.

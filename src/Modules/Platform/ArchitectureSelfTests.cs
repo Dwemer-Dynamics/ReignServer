@@ -2185,12 +2185,12 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ? File.ReadAllText(qualificationFixturesPath)
                         : "";
                 int targetSearchStart = liveInteractionSourceText.IndexOf(
-                    "private static Dictionary<string, object> LiveTestTargetSearchApi",
+                    "internal static Dictionary<string, object> LiveTestTargetSearchApi",
                     StringComparison.Ordinal);
                 int targetSearchEnd = targetSearchStart < 0
                     ? -1
                     : liveInteractionSourceText.IndexOf(
-                        "private static Dictionary<string, object> LiveTestRunStartApi",
+                        "internal static Dictionary<string, object> LiveTestRunStartApi",
                         targetSearchStart,
                         StringComparison.Ordinal);
                 string targetSearchBody = targetSearchStart >= 0 && targetSearchEnd > targetSearchStart
@@ -2260,7 +2260,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "[\"profileCacheHit\"] = true",
                         StringComparison.Ordinal)
                     && qualificationFixturesText.Contains(
-                        "traits = BuildTraitDocument(runtimeProfile);",
+                        "traits = CharactersService.BuildTraitDocument(runtimeProfile);",
                         StringComparison.Ordinal)
                     && qualificationFixturesText.Contains(
                         "if (verifyIdentity)",

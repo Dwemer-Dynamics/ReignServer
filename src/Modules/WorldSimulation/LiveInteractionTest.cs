@@ -5382,7 +5382,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && worldDiplomacyDirectorSource.Contains(
                     "MarkDiplomaticRelationshipFeedbackRecorded(campaignId, actionId")
                 && kingdomLeaderDiplomacySource.IndexOf(
-                    "lock (Program.CampaignRelationshipWriteLock(campaignId))",
+                    "lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))",
                     StringComparison.Ordinal)
                     < kingdomLeaderDiplomacySource.IndexOf(
                         "SELECT COUNT(*) AS count FROM ruler_diplomatic_incidents",
@@ -5393,7 +5393,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && notableMbtiSource.Contains("UpdateCharacterIndexBatch(campaignId, indexProfiles)")
                 && notableMbtiSource.Contains("notable_mbti.initialize.performance")
                 && notableMbtiSource.Contains("notable_mbti.confirm.performance")
-                && serverProgramSource.Contains("private static void UpdateCharacterIndexBatch"),
+                && serverProgramSource.Contains("internal static void UpdateCharacterIndexBatch"),
                 "Large profile and confirmation sets use transactional database writes, one character-index rewrite, and phase-level timing evidence.");
             add("relationship_history_qualification_uses_dependent_followups",
                 qualificationRunnerSource.Contains("\"cold_initial\"")
