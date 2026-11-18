@@ -662,7 +662,7 @@ namespace ReignBetaServer
             string serverRoot = Path.Combine(root, "ReignServer");
             string controlCenterMarkup = File.ReadAllText(Path.Combine(serverRoot, "ui", "index.html"));
             string notableMbtiPath = VerificationSourceLocator.ResolveUnique(serverRoot, "NotableMbtiProfiles.cs", "src");
-            string mbtiProgramSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src"));
+            string mbtiProgramSource = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
             string cachingSource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "PromptCaching.cs", "src");
             string diplomacySource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "WorldDiplomacyDirector.cs", "src");
             string sceneSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ConversationSceneState.cs", "src"));
@@ -1699,8 +1699,7 @@ namespace ReignBetaServer
 
             string socialEventVmText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string socialEventVmTextScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignSocialEventScreenVM");
-            string socialEventServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
-            string socialEventServerText = File.Exists(socialEventServerPath) ? File.ReadAllText(socialEventServerPath) : "";
+            string socialEventServerText = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
             bool approachOpeningValid = socialEventVmText.Contains("public async void ExecuteWaitApproach()")
                 // The approach opening keeps its empty player line and opening flag, now under the screen's load owner.
                 && socialEventVmText.Contains("RequestRepliesAsync(heroes, string.Empty, true, owner)")
@@ -2827,7 +2826,7 @@ namespace ReignBetaServer
 				});
 
 			string serverProgramPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
-			string serverProgramText = File.Exists(serverProgramPath) ? File.ReadAllText(serverProgramPath) : "";
+			string serverProgramText = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
 			// The /identity/synchronize registration lives in the Platform route file (RouteTable.cs).
 			string platformRoutesPath = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.PlatformRoutes.cs", "src");
 			string platformRoutesText = File.Exists(platformRoutesPath) ? File.ReadAllText(platformRoutesPath) : "";
@@ -2953,7 +2952,7 @@ namespace ReignBetaServer
             RunPromptSizeContract(checks);
 
             string programSource = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
-            string programText = File.Exists(programSource) ? File.ReadAllText(programSource) : "";
+            string programText = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
             // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
             int routeCount = ServerRoutes.Value.Routes
                 .Count(route => route.Match == RouteMatch.Exact && route.Path.Length > 1
