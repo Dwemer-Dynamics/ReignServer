@@ -4,7 +4,7 @@ AI portrait and scene images: portrait generation and refresh, image providers (
 face detection and physique, clothing and outfit changes, shared first-party portraits, portrait derivatives, the
 chat view (conversation scene images and wardrobe), encountered-resident portraits, adult portrait rules, tavern
 house scenes and native portrait source import. Portrait registration, status, request and diagnosis routes are
-still in `Platform/Program.cs`.
+in `Portraits/Program.PortraitRequests.cs` (part of `Program`).
 
 > Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs:
@@ -30,11 +30,11 @@ still in `Platform/Program.cs`.
 
 ## Service class
 
-Every file except `Program.PortraitsRoutes.cs` and `LinuxImageCodec.cs` (its own `LinuxImageCodec` class) holds
+Every file except `Program.PortraitsRoutes.cs`, `Program.PortraitRequests.cs` and `LinuxImageCodec.cs` (its own `LinuxImageCodec` class) holds
 `internal static partial class PortraitsService` (not a `Program` partial). It calls `Program` members with an
 explicit `Program.` qualifier, and `Program` and the other modules call it as `PortraitsService.X`; the members used
 across that boundary are `internal`. `Program.PortraitsRoutes.cs` stays part of `Program` and registers the service
-handlers; the portrait registration, status, request and diagnosis routes in `Platform/Program.cs` call the service
+handlers; the portrait registration, status, request and diagnosis routes in `Portraits/Program.PortraitRequests.cs` call the service
 the same way. The module's static state (generation and derivative job state, the chat view and Codex image gates,
 outfit change operations, the face-detection session and the vision model catalog) lives in `PortraitsService`.
 

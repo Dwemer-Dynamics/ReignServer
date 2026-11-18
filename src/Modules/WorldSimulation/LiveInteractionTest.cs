@@ -4962,7 +4962,6 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     "PassiveWorldControl.cs",
                     "ReignLiveTest/Features/WorldSimulation");
             string notableMbtiPath = serverSourcePath("NotableMbtiProfiles.cs");
-            string serverProgramPath = serverSourcePath("Program.cs");
             string qualificationRunnerPath = string.IsNullOrWhiteSpace(sourceRoot) ? "" :
                 VerificationSourceLocator.ResolveUnique(
                     Path.Combine(sourceRoot, "ReignServer"),
@@ -5010,7 +5009,8 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             string characterInitializationSourceScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientSourceRoot, "ReignCharacterEditorCampaignBehavior");
             string notablePopupSource = VerificationSourceLocator.ReadClientSourceText(clientSourceRoot);
             string notableMbtiSource = File.Exists(notableMbtiPath) ? File.ReadAllText(notableMbtiPath) : "";
-            string serverProgramSource = File.Exists(serverProgramPath) ? File.ReadAllText(serverProgramPath) : "";
+            string serverProgramSource = string.IsNullOrWhiteSpace(sourceRoot)
+                ? "" : VerificationSourceLocator.ReadServerTypeSourceText(Path.Combine(sourceRoot, "ReignServer"), "Program");
             string qualificationRunnerSource = File.Exists(qualificationRunnerPath) ? File.ReadAllText(qualificationRunnerPath) : "";
             string serverLiveTestSource = File.Exists(serverLiveTestPath) ? File.ReadAllText(serverLiveTestPath) : "";
             string lifecycleCliSource = File.Exists(lifecycleCliPath) ? File.ReadAllText(lifecycleCliPath) : "";

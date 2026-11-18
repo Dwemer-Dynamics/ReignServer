@@ -56,6 +56,18 @@ namespace ReignBetaServer
         private static readonly object ClientSnapshotGate = new object();
         private static readonly Dictionary<string, ClientSourceSnapshot> ClientSnapshots =
             new Dictionary<string, ClientSourceSnapshot>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, ClientSourceSnapshot> ServerProductSnapshots =
+            new Dictionary<string, ClientSourceSnapshot>(StringComparer.Ordinal);
+        // Sources compiled only into the verification build (the ReignExcludeVerification Compile Remove list in
+        // ReignServer.csproj, besides the *SelfTests*, *Tests.cs and *Fixtures.cs patterns). They quote the very text
+        // the server contracts look for, so the server type reader leaves them out.
+        private static readonly HashSet<string> VerificationOnlyServerSources =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Modules/Platform/VerificationLab.cs", "Modules/Platform/VerificationSourceLocator.cs",
+                "Modules/Platform/CodexPerformanceVerification.cs", "Modules/Court/CapitalAmbassadorTestSystem.cs",
+                "Modules/Portraits/BackgroundPortraitContracts.cs", "Modules/Dialogue/PersonalGossipCompositionProbe.cs"
+            };
         private static readonly Regex TypeDeclarationPattern = new Regex(
             @"^[ \t]*(?:\[[^\]\r\n]*\][ \t]*)*"
             + @"(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|unsafe|new|file|ref)\s+)*"
@@ -84,6 +96,20 @@ namespace ReignBetaServer
         public static string ReadClientTypeSourceText(string clientRoot, string typeName)
         {
             ClientSourceSnapshot snapshot = GetClientSnapshot(clientRoot);
+            return snapshot == null ? string.Empty : snapshot.TypeText(typeName);
+        }
+
+        /// <summary>
+        /// The text of every product server source file beneath <c>serverRoot/src</c> that declares
+        /// <paramref name="typeName"/> (all partial declarations, for example every <c>partial class Program</c> file),
+        /// concatenated in ordinal relative-path order, wherever those files live. Verification-only sources are left
+        /// out. Server source-text contracts read a type this way so behaviour-neutral moves between its partial files
+        /// keep them valid. Returns an empty string when the server root is unavailable; throws when the type is not
+        /// declared or the unqualified name spans namespaces.
+        /// </summary>
+        public static string ReadServerTypeSourceText(string serverRoot, string typeName)
+        {
+            ClientSourceSnapshot snapshot = GetServerProductSnapshot(serverRoot);
             return snapshot == null ? string.Empty : snapshot.TypeText(typeName);
         }
 
@@ -169,6 +195,31 @@ namespace ReignBetaServer
             }
         }
 
+        private static ClientSourceSnapshot GetServerProductSnapshot(string serverRoot)
+        {
+            if (string.IsNullOrWhiteSpace(serverRoot)) return null;
+            string sourceRoot = Path.Combine(Path.GetFullPath(serverRoot), "src");
+            if (!Directory.Exists(sourceRoot)) return null;
+            lock (ClientSnapshotGate)
+            {
+                if (ServerProductSnapshots.TryGetValue(sourceRoot, out ClientSourceSnapshot cached)
+                    && DateTime.UtcNow - cached.CreatedUtc < ClientSnapshotLifetime)
+                    return cached;
+                ClientSourceSnapshot created = ClientSourceSnapshot.Load(sourceRoot, IsServerProductSource);
+                ServerProductSnapshots[sourceRoot] = created;
+                return created;
+            }
+        }
+
+        private static bool IsServerProductSource(string relativePath)
+        {
+            string fileName = Path.GetFileName(relativePath);
+            return fileName.IndexOf("SelfTests", StringComparison.OrdinalIgnoreCase) < 0
+                && !fileName.EndsWith("Tests.cs", StringComparison.OrdinalIgnoreCase)
+                && !fileName.EndsWith("Fixtures.cs", StringComparison.OrdinalIgnoreCase)
+                && !VerificationOnlyServerSources.Contains(relativePath);
+        }
+
         private sealed class ClientSourceSnapshot
         {
             private readonly List<KeyValuePair<string, string>> files;
@@ -205,11 +256,12 @@ namespace ReignBetaServer
                 }
             }
 
-            public static ClientSourceSnapshot Load(string sourceRoot)
+            public static ClientSourceSnapshot Load(string sourceRoot, Func<string, bool> includeRelativePath = null)
             {
                 List<KeyValuePair<string, string>> files = Enumerate(sourceRoot, "*.cs")
                     .Select(path => new KeyValuePair<string, string>(
                         Path.GetRelativePath(sourceRoot, path).Replace('\\', '/'), path))
+                    .Where(pair => includeRelativePath == null || includeRelativePath(pair.Key))
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => new KeyValuePair<string, string>(pair.Key, File.ReadAllText(pair.Value)))
                     .ToList();

@@ -4,7 +4,7 @@ The conversation pipeline and memory: conversation sessions and continuity, prom
 structured actions in dialogue, grounding and claim validation, categorized, semantic and specialist memory, group
 and party conversation, drinking and intoxication, personal gossip, communications, temporary guests, and the final
 conversation gauntlet qualification system. The main turn handlers (`/dialogue/respond`, `/party-chat/respond`,
-`/memory/build_context`, `/context/*`) are still in `Platform/Program.cs` and call into this module.
+`/memory/build_context`, `/context/*`) are `Program` partial files in this folder (`Program.<Area>.cs`) and call into this module.
 
 > Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction. Feature docs in [docs/server](../../../docs/server/README.md), for example
@@ -13,13 +13,13 @@ conversation gauntlet qualification system. The main turn handlers (`/dialogue/r
 
 ## Service class
 
-Every file except `Program.DialogueRoutes.cs` that used to be a `Program` partial is now
+Every file except `Program.DialogueRoutes.cs` and the `Program.<Area>.cs` handler files that used to be a `Program` partial is now
 `internal static partial class DialogueService`, in its existing file. Types that were already separate
 (`CodexConversationContracts`, the `FinalConversationGauntlet*` classes and others) are unchanged apart from
 qualifiers. `DialogueService` calls `Program` members with an explicit `Program.` qualifier, and `Program` and the
 other modules call it as `DialogueService.X`; the members used across that boundary are `internal`.
 `Program.DialogueRoutes.cs` stays part of `Program` and registers the service handlers, and the main turn handlers
-in `Platform/Program.cs` call the service the same way. The module's static state (memory and semantic queues, prompt
+in the `Program.<Area>.cs` partial files here (split from `Platform/Program.cs`) call the service the same way. The module's static state (memory and semantic queues, prompt
 caches, the conversation turn dispatch gate, the capacity catalog and late-interaction recovery) lives in
 `DialogueService`.
 

@@ -1,19 +1,25 @@
 # Platform module (server)
 
-Process entry point and shared runtime: `Program.cs` (`Main`, startup, the `HandleClient` router, ingress limits,
-`CampaignDataGate`, shared helpers), settings and secrets, LLM provider profiles and middleware, the Codex app-server
-runtime, observability, diagnostics, the priority background scheduler and the VerificationLab. `Program.cs` still
-holds much of the core dialogue, memory, action, character and portrait request handling that conceptually belongs
-to other modules.
+Process entry point and shared runtime: `Program.cs` (`Main`, startup, the `HandleClient` router,
+`CampaignDataGate`) and its `Program.<Area>.cs` partial files (ingress limits, campaign SQL, settings, prompts, LLM
+transport, the action pipeline, logs, test cases), settings and secrets, LLM provider profiles and middleware, the
+Codex app-server runtime, observability, diagnostics, the priority background scheduler and the VerificationLab. The
+core dialogue, memory, character and portrait request handlers are `Program` partial files in the Dialogue,
+Characters and Portraits folders.
 
 > Checked against the source on 2026-11-17. [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) describes the whole server
 > and the restructuring direction.
 
 ## Main files
 
-- `Program.cs` (about 30.8k lines): `Main`, `RunServer`, `HandleClient`, `ReadRequest` and the ingress constants,
-  `EnterCampaignRequestAccess`, `OpenCampaignConnection`, `RunInteractiveRequest`, settings load/save, and the
-  in-file handlers listed below.
+- `Program.cs` (about 1.3k lines): core fields, `Main`, `RunServer`, `HandleClient`, `EnterCampaignRequestAccess`,
+  `RunInteractiveRequest`, `ControlCenterHtml` and `HttpRequest`.
+- `Program.<Area>.cs` partials (verbatim parts of the former single file): `HttpIngress` (`ReadRequest` and the
+  ingress constants), `CampaignSql` (`OpenCampaignConnection`, `ExecuteSql`, `QuerySql`), `CampaignFiles`,
+  `Settings`, `PromptTemplates`, `DefaultPromptTemplates`, `LlmTransport`, `ConversationResponses`, `LogsAndAudit`,
+  `PipelineTestRunner`, `DefaultTestCases`, and the action pipeline (`DialogueActions`, `ActionGates`,
+  `ActionPlanner`, `ActionRouter`, `DirectiveTerms`, `DirectivePackages`, `ActionReferences`, `ActionValidation`,
+  `ActionQueue`). See [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md#process-composition) for the full list.
 - Providers: `LlmProviderProfiles.cs`, `LlmProviderControlCenter.cs`, `ProviderMiddleware.cs`,
   `CodexAppServerProvider.cs`, `CodexRuntime.cs`, `CodexFailureRecovery.cs`, `CodexPerformance*.cs`,
   `NativeProviderTestGuard.cs`.
@@ -33,7 +39,8 @@ Handled in other Platform files: `POST /api/activate`, `GET /api/gameplay-option
 `POST /api/support-bundle`, `/verification/*` (run, status, cancel, results, replay), `/initialization/readiness/*`
 (seal, status, retry).
 
-Handled directly in `Program.cs`:
+Handled by `Program` (in `Program.cs` and its `Program.<Area>.cs` partial files here and in the Dialogue,
+Characters and Portraits folders):
 
 - Service and Control Center: `GET /health`, `GET /` and `/index.html`, logo assets, `/api/settings`,
   `/api/settings/clear-key`, `/api/shutdown`, `/api/diagnostics`, `/api/diagnostics/test-llm`, `/api/prompts`,

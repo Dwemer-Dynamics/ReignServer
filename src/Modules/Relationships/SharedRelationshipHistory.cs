@@ -844,7 +844,7 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
             string workerSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ContinuousRelationshipWorker.cs", "src"));
             string promptSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "RelationshipPrompts.cs", "src"));
             string promptCachingSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PromptCaching.cs", "src"));
-            string programSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src"));
+            string programSource = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
             add("history_generation_is_dialogue_lazy_not_daily",
                 !string.IsNullOrWhiteSpace(workerSource)
                 && !workerSource.Contains("EnsureSharedRelationshipHistoriesForConversation", StringComparison.Ordinal)
