@@ -49,6 +49,59 @@ namespace ReignBetaServer
                 + ": " + string.Join(", ", candidates));
         }
 
+        /// <summary>
+        /// The text of a logical server source file together with the partial files it was split into beside it
+        /// (<c>Name.cs</c> first, then every <c>Name.*.cs</c> in the same folder in ordinal name order), so a check that
+        /// pinned one file keeps exactly the same scope after a behaviour-neutral split. Returns an empty string when the
+        /// search root or the file is unavailable.
+        /// </summary>
+        public static string ReadServerSplitSourceText(
+            string serverRoot,
+            string logicalFileName,
+            params string[] preferredPathFragments)
+        {
+            return string.Join("\n\n", ServerSplitSourceFiles(serverRoot, logicalFileName, preferredPathFragments)
+                .Select(path => File.ReadAllText(path)));
+        }
+
+        /// <summary>
+        /// The declaration text of every method named <paramref name="memberName"/> found in a logical server source
+        /// file and its split partial files (see <see cref="ReadServerSplitSourceText"/>). Returns an empty string when
+        /// the files or the member are unavailable.
+        /// </summary>
+        public static string ReadServerSplitMemberSourceText(
+            string serverRoot,
+            string logicalFileName,
+            string memberName,
+            params string[] preferredPathFragments)
+        {
+            if (string.IsNullOrWhiteSpace(memberName))
+                throw new ArgumentException("A server member name is required.", "memberName");
+            return string.Join("\n\n", ServerSplitSourceFiles(serverRoot, logicalFileName, preferredPathFragments)
+                .SelectMany(path => ClientSourceSnapshot.ExtractMemberDeclarations(File.ReadAllText(path), memberName)));
+        }
+
+        private static List<string> ServerSplitSourceFiles(
+            string serverRoot,
+            string logicalFileName,
+            string[] preferredPathFragments)
+        {
+            string mainPath = ResolveUnique(serverRoot, logicalFileName, preferredPathFragments);
+            if (string.IsNullOrEmpty(mainPath) || !File.Exists(mainPath)) return new List<string>();
+            string stem = Path.GetFileNameWithoutExtension(logicalFileName) + ".";
+            List<string> files = new List<string> { mainPath };
+            files.AddRange(Directory.EnumerateFiles(Path.GetDirectoryName(mainPath), "*.cs")
+                .Where(path =>
+                {
+                    string name = Path.GetFileName(path);
+                    return name.Length > stem.Length + 3
+                        && name.StartsWith(stem, StringComparison.Ordinal)
+                        && name.EndsWith(".cs", StringComparison.Ordinal);
+                })
+                .OrderBy(path => Path.GetFileName(path), StringComparer.Ordinal));
+            return files;
+        }
+
         // Client (ReignBeta) source-text contracts must not depend on which file holds the code. The client source
         // is read once into a snapshot (every src/**/*.cs, ordered by relative path) and checks either search all
         // of it or the files that declare a named type, so behaviour-neutral file moves keep the contracts valid.
@@ -275,7 +328,7 @@ namespace ReignBetaServer
 
             // Every method, constructor or operator-like member named memberName in one file, from the start of its
             // declaration line through its closing brace (or the semicolon of an expression body).
-            private static IEnumerable<string> ExtractMemberDeclarations(string text, string memberName)
+            internal static IEnumerable<string> ExtractMemberDeclarations(string text, string memberName)
             {
                 var pattern = new Regex(
                     @"^[ \t]*(?:\[[^\]\r\n]*\][ \t]*)*"
