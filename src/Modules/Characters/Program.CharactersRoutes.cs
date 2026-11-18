@@ -8,7 +8,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Characters module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterCharactersRoutes(ReignRouteTable routes)
         {
             routes.Get("/character-editor/portrait", (request, route) =>
@@ -30,7 +29,7 @@ namespace ReignBetaServer
             routes.Post("/identity/debug/know-everyone", request => IdentityDebugKnowEveryoneApi(request.JsonBody));
             routes.Get("/characters/profile-library/status", request => CharacterProfileLibraryStatusApi());
             routes.Post("/characters/profile-library/action", request => CharacterProfileLibraryActionApi(request.JsonBody));
-            routes.Legacy("POST", "/character-editor/list");
+            routes.Post("/character-editor/list", request => CharacterEditorListApi(request.JsonBody));
             routes.Post("/character-editor/load", request => CharacterEditorLoadApi(request.JsonBody));
             routes.Get("/characters/narrative", request => InspectCharacterNarrative(request.Query));
             routes.Post("/character-editor/construct", request => CharacterEditorConstructApi(request.JsonBody));

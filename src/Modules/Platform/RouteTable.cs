@@ -9,10 +9,8 @@ namespace ReignBetaServer
     {
         // HTTP route table. Each module declares its routes in Program.<Module>Routes.cs: method, exact path or
         // prefix (with its comparison), handler and campaign-gate policy. HandleClient dispatches the first route
-        // that matches, in registration order, exactly as the former if/else chain did. A route registered with
-        // Legacy* has no handler yet: it is still served by the remaining branch of that chain in HandleClient,
-        // which keeps the old relative order because no registered route overlaps another (see
-        // RouteTableContractSelfTests).
+        // that matches, in registration order, exactly as the former if/else chain did; no registered route overlaps
+        // another (see RouteTableContractSelfTests). An unmatched request gets the "Unknown route." 404.
 
         // Returned by a handler that has already written its own response (HTML, a file or a download) and logged
         // the request. HandleClient then returns without writing JSON, exactly like the former early returns.
@@ -47,7 +45,6 @@ namespace ReignBetaServer
             public RouteMatch Match;
             public string Path;
             public StringComparison Comparison = StringComparison.Ordinal;
-            // Null while the route is still served by HandleClient's legacy if/else chain.
             public RouteHandler Handler;
             public CampaignGatePolicy CampaignGate = CampaignGatePolicy.Read;
 
@@ -101,12 +98,6 @@ namespace ReignBetaServer
                 Add("GET", RouteMatch.Prefix, prefix, comparison, Wrap(handler));
             public ReignRoute PostPrefix(string prefix, StringComparison comparison, Func<HttpRequest, object> handler) =>
                 Add("POST", RouteMatch.Prefix, prefix, comparison, Wrap(handler));
-
-            // Declares a route still served by HandleClient's legacy if/else chain.
-            public ReignRoute Legacy(string method, string path) =>
-                Add(method, RouteMatch.Exact, path, StringComparison.Ordinal, null);
-            public ReignRoute LegacyPrefix(string method, string prefix, StringComparison comparison) =>
-                Add(method, RouteMatch.Prefix, prefix, comparison, null);
 
             // Every path below the prefix runs without a campaign lease, registered or not, except gatedSubtree.
             public void CampaignGateExemptArea(string prefix, string gatedSubtree = null)
@@ -188,13 +179,12 @@ namespace ReignBetaServer
             return routes.Seal();
         }
 
-        // False when no registered route matches or the match is still served by the legacy chain; HandleClient
-        // then continues into that chain, which ends in the 404 response.
+        // False when no registered route matches; HandleClient then writes the 404 response.
         private static bool TryDispatchRegisteredRoute(HttpRequest request, RouteContext route, out object response)
         {
             response = null;
             ReignRoute match = ServerRoutes.Value.Resolve(request.Method, request.Path);
-            if (match == null || match.Handler == null) return false;
+            if (match == null) return false;
             response = match.Handler(request, route);
             return true;
         }

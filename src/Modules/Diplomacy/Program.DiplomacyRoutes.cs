@@ -8,11 +8,10 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Diplomacy module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterDiplomacyRoutes(ReignRouteTable routes)
         {
             routes.Post("/diplomacy/director/evaluate", request => EvaluateWorldDiplomacy(request.JsonBody));
-            routes.Legacy("POST", "/diplomacy/debug/random-event");
+            routes.Post("/diplomacy/debug/random-event", request => QueueRandomDiplomacyDebugEvent(request.JsonBody));
             routes.Get("/political-pressure/notices", request => NextPoliticalPressureNotices(request.Query));
             routes.Post("/political-pressure/acknowledge", request => AcknowledgePoliticalPressureNotice(request.JsonBody));
 #if !REIGN_EXCLUDE_COURT

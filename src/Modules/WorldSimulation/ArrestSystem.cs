@@ -7,39 +7,23 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static bool TryHandleArrestRoute(HttpRequest request, out object response)
-        {
-            response = null;
-            if (request.Method != "POST") return false;
-            if (request.Path == "/arrests/case/apply")
-            {
-                response = ArrestCaseApplyApi(request.JsonBody);
-                return true;
-            }
-            if (request.Path == "/arrests/evidence/evaluate")
-            {
-                response = ArrestEvidenceEvaluateApi(request.JsonBody);
-                return true;
-            }
 #if !REIGN_EXCLUDE_VERIFICATION
-            if (request.Path == "/arrests/test/contracts")
+        // POST /arrests/test/contracts (registered in Program.WorldSimulationRoutes.cs).
+        private static Dictionary<string, object> ArrestContractReportApi()
+        {
+            List<Dictionary<string, object>> results = RunArrestSystemSelfTests();
+            return new Dictionary<string, object>
             {
-                List<Dictionary<string, object>> results = RunArrestSystemSelfTests();
-                response = new Dictionary<string, object>
-                {
-                    ["ok"] = results.All(item => ReadBool(item, "passed", false)),
-                    ["schema"] = "reign-arrest-contract-report-v2",
-                    ["caseCount"] = results.Count,
-                    ["languageCaseCount"] = results.Count(item =>
-                        ReadString(item, "name", "").StartsWith("arrest_language_",
-                            StringComparison.OrdinalIgnoreCase)),
-                    ["results"] = results
-                };
-                return true;
-            }
-#endif
-            return false;
+                ["ok"] = results.All(item => ReadBool(item, "passed", false)),
+                ["schema"] = "reign-arrest-contract-report-v2",
+                ["caseCount"] = results.Count,
+                ["languageCaseCount"] = results.Count(item =>
+                    ReadString(item, "name", "").StartsWith("arrest_language_",
+                        StringComparison.OrdinalIgnoreCase)),
+                ["results"] = results
+            };
         }
+#endif
 
         private static Dictionary<string, object> ArrestEvidenceEvaluateApi(
             Dictionary<string, object> payload)

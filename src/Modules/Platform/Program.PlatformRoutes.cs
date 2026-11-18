@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
@@ -8,7 +9,6 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // HTTP routes owned by the Platform module, in their former router order (see RouteTable.cs).
-        // Legacy(...) routes are still served by the if/else chain in HandleClient.
         private static void RegisterPlatformRoutes(ReignRouteTable routes)
         {
             // Test and verification tooling isolates its own campaigns, so it runs without the campaign lease;
@@ -40,7 +40,31 @@ namespace ReignBetaServer
                 LogRequest(request, 200);
                 return RouteResponseWritten;
             }).WithoutCampaignGate();
-            routes.Legacy("GET", "/health").WithoutCampaignGate();
+            routes.Get("/health", request =>
+            {
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = true,
+                    ["service"] = "BannerlordReignServer",
+                    ["databaseName"] = ReignPostgreSqlOptions.FromEnvironment().Database,
+                    ["databaseSchemaVersion"] = ReignPostgreSqlStorage.DatabaseSchemaVersion,
+                    ["requiredDatabaseSchemaVersion"] = ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
+                    ["databaseSchemaUpToDate"] = ReignPostgreSqlStorage.DatabaseSchemaVersion == ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
+                    ["protocolVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol,
+                    ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? typeof(Program).Assembly.GetName().Version.ToString(3),
+                    ["contentVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.ContentVersion ?? "development",
+                    ["dataDir"] = DataDir,
+                    ["processId"] = Process.GetCurrentProcess().Id,
+                    ["port"] = ActiveServerPort,
+                    ["managedBy"] = "ReignServer",
+                    // Exact additive capability: the route, preflight and legacy guards are wired.
+                    [Reign.Core.Contracts.Actions.TerminalActionReportProtocol.HealthCapabilityField] =
+                        Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema,
+                    // Additive: verified-load recovery, load proofs and admission-bound acks are wired.
+                    [Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoveryHealthCapabilityField] =
+                        Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoverySchema
+                };
+            }).WithoutCampaignGate();
             routes.Post("/api/activate", request => ActivateRunningServer(request.JsonBody));
             routes.Get("/api/settings", request => SettingsForUi(LoadSettings()));
             routes.Get("/api/gameplay-options", request => ReignXpOptionsForClient());
@@ -56,7 +80,7 @@ namespace ReignBetaServer
             // must run without campaign ownership.
             routes.Post("/api/shutdown", request => RequestServerShutdown()).WithoutCampaignGate();
             routes.Post("/api/settings/clear-key", request => ClearSettingsKey(request.JsonBody, request));
-            routes.Legacy("GET", "/api/diagnostics");
+            routes.Get("/api/diagnostics", request => ServerDiagnostics());
             routes.Post("/api/diagnostics/test-llm", request => TestLlmKey(request.JsonBody));
             routes.Get("/api/codex/status", request => CodexStatusApi());
             routes.Post("/api/codex/start", request => StartCodexAppServerApi());
@@ -65,13 +89,13 @@ namespace ReignBetaServer
             routes.Post("/api/codex/logout", request => CodexLogoutApi());
             routes.Post("/api/codex/models/refresh", request => RefreshCodexModelsApi());
             routes.Post("/api/codex/models/verify", request => CodexVerifyModelApi(request.JsonBody));
-            routes.Legacy("GET", "/api/telemetry/status");
-            routes.Legacy("GET", "/api/provider/status");
-            routes.Legacy("GET", "/api/background/status");
-            routes.Legacy("GET", "/api/prompts");
-            routes.Legacy("POST", "/api/prompts");
+            routes.Get("/api/telemetry/status", request => ReignTelemetryStatus());
+            routes.Get("/api/provider/status", request => ProviderMiddlewareStatus());
+            routes.Get("/api/background/status", request => PriorityBackgroundStatus());
+            routes.Get("/api/prompts", request => ReadPromptTemplatesApi());
+            routes.Post("/api/prompts", request => SavePromptTemplatesApi(request.JsonBody));
             routes.Post("/api/castle-chat/prompts", request => CastleChatPromptsApi(request.JsonBody));
-            routes.Legacy("GET", "/api/logs");
+            routes.Get("/api/logs", request => ReadLogApi(request.Query));
             routes.Get("/api/diagnostics/conversations", request => ConversationDiagnosticsListApi(request.Query));
             routes.Get("/api/diagnostics/conversations/trace", request => ConversationDiagnosticsTraceApi(request.Query));
             routes.Get("/api/diagnostics/conversations/payload", request => ConversationDiagnosticsPayloadApi(request.Query));
@@ -98,19 +122,19 @@ namespace ReignBetaServer
                 return RouteResponseWritten;
             });
             routes.Post("/audit/ingest", request => AuditIngest(request.JsonBody));
-            routes.Legacy("GET", "/audit/query");
+            routes.Get("/audit/query", request => AuditQuery(request.Query));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Legacy("GET", "/tests/cases");
-            routes.Legacy("POST", "/tests/cases/save");
-            routes.Legacy("POST", "/tests/run");
-            routes.Legacy("POST", "/tests/run-suite");
-            routes.Legacy("POST", "/tests/capture-from-correlation");
-            routes.Legacy("GET", "/tests/runs");
-            routes.Legacy("POST", "/verification/run");
-            routes.Legacy("GET", "/verification/status");
-            routes.Legacy("POST", "/verification/cancel");
-            routes.Legacy("GET", "/verification/results");
-            routes.Legacy("POST", "/verification/replay");
+            routes.Get("/tests/cases", request => TestCasesApi(request.Query));
+            routes.Post("/tests/cases/save", request => SaveTestCaseApi(request.JsonBody));
+            routes.Post("/tests/run", request => RunTestApi(request.JsonBody));
+            routes.Post("/tests/run-suite", request => RunTestSuiteApi(request.JsonBody));
+            routes.Post("/tests/capture-from-correlation", request => CaptureTestFromCorrelationApi(request.JsonBody));
+            routes.Get("/tests/runs", request => TestRunsApi(request.Query));
+            routes.Post("/verification/run", request => StartVerificationApi(request.JsonBody));
+            routes.Get("/verification/status", request => VerificationStatusApi());
+            routes.Post("/verification/cancel", request => CancelVerificationApi());
+            routes.Get("/verification/results", request => VerificationResultsApi(request.Query));
+            routes.Post("/verification/replay", request => ReplayVerificationApi(request.JsonBody));
 #endif
             routes.Post("/events/ingest", request => IngestEvent(request.JsonBody));
             routes.Post("/initialization/readiness/seal", request => InitializationReadinessSealApi(request.JsonBody));
@@ -123,7 +147,7 @@ namespace ReignBetaServer
             routes.Post("/memory/action_result", request => MemoryActionResultApi(request.JsonBody));
             routes.Post("/memory/build_context", request => MemoryBuildContextApi(request.JsonBody));
             routes.Post("/memory/consolidate", request => MemoryConsolidateApi(request.JsonBody));
-            routes.Legacy("POST", "/identity/synchronize");
+            routes.Post("/identity/synchronize", request => IdentitySynchronizeWithPortraitRosterUpgradeApi(request.JsonBody));
             routes.Post("/context/build", request => BuildContext(request.JsonBody));
             routes.Post("/context/select", request => SelectContextPulls(request.JsonBody));
             routes.Post("/actions/route", request => RouteActionsApi(request.JsonBody));
@@ -153,8 +177,8 @@ namespace ReignBetaServer
             routes.Post("/family-chambers/scene/generate", request => RunInteractiveRequest(() => FamilyChambersSceneGenerate(request.JsonBody)));
             routes.Post("/family-chambers/childhood/mature", request => FamilyChambersMatureChildhood(request.JsonBody));
             routes.Post("/portraits/diagnose", request => PortraitDiagnose(request.JsonBody));
-            routes.Legacy("GET", "/actions/catalog");
-            routes.Legacy("GET", "/actions/failures");
+            routes.Get("/actions/catalog", request => ActionCatalog());
+            routes.Get("/actions/failures", request => ActionFailures(request.JsonBody, request.Query));
             routes.Get("/actions/next", request => NextActions(request.JsonBody, request.Query));
             routes.Post("/actions/next", request => NextActions(request.JsonBody, request.Query));
             routes.Post("/actions/propose", request => ProposeAction(request.JsonBody));

@@ -16,7 +16,7 @@ arrests and dialogue marriage actions. It also hosts the live interaction test c
 - World Test: `WorldTest.cs`, `WorldTestReadiness.cs`, `WorldTestReports.cs`, `WorldTestTelemetry.cs`,
   `WorldTestRollupWorker.cs` (started by `RunServer`).
 - Campaign commands and actions: `CampaignCommandSystem.cs`, `DialogueActionAuthority.cs`,
-  `DialogueMarriageActions.cs`, `ArrestSystem.cs` (`TryHandleArrestRoute`).
+  `DialogueMarriageActions.cs`, `ArrestSystem.cs` (its `/arrests/*` routes are registered in `Program.WorldSimulationRoutes.cs`).
 - Social events: `SocialEventTurns.cs`, `SocialEventApproaches.cs`, `GeneratedWildernessVariety.cs`. The start,
   respond, resolve and history routes for social events are still in `Platform/Program.cs`.
 - `LiveInteractionTest.cs`: the server side of the live in-game test harness (`/tests/live/*`), driven by
