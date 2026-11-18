@@ -499,7 +499,7 @@ WHERE session_id=$session AND exchange_id=$exchange AND status='active' ORDER BY
             };
         }
 
-        private static string RenderExactHistoryTurn(Dictionary<string, object> turn,
+        internal static string RenderExactHistoryTurn(Dictionary<string, object> turn,
             KnowledgeAccessContext knowledge)
         {
             turn = turn ?? new Dictionary<string, object>();

@@ -333,7 +333,7 @@ $day,$effective,$chance,$roll,'queued',$expiry,$correlation,$ts,$ts);", new Dict
             }
         }
 
-        private static int StableRulerD100(string campaignId, string timelineId, int dayOrSeason, string subject)
+        internal static int StableRulerD100(string campaignId, string timelineId, int dayOrSeason, string subject)
         {
             uint value = (uint)StableDirectorSeed(campaignId + "|" + timelineId, dayOrSeason, subject ?? "");
             return 1 + (int)(value % 100u);
@@ -349,7 +349,7 @@ $day,$effective,$chance,$roll,'queued',$expiry,$correlation,$ts,$ts);", new Dict
             return !string.IsNullOrWhiteSpace(firstParty) && firstParty.Equals(secondParty, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static void RecordRulerActivity(ReignDbConnection connection, string campaignId,
+        internal static void RecordRulerActivity(ReignDbConnection connection, string campaignId,
             string timelineId, double worldDay, string observer, string target, string eventType,
             string polarity, string status, int threshold, int before, int after, int roll, int chance,
             string actionId, string correlationId, string reason, Dictionary<string, object> payload = null)
@@ -399,7 +399,7 @@ outcome=$outcome,action_id=$action,updated_ts=$ts WHERE opportunity_id=$id;", ne
             double latestDay, Dictionary<string, object> nativePayload)
         {
             EnsureKingdomLeaderDiplomacySchema(connection);
-            EnsureRebellionSchema(connection);
+            RebellionService.EnsureRebellionSchema(connection);
             int day = (int)Math.Floor(latestDay + 0.000001d);
             List<Dictionary<string, object>> rulers = ReadDictionaryList(nativePayload, "politicalLeaders")
                 .Where(row => ReadPoliticalFlag(row, "is_ruler", "isRuler"))
@@ -925,7 +925,7 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
                 delta, "", 0, true, "diplomacy-refusal:" + eventId);
         }
 
-        private static void ApplyRulerDiplomaticIncident(string campaignId, string timelineId,
+        internal static void ApplyRulerDiplomaticIncident(string campaignId, string timelineId,
             double worldDay, string eventKind, string incidentId, string sourceId,
             string observer, string target, string observerKingdom, string targetKingdom,
             int affinityDelta, string publicSubjectId, int publicDelta,
@@ -1230,7 +1230,7 @@ ON CONFLICT(campaign_id,timeline_id,subject_id,tag_id) DO NOTHING;",
                 });
         }
 
-        private static void RecordRulerDiplomacyEventActivity(string campaignId,
+        internal static void RecordRulerDiplomacyEventActivity(string campaignId,
             Dictionary<string, object> diplomaticEvent, string eventType,
             string status)
         {

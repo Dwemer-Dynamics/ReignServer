@@ -85,7 +85,7 @@ status TEXT NOT NULL,payload_json TEXT NOT NULL,created_ts BIGINT NOT NULL,resol
 CREATE INDEX IF NOT EXISTS idx_continuity_pending_owner ON conversation_continuity_pending(timeline_id,owner_id,status);");
         }
 
-        private static string ContinuityTimeline(Dictionary<string, object> payload) =>
+        internal static string ContinuityTimeline(Dictionary<string, object> payload) =>
             FirstNonEmpty(ReadString(payload, "timelineId", ""), "main");
 
         private static bool ContinuityClosed(string status) =>

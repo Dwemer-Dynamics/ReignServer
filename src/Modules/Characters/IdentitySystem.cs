@@ -2338,7 +2338,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
             return true;
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             BuildCurrentPoliticalAuthorityView(
                 Dictionary<string, object> identityView,
                 Dictionary<string, object> context)

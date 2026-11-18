@@ -75,7 +75,7 @@ namespace ReignBetaServer
             }, StringComparer.OrdinalIgnoreCase)
         };
 
-        private sealed class PromptEnvelope
+        internal sealed class PromptEnvelope
         {
             public List<Dictionary<string, object>> Messages { get; set; } = new List<Dictionary<string, object>>();
             public Dictionary<string, object> Diagnostics { get; set; } = new Dictionary<string, object>();
@@ -1010,7 +1010,7 @@ namespace ReignBetaServer
             return block.ToString().Trim();
         }
 
-        private static string BuildPromptContext(
+        internal static string BuildPromptContext(
             string campaignId,
             string heroId,
             Dictionary<string, object> profile,
@@ -1413,7 +1413,7 @@ namespace ReignBetaServer
             return builder.ToString().Trim();
         }
 
-        private static string BuildStableCharacterPrompt(string heroId, string heroName, Dictionary<string, object> profile, Dictionary<string, object> characteristics)
+        internal static string BuildStableCharacterPrompt(string heroId, string heroName, Dictionary<string, object> profile, Dictionary<string, object> characteristics)
         {
             profile = profile ?? new Dictionary<string, object>();
             characteristics = characteristics ?? new Dictionary<string, object>();
@@ -1475,7 +1475,7 @@ namespace ReignBetaServer
             return FirstNonEmpty(string.Join("\n", wounds.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.Ordinal)), "Not established.");
         }
 
-        private static string BuildLiveCharacterPrompt(string heroName, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> state, string playerText, string sceneContext)
+        internal static string BuildLiveCharacterPrompt(string heroName, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> state, string playerText, string sceneContext)
         {
             profile = profile ?? new Dictionary<string, object>();
             characteristics = characteristics ?? new Dictionary<string, object>();
@@ -1509,7 +1509,7 @@ namespace ReignBetaServer
             Dictionary<string, object> characteristics,
             string playerText)
         {
-            if (!LooksLikeRebellionPreparationRequest(playerText)) return string.Empty;
+            if (!RebellionService.LooksLikeRebellionPreparationRequest(playerText)) return string.Empty;
             profile = profile ?? new Dictionary<string, object>();
             characteristics = characteristics ?? new Dictionary<string, object>();
             Dictionary<string, object> nativeTraits =
@@ -1521,7 +1521,7 @@ namespace ReignBetaServer
             int playerRelation = ReadInt(profile, "relationToPlayer", 0);
             int loyalty = ReadInt(reignTraits, "loyalty", 50);
             int honor = ReadInt(nativeTraits, "honor", 0);
-            bool reportEligible = RebellionPrivateReportEligible(
+            bool reportEligible = RebellionService.RebellionPrivateReportEligible(
                 sameSovereign, sovereignRelation, loyalty, honor);
             return "This is a clear request for support in a planned rebellion. Decide pledge, refusal, or deferral in character. "
                 + "Reporting is a private action and must never be suggested to the player as an option or announced merely to make the route visible. "
@@ -1645,7 +1645,7 @@ namespace ReignBetaServer
             return envelope;
         }
 
-        private static PromptEnvelope BuildSimplePromptEnvelope(string requestType, string variant, string system, string live)
+        internal static PromptEnvelope BuildSimplePromptEnvelope(string requestType, string variant, string system, string live)
         {
             return CreatePromptEnvelope(requestType, variant, system, "", live);
         }
@@ -1682,29 +1682,6 @@ namespace ReignBetaServer
                 .OrderBy(x => ReadFirstString(x, "command", "action", "id"), StringComparer.Ordinal)
                 .ToList();
             return CanonicalJson(ordered);
-        }
-
-        private static string CanonicalJson(object value)
-        {
-            return Json.Serialize(CanonicalizeJsonValue(value));
-        }
-
-        private static object CanonicalizeJsonValue(object value)
-        {
-            if (value == null || value is string || value is bool || value is char || value is byte || value is sbyte || value is short || value is ushort || value is int || value is uint || value is long || value is ulong || value is float || value is double || value is decimal) return value;
-            if (value is IDictionary dictionary)
-            {
-                SortedDictionary<string, object> sorted = new SortedDictionary<string, object>(StringComparer.Ordinal);
-                foreach (DictionaryEntry entry in dictionary) sorted[Convert.ToString(entry.Key, CultureInfo.InvariantCulture) ?? ""] = CanonicalizeJsonValue(entry.Value);
-                return sorted;
-            }
-            if (value is IEnumerable enumerable)
-            {
-                List<object> list = new List<object>();
-                foreach (object item in enumerable) list.Add(CanonicalizeJsonValue(item));
-                return list;
-            }
-            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
         }
 
         private static void EnsurePromptCacheLayoutMigration()

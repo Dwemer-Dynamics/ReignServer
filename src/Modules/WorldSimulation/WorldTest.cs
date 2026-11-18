@@ -803,7 +803,7 @@ AND subject_id IN ($a,$b) AND (tag_id='ruler_favoring' OR tag_id LIKE 'ruler_fav
                 EnsureRumorSchema(connection);
                 // Remain safe when reading an old Save Sync snapshot whose
                 // campaign schema predates eager rebellion initialization.
-                EnsureRebellionSchema(connection);
+                RebellionService.EnsureRebellionSchema(connection);
                 Dictionary<string, object> latestHeartbeat = QuerySql(connection,
                     "SELECT * FROM world_test_native_heartbeats WHERE timeline_id=$timeline ORDER BY world_day DESC LIMIT 1;",
                     new Dictionary<string, object> { ["timeline"] = timelineId }).FirstOrDefault() ?? new Dictionary<string, object>();
@@ -1979,7 +1979,7 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
             int recognitionChanceViolations = recognitionAttempts.Count(x =>
                 ReadInt(x, "chance_percent", 0) < 1
                 || ReadInt(x, "chance_percent", 0)
-                    > RebellionRecognitionMaximumChancePercent);
+                    > RebellionService.RebellionRecognitionMaximumChancePercent);
             if (recognitionQueueFailures > 0)
                 anomalies.Add("One or more accepted rebel-independence recognition attempts failed to queue their exact negotiated resolution.");
             if (recognitionChanceViolations > 0)
@@ -1989,8 +1989,8 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
             return new Dictionary<string, object>
             {
                 ["name"] = "Relationship-Triggered Rebellions", ["status"] = status, ["latestSuccessfulDay"] = lastRollDay,
-                ["configuredWeeklyChancePercent"] = RebellionWeeklyOutbreakPercent,
-                ["configuredRelationshipThreshold"] = RebellionRelationshipThreshold,
+                ["configuredWeeklyChancePercent"] = RebellionService.RebellionWeeklyOutbreakPercent,
+                ["configuredRelationshipThreshold"] = RebellionService.RebellionRelationshipThreshold,
                 ["weeklyRollCount"] = rolls.Count, ["eligibleRollCount"] = eligible, ["triggeredRollCount"] = triggered,
                 ["observedSuccessPercent"] = eligible == 0 ? 0d : Math.Round(100d * triggered / eligible, 2),
                 ["sampleStatus"] = eligible < 30 ? "insufficient_data" : "informational",
@@ -2009,7 +2009,7 @@ ORDER BY world_day DESC, attempt_index DESC LIMIT 100;",
                         StringComparison.OrdinalIgnoreCase)),
                 ["recognitionQueueFailureCount"] = recognitionQueueFailures,
                 ["recognitionChanceViolationCount"] = recognitionChanceViolations,
-                ["recognitionMaximumChancePercent"] = RebellionRecognitionMaximumChancePercent,
+                ["recognitionMaximumChancePercent"] = RebellionService.RebellionRecognitionMaximumChancePercent,
                 ["recognitionStatuses"] = CountBy(recognitionAttempts, "status"),
                 ["recentRecognitionAttempts"] = recognitionAttempts.Take(20).ToList(),
                 ["recentMovements"] = movements.OrderByDescending(x => ReadDouble(x, "updatedDay", 0d)).Take(20).ToList()
@@ -2909,7 +2909,7 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
             add("checkpoint_boundaries",
                 BuildWorldTestCheckpoints(31.5d).Count(x => ReadBool(x, "reached", false)) == 3,
                 "Campaign checkpoints are reached at days 1, 7, 31.5, 63, and 126.");
-            add("configured_rebellion_chance", RebellionWeeklyOutbreakPercent == 5,
+            add("configured_rebellion_chance", RebellionService.RebellionWeeklyOutbreakPercent == 5,
                 "World Test reports the configured 5% weekly outbreak chance used by the native rebellion contract.");
             List<Dictionary<string, object>> treatyFixture =
                 new List<Dictionary<string, object>>

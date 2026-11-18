@@ -5143,13 +5143,13 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && socialReputationSource.Contains(
                     "new[] { subjectId }, worldDay);")
                 && worldRelationshipSource.Contains(
-                    "private static Dictionary<string, object> ResolveEffectiveAttitude(")
+                    "internal static Dictionary<string, object> ResolveEffectiveAttitude(")
                 && worldRelationshipSource.Contains(
                     "int effective = hasPair ? Clamp(personal + standingValue"),
                 "A verified foreground encounter may refresh only the subject's indexed Public Standing; effective attitude remains a pure directional read and no observer projection is copied into relationship state.");
             add("ruler_diplomacy_uses_personal_affinity_only",
                 worldRelationshipSource.Contains(
-                    "private static Dictionary<string, object> ResolveRulerDiplomaticAttitude(")
+                    "internal static Dictionary<string, object> ResolveRulerDiplomaticAttitude(")
                 && worldRelationshipSource.Contains(
                     "attitude[\"effectiveAttitude\"] = personal;")
                 && kingdomLeaderDiplomacySource.Contains(

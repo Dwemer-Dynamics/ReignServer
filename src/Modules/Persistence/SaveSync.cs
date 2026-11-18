@@ -3153,7 +3153,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureRebellionSchema(connection);
+                RebellionService.EnsureRebellionSchema(connection);
                 EnsureRelationshipDirectorSchema(connection);
                 EnsureMbtiRelationshipSchema(connection);
                 EnsureCourtSchema(connection);

@@ -555,7 +555,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static Dictionary<string, object> BuildAutonomousWorldStartupGrace(
+        internal static Dictionary<string, object> BuildAutonomousWorldStartupGrace(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -1831,7 +1831,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static void QueueDiplomaticEvent(string campaignId, Dictionary<string, object> diplomaticEvent)
+        internal static void QueueDiplomaticEvent(string campaignId, Dictionary<string, object> diplomaticEvent)
         {
             lock (FileLock)
             {
@@ -2807,7 +2807,7 @@ namespace ReignBetaServer
         }
 
         private static double DirectorVirtue(Dictionary<string, object> virtues, string key) => Clamp(0d, 100d, ReadDouble(virtues, key, 50d));
-        private static double Clamp(double min, double max, double value) => Math.Max(min, Math.Min(max, value));
+        internal static double Clamp(double min, double max, double value) => Math.Max(min, Math.Min(max, value));
 
         private static string RequirePublicReason(Dictionary<string, object> source, string fallback)
         {

@@ -5,7 +5,7 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         private static void AddGovernmentEdictSelfTests(Action<string, bool, string, object> add)
         {

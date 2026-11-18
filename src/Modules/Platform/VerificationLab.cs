@@ -532,10 +532,10 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.social_reputation", "social_reputation", RunRumorSubsystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (!includeBaselines && explicitSuite && ShouldRunVerificationSuite(requestedSuite, "spymaster"))
-                AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", RunSpymasterSystemSelfTests());
+                AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (ShouldRunVerificationSuite(requestedSuite, "government"))
-                AddSubsystemListSummary(checks, "contracts.government", "government", RunGovernmentSystemSelfTests());
+                AddSubsystemListSummary(checks, "contracts.government", "government", GovernmentService.RunGovernmentSystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (string.Equals(requestedSuite, "rulers", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.rulers", "rulers", RunRulerJudgmentSelfTests());
@@ -557,7 +557,7 @@ namespace ReignBetaServer
                 AddSelfTestSummary(checks, "baseline.diplomacy", "world_diplomacy", RunWorldDiplomacySelfTests());
                 AddSelfTestSummary(checks, "baseline.world_history", "world_history", RunWorldHistorySelfTests());
                 AddSelfTestSummary(checks, "baseline.initialization_readiness", "save_load", RunInitializationReadinessSelfTests());
-                AddSelfTestSummary(checks, "baseline.rebellion", "rebellion", RunRebellionSelfTests());
+                AddSelfTestSummary(checks, "baseline.rebellion", "rebellion", RebellionService.RunRebellionSelfTests());
                 AddSubsystemListSummary(checks, "baseline.world_test", "world_test", RunWorldTestSelfTests());
             }
         }
@@ -570,7 +570,7 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(requestedSuite) && ShouldRunVerificationSuite(requestedSuite, "social_reputation"))
                 AddSubsystemListSummary(checks, "architecture.social_reputation", "social_reputation", RunRumorSubsystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
-            if (ShouldRunVerificationSuite(requestedSuite, "spymaster")) AddSubsystemListSummary(checks, "architecture.spymaster", "spymaster", RunSpymasterSystemSelfTests());
+            if (ShouldRunVerificationSuite(requestedSuite, "spymaster")) AddSubsystemListSummary(checks, "architecture.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
             if (ShouldStop(checks, failFast)) return;
             if (ShouldRunVerificationSuite(requestedSuite, "interaction_architecture"))
             {
@@ -635,7 +635,7 @@ namespace ReignBetaServer
             AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", RunChatViewContractTests());
             if (includeExpensiveSubsystems)
             {
-                AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", RunSpymasterSystemSelfTests());
+                AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
                 AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RunCurrentRelationshipSelfTests());
                 AddSubsystemListSummary(checks, "contracts.notable_mbti", "memory_relationships", RunNotableMbtiSelfTests());
             }
@@ -3872,7 +3872,7 @@ namespace ReignBetaServer
             return File.Exists(failure) ? failure : "";
         }
 
-        private static string FindVerificationSourceRoot()
+        internal static string FindVerificationSourceRoot()
         {
             // The build snapshot is the evidence for this binary. Prefer it over
             // an ancestor checkout, which may have changed or use source junctions.

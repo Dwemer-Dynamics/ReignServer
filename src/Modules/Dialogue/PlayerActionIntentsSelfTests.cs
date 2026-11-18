@@ -198,7 +198,7 @@ namespace ReignBetaServer
                 && ReadString(preflight(absentCampaign, protocolId, protocolGeneration, protocolTerms), "disposition", "") == "unknown", eligible);
             // A known row made ineligible by a foreign projection owner answers ineligible only for
             // its exact current scope; stale or mismatched scope never permits legacy fallback.
-            Action<string, bool> foreignOwner = (id, present) => { using (var c = OpenCampaignConnection(campaign)) { EnsureRebellionSchema(c);
+            Action<string, bool> foreignOwner = (id, present) => { using (var c = OpenCampaignConnection(campaign)) { RebellionService.EnsureRebellionSchema(c);
                 ExecuteSql(c, present ? @"INSERT INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
 second_kingdom_id,first_ruler_id,second_ruler_id,command,terms_json,terms_hash,status,created_day,updated_day,expires_day,queued_action_id)
 VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peace','{}','h','queued',20,20,30,$id);"

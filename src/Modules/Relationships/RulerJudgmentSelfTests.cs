@@ -82,7 +82,7 @@ namespace ReignBetaServer
                         var actual = ReadDictionary(canonicalContext, "traits");
                         Check("unconstructed_shipped_ruler_v" + version + "_" + ruler,
                             ReadString(canonicalContext, "traitSource", "") == "shipped_foundation_traits"
-                            && actual.All(t => Convert.ToDouble(t.Value) == Trait100(expected, t.Key))
+                            && actual.All(t => Convert.ToDouble(t.Value) == RebellionService.Trait100(expected, t.Key))
                             && actual.Values.Any(v => Convert.ToDouble(v) != 50d)
                             && !File.Exists(CharacterFile(campaign, ruler, "traits.json")));
                     }

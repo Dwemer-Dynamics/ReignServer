@@ -751,7 +751,7 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
             return get("trust") + get("respect") + get("affection") + 0.5d * get("interest_alignment") - get("resentment") - get("rivalry");
         }
 
-        private static string AmbientPairKey(string a, string b)
+        internal static string AmbientPairKey(string a, string b)
         {
             if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b) || a.Equals(b, StringComparison.OrdinalIgnoreCase)) return "";
             return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? a + "|" + b : b + "|" + a;

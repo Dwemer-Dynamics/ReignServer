@@ -11,7 +11,7 @@ namespace ReignBetaServer
     {
         private static readonly object PoliticalProfileLock = new object();
 
-        private static GovernmentPoliticalProfile EnsurePoliticalProfile(string campaignId, string heroId,
+        internal static GovernmentPoliticalProfile EnsurePoliticalProfile(string campaignId, string heroId,
             Dictionary<string, object> profile, Dictionary<string, object> traits)
         {
             lock (PoliticalProfileLock)
@@ -166,7 +166,7 @@ namespace ReignBetaServer
             return TestDict("ok", true, "campaignId", campaign, "timelineId", timeline, "profiles", profiles);
         }
 
-        private static List<Dictionary<string, object>> RequiredPoliticalMessages(Dictionary<string, object> request,
+        internal static List<Dictionary<string, object>> RequiredPoliticalMessages(Dictionary<string, object> request,
             List<Dictionary<string, object>> source)
         {
             if (source.Count == 0) return source; // Context-capacity estimation is not a character turn.

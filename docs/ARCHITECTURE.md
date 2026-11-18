@@ -58,10 +58,12 @@ flowchart LR
 
 ## Process composition
 
-Everything in `src/` is one `internal static partial class Program` (namespace `ReignBetaServer`): 436 of the 467
-`.cs` files under `src/Modules` contribute to it. Module folders are a file layout, not a type or namespace boundary;
-any file can call any private static member. Only a few helpers are separate types (for example
-`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes).
+Most of `src/` is one `internal static partial class Program` (namespace `ReignBetaServer`): 436 of the 483 `.cs`
+files under `src/Modules` contribute to it. For those files, module folders are a file layout, not a type or namespace
+boundary; any of them can call any private static member. The exceptions are a few helper types (for example
+`ReignPostgreSqlStorage`, `ReignPostgreSqlDialect`, the `FinalConversationGauntlet*` classes), the stateless helpers
+in `Platform/ServerCore.cs`, and the module service classes `SpymasterService`, `RebellionService` and
+`GovernmentService` (see [Direction](#direction-2026-11-restructuring-programme), steps 3 and 4).
 `src/Modules/Platform/Program.cs` alone is about 30.8k lines and still contains much of the core dialogue, memory,
 character, action and portrait request handling.
 
@@ -277,8 +279,9 @@ dependencies on other modules.
 
 ## Direction (2026-11 restructuring programme)
 
-These are planned, one reviewed PR at a time and without behaviour change. None of them exists yet except step 1, the partial CI noted in step 7 and the partial route table in step 2; update this
-document in the same PR as any step that lands.
+These are planned, one reviewed PR at a time and without behaviour change. Step 1 has landed as an opt-in, steps 2, 3
+and 4 have partly landed, and step 7 is partial (see each step); update this document in the same PR as any step that
+lands.
 
 1. A verification build flavour: `*SelfTests*`, VerificationLab, test routes and the `--run-*` flags compiled only
    into a verification build (using a csproj condition like `ExcludeCourt`), with the validator building that flavour.
@@ -288,8 +291,20 @@ document in the same PR as any step that lands.
    chain, and gate exemptions are declared on the routes instead of in a separate list. Partly landed: the table and
    gate declarations exist and serve most routes; the `Legacy(...)` routes still use the chain.
 3. Shared helpers (`ReadString`, `TestDict`, `QuerySql`, `ExecuteSql` and similar) move to a static `ServerCore`.
+   Partly landed: `Platform/ServerCore.cs` holds the stateless helpers (the `Read*`/`TestDict`/`TestList` family,
+   `FirstNonEmpty`, the shared `Json` serializer, `UnwrapJsonResponse`, `TryParseStrictJsonObject`,
+   `TryParseJsonObject`, `CanonicalJson`, `CanonicalizeJsonValue`, and the stateless PostgreSQL helpers
+   `AddSqlParameters`, `IsTransientDatabaseContention`, `IsStalePostgreSqlPreparedPlan`, `ResetPostgreSqlPreparedPlans`,
+   `IsPostgreSqlSchemaMutation`, `AcquirePostgreSqlTransactionMutationLock`). A `global using static` makes them
+   callable unqualified from every type. Helpers that touch `Program` state (`QuerySql`, `ExecuteSql`, campaign
+   connections, settings) stay in `Program`. Every overload of a moved name moves with it, so no method group is split.
 4. The `partial class Program` is split per module into `<Module>Service` and `<Module>Store` classes, leaf modules
-   first.
+   first. Partly landed: Spymaster (`SpymasterService`), Rebellion (`RebellionService`) and Government
+   (`GovernmentService`) are their own `internal static partial class`es, in their existing files. They call back into
+   `Program` with explicit `Program.` qualifiers; `Program` and the other modules call them as `<Module>Service.X`, and
+   the members used across that boundary are `internal`. The module route files (`Program.<Module>Routes.cs`) stay part
+   of `Program` and name the service handlers. None of these modules has SQL-only code that separates cleanly without
+   moving code between files, so there is no `<Module>Store` yet. The other modules are still `Program` partials.
 5. Per-campaign versioned migrations: each module's `Ensure*` DDL becomes ordered migrations under one runner,
    following the `reign_meta` pattern, and runtime `Ensure*` calls leave hot paths.
 6. Typed request and response DTOs in `Reign.Core.Contracts` for client-facing routes, module by module.
