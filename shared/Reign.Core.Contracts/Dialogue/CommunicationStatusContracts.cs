@@ -54,7 +54,7 @@ namespace Reign.Core.Contracts.Dialogue
     {
         // Required; empty when absent.
         public string CampaignId { get; set; } = string.Empty;
-        // Trimmed; a blank or absent value means DefaultTimelineId. Must equal the active timeline.
+        // Kept as sent (the server does not trim); a blank or absent value means DefaultTimelineId. Must equal the active timeline.
         public string TimelineId { get; set; } = CommunicationStatusProtocol.DefaultTimelineId;
         // Empty selects every hero.
         public string HeroId { get; set; } = string.Empty;
@@ -70,7 +70,7 @@ namespace Reign.Core.Contracts.Dialogue
             return new CommunicationStatusRequest
             {
                 CampaignId = WireReads.ReadString(payload, CommunicationStatusProtocol.CampaignIdField, string.Empty),
-                TimelineId = string.IsNullOrWhiteSpace(timeline) ? CommunicationStatusProtocol.DefaultTimelineId : timeline.Trim(),
+                TimelineId = string.IsNullOrWhiteSpace(timeline) ? CommunicationStatusProtocol.DefaultTimelineId : timeline,
                 HeroId = WireReads.ReadString(payload, CommunicationStatusProtocol.HeroIdField, string.Empty),
                 Offset = WireReads.ReadInt(payload, CommunicationStatusProtocol.OffsetField, CommunicationStatusProtocol.DefaultOffset),
                 Limit = WireReads.ReadInt(payload, CommunicationStatusProtocol.LimitField, CommunicationStatusProtocol.DefaultLimit)
