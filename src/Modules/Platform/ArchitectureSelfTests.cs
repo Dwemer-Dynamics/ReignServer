@@ -1615,7 +1615,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ["settingsPath"] = kingdomEventSettingsPath
                     });
                 add("kingdom_event_announcement_queue_contract",
-                    kingdomEventBehaviorText.Contains("ReignNewsCampaignBehavior.Instance?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal)
+                    (kingdomEventBehaviorText.Contains("ReignNewsCampaignBehavior.Instance?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal) || kingdomEventBehaviorText.Contains("ReignServices.News?.KingdomEvent(record, kingdom, secondary, oldRuler, heir)", StringComparison.Ordinal))
                     && !kingdomEventBehaviorTextScoped.Contains("PendingAnnouncementEventIds", StringComparison.Ordinal)
                     && kingdomNewsNoticesText.Contains("Category = ReignNewsCategories.WorldEvents", StringComparison.Ordinal)
                     && kingdomNewsNoticesText.Contains("Publish(news)", StringComparison.Ordinal)
