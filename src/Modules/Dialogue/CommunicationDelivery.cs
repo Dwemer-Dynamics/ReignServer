@@ -136,17 +136,17 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
         {
             string campaign = ReadString(p, "campaignId", ""), timeline = ContinuityTimeline(p);
             if (campaign.Length == 0) return TestDict("ok", false, "error", "An exact campaign is required.");
-            using var ownership = EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign));
+            using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
             using var c = OpenCampaignConnection(campaign);
             if (operation == "status")
             {
-                if (ActiveWorldHistoryTimeline(c) != timeline) return CommunicationStatusProtocol.Failure(CommunicationStatusProtocol.TimelineNotActiveError);
+                if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) return CommunicationStatusProtocol.Failure(CommunicationStatusProtocol.TimelineNotActiveError);
                 CommunicationStatusRequest request = CommunicationStatusRequest.FromDictionary(p);
                 return ReadCommunicationSnapshot(c, timeline, request.HeroId, request.Offset, request.Limit);
             }
             EnsureCommunicationSchema(c); EnsureMemoryPrecisionSchema(c);
-            string generation = NpcLivesGeneration(c);
-            if (ActiveWorldHistoryTimeline(c) != timeline) return TestDict("ok", false, "error", "The communication timeline is not active.");
+            string generation = CharactersService.NpcLivesGeneration(c);
+            if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) return TestDict("ok", false, "error", "The communication timeline is not active.");
             if (operation == "scope") return TestDict("ok", true, "generation", generation);
             if (operation != "tick") return TestDict("ok", false, "error", "Unknown communication operation.");
             if (ReadString(p, "generation", "") != generation) return TestDict("ok", false, "status", "stale_generation", "generation", generation);
@@ -194,18 +194,18 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
 
         private static Dictionary<string, object> ReadCommunicationSnapshot(ReignDbConnection c, string timeline, string hero, int offset, int limit)
         {
-            if (!TableExists(c, "communication_messages")) return CommunicationStatusResponse.NoSchema(timeline).ToDictionary();
+            if (!WorldSimulationService.TableExists(c, "communication_messages")) return CommunicationStatusResponse.NoSchema(timeline).ToDictionary();
             var args = TestDict("timeline", timeline, "hero", hero, "offset", Math.Clamp(offset, 0, 1000000), "limit", Math.Clamp(limit, 1, 100));
             string messages = " FROM communication_messages WHERE timeline_id=$timeline AND ($hero='' OR speaker_id=$hero OR recipient_id=$hero)";
             string history = " FROM communication_history WHERE timeline_id=$timeline AND ($hero='' OR owner_id=$hero)";
-            var admissions = TableExists(c, "conversation_accepted_units") ? QuerySql(c, @"SELECT a.unit_id,a.created_ts,
+            var admissions = WorldSimulationService.TableExists(c, "conversation_accepted_units") ? QuerySql(c, @"SELECT a.unit_id,a.created_ts,
 (a.receipt_json::jsonb->'communications')::text AS admission_json FROM conversation_accepted_units a
 WHERE a.receipt_json::jsonb ? 'communications' AND EXISTS(SELECT 1 FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.exchange_id=a.unit_id AND t.role='npc'
 AND ($hero='' OR t.speaker_id=$hero)
 AND COALESCE(t.payload_json::jsonb->>'timelineId',s.payload_json::jsonb->>'timelineId','main')=$timeline)
 ORDER BY a.created_ts DESC,a.unit_id LIMIT $limit OFFSET $offset;", args) : new List<Dictionary<string, object>>();
-            return CommunicationStatusResponse.Snapshot(NpcLivesGeneration(c), timeline,
+            return CommunicationStatusResponse.Snapshot(CharactersService.NpcLivesGeneration(c), timeline,
                 admissions,
                 QuerySql(c, "SELECT *" + messages + " ORDER BY created_day,message_id LIMIT $limit OFFSET $offset;", args),
                 QuerySql(c, "SELECT *" + history + " ORDER BY acquired_day,receipt_id LIMIT $limit OFFSET $offset;", args),
@@ -215,7 +215,7 @@ ORDER BY a.created_ts DESC,a.unit_id LIMIT $limit OFFSET $offset;", args) : new 
 
         private static Dictionary<string, object> CommunicationReadiness(ReignDbConnection c, string timeline, double day)
         {
-            if (!TableExists(c, "communication_messages")) return TestDict("active", false, "pending", 0L, "due", 0L, "failed", 0L);
+            if (!WorldSimulationService.TableExists(c, "communication_messages")) return TestDict("active", false, "pending", 0L, "due", 0L, "failed", 0L);
             var counts = QuerySql(c, @"SELECT
 COUNT(*) FILTER (WHERE status IN ('awaiting_host','reply_pending','reply_generating','summons_ready')) AS pending,
 COUNT(*) FILTER (WHERE status='in_transit' AND due_day<=$day OR status='queued' AND COALESCE((payload_json::jsonb->>'dispatchNotBefore')::double precision,created_day)<=$day) AS due,
@@ -243,14 +243,14 @@ COUNT(*) AS total FROM communication_messages WHERE timeline_id=$timeline;", Tes
                 Dictionary<string, object> row, data, replyContext;
                 string generation, lease;
                 using (new CommunicationDataReadLease())
-                using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
+                using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
                 using (var c = OpenCampaignConnection(campaign))
                 {
                     EnsureCommunicationSchema(c); EnsureMemoryPrecisionSchema(c);
-                    generation = NpcLivesGeneration(c);
+                    generation = CharactersService.NpcLivesGeneration(c);
                     string leasePrefix = CommunicationWorkerBoot + ":" + generation + ":";
                     lease = leasePrefix + Guid.NewGuid().ToString("N");
-                    string timeline = ActiveWorldHistoryTimeline(c);
+                    string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(c);
                     long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     ExecuteSql(c, @"UPDATE communication_messages SET status='reply_failed' WHERE timeline_id=$timeline
 AND status='reply_generating' AND attempts>=3 AND (lease_until<$now OR lease_token NOT LIKE $prefix);",
@@ -274,10 +274,10 @@ AND (status='reply_pending' OR status='reply_generating' AND (lease_until<$now O
                 try { result = ComposeCommunicationReply(campaign, row, data, replyContext, respond ?? ChatWithLlm); }
                 catch (Exception ex) { result = TestDict("ok", false, "error", "Reply generation failed: " + ex.GetType().Name); }
                 using (new CommunicationDataReadLease())
-                using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
+                using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
                 using (var c = OpenCampaignConnection(campaign))
                 {
-                    if (generation != NpcLivesGeneration(c)) return;
+                    if (generation != CharactersService.NpcLivesGeneration(c)) return;
                     var current = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND lease_token=$lease AND status='reply_generating';",
                         TestDict("id", ReadString(row, "message_id", ""), "lease", lease)).FirstOrDefault();
                     if (current == null) continue;
@@ -397,7 +397,7 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
             return true;
         }
 
-        private static void AcceptCommunicationNativeReceipt(ReignDbConnection c, NpcLivesState state, Dictionary<string, object> p, double day)
+        internal static void AcceptCommunicationNativeReceipt(ReignDbConnection c, NpcLivesState state, Dictionary<string, object> p, double day)
         {
             EnsureCommunicationSchema(c);
             string id = ReadString(p, "communicationId", ""), kind = ReadString(p, "kind", "");
@@ -437,7 +437,7 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
             if (kind == "meeting_agreed" && ReadString(row, "status", "") != "summons_ready"
                 && state.Meetings.All(m => m.Id != ReadString(p, "id", ""))) throw new InvalidOperationException("That summons is not ready.");
             bool replay = state.OperationReceipts.ContainsKey(ReadString(p, "operationId", ""));
-            NpcLivesNativeReceipt(c, state, p, ReadString(row, "player_id", ""), day);
+            CharactersService.NpcLivesNativeReceipt(c, state, p, ReadString(row, "player_id", ""), day);
             if (replay) return;
             string status = kind == "meeting_arrived" ? "meeting" : kind == "meeting_completed" ? "completed"
                 : kind == "meeting_interrupted" || kind == "meeting_cancelled" ? "interrupted" : "summons_travelling";

@@ -377,7 +377,7 @@ namespace ReignBetaServer
             {
                 Program.InvalidateCampaignSchemaCaches(campaignId);
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
-                Program.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
                 return !ReignPostgreSqlStorage.CampaignExists(campaignId)
                     && !Directory.Exists(Program.CampaignDirectory(campaignId));
             }

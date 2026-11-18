@@ -6,7 +6,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static List<Dictionary<string, object>> RunWorldHistoryDialogueAssertions(string campaignId, string timelineId)
+        internal static List<Dictionary<string, object>> RunWorldHistoryDialogueAssertions(string campaignId, string timelineId)
         {
             var checks = new List<Dictionary<string, object>>();
             Action<string, bool> check = (name, passed) => checks.Add(new Dictionary<string, object>
@@ -90,10 +90,10 @@ namespace ReignBetaServer
                 olderWin["sequence"] = 90 - index;
                 fixtures.Add(olderWin);
             }
-            var ingest = WorldHistoryIngestBatchApi(new Dictionary<string, object>
+            var ingest = WorldSimulationService.WorldHistoryIngestBatchApi(new Dictionary<string, object>
                 { ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["events"] = fixtures });
             check("fixtures_ingested", ReadInt(ingest, "accepted", 0) == fixtures.Count);
-            var otherTimeline = WorldHistoryIngestBatchApi(new Dictionary<string, object>
+            var otherTimeline = WorldSimulationService.WorldHistoryIngestBatchApi(new Dictionary<string, object>
                 { ["campaignId"] = campaignId, ["timelineId"] = "dialogue_other_timeline",
                     ["events"] = new List<Dictionary<string, object>> { evt("dialogue_other", "tournament_finished", 110d, "Michael won a tournament in another timeline.", "ordinary") } });
             check("alternate_timeline_fixture", ReadInt(otherTimeline, "accepted", 0) == 1);
@@ -106,7 +106,7 @@ namespace ReignBetaServer
                 item["sequence"] = 200 + index;
                 return item;
             }).ToList();
-            var trafficIngest = WorldHistoryIngestBatchApi(new Dictionary<string, object>
+            var trafficIngest = WorldSimulationService.WorldHistoryIngestBatchApi(new Dictionary<string, object>
                 { ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["events"] = traffic });
             check("crowded_history_fixture", ReadInt(trafficIngest, "accepted", 0) == traffic.Count);
 

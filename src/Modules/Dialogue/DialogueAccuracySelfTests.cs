@@ -25,7 +25,7 @@ namespace ReignBetaServer
                 "severityTier", tier, "summary", "A response to the supplied current conduct.",
                 "currentConductQuote", quote, "sourceTurnIds", new[] { "past-reference" });
             Dictionary<string, object> Normalize(Dictionary<string, object> parsed, string text) =>
-                NormalizeConversationRelationshipAssessments(parsed,
+                RelationshipsService.NormalizeConversationRelationshipAssessments(parsed,
                     TestDict("playerHeroStringId", "player", "playerText", text, "participants", new[] { "npc", "player" }),
                     "npc", "suspicious", "player", "current-turn").Single();
             string campaign = "dialogue_accuracy_" + Guid.NewGuid().ToString("N");
@@ -68,7 +68,7 @@ namespace ReignBetaServer
                     Check(sample.Id + "_missing_never_infers_sign", ReadString(Normalize(missing, sample.Player), "valence", "") == "neutral");
                     if (sample.Tier == "meaningful")
                     {
-                        var awarded = ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "meaningful",
+                        var awarded = RelationshipsService.ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "meaningful",
                             "mode", "dialogue", "playerHeroStringId", "player", "participants", new[] { "npc", "player" },
                             "assessments", new List<Dictionary<string, object>> { normalized }));
                         Check("repair_preserves_meaningful_award", ReadInt(ReadDictionaryList(awarded, "receipts").Single(), "finalDelta", 0) >= 2, awarded);
@@ -92,11 +92,11 @@ namespace ReignBetaServer
                 pride["relationshipAssessments"] = new List<Dictionary<string, object>> { Assessment("negative", "We all fall sometimes.") };
                 Check("supported_pride_reaction_not_forced_positive", ReadString(Normalize(pride, "We all fall sometimes."), "valence", "") == "negative");
                 pride["relationshipAssessments"] = new List<Dictionary<string, object>> { Assessment("negative", "We all fall sometimes.", "meaningful") };
-                var slightReceipt = ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "pride-slight",
+                var slightReceipt = RelationshipsService.ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "pride-slight",
                     "mode", "dialogue", "playerHeroStringId", "player", "participants", new[] { "npc", "player" },
                     "assessments", new[] { Normalize(pride, "We all fall sometimes.") }));
                 Check("proud_slight_remains_negative_but_capped", ReadInt(ReadDictionaryList(slightReceipt, "receipts").Single(), "finalDelta", 0) == -1, slightReceipt);
-                var threatReceipt = ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "real-threat",
+                var threatReceipt = RelationshipsService.ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "real-threat",
                     "mode", "dialogue", "playerHeroStringId", "player", "participants", new[] { "npc", "player" },
                     "assessments", new[] { Normalize(negative, "I will burn your house.") }));
                 Check("independent_direct_threat_retains_stronger_loss", ReadInt(ReadDictionaryList(threatReceipt, "receipts").Single(), "finalDelta", 0) <= -4, threatReceipt);
@@ -214,7 +214,7 @@ namespace ReignBetaServer
                     && ReadDictionaryList(ReadDictionary(failed, "formatRetry"), "attempts").Count == 2, failed);
 
                 var neutralRows = new List<Dictionary<string, object>> { Normalize(missingAssessment, "Hello.") };
-                var neutralReceipt = ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "neutral",
+                var neutralReceipt = RelationshipsService.ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "exchangeId", "neutral",
                     "mode", "dialogue", "playerHeroStringId", "player", "participants", new[] { "npc", "player" }, "assessments", neutralRows));
                 Check("missing_evidence_produces_no_persisted_or_native_delta", ReadBool(neutralReceipt, "ok", false)
                     && ReadDictionaryList(neutralReceipt, "receipts").Count == 0

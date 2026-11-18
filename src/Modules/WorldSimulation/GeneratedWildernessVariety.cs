@@ -7,10 +7,10 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private const int WildernessRecentEventLimit = 8;
-        private const int WildernessParticipantLimit = 3;
+        internal const int WildernessParticipantLimit = 3;
         private const int WildernessRecentApproachLimit = 400;
         private const int WildernessRecentOpeningLimit = 600;
 
@@ -56,19 +56,19 @@ namespace ReignBetaServer
             new[] { "cooperation_invention", "cooperation", "Someone proposes an amusing improvement to a travel routine and invites criticism or refinement." }
         };
 
-        private static List<Dictionary<string, object>> WildernessRecentEvents(Dictionary<string, object> payload)
+        internal static List<Dictionary<string, object>> WildernessRecentEvents(Dictionary<string, object> payload)
         {
             return ReadDictionaryList(payload, "recentEvents").Take(WildernessRecentEventLimit)
                 .Select(row => new Dictionary<string, object>
                 {
-                    ["varietyKey"] = LimitText(ReadString(row, "varietyKey", ""), 80),
-                    ["title"] = LimitText(ReadString(row, "title", ""), 120),
-                    ["approachDescription"] = LimitText(ReadString(row, "approachDescription", ""), WildernessRecentApproachLimit),
-                    ["openingText"] = LimitText(ReadString(row, "openingText", ""), WildernessRecentOpeningLimit)
+                    ["varietyKey"] = Program.LimitText(ReadString(row, "varietyKey", ""), 80),
+                    ["title"] = Program.LimitText(ReadString(row, "title", ""), 120),
+                    ["approachDescription"] = Program.LimitText(ReadString(row, "approachDescription", ""), WildernessRecentApproachLimit),
+                    ["openingText"] = Program.LimitText(ReadString(row, "openingText", ""), WildernessRecentOpeningLimit)
                 }).ToList();
         }
 
-        private static string[] SelectWildernessDirection(Dictionary<string, object> payload, Func<int, int> choose = null)
+        internal static string[] SelectWildernessDirection(Dictionary<string, object> payload, Func<int, int> choose = null)
         {
             var recent = WildernessRecentEvents(payload);
             var used = new HashSet<string>(recent.Select(row => ReadString(row, "varietyKey", "")), StringComparer.Ordinal);
@@ -80,19 +80,19 @@ namespace ReignBetaServer
             return eligible[(choose ?? RandomNumberGenerator.GetInt32)(eligible.Count)];
         }
 
-        private static Dictionary<string, object> WildernessCharacterBrief(Dictionary<string, object> stack, Dictionary<string, object> participant)
+        internal static Dictionary<string, object> WildernessCharacterBrief(Dictionary<string, object> stack, Dictionary<string, object> participant)
         {
             stack = stack ?? new Dictionary<string, object>();
             var traits = ReadDictionary(stack, "traits");
             var background = ReadDictionary(stack, "background");
             var brief = new Dictionary<string, object>
             {
-                ["id"] = LimitText(CharacterIdFrom(participant), 160),
-                ["name"] = LimitText(ReadString(participant, "name", ""), 120),
-                ["role"] = LimitText(ReadString(participant, "generatedRole", "party_member"), 80),
-                ["culture"] = LimitText(ReadFirstString(participant, "cultureName", "culture"), 120),
-                ["personality"] = LimitText(ReadString(traits, "basePersonalitySummary", ""), 700),
-                ["background"] = LimitText(FirstNonEmpty(ReadString(background, "summary", ""), ReadString(stack, "nativeBiography", "")), 900),
+                ["id"] = Program.LimitText(Program.CharacterIdFrom(participant), 160),
+                ["name"] = Program.LimitText(ReadString(participant, "name", ""), 120),
+                ["role"] = Program.LimitText(ReadString(participant, "generatedRole", "party_member"), 80),
+                ["culture"] = Program.LimitText(ReadFirstString(participant, "cultureName", "culture"), 120),
+                ["personality"] = Program.LimitText(ReadString(traits, "basePersonalitySummary", ""), 700),
+                ["background"] = Program.LimitText(FirstNonEmpty(ReadString(background, "summary", ""), ReadString(stack, "nativeBiography", "")), 900),
                 ["scope"] = "Selected character facts for a new opening, not a transcript or a complete biography. Missing facts are unknown."
             };
             // Missing native identity is unknown, never the false/male default.
@@ -128,7 +128,7 @@ namespace ReignBetaServer
                 foreach (var pair in fields.Take(16))
                 {
                     if (budget < 100) break;
-                    string key = LimitText(pair.Key, 60);
+                    string key = Program.LimitText(pair.Key, 60);
                     budget -= key.Length + 8;
                     result[key] = ProjectWildernessFacts(pair.Value, ref budget, depth + 1);
                 }
@@ -144,12 +144,12 @@ namespace ReignBetaServer
                 }
                 return result;
             }
-            string text = LimitText(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), Math.Min(400, budget));
+            string text = Program.LimitText(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), Math.Min(400, budget));
             budget -= text.Length;
             return text;
         }
 
-        private static void AppendWildernessVarietyPrompt(System.Text.StringBuilder builder, Dictionary<string, object> payload, string[] direction)
+        internal static void AppendWildernessVarietyPrompt(System.Text.StringBuilder builder, Dictionary<string, object> payload, string[] direction)
         {
             builder.AppendLine("SCENE DIRECTION FOR THIS EVENT: " + direction[0] + " — " + direction[2]);
             builder.AppendLine("Make this a concrete incident already underway, with an observable activity and a specific conversational choice. The direction is inspiration, not a fixed script; adapt it to the actual terrain, time and participants.");
@@ -160,21 +160,21 @@ namespace ReignBetaServer
             builder.AppendLine();
         }
 
-        private static string WildernessOpeningRejection(Dictionary<string, object> response, Dictionary<string, object> payload, List<Dictionary<string, object>> participants)
+        internal static string WildernessOpeningRejection(Dictionary<string, object> response, Dictionary<string, object> payload, List<Dictionary<string, object>> participants)
         {
             string approach = ReadString(response, "approachDescription", "");
             string opening = ReadString(response, "openingText", "");
             if (string.IsNullOrWhiteSpace(approach) || string.IsNullOrWhiteSpace(opening)
                 || string.IsNullOrWhiteSpace(ReadString(response, "playerHook", ""))) return "incomplete_opening";
-            string[] allowedIds = participants.Select(CharacterIdFrom).ToArray();
+            string[] allowedIds = participants.Select(Program.CharacterIdFrom).ToArray();
             if (!ReadStringList(response, "participantHeroIds").Any(id => allowedIds.Contains(id, StringComparer.Ordinal))) return "no_eligible_participants";
             if (WildernessOpeningIdentityConflict(response, participants)) return "participant_gender_conflict";
             foreach (var recent in WildernessRecentEvents(payload))
             {
                 string priorApproach = ReadString(recent, "approachDescription", "");
                 string priorOpening = ReadString(recent, "openingText", "");
-                if (WildernessNormalizedText(LimitText(approach, WildernessRecentApproachLimit)) == WildernessNormalizedText(priorApproach)
-                    || WildernessNormalizedText(LimitText(opening, WildernessRecentOpeningLimit)) == WildernessNormalizedText(priorOpening)) return "repeated_opening";
+                if (WildernessNormalizedText(Program.LimitText(approach, WildernessRecentApproachLimit)) == WildernessNormalizedText(priorApproach)
+                    || WildernessNormalizedText(Program.LimitText(opening, WildernessRecentOpeningLimit)) == WildernessNormalizedText(priorOpening)) return "repeated_opening";
                 var currentWords = WildernessContentWords(approach + " " + opening, participants);
                 var priorWords = WildernessContentWords(priorApproach + " " + priorOpening, participants);
                 int shared = currentWords.Intersect(priorWords).Count();

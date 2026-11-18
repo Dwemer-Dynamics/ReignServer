@@ -352,7 +352,7 @@ VALUES($run,$review,$case,$blind,$key,$ts);",
                     + ". " + ReadString(item, "mode", "conversation"));
                 markdown.AppendLine();
                 foreach (Dictionary<string, object> line in
-                    ReadObjectList(item, "transcript")
+                    CharactersService.ReadObjectList(item, "transcript")
                         .OfType<Dictionary<string, object>>())
                 {
                     string speaker = FirstNonEmpty(

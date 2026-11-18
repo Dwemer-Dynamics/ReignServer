@@ -408,7 +408,7 @@ SELECT $prefix || n,'npc','main',$generation,'turn',$from,$fromHash,'turn',$to,$
                 Check("off_mode_prefix_is_byte_identical_with_persisted_edges", disabledPrefix == BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>()));
                 using (var c = OpenCampaignConnection(campaign))
                 {
-                    string id = ReadString(InsertLetter(c, "npc", "Mira", "player", "Player", "I moved the plant into a pot beside the stone wall.",
+                    string id = ReadString(RelationshipsService.InsertLetter(c, "npc", "Mira", "player", "Player", "I moved the plant into a pot beside the stone wall.",
                         "npc_initiated", "plant", "", "a", "b", 10d, 15d, TestDict()), "letterId", "");
                     linkedLetterId = id;
                     var access = new KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };

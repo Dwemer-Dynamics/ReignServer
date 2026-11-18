@@ -5,11 +5,11 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
 #if !REIGN_EXCLUDE_VERIFICATION
         // POST /arrests/test/contracts (registered in Program.WorldSimulationRoutes.cs).
-        private static Dictionary<string, object> ArrestContractReportApi()
+        internal static Dictionary<string, object> ArrestContractReportApi()
         {
             List<Dictionary<string, object>> results = RunArrestSystemSelfTests();
             return new Dictionary<string, object>
@@ -25,7 +25,7 @@ namespace ReignBetaServer
         }
 #endif
 
-        private static Dictionary<string, object> ArrestEvidenceEvaluateApi(
+        internal static Dictionary<string, object> ArrestEvidenceEvaluateApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -37,13 +37,13 @@ namespace ReignBetaServer
                 {
                     ["ok"] = false, ["error"] = "accusedHeroId is required."
                 };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
                 List<string> evidenceIds = new List<string>();
                 if (TableExists(connection, "foreign_agent_assignments"))
                 {
-                    evidenceIds.AddRange(QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id
+                    evidenceIds.AddRange(Program.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id
 FROM foreign_agent_assignments
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND agent_hero_id=$accused AND status='exposed';",
@@ -54,7 +54,7 @@ AND agent_hero_id=$accused AND status='exposed';",
                         }).Select(row => "foreign_agent:" + accusedId + ":"
                             + ReadString(row, "sponsor_kingdom_id", "unknown")));
                 }
-                List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT DISTINCT e.*
+                List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT DISTINCT e.*
 FROM world_history_events e
 JOIN world_history_entities entity ON entity.event_id=e.event_id
 WHERE e.timeline_id=$timeline AND entity.entity_id=$accused
@@ -87,7 +87,7 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object>
             }
         }
 
-        private static Dictionary<string, object> ArrestCaseApplyApi(
+        internal static Dictionary<string, object> ArrestCaseApplyApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -115,17 +115,17 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object>
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             int desiredDelta = Clamp(ReadInt(payload, "relationshipDelta", 0), -100, 100);
             int reputationValue = Clamp(ReadInt(payload, "reputationValue", 0), -100, 100);
-            string description = LimitText(ReadString(payload, "description", ""), 1000);
+            string description = Program.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
-                EnsureRelationshipDirectorSchema(connection);
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureRelationshipDirectorSchema(connection);
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
-                    Dictionary<string, object> existing = QuerySql(connection, @"
+                    Dictionary<string, object> existing = Program.QuerySql(connection, @"
 SELECT * FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
@@ -145,15 +145,15 @@ AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                             desiredDelta, priorDelta);
                         if (correction != 0)
                         {
-                            string pairKey = AmbientPairKey(accusedId, playerId);
+                            string pairKey = RelationshipsService.AmbientPairKey(accusedId, playerId);
                             string heroA = pairKey.StartsWith(accusedId + "|",
                                 StringComparison.OrdinalIgnoreCase) ? accusedId : playerId;
                             string heroB = string.Equals(heroA, accusedId,
                                 StringComparison.OrdinalIgnoreCase) ? playerId : accusedId;
-                            EnsurePoliticalRelationshipPair(connection, campaignId,
+                            RelationshipsService.EnsurePoliticalRelationshipPair(connection, campaignId,
                                 timelineId, pairKey, heroA, heroB, worldDay);
                             Dictionary<string, object> pair =
-                                ApplyAtomicDirectionalRelationshipDelta(connection,
+                                RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection,
                                     campaignId, accusedId, playerId, correction,
                                     worldDay, "arrest_case:" + caseId, timelineId);
                             if (pair == null)
@@ -177,7 +177,7 @@ AND subject_id=$subject AND tag_id=$tag LIMIT 1;",
                             ["arrestAppliedRelationshipDelta"] = appliedDelta,
                             ["playerOriginated"] = true
                         };
-                        ExecuteSql(connection, @"
+                        Program.ExecuteSql(connection, @"
 INSERT INTO character_reputations(campaign_id,timeline_id,subject_id,tag_id,
 source_occurrence_id,archetype_id,subject_role,description,reputation_value,
 acquired_day,catalog_revision,snapshot_json,status,updated_ts)
@@ -202,15 +202,15 @@ snapshot_json=$snapshot,status='active',updated_ts=$ts;",
                             desiredDelta, priorDelta);
                         if (correction != 0)
                         {
-                            string pairKey = AmbientPairKey(accusedId, playerId);
+                            string pairKey = RelationshipsService.AmbientPairKey(accusedId, playerId);
                             string heroA = pairKey.StartsWith(accusedId + "|",
                                 StringComparison.OrdinalIgnoreCase) ? accusedId : playerId;
                             string heroB = string.Equals(heroA, accusedId,
                                 StringComparison.OrdinalIgnoreCase) ? playerId : accusedId;
-                            EnsurePoliticalRelationshipPair(connection, campaignId,
+                            RelationshipsService.EnsurePoliticalRelationshipPair(connection, campaignId,
                                 timelineId, pairKey, heroA, heroB, worldDay);
                             Dictionary<string, object> pair =
-                                ApplyAtomicDirectionalRelationshipDelta(connection,
+                                RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection,
                                     campaignId, accusedId, playerId, correction,
                                     worldDay, "arrest_rescinded:" + caseId, timelineId);
                             if (pair == null)
@@ -218,7 +218,7 @@ snapshot_json=$snapshot,status='active',updated_ts=$ts;",
                                     "The rescinded arrest relationship effect could not be removed.");
                             appliedDelta = 0;
                         }
-                        ExecuteSql(connection, @"
+                        Program.ExecuteSql(connection, @"
 UPDATE character_reputations SET status='rescinded_by_accuser',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id=$subject AND tag_id=$tag;",
@@ -228,8 +228,8 @@ AND subject_id=$subject AND tag_id=$tag;",
                                 ["subject"] = accusedId, ["tag"] = tagId, ["ts"] = ts
                             });
                     }
-                    ExecuteSql(connection, "COMMIT;");
-                    InvalidateRelationshipPairStateCache(campaignId);
+                    Program.ExecuteSql(connection, "COMMIT;");
+                    RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
                     return new Dictionary<string, object>
                     {
                         ["ok"] = true, ["operation"] = operation,
@@ -240,7 +240,7 @@ AND subject_id=$subject AND tag_id=$tag;",
                 }
                 catch (Exception ex)
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["caseId"] = caseId, ["error"] = ex.Message
@@ -249,7 +249,7 @@ AND subject_id=$subject AND tag_id=$tag;",
             }
         }
 
-        private static List<Dictionary<string, object>> BuildArrestDialogueCandidates(
+        internal static List<Dictionary<string, object>> BuildArrestDialogueCandidates(
             Dictionary<string, object> payload,
             Dictionary<string, object> hero,
             string playerText,
@@ -258,7 +258,7 @@ AND subject_id=$subject AND tag_id=$tag;",
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Dictionary<string, object> context = ReadDictionary(payload, "arrestContext")
                 ?? new Dictionary<string, object>();
-            string normalized = NormalizeLookup(playerText);
+            string normalized = Program.NormalizeLookup(playerText);
             if (string.IsNullOrWhiteSpace(normalized) || ArrestTextIsNonDirective(normalized))
                 return results;
             string playerId = ReadFirstString(payload, "playerHeroStringId", "playerId");
@@ -335,7 +335,7 @@ AND subject_id=$subject AND tag_id=$tag;",
                 ["severity"] = severity,
                 ["chargeCategory"] = category,
                 ["surrenderAccepted"] = !partyEncounter || ArrestReplyAccepts(visibleReply),
-                ["reactionSnapshot"] = LimitText(visibleReply ?? string.Empty, 1000)
+                ["reactionSnapshot"] = Program.LimitText(visibleReply ?? string.Empty, 1000)
             };
             results.Add(prepare);
             return results;
@@ -358,7 +358,7 @@ AND subject_id=$subject AND tag_id=$tag;",
             };
         }
 
-        private static string BuildArrestDialoguePromptBlock(
+        internal static string BuildArrestDialoguePromptBlock(
             Dictionary<string, object> turnPayload)
         {
             Dictionary<string, object> context = ReadDictionary(turnPayload, "arrestContext");
@@ -378,7 +378,7 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool ArrestTextIsNonDirective(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "do not arrest", "dont arrest", "do not take him", "do not take her",
                 "not arrest", "if i arrest", "if we arrest", "would arrest",
                 "would you arrest", "could arrest", "should i arrest", "should i put",
@@ -388,7 +388,7 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool LooksLikeArrestOrder(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "arrest", "guards take", "guard take", "take him to the dungeon",
                 "take her to the dungeon", "take them to the dungeon",
                 "take him away", "take her away", "take them away", "take you away",
@@ -400,8 +400,8 @@ AND subject_id=$subject AND tag_id=$tag;",
                 "lock them up", "take you into custody", "taking you into custody", "detain him",
                 "detain her", "detain them", "placed in custody")
                 || (normalized.Contains("lock ") && normalized.Contains(" up"))
-                || (ContainsAnyNormalized(normalized, "dungeon", "prison", "custody", "detained")
-                    && ContainsAnyNormalized(normalized, "guards", "guard", "take", "send", "lock", "put", "place"));
+                || (Program.ContainsAnyNormalized(normalized, "dungeon", "prison", "custody", "detained")
+                    && Program.ContainsAnyNormalized(normalized, "guards", "guard", "take", "send", "lock", "put", "place"));
         }
 
         private static bool ArrestNamesAbsentThirdParty(
@@ -422,8 +422,8 @@ AND subject_id=$subject AND tag_id=$tag;",
                     || string.Equals(id, playerId, StringComparison.OrdinalIgnoreCase)) continue;
                 foreach (string name in new[] { ReadString(hero, "name", ""), id })
                 {
-                    string candidate = NormalizeLookup(name);
-                    if (candidate.Length >= 3 && NormalizedTextContainsPhrase(normalizedText, candidate))
+                    string candidate = Program.NormalizeLookup(name);
+                    if (candidate.Length >= 3 && Program.NormalizedTextContainsPhrase(normalizedText, candidate))
                         return true;
                 }
             }
@@ -432,7 +432,7 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool LooksLikeArrestConfirmation(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "take him away", "take her away", "take them away", "take you away",
                 "guards take him", "guards take her", "guards take them", "guards take you",
                 "to the dungeon", "to prison", "do it guards", "proceed with the arrest",
@@ -441,7 +441,7 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool LooksLikeRescission(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "rescind the accusation", "withdraw the accusation", "clear his name",
                 "clear her name", "clear their name", "clear your name", "charges are dropped",
                 "drop the charges", "pardon and clear", "accusation was false", "exonerate");
@@ -449,7 +449,7 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool LooksLikeRelease(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "release him", "release her", "release them", "release you",
                 "free him", "free her", "free them", "free you", "let him out",
                 "let her out", "let them out", "leave the dungeon");
@@ -457,14 +457,14 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool LooksLikeDuel(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "nonlethal duel", "non lethal duel", "duel for your surrender",
                 "duel for the arrest", "fight me for your freedom", "settle this by duel");
         }
 
         private static bool LooksLikePlayerPartyAttack(string normalized)
         {
-            return ContainsAnyNormalized(normalized,
+            return Program.ContainsAnyNormalized(normalized,
                 "order my men to attack", "order our men to attack", "my men attack",
                 "our men attack", "troops attack", "party attack", "attack their party",
                 "attack his party", "attack her party", "men seize them by force");
@@ -472,10 +472,10 @@ AND subject_id=$subject AND tag_id=$tag;",
 
         private static bool ArrestReplyAccepts(string reply)
         {
-            string normalized = NormalizeLookup(reply);
-            if (ContainsAnyNormalized(normalized, "refuse", "will not", "wont", "never surrender",
+            string normalized = Program.NormalizeLookup(reply);
+            if (Program.ContainsAnyNormalized(normalized, "refuse", "will not", "wont", "never surrender",
                 "fight you", "resist", "defy", "not surrender")) return false;
-            return ContainsAnyNormalized(normalized, "surrender", "submit", "yield", "i accept",
+            return Program.ContainsAnyNormalized(normalized, "surrender", "submit", "yield", "i accept",
                 "very well", "i will go", "take me", "i comply", "agreed", "duel", "accept your challenge");
         }
 
@@ -494,7 +494,7 @@ AND subject_id=$subject AND tag_id=$tag;",
                 if (index >= 0)
                 {
                     string reason = text.Substring(index + marker.Length).Trim(' ', '.', ',', ';', ':', '!', '?');
-                    if (reason.Length >= 3) return LimitText(reason, 500);
+                    if (reason.Length >= 3) return Program.LimitText(reason, 500);
                 }
             }
             foreach (string charge in new[]
@@ -506,34 +506,34 @@ AND subject_id=$subject AND tag_id=$tag;",
             {
                 int index = lower.IndexOf(charge, StringComparison.Ordinal);
                 if (index >= 0)
-                    return LimitText(text.Substring(index).Trim(' ', '.', ',', ';', ':', '!', '?'), 500);
+                    return Program.LimitText(text.Substring(index).Trim(' ', '.', ',', ';', ':', '!', '?'), 500);
             }
             return string.Empty;
         }
 
         private static string ClassifyArrestSeverity(string accusation)
         {
-            string value = NormalizeLookup(accusation);
-            if (ContainsAnyNormalized(value, "treason", "regicide", "betray the realm", "wartime betrayal"))
+            string value = Program.NormalizeLookup(accusation);
+            if (Program.ContainsAnyNormalized(value, "treason", "regicide", "betray the realm", "wartime betrayal"))
                 return "capital";
-            if (ContainsAnyNormalized(value, "murder", "assassination", "espionage", "spying",
+            if (Program.ContainsAnyNormalized(value, "murder", "assassination", "espionage", "spying",
                 "foreign spy", "sabotage", "rebellion")) return "grave";
-            if (ContainsAnyNormalized(value, "theft", "fraud", "corruption", "assault",
+            if (Program.ContainsAnyNormalized(value, "theft", "fraud", "corruption", "assault",
                 "stole", "conspiracy", "conspiring", "bribery", "kidnapping")) return "serious";
             return "minor";
         }
 
         private static string ClassifyArrestCharge(string accusation)
         {
-            string value = NormalizeLookup(accusation);
-            if (ContainsAnyNormalized(value, "treason", "regicide")) return "treason";
-            if (ContainsAnyNormalized(value, "espionage", "spying", "foreign spy", "spy")) return "espionage";
-            if (ContainsAnyNormalized(value, "murder", "assassination")) return "murder";
-            if (ContainsAnyNormalized(value, "sabotage")) return "sabotage";
-            if (ContainsAnyNormalized(value, "rebellion")) return "rebellion";
-            if (ContainsAnyNormalized(value, "theft", "stole", "fraud", "corruption", "bribery")) return "property_corruption";
-            if (ContainsAnyNormalized(value, "assault", "kidnapping")) return "violence";
-            if (ContainsAnyNormalized(value, "conspiracy", "conspiring")) return "conspiracy";
+            string value = Program.NormalizeLookup(accusation);
+            if (Program.ContainsAnyNormalized(value, "treason", "regicide")) return "treason";
+            if (Program.ContainsAnyNormalized(value, "espionage", "spying", "foreign spy", "spy")) return "espionage";
+            if (Program.ContainsAnyNormalized(value, "murder", "assassination")) return "murder";
+            if (Program.ContainsAnyNormalized(value, "sabotage")) return "sabotage";
+            if (Program.ContainsAnyNormalized(value, "rebellion")) return "rebellion";
+            if (Program.ContainsAnyNormalized(value, "theft", "stole", "fraud", "corruption", "bribery")) return "property_corruption";
+            if (Program.ContainsAnyNormalized(value, "assault", "kidnapping")) return "violence";
+            if (Program.ContainsAnyNormalized(value, "conspiracy", "conspiring")) return "conspiracy";
             return "other";
         }
 

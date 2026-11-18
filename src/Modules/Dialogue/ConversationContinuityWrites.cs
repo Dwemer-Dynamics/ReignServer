@@ -123,7 +123,7 @@ ON CONFLICT(pending_id) DO NOTHING;", TestDict("id", pendingId, "record", record
             Dictionary<string, object> payload, string owner, string peer, List<string> sourceIds)
         {
             var snapshot = GetContinuityReadSnapshot(payload, owner);
-            if (snapshot == null || !TableExists(connection, "conversation_turns")) return "";
+            if (snapshot == null || !WorldSimulationService.TableExists(connection, "conversation_turns")) return "";
             snapshot.DeliveredPending.Clear();
             var text = new StringBuilder();
             var access = BuildKnowledgeAccessContext(owner, peer, "", payload);
@@ -195,7 +195,7 @@ WHERE pending_id=$id AND record_id=$record AND timeline_id=$timeline AND status=
         {
             // The accepted event is server-issued. sceneTurnId can identify a
             // preceding client scene; it is never the canonical source of a reply.
-            var turn = TableExists(connection, "conversation_turns") ? QuerySql(connection, @"SELECT turn_id
+            var turn = WorldSimulationService.TableExists(connection, "conversation_turns") ? QuerySql(connection, @"SELECT turn_id
 FROM conversation_turns WHERE event_id=$event AND speaker_id=$owner AND text=$text AND status='active'
 ORDER BY turn_order DESC LIMIT 1;", new Dictionary<string, object> {
                 ["event"] = eventId, ["owner"] = owner, ["text"] = acceptedReply ?? "" }).FirstOrDefault() : null;

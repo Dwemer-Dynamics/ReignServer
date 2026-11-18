@@ -152,9 +152,9 @@ namespace ReignBetaServer
             Check("speech_and_hypothesis_not_scene_completion", BuildCurrentSceneProgressPrompt(sceneLines) == "");
             sceneLines[0]["text"] = "*She served the meal, " + new string('x', 500) + ", then departed.*";
             Check("whole_completed_action_not_prefix", BuildCurrentSceneProgressPrompt(sceneLines).Contains(", then departed."));
-            Check("temporary_aversion_rejected", DynamicCharacteristicRejectionReason("Mira hates that the thought follows her tonight.", "npc",
+            Check("temporary_aversion_rejected", CharactersService.DynamicCharacteristicRejectionReason("Mira hates that the thought follows her tonight.", "npc",
                 TestDict("name", "Mira"), TestDict(), "Mira hates that the thought follows her tonight.") == "temporary_reaction_is_not_stable_characterization");
-            Check("trait_text_never_clipped_mid_fact", FormatDynamicCharacteristicsForPrompt(TestDict("active",
+            Check("trait_text_never_clipped_mid_fact", CharactersService.FormatDynamicCharacteristicsForPrompt(TestDict("active",
                 new[] { TestDict("category", "personal_history", "text", "I remember " + new string('x', 400) + ", but it was only a possibility.") }))
                 .Contains(", but it was only a possibility."));
             Dictionary<string, object> Piece(string id, string hash, string text) => TestDict("id", id, "hash", hash, "text", text);

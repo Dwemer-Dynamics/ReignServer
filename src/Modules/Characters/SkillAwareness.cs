@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const int SkillAwarenessModelVersion = 1;
         private const string SkillAwarenessModelId = "reign_skill_awareness_v1";
@@ -364,7 +364,7 @@ namespace ReignBetaServer
             return entries;
         }
 
-        private static string BuildCoreSkillAwarenessPrompt(Dictionary<string, object> profile, Dictionary<string, object> characteristics)
+        internal static string BuildCoreSkillAwarenessPrompt(Dictionary<string, object> profile, Dictionary<string, object> characteristics)
         {
             List<SkillAwarenessEntry> top = ResolveSkillAwarenessEntries(profile, characteristics).Take(3).ToList();
             string interests = BuildDefiningInterestsPrompt(characteristics);
@@ -377,7 +377,7 @@ namespace ReignBetaServer
             return builder.ToString().TrimEnd();
         }
 
-        private static string BuildRelevantSkillAwarenessPrompt(Dictionary<string, object> profile, Dictionary<string, object> characteristics, string turnText, string sceneContext)
+        internal static string BuildRelevantSkillAwarenessPrompt(Dictionary<string, object> profile, Dictionary<string, object> characteristics, string turnText, string sceneContext)
         {
             List<SkillAwarenessEntry> entries = ResolveSkillAwarenessEntries(profile, characteristics);
             if (entries.Count == 0) return "";
@@ -410,7 +410,7 @@ namespace ReignBetaServer
             {
                 bool match = entry.Definition.Aliases.Any(alias => ContainsSkillAlias(query, alias));
                 if (entry.Definition.Key.Equals("trade", StringComparison.OrdinalIgnoreCase)
-                    && (IsConversationalTradeUsage(query.ToLowerInvariant()) || NegatesMaterialTradeOffer(query.ToLowerInvariant())))
+                    && (Program.IsConversationalTradeUsage(query.ToLowerInvariant()) || Program.NegatesMaterialTradeOffer(query.ToLowerInvariant())))
                     match = false;
                 if (entry.Definition.Key.Equals("riding", StringComparison.OrdinalIgnoreCase)
                     && Regex.IsMatch(query, @"\briding\s+(?:out\s+)?(?:the\s+)?(?:storm|wave|tide|trouble|crisis)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
@@ -427,7 +427,7 @@ namespace ReignBetaServer
             return Regex.IsMatch(text, @"(?<![\p{L}\p{N}])" + Regex.Escape(alias.Trim()) + @"(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
-        private static Dictionary<string, object> BuildSkillAwarenessDiagnostics(Dictionary<string, object> profile, Dictionary<string, object> characteristics, string turnText, string sceneContext)
+        internal static Dictionary<string, object> BuildSkillAwarenessDiagnostics(Dictionary<string, object> profile, Dictionary<string, object> characteristics, string turnText, string sceneContext)
         {
             List<SkillAwarenessEntry> entries = ResolveSkillAwarenessEntries(profile, characteristics);
             List<SkillAwarenessEntry> relevant = SelectRelevantSkillAwareness(entries, turnText, sceneContext);
@@ -458,7 +458,7 @@ namespace ReignBetaServer
                 || Regex.IsMatch(text, @"\b(?:level|skill\s+level)\s+\d{1,4}\s+(?:in\s+)?(?:" + skillNames + @")\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
-        private static string RemoveSpokenNumericSkillLevels(string text, out bool repaired)
+        internal static string RemoveSpokenNumericSkillLevels(string text, out bool repaired)
         {
             repaired = ContainsSpokenNumericSkillLevel(text);
             if (!repaired) return text ?? "";
@@ -469,7 +469,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static List<Dictionary<string, object>> RunSkillAwarenessSelfTests()
+        internal static List<Dictionary<string, object>> RunSkillAwarenessSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, detail, evidence) => results.Add(new Dictionary<string, object>

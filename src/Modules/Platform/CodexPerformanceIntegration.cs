@@ -35,7 +35,7 @@ namespace ReignBetaServer
         private static readonly object CodexTimelineGate = new object();
         private static readonly Dictionary<string, string> CodexConversationTimelines = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        private static void InvalidateCodexConversationTimeline(string campaignId)
+        internal static void InvalidateCodexConversationTimeline(string campaignId)
         {
             lock (CodexTimelineGate) CodexConversationTimelines[campaignId ?? ""] = Guid.NewGuid().ToString("N");
             InvalidateCodexThreads("save_load_or_rollback");
@@ -102,7 +102,7 @@ namespace ReignBetaServer
             if (ActiveCodexConversationScope.Value != null) return generate();
             var settings = LoadSettings();
             if (!UsesCodexSubscription(settings)) return generate();
-            var scope = new CodexConversationScope { Settings = DeepCloneProfileDictionary(settings), CorrelationId = EnsureCorrelationId(payload) };
+            var scope = new CodexConversationScope { Settings = CharactersService.DeepCloneProfileDictionary(settings), CorrelationId = EnsureCorrelationId(payload) };
             string gateKey = "";
             CodexConversationGate gate = null;
             bool entered = false;
@@ -197,7 +197,7 @@ namespace ReignBetaServer
             if (ReadString(conduct, "outcome", "") == "accepted" && !ReadBool(conduct, "repairAttempted", false)
                 && originalReply.Length > 0 && originalReply == ReadString(conduct, "finalReply", ""))
             {
-                scope.AcceptedPoliticalConduct = DeepCloneProfileDictionary(ReadDictionary(conduct, "observed"));
+                scope.AcceptedPoliticalConduct = CharactersService.DeepCloneProfileDictionary(ReadDictionary(conduct, "observed"));
                 scope.AcceptedPoliticalConductReply = originalReply;
             }
             foreach (var pair in llm ?? new Dictionary<string, object>())
@@ -225,7 +225,7 @@ namespace ReignBetaServer
         {
             var scope = ActiveCodexConversationScope.Value;
             if (scope == null || parsed == null) return;
-            scope.FinalContract = DeepCloneProfileDictionary(parsed);
+            scope.FinalContract = CharactersService.DeepCloneProfileDictionary(parsed);
             // Response diagnostics add engine-owned decision/motive fields on every
             // turn. They are not edits to the model's contract. Keep the validated
             // parsed contract, but compare its spoken reply with the accepted text.
@@ -322,13 +322,13 @@ namespace ReignBetaServer
             if (!UsesCodexSubscription(settings)) return null;
             NormalizeCodexOptions(settings);
             var context = new Dictionary<string, object> {
-                ["options"] = DeepCloneProfileDictionary(ReadDictionary(settings, "codexOptions")),
+                ["options"] = CharactersService.DeepCloneProfileDictionary(ReadDictionary(settings, "codexOptions")),
                 ["requestType"] = requestType, ["model"] = model, ["correlationId"] = correlationId,
                 ["attemptId"] = Guid.NewGuid().ToString("N"),
                 ["parentCorrelationId"] = FirstNonEmpty(ReadFirstString(payload, "parentCorrelationId", "repairParentCorrelationId"), ActiveCodexConversationScope.Value?.CorrelationId ?? ""),
                 ["deferFinalization"] = ActiveCodexConversationScope.Value != null,
                 ["authoritativeMetadata"] = ActiveCodexConversationScope.Value == null ? new Dictionary<string, object>()
-                    : DeepCloneProfileDictionary(ReadDictionary(payload, "codexAuthoritativeMetadata") ?? new Dictionary<string, object>()),
+                    : CharactersService.DeepCloneProfileDictionary(ReadDictionary(payload, "codexAuthoritativeMetadata") ?? new Dictionary<string, object>()),
                 ["requestedReasoningEffort"] = EffectiveCodexReasoningEffort(settings, payload, requestType),
                 ["campaignId"] = ReadString(payload, "campaignId", ""),
                 ["timelineId"] = ReadFirstString(payload, "timelineId", "loadGeneration"),

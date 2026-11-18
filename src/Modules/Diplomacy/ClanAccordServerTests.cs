@@ -97,7 +97,7 @@ namespace ReignBetaServer
             {
                 using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    Program.EnsureMbtiRelationshipSchema(connection);
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                     Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,
 tag_a_to_b,tag_b_to_a,first_day,last_day,projected_native_relation,updated_ts)
@@ -211,7 +211,7 @@ VALUES('npc|player','npc','player','INTJ','ESFP',18,25,'neutral','neutral',1,1,1
                 string root = Path.GetFullPath(Program.CampaignsRoot()) + Path.DirectorySeparatorChar;
                 string path = Path.GetFullPath(Program.CampaignDirectory(campaign));
                 if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(path) == campaign)
-                    Program.TryDeleteDirectory(path);
+                    PersistenceService.TryDeleteDirectory(path);
             }
         }
     }

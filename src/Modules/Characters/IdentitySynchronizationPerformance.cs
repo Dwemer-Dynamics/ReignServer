@@ -4,9 +4,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private static List<string> SelectIdentityPopularitySubjects(ReignDbConnection connection,
+        internal static List<string> SelectIdentityPopularitySubjects(ReignDbConnection connection,
             List<Dictionary<string, object>> previous, List<Dictionary<string, object>> current)
         {
             // These are precisely the roster columns used by the popularity aggregate.
@@ -21,7 +21,7 @@ namespace ReignBetaServer
                         ReadString(newRows[id], field, ""), StringComparison.Ordinal))), StringComparer.OrdinalIgnoreCase);
             if (changed.Count == 0) return new List<string>();
             var affected = new HashSet<string>(changed, StringComparer.OrdinalIgnoreCase);
-            foreach (var row in QuerySql(connection, @"WITH changed AS (
+            foreach (var row in Program.QuerySql(connection, @"WITH changed AS (
  SELECT value AS id FROM jsonb_array_elements_text(CAST($heroes AS jsonb)))
 SELECT hero_b_id AS subject_id FROM relationship_pair_chemistry JOIN changed ON hero_a_id=id
 UNION SELECT hero_a_id FROM relationship_pair_chemistry JOIN changed ON hero_b_id=id;",
@@ -36,13 +36,13 @@ UNION SELECT hero_a_id FROM relationship_pair_chemistry JOIN changed ON hero_b_i
 
         // The previous roster is immutable for this preparation. Preserve its ordering:
         // the first serial upgrade wins if both endpoints changed in the same census.
-        private static List<Dictionary<string, object>> PrepareHistoricalIdentityBatch(
+        internal static List<Dictionary<string, object>> PrepareHistoricalIdentityBatch(
             List<Dictionary<string, object>> previous,
             List<Dictionary<string, object>> nextHeroes)
         {
             var next = nextHeroes.ToDictionary(IdentityHeroId, x => x, StringComparer.OrdinalIgnoreCase);
             var families = previous.ToDictionary(x => ReadString(x, "hero_id", ""),
-                x => new HashSet<string>(TextListFromJson(ReadString(x, "family_ids_json", "[]")),
+                x => new HashSet<string>(Program.TextListFromJson(ReadString(x, "family_ids_json", "[]")),
                     StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
             var rows = new List<Dictionary<string, object>>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -78,13 +78,13 @@ UNION SELECT hero_a_id FROM relationship_pair_chemistry JOIN changed ON hero_b_i
             return rows;
         }
 
-        private static void WriteHistoricalIdentityBatch(ReignDbConnection connection,
+        internal static void WriteHistoricalIdentityBatch(ReignDbConnection connection,
             List<Dictionary<string, object>> rows, double day, long ts)
         {
             // Bounded transport; no duplicate conflict keys in a statement. Existing
             // verified rows and first_met_day have precisely the serial semantics.
             for (int offset = 0; offset < rows.Count; offset += 1000)
-                ExecuteSql(connection, @"INSERT INTO acquaintances(
+                Program.ExecuteSql(connection, @"INSERT INTO acquaintances(
 observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,first_met_day,last_met_day,updated_ts)
 SELECT r.observer,r.subject,'verified',r.name,'historical_group_identity',1,$day,$day,$ts
 FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(observer text,subject text,name text)

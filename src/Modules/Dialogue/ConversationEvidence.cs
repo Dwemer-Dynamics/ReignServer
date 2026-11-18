@@ -49,7 +49,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                 || Regex.IsMatch(currentPlayerText ?? "", pattern, RegexOptions.IgnoreCase);
         }
 
-        private static List<Dictionary<string, object>> CurrentConversationSources(string player, string npc,
+        internal static List<Dictionary<string, object>> CurrentConversationSources(string player, string npc,
             string playerText, string reply, string eventId, string currentTurnId = "")
             => new List<Dictionary<string, object>> {
                 new Dictionary<string, object> { ["turnId"] = "current_player", ["speakerId"] = player, ["text"] = playerText ?? "", ["eventId"] = eventId,
@@ -58,7 +58,7 @@ For a continuity update linking earlier dialogue, include relatedTurnId, relatio
                     ["turnAliases"] = new[] { "current", eventId, eventId + "_npc", currentTurnId, !string.IsNullOrEmpty(currentTurnId) ? currentTurnId + "_npc_" + npc : "" } }
             };
 
-        private static Dictionary<string, object> BindConversationSource(Dictionary<string, object> write,
+        internal static Dictionary<string, object> BindConversationSource(Dictionary<string, object> write,
             List<Dictionary<string, object>> sources, string fallbackSpeaker, string eventId)
         {
             var claimed = ReadDictionary(write, "sourceEvidence");

@@ -9,10 +9,10 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static Dictionary<string, object> AnnouncementOptionsForClient(Dictionary<string, object> settings) =>
+        internal static Dictionary<string, object> AnnouncementOptionsForClient(Dictionary<string, object> settings) =>
             ReignNewsCategories.Switches.Keys.ToDictionary(k => k, k => (object)ReadBool(settings, k, true), StringComparer.Ordinal);
 
-        private static string ValidateAnnouncementOptions(Dictionary<string, object> incoming)
+        internal static string ValidateAnnouncementOptions(Dictionary<string, object> incoming)
         {
             foreach (var pair in incoming.Where(p => p.Key.StartsWith("announcement", StringComparison.Ordinal)))
             {
@@ -22,7 +22,7 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static string AnnouncementOptionsHtml()
+        internal static string AnnouncementOptionsHtml()
         {
             var html = new StringBuilder("<div class='xpOptions' id='announcementOptions'><h3>Announcements</h3><p class='xpHelp'>Hear the news of the realm in a town-crier popup. Campaign time pauses until you acknowledge each report. Reports wait until you return to the campaign map.</p>");
             foreach (var pair in ReignNewsCategories.Switches)
@@ -31,7 +31,7 @@ namespace ReignBetaServer
             return html.Append("<p class='xpHelp'>All types default to on. Ordinary captures never create a popup. Turn a type off to keep its news in the normal text window; this changes announcements only, not events or their consequences. Unread popups of a disabled type are cleared, so switching it back on starts with new reports. Preferences apply across campaigns and refresh in the game within five seconds.</p><div id='announcementOptionsPreview' class='xpHelp' aria-live='polite'></div><button type='button' onclick='resetAnnouncementOptions()'>Reset to defaults</button> <button type='button' id='saveAnnouncementOptions' disabled onclick='saveAnnouncementOptions()'>Save announcement options</button><div id='announcementOptionsStatus' role='status' aria-live='polite'></div></div>").ToString();
         }
 
-        private static string AnnouncementOptionsScript() => "const announcementSwitchIds=" + Json.Serialize(ReignNewsCategories.Switches.Keys.ToArray()) + @";
+        internal static string AnnouncementOptionsScript() => "const announcementSwitchIds=" + Json.Serialize(ReignNewsCategories.Switches.Keys.ToArray()) + @";
 ids.push(...announcementSwitchIds);announcementSwitchIds.forEach(k=>boolIds.add(k));
 let announcementOptionsLoaded=false;
 function renderAnnouncementOptions(){const enabled=document.getElementById('announcementPopupsEnabled').checked;document.getElementById('announcementOptionsPreview').textContent=enabled?'Selected reports pause time and open as popups. All reports also appear in the text window.':'All announcements use the normal text window.';}

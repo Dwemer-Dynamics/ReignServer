@@ -5,9 +5,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
-        private static List<Dictionary<string, object>> RunWildernessVarietySelfTests()
+        internal static List<Dictionary<string, object>> RunWildernessVarietySelfTests()
         {
             var rows = new List<Dictionary<string, object>>();
             void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
@@ -62,7 +62,7 @@ namespace ReignBetaServer
                 }
                 unknown.Remove("isFemale");
                 var payload = new Dictionary<string, object> { ["wildernessInitiatorHeroStringId"] = "female" };
-                string prompt = BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, new List<Dictionary<string, object>> { female, male, unknown }, WildernessDirections[0], (id, p) => empty);
+                string prompt = Program.BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, new List<Dictionary<string, object>> { female, male, unknown }, WildernessDirections[0], (id, p) => empty);
                 Require(prompt.Contains("she/her") && prompt.Contains("he/him") && prompt.Contains("they/them") && prompt.Contains("Initiating participant id: female"), "Writer lost identity or initiator.");
                 Require(prompt.Contains("occupation Lord") && prompt.Contains("never override native identity"), "Writer rule permits title/name to override identity.");
             });
@@ -70,17 +70,17 @@ namespace ReignBetaServer
             {
                 var empty = new Dictionary<string, object>();
                 var female = new Dictionary<string, object> { ["name"] = "Mira", ["occupation"] = "Lord", ["isFemale"] = true };
-                string foundation = BuildStableCharacterPrompt("female", "Mira", female, empty);
+                string foundation = Program.BuildStableCharacterPrompt("female", "Mira", female, empty);
                 Require(foundation.Contains("female; she/her") && foundation.Contains("earlier event descriptions and transcript wording never override native identity"), "Saved scene wording or a Lord title can override native female identity.");
                 female["isFemale"] = false;
-                Require(BuildStableCharacterPrompt("male", "Mira", female, empty).Contains("male; he/him"), "Known male foundation lost native pronouns.");
+                Require(Program.BuildStableCharacterPrompt("male", "Mira", female, empty).Contains("male; he/him"), "Known male foundation lost native pronouns.");
                 foreach (object unknown in new object[] { null, "invalid" })
                 {
                     female["isFemale"] = unknown;
-                    Require(BuildStableCharacterPrompt("unknown", "Mira", female, empty).Contains("unknown; they/them"), "Invalid foundation identity defaulted to male.");
+                    Require(Program.BuildStableCharacterPrompt("unknown", "Mira", female, empty).Contains("unknown; they/them"), "Invalid foundation identity defaulted to male.");
                 }
                 female.Remove("isFemale");
-                Require(BuildStableCharacterPrompt("missing", "Mira", female, empty).Contains("unknown; they/them"), "Missing foundation identity defaulted to male.");
+                Require(Program.BuildStableCharacterPrompt("missing", "Mira", female, empty).Contains("unknown; they/them"), "Missing foundation identity defaulted to male.");
             });
             Check("obvious_named_gender_conflict_rejected_without_rewriting", () =>
             {
@@ -121,7 +121,7 @@ namespace ReignBetaServer
                 };
                 string before = Json.Serialize(stack);
                 int loads = 0;
-                string prompt = BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", new Dictionary<string, object>(), participants,
+                string prompt = Program.BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", new Dictionary<string, object>(), participants,
                     WildernessDirections[0], (id, person) => { loads++; return stack; });
                 Require(loads == 3 && prompt.Length < 15000, "Three 330k-character stacks exceeded the opening budget.");
                 Require(prompt.Contains("Curious, frank and playful.") && prompt.Contains("Akkalat"), "Compact context discarded relevant character grounding.");
@@ -148,9 +148,9 @@ namespace ReignBetaServer
                 int loads = 0;
                 var largeParticipants = participants.Concat(participants).Select(person => new Dictionary<string, object>(person)
                 { ["name"] = huge, ["cultureName"] = huge, ["generatedRole"] = huge }).ToList();
-                string prompt = BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, largeParticipants,
+                string prompt = Program.BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, largeParticipants,
                     WildernessDirections[1], (id, person) => { loads++; return stack; });
-                var envelope = BuildSimplePromptEnvelope("generated_wilderness_event", "opening", "Output valid JSON.", prompt);
+                var envelope = Program.BuildSimplePromptEnvelope("generated_wilderness_event", "opening", "Output valid JSON.", prompt);
                 string request = Json.Serialize(new Dictionary<string, object> { ["messages"] = envelope.Messages, ["promptEnvelope"] = envelope.Diagnostics });
                 Require(loads == 3 && WildernessRecentEvents(payload).Count == 8, "Unbounded history or participant input reached the prompt.");
                 Require(prompt.Length < 180000 && request.Length < 220000, "Unicode serialization exceeded the conservative opening allowance: " + prompt.Length + "/" + request.Length);
@@ -159,7 +159,7 @@ namespace ReignBetaServer
             {
                 var payload = new Dictionary<string, object> { ["terrainKey"] = "water", ["timeOfDayText"] = "night",
                     ["recentEvents"] = new[] { Opening("Ulagara weaves a saddle blanket.", "Temurtai folds her arms and watches her sister's weaving.") } };
-                string prompt = BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, participants.Take(1).ToList(),
+                string prompt = Program.BuildGeneratedWildernessPrompt("isolated_wilderness_fixture", payload, participants.Take(1).ToList(),
                     WildernessDirections[15], (id, person) => new Dictionary<string, object>());
                 Require(prompt.Contains("saddle blanket") && prompt.Contains("game_riddle") && prompt.Contains("night")
                     && prompt.Contains("travel by water") && prompt.Contains("no secret or distress"), "The opening lost history, selected direction, terrain/time or emotional range.");
@@ -201,7 +201,7 @@ namespace ReignBetaServer
             });
             Check("client_saved_history_and_failed_generation_contract", () =>
             {
-                string client = Path.Combine(FindVerificationSourceRoot(), "ReignBeta");
+                string client = Path.Combine(Program.FindVerificationSourceRoot(), "ReignBeta");
                 // Located by type name (absence and save-id uniqueness are scoped to the owning type) or across all
                 // client source (presence-only markers), never by file path.
                 string behaviorScoped = VerificationSourceLocator.ReadClientTypeSourceText(client, "ReignSocialEventsCampaignBehavior");

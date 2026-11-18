@@ -10,7 +10,7 @@ namespace ReignBetaServer
     {
         private const int InitializationReadinessSealVersion = 3;
 
-        private static Dictionary<string, object> InitializationReadinessStatusApi(
+        internal static Dictionary<string, object> InitializationReadinessStatusApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -22,15 +22,15 @@ namespace ReignBetaServer
             if (ReadBool(payload, "resumeWorkers", true))
             {
                 ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
-                SignalContinuousRelationshipWorker();
+                RelationshipsService.SignalContinuousRelationshipWorker();
             }
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureWorldHistorySchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
                 ReputationService.EnsureSocialSubjectWorkSchema(connection);
-                EnsureWorldRelationshipSchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureWorldRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 int pending = ReadInt(QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.event_type='social_outcome'
@@ -188,7 +188,7 @@ AND status<>'completed';",
                     });
             }
             ReputationService.ResumePendingSocialWorldHistoryOutcomes(campaignId, timelineId);
-            SignalContinuousRelationshipWorker();
+            RelationshipsService.SignalContinuousRelationshipWorker();
             return new Dictionary<string, object>
             {
                 ["ok"] = true, ["campaignId"] = campaignId,
@@ -228,8 +228,8 @@ AND status<>'completed';",
 
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureWorldHistorySchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 EnsureInitializationReadinessSchema(connection);
 
                 Dictionary<string, object> timeline = QuerySql(
@@ -347,7 +347,7 @@ AND status='initialization_pending';",
                         ["campaign"] = campaignId,
                         ["timeline"] = timelineId
                     });
-                SignalContinuousRelationshipWorker();
+                RelationshipsService.SignalContinuousRelationshipWorker();
 
                 return new Dictionary<string, object>
                 {
@@ -398,7 +398,7 @@ PRIMARY KEY(campaign_id,timeline_id,seal_version));");
             string timelineId = "main_initialization";
             try
             {
-                Dictionary<string, object> opened = WorldHistoryOpenTimelineApi(new Dictionary<string, object>
+                Dictionary<string, object> opened = WorldSimulationService.WorldHistoryOpenTimelineApi(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["timelineId"] = timelineId,
@@ -431,7 +431,7 @@ PRIMARY KEY(campaign_id,timeline_id,seal_version));");
                 using (ReignDbConnection connection =
                     OpenCampaignConnection(campaignId))
                 {
-                    EnsureMbtiRelationshipSchema(connection);
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                     ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
 plan_id,campaign_id,timeline_id,world_day,target_count,issued_ts,
 client_applied,client_remaining,client_failed)

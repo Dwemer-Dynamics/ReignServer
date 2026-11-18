@@ -20,7 +20,7 @@ namespace ReignBetaServer
             {
                 using (var connection = OpenCampaignConnection(campaign))
                 {
-                    letterId = ReadString(InsertLetter(connection, "npc", "Author", "player", "Player", body,
+                    letterId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", body,
                         "npc_initiated", "gift", "", "a", "b", 10d, 13d, TestDict()), "letterId", "");
                     List<MemoryEvidence> Recall(string who, Dictionary<string, object> ctx = null) => LoadCorrespondenceMemory(connection,
                         who, who == "npc" ? "player" : "npc", "carved wooden horse", ctx ?? context,
@@ -71,7 +71,7 @@ namespace ReignBetaServer
                     Check("authored_question_survives_without_fabricated_chat_turn", ReadStringList(stored, "applied").Contains("letter_question")
                         && questionPrompt.Contains("Will you come through the western gate?"), stored);
                     const string informationRequest = "Please explain how you would fund the purchase.";
-                    string requestLetterId = ReadString(InsertLetter(connection, "npc", "Author", "player", "Player", informationRequest,
+                    string requestLetterId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", informationRequest,
                         "npc_initiated", "purchase", "", "a", "b", 13d, 16d, TestDict()), "letterId", "");
                     var requestSource = ResolveLetterQuestionSource(connection, requestLetterId, informationRequest, "npc", "npc", "player", context);
                     Check("letter_information_request_retains_body_and_form", requestSource != null
@@ -90,7 +90,7 @@ namespace ReignBetaServer
                         && BuildQuestionContinuityPrompt(connection, context, "npc", "player", new List<string>()).Contains(informationRequest), requestStored);
                     Check("information_request_does_not_disclose_unread_letter", ResolveLetterQuestionSource(connection, requestLetterId,
                         informationRequest, "npc", "player", "npc", context) == null);
-                    for (int i = 0; i < 80; i++) InsertLetter(connection, "npc", "Author", "player", "Player", "A routine note about tomorrow's weather.",
+                    for (int i = 0; i < 80; i++) RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", "A routine note about tomorrow's weather.",
                         "npc_initiated", "weather", "", "a", "b", 13d + i / 100d, 16d + i / 100d, TestDict());
                     Check("lifetime_topic_ranks_before_recent_limit", Recall("npc").Any(e => e.SourceId == letterId && e.Text.Contains(body)));
                 }
@@ -158,7 +158,7 @@ namespace ReignBetaServer
                     "worldHistorySequence", 8L, "worldHistoryHeadEventId", "history_head");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "letter_before");
                 using (var connection = OpenCampaignConnection(campaign))
-                    futureId = ReadString(InsertLetter(connection, "npc", "Author", "player", "Player", "Future secret after the save.", "npc_initiated", "future", "", "a", "b", 21d, 24d, TestDict()), "letterId", "");
+                    futureId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", "Future secret after the save.", "npc_initiated", "future", "", "a", "b", 21d, 24d, TestDict()), "letterId", "");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "letter_before");
                 AdvanceMemoryRestoreGeneration(campaign, point);
                 using (var connection = OpenCampaignConnection(campaign))

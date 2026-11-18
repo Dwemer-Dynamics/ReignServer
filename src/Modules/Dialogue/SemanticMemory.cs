@@ -14,8 +14,8 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string SemanticModelVersion = "bge-small-en-v1.5-384-precision-v2";
-        private const string SemanticCollection = "reign_memory_bge_small_en_v1_5_v1";
+        internal const string SemanticModelVersion = "bge-small-en-v1.5-384-precision-v2";
+        internal const string SemanticCollection = "reign_memory_bge_small_en_v1_5_v1";
         private const string WorldHistoryEmbeddingFilterVersion = "2";
         private const string ConversationEmbeddingPolicyVersion = "2";
         private static readonly object SemanticWorkerLock = new object();
@@ -50,7 +50,7 @@ namespace ReignBetaServer
                 "tournament_finished", "village_looted", "village_raid_started", "war_declared"
             }, StringComparer.OrdinalIgnoreCase);
 
-        private static void EnsureSemanticMemorySchema(ReignDbConnection connection)
+        internal static void EnsureSemanticMemorySchema(ReignDbConnection connection)
         {
             if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
                 throw new InvalidOperationException("Semantic schema settings require FileLock before CampaignSchemaLock.");
@@ -60,7 +60,7 @@ namespace ReignBetaServer
         }
 
         // Cold campaign initialization supplies settings before taking SchemaLock.
-        private static void EnsureSemanticMemorySchema(ReignDbConnection connection,
+        internal static void EnsureSemanticMemorySchema(ReignDbConnection connection,
             string providerGeneration)
         {
             if (providerGeneration == null) throw new ArgumentNullException(nameof(providerGeneration));
@@ -251,7 +251,7 @@ ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pend
                 + " OR LOWER(COALESCE(" + columnPrefix + "event_type,'')) IN (" + types + "))";
         }
 
-        private static bool WorldHistoryEventEmbeddingEligible(Dictionary<string, object> row)
+        internal static bool WorldHistoryEventEmbeddingEligible(Dictionary<string, object> row)
         {
             if (row == null) return false;
             if (string.Equals(ReadString(row, "dissemination_class", ""), "major_world", StringComparison.OrdinalIgnoreCase)) return true;
@@ -568,7 +568,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
             }
         }
 
-        private static void StartManagedSemanticWorker(Dictionary<string, object> settings)
+        internal static void StartManagedSemanticWorker(Dictionary<string, object> settings)
         {
             StartManagedSemanticWorker(settings, null);
         }
@@ -576,7 +576,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
         // stopRequested is the pump-only admission check: a canceled or shut-down pump must not probe
         // or spawn. Other callers (explicit external delete, Save Sync, restore) pass null and keep
         // their ability to start the worker after ShutdownRequested.
-        private static void StartManagedSemanticWorker(Dictionary<string, object> settings, Func<bool> stopRequested)
+        internal static void StartManagedSemanticWorker(Dictionary<string, object> settings, Func<bool> stopRequested)
         {
             if (stopRequested != null && stopRequested()) return;
             string baseUrl = ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082").TrimEnd('/');
@@ -1057,7 +1057,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 });
         }
 
-        private static Dictionary<string, object> SemanticProviderRequest(Dictionary<string, object> settings)
+        internal static Dictionary<string, object> SemanticProviderRequest(Dictionary<string, object> settings)
         {
             return new Dictionary<string, object>
             {
@@ -1067,12 +1067,12 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
             };
         }
 
-        private static string SemanticWorkerUrl(Dictionary<string, object> settings, string path)
+        internal static string SemanticWorkerUrl(Dictionary<string, object> settings, string path)
         {
             return ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082").TrimEnd('/') + path;
         }
 
-        private static Dictionary<string, object> TrySemanticMemorySearch(string campaignId, string query,
+        internal static Dictionary<string, object> TrySemanticMemorySearch(string campaignId, string query,
             Dictionary<string, object> retrievalRoute, Dictionary<string, object> settings, IEnumerable<string> sourceTypes = null, string timelineId = "", string observerId = "", double asOfWorldDay = double.MaxValue)
         {
             Dictionary<string, object> status = new Dictionary<string, object>
@@ -1081,7 +1081,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 ["reason"] = "disabled", ["results"] = new List<Dictionary<string, object>>(), ["durationMs"] = 0
             };
             if (!ReadBool(settings, "enableSemanticMemory", true) || string.IsNullOrWhiteSpace(query)) return status;
-            if (IsSaveSyncSemanticBlocked(campaignId))
+            if (PersistenceService.IsSaveSyncSemanticBlocked(campaignId))
             {
                 status["reason"] = "save_sync_lexical_fallback";
                 return status;
@@ -1228,7 +1228,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
             return deterministic + Math.Max(0d, semantic) * ClampDouble(ReadDouble(settings, "vectorScoreWeight", 30d), 0d, 100d);
         }
 
-        private static List<Dictionary<string, object>> MergeSemanticWorldHistoryCandidates(ReignDbConnection connection,
+        internal static List<Dictionary<string, object>> MergeSemanticWorldHistoryCandidates(ReignDbConnection connection,
             string campaignId, string timelineId, string claim, string family, string claimantId, List<string> entityHints,
             string locationId, double fromDay, double toDay, List<Dictionary<string, object>> candidates,
             Dictionary<string, object> semanticSearch, Dictionary<string, object> settings)
@@ -1245,7 +1245,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                     byId[candidateId] = candidate;
                 }
             }
-            List<string> terms = SimpleTags(claim).Concat(FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(18).ToList();
+            List<string> terms = SimpleTags(claim).Concat(WorldSimulationService.FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(18).ToList();
             foreach (Dictionary<string, object> hit in SemanticHits(semanticSearch, "world_history_event"))
             {
                 Dictionary<string, object> payload = ReadDictionary(hit, "payload") ?? new Dictionary<string, object>();
@@ -1262,13 +1262,13 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
                             ["from"] = fromDay, ["to"] = toDay <= 0 ? double.MaxValue : toDay
                         }).FirstOrDefault();
                     if (row == null) continue;
-                    List<Dictionary<string, object>> entities = QueryWorldHistoryEntities(connection, eventId);
+                    List<Dictionary<string, object>> entities = WorldSimulationService.QueryWorldHistoryEntities(connection, eventId);
                     row["entities"] = entities;
-                    double deterministic = HistoryTermScore(row, terms);
+                    double deterministic = WorldSimulationService.HistoryTermScore(row, terms);
                     if (entities.Any(entity => string.Equals(ReadString(entity, "entity_id", ""), claimantId, StringComparison.OrdinalIgnoreCase))) deterministic += 8d;
                     foreach (string id in entityHints ?? new List<string>())
                         if (entities.Any(entity => string.Equals(ReadString(entity, "entity_id", ""), id, StringComparison.OrdinalIgnoreCase))) deterministic += 4d;
-                    if (EventMatchesFamily(ReadString(row, "event_type", ""), entities, family)) deterministic += 10d;
+                    if (WorldSimulationService.EventMatchesFamily(ReadString(row, "event_type", ""), entities, family)) deterministic += 10d;
                     row["deterministicScore"] = deterministic;
                     byId[eventId] = row;
                 }
@@ -1453,14 +1453,14 @@ WHERE source_type<>'world_history_event' OR source_id IN
             Dictionary<string, object> changedTarget = semanticRow("memory", "changed", "new", "vector_changed");
             Dictionary<string, object> futureCurrent = semanticRow("event", "future", "future", "vector_future");
             Dictionary<string, object> restoredTarget = semanticRow("summary", "restored", "restored", "vector_restored");
-            currentDocuments[SaveSyncEmbeddingDocumentKey(unchangedCurrent)] = unchangedCurrent;
-            currentDocuments[SaveSyncEmbeddingDocumentKey(changedCurrent)] = changedCurrent;
-            currentDocuments[SaveSyncEmbeddingDocumentKey(futureCurrent)] = futureCurrent;
-            targetDocuments[SaveSyncEmbeddingDocumentKey(unchangedTarget)] = unchangedTarget;
-            targetDocuments[SaveSyncEmbeddingDocumentKey(changedTarget)] = changedTarget;
-            targetDocuments[SaveSyncEmbeddingDocumentKey(restoredTarget)] = restoredTarget;
+            currentDocuments[PersistenceService.SaveSyncEmbeddingDocumentKey(unchangedCurrent)] = unchangedCurrent;
+            currentDocuments[PersistenceService.SaveSyncEmbeddingDocumentKey(changedCurrent)] = changedCurrent;
+            currentDocuments[PersistenceService.SaveSyncEmbeddingDocumentKey(futureCurrent)] = futureCurrent;
+            targetDocuments[PersistenceService.SaveSyncEmbeddingDocumentKey(unchangedTarget)] = unchangedTarget;
+            targetDocuments[PersistenceService.SaveSyncEmbeddingDocumentKey(changedTarget)] = changedTarget;
+            targetDocuments[PersistenceService.SaveSyncEmbeddingDocumentKey(restoredTarget)] = restoredTarget;
             SaveSyncSemanticReconciliationPlan selectivePlan =
-                BuildSaveSyncSemanticReconciliationPlan(currentDocuments, targetDocuments);
+                PersistenceService.BuildSaveSyncSemanticReconciliationPlan(currentDocuments, targetDocuments);
             add("save_sync_selective_reconciliation",
                 selectivePlan.PreservedDocuments == 1
                 && selectivePlan.DeleteVectorIds.SetEquals(new[] { "vector_changed", "vector_future" })
@@ -1546,13 +1546,13 @@ VALUES('semantic_significant_history',$campaign,'timeline',2,10,'siege_completed
             public Dictionary<string, object> Payload = new Dictionary<string, object>();
         }
 
-        private sealed class SemanticSourceIdentity
+        internal sealed class SemanticSourceIdentity
         {
             public string SourceType = "";
             public string SourceId = "";
         }
 
-        private sealed class SaveSyncSemanticReconciliationPlan
+        internal sealed class SaveSyncSemanticReconciliationPlan
         {
             public readonly HashSet<string> DeleteVectorIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             public readonly List<SemanticSourceIdentity> RequeueSources = new List<SemanticSourceIdentity>();

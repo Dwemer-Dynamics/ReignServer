@@ -502,7 +502,7 @@ VALUES('whisper','group_source','private_event',4,'agreement_exchange','player',
                 AdvanceMemoryRestoreGeneration(campaign);
                 add("restore_changes_generation", oldGeneration != ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""), null);
                 add("request_generation_rejected_after_restore",!PrecisionEvidenceGenerationCurrent(epochPacket),null);
-                add("save_sync_classifies_derivatives", new[] { "memory_precision_state", "memory_projections", "memory_background_jobs", "temporal_knowledge_assertions" }.All(t => SaveSyncSubsystemForTable(t) == "memories"), null);
+                add("save_sync_classifies_derivatives", new[] { "memory_precision_state", "memory_projections", "memory_background_jobs", "temporal_knowledge_assertions" }.All(t => PersistenceService.SaveSyncSubsystemForTable(t) == "memories"), null);
             }
 
             foreach (int turns in new[] { 10, 30, 100, 200 })
@@ -597,7 +597,7 @@ VALUES('whisper','group_source','private_event',4,'agreement_exchange','player',
                     "npcId", "archive_npc", "playerId", "archive_player", "worldDay", 1d, "ts", 1L,
                     "participants", new[] { "archive_npc", "archive_player" }));
                 using var c = OpenCampaignConnection(campaign);
-                EnsureIdentitySchema(c);
+                CharactersService.EnsureIdentitySchema(c);
                 ExecuteSql(c, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,updated_ts)
 VALUES('archive_npc','archive_player','verified','Player','fixture',1,1);");
                 var audience = new List<string> { "archive_npc", "archive_player" };

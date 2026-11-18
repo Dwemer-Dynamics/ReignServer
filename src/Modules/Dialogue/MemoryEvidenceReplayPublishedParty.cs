@@ -13,14 +13,14 @@ namespace ReignBetaServer
         private const string PublishedPartyReplaySchema = "reign-evidence-party-publication-v1";
         private const int PublishedPartyReplayMaxBytes = 256 * 1024;
 
-        private sealed record PublishedPartyReplayRow(string Id, string Exchange, string SpeakerId, string Speaker,
+        internal sealed record PublishedPartyReplayRow(string Id, string Exchange, string SpeakerId, string Speaker,
             string Role, string Body, long Sequence, double Day);
 
         // Only the isolated evidence reader constructs these bindings. The lookup
         // belongs to one stock precision read's access object, never a payload flag.
         private static readonly ConditionalWeakTable<KnowledgeAccessContext, PublishedPartyReplayView> PublishedPartyReplayReads = new();
 
-        private sealed class PublishedPartyReplayView
+        internal sealed class PublishedPartyReplayView
         {
             private readonly string campaign, observer, peer, timeline, session, query;
             private readonly long cutoff;

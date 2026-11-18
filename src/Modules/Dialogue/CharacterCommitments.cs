@@ -177,7 +177,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
             Dictionary<string, object> payload, List<string> sources, IEnumerable<string> additionalObservers = null,
             string requiredTranscript = "")
         {
-            if (!TableExists(connection, "obligations")) return "";
+            if (!WorldSimulationService.TableExists(connection, "obligations")) return "";
             var access = BuildKnowledgeAccessContext(observer, peer, "", payload);
             var rows = QuerySql(connection, "SELECT * FROM obligations WHERE " + PromptActiveObligationSql + " AND "
                 + MemoryEligibilitySql("obligations") + " AND " + MemorySourceTimelineSql("obligations", access: access)
@@ -330,7 +330,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
             // A transcript audience is not a receipt that a letter was delivered.
             var p = TryParseJsonObject(ReadString(turn, "payload_json", "{}"));
             string letterId = ReadFirstString(p, "letterId", "sourceLetterId");
-            if (letterId.Length == 0 || !TableExists(connection, "letters")) return false;
+            if (letterId.Length == 0 || !WorldSimulationService.TableExists(connection, "letters")) return false;
             var letter = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).SingleOrDefault();
             return LetterVisibleToObserver(connection, letter, access.NpcId, access, out _);
         }
@@ -347,7 +347,7 @@ AND o.payload_json::jsonb->'sourceEvidence'->>'status'='supported_span';");
         private static Dictionary<string, object> ResolveCommitmentSourceTurn(ReignDbConnection connection,
             Dictionary<string, object> reference, List<KnowledgeAccessContext> audience)
         {
-            if (!TableExists(connection, "conversation_turns")) return null;
+            if (!WorldSimulationService.TableExists(connection, "conversation_turns")) return null;
             string id = ReadString(reference, "turnId", ""), sourceEvent = ReadString(reference, "sourceEventId", "");
             string speaker = ReadString(reference, "speakerId", ""), quote = ReadString(reference, "quote", "");
             string hash = ReadString(reference, "sourceHash", "");
@@ -452,7 +452,7 @@ WHERE status='active' AND speaker_id=$speaker AND (turn_id=$turn OR event_id=$ev
         private static void EnsureLatestAcceptedCommitments(ReignDbConnection connection)
         {
             const string marker = "explicit_accepted_commitment_bootstrap_v1";
-            if (!TableExists(connection, "conversation_turns") || !TableExists(connection, "conversation_sessions")
+            if (!WorldSimulationService.TableExists(connection, "conversation_turns") || !WorldSimulationService.TableExists(connection, "conversation_sessions")
                 || ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
             // Bootstrap only the latest accepted private contribution per pair.
             // Older promises may have been fulfilled or withdrawn later; absence

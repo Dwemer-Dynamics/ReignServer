@@ -6,7 +6,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string NanoGptProvider = "nanogpt";
+        internal const string NanoGptProvider = "nanogpt";
         private const string OpenRouterProvider = "openrouter";
         private const string OpenRouterChatUrl = "https://openrouter.ai/api/v1/chat/completions";
         private const string OllamaCloudProvider = "ollama_cloud";
@@ -30,7 +30,7 @@ namespace ReignBetaServer
         private static bool IsRetiredMemoryRequest(string purpose) =>
             purpose == "dialogue_evidence" || purpose == "dialogue_verification" || purpose == "dialogue_memory_repair" || purpose == "context_selector";
 
-        private static List<string> MergeProviderSettings(Dictionary<string, object> settings, Dictionary<string, object> incoming)
+        internal static List<string> MergeProviderSettings(Dictionary<string, object> settings, Dictionary<string, object> incoming)
         {
             NormalizeLlmProviderSettings(settings);
             NormalizeCodexOptions(settings);
@@ -45,7 +45,7 @@ namespace ReignBetaServer
                 if (pair.Key == "codexOptions")
                 {
                     var suppliedCodexOptions = ReadDictionary(incoming, "codexOptions");
-                    var mergedCodexOptions = DeepCloneProfileDictionary(ReadDictionary(settings, "codexOptions") ?? new Dictionary<string, object>());
+                    var mergedCodexOptions = CharactersService.DeepCloneProfileDictionary(ReadDictionary(settings, "codexOptions") ?? new Dictionary<string, object>());
                     if (suppliedCodexOptions != null) foreach (var option in suppliedCodexOptions) mergedCodexOptions[option.Key] = option.Value;
                     settings["codexOptions"] = mergedCodexOptions;
                     continue;
@@ -78,7 +78,7 @@ namespace ReignBetaServer
             foreach (string key in new[] { "response_format", "tools", "tool_choice", "stop", "seed" }) CopyOptional(payload, body, key);
             var extra = ReadDictionary(payload, "extra");
             if (extra != null) foreach (var pair in extra) body[pair.Key] = pair.Value;
-            body["messages"] = RequiredPoliticalMessages(payload, ReadDictionaryList(body, "messages"));
+            body["messages"] = CharactersService.RequiredPoliticalMessages(payload, ReadDictionaryList(body, "messages"));
             // Ollama Cloud currently has no structured-output support. Reign's
             // existing JSON instructions and response validation remain authoritative.
             if (NormalizeLlmProvider(ReadString(settings, "llmProvider", "")) == OllamaCloudProvider)

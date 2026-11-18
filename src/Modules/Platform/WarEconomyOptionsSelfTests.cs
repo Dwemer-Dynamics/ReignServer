@@ -69,7 +69,7 @@ namespace ReignBetaServer
                 "numbers", EconomyOptions.Numbers.Keys.ToArray(), "gameplayOptions", WarEconomyOptionsForClient(DefaultSettings())));
             WriteJsonObject(Path.Combine(VerificationDir, "war-economy-full-options-fixture.json"), TestDict(
                 "markup", ReignXpOptionsHtml(), "script", ReignXpOptionsScript(),
-                "diagnosticsMarkup", NpcLivesDiagnosticsHtml(), "diagnosticsScript", NpcStoryEditorScript(),
+                "diagnosticsMarkup", NpcLivesDiagnosticsHtml(), "diagnosticsScript", CharactersService.NpcStoryEditorScript(),
                 "definitions", ReignBeta.Shared.Characters.NpcStoryCatalog.All));
             return rows;
         }

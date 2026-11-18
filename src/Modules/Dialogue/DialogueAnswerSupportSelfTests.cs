@@ -200,7 +200,7 @@ namespace ReignBetaServer
                 TestDict("meaning", claim), TestDict("meaning", "The grain is dry.") }), _ => Response("no"));
             var quietBody = TryParseJsonObject(ReadString(quietHeld, "content", ""));
             Check("intentional_quiet_keeps_independent_record", ReadBool(quietHeld, "ok", false)
-                && NormalizeSocialEventParticipation(quietBody) == "quiet"
+                && WorldSimulationService.NormalizeSocialEventParticipation(quietBody) == "quiet"
                 && ReadDictionaryList(quietBody, "continuityWrites").Count == 1
                 && ReadBool(EnsureConversationDelivery(quietHeld, allowQuiet: true), "ok", false));
             foreach (string alias in new[] { "reply", "body", "letter" })

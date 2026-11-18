@@ -9,10 +9,10 @@ namespace ReignBetaServer
     // Per-campaign versioned schema migrations (docs/server/CampaignMigrations.md).
     // The version lives in the campaign schema's own schema_meta, so Save Sync
     // snapshots and imported archives carry it and are upgraded when reopened.
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
-        private const string CampaignMigrationVersionKey = "campaign_migration_version";
-        private const int PlayerApproachSchemaMigrationVersion = 2;
+        internal const string CampaignMigrationVersionKey = "campaign_migration_version";
+        internal const int PlayerApproachSchemaMigrationVersion = 2;
 
         private sealed class CampaignSchemaMigration
         {
@@ -37,27 +37,27 @@ namespace ReignBetaServer
             // generation), so this entry only records the version.
             new CampaignSchemaMigration(1, "core_baseline", null),
             new CampaignSchemaMigration(PlayerApproachSchemaMigrationVersion,
-                "player_approach_tables", ApplyPlayerApproachSchemaDdl),
+                "player_approach_tables", RelationshipsService.ApplyPlayerApproachSchemaDdl),
         };
 
-        private static int LatestCampaignMigrationVersion =>
+        internal static int LatestCampaignMigrationVersion =>
             CampaignSchemaMigrations[CampaignSchemaMigrations.Length - 1].Version;
 
         // Migration 1: the core campaign schema created on the first open.
         // Every step is idempotent and re-run on each cold open, exactly as
         // before versioned migrations existed. Do not add new DDL here; append
         // a numbered migration instead.
-        private static void ApplyCampaignBaselineSchema(ReignDbConnection connection,
+        internal static void ApplyCampaignBaselineSchema(ReignDbConnection connection,
             string campaignId, string providerGeneration)
         {
-            EnsureMemorySchema(connection);
-            CampaignSchemaAfterMemoryForTests?.Invoke();
-            EnsureCategorizedMemorySchema(connection);
-            EnsureWorldHistorySchema(connection);
-            EnsureSemanticMemorySchema(connection, providerGeneration);
-            RunCategorizedMemoryMigration(connection, campaignId);
+            Program.EnsureMemorySchema(connection);
+            Program.CampaignSchemaAfterMemoryForTests?.Invoke();
+            Program.EnsureCategorizedMemorySchema(connection);
+            WorldSimulationService.EnsureWorldHistorySchema(connection);
+            Program.EnsureSemanticMemorySchema(connection, providerGeneration);
+            Program.RunCategorizedMemoryMigration(connection, campaignId);
             // Repair legacy scalar memories once, outside warm reads.
-            ExecuteSql(connection, @"DELETE FROM memories
+            Program.ExecuteSql(connection, @"DELETE FROM memories
 WHERE source='dialogue_llm'
   AND lower(trim(summary)) IN ('0','1','true','false','null','undefined');");
         }
@@ -94,7 +94,7 @@ WHERE source='dialogue_llm'
                 {
                     // Statements must not retry individually inside the
                     // migration transaction; the whole migration retries.
-                    using (new SqlStatementRetrySuppression(connection))
+                    using (new Program.SqlStatementRetrySuppression(connection))
                     using (ReignDbTransaction transaction = connection.BeginTransaction())
                     {
                         AcquirePostgreSqlTransactionMutationLock(connection, transaction);
@@ -104,7 +104,7 @@ WHERE source='dialogue_llm'
                             return false;
                         }
                         migration.Apply?.Invoke(connection);
-                        ExecuteSql(connection,
+                        Program.ExecuteSql(connection,
                             "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,$value);",
                             new Dictionary<string, object>
                             {
@@ -113,7 +113,7 @@ WHERE source='dialogue_llm'
                             }, transaction);
                         transaction.Commit();
                     }
-                    LogOperational("campaign.schema_migration_applied", new Dictionary<string, object>
+                    Program.LogOperational("campaign.schema_migration_applied", new Dictionary<string, object>
                     {
                         ["campaignId"] = ReignPostgreSqlStorage.CampaignIdForConnection(connection),
                         ["version"] = migration.Version,
@@ -131,7 +131,7 @@ WHERE source='dialogue_llm'
         private static int ReadCampaignMigrationVersion(ReignDbConnection connection,
             ReignDbTransaction transaction)
         {
-            string value = ReadString(QuerySql(connection,
+            string value = ReadString(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 new Dictionary<string, object> { ["key"] = CampaignMigrationVersionKey },
                 transaction).FirstOrDefault(), "value", "");
@@ -141,7 +141,7 @@ WHERE source='dialogue_llm'
 
         // Records the in-memory fast path that lets migration-owned Ensure*
         // methods skip their DDL. InvalidateCampaignSchemaCaches clears it.
-        private static void MarkCampaignMigrationsReady(ReignDbConnection connection,
+        internal static void MarkCampaignMigrationsReady(ReignDbConnection connection,
             int version)
         {
             string campaignId = ReignPostgreSqlStorage.CampaignIdForConnection(connection);
@@ -149,14 +149,14 @@ WHERE source='dialogue_llm'
                 return;
             int ready = Math.Min(version, LatestCampaignMigrationVersion);
             for (int value = 1; value <= ready; value++)
-                PostgreSqlComponentSchemaFastPaths[CampaignMigrationFastPathKey(campaignId, value)] = 0;
+                Program.PostgreSqlComponentSchemaFastPaths[CampaignMigrationFastPathKey(campaignId, value)] = 0;
         }
 
-        private static bool IsCampaignMigrationReady(ReignDbConnection connection, int version)
+        internal static bool IsCampaignMigrationReady(ReignDbConnection connection, int version)
         {
             string campaignId = ReignPostgreSqlStorage.CampaignIdForConnection(connection);
             return !string.IsNullOrWhiteSpace(campaignId)
-                && PostgreSqlComponentSchemaFastPaths.ContainsKey(
+                && Program.PostgreSqlComponentSchemaFastPaths.ContainsKey(
                     CampaignMigrationFastPathKey(campaignId, version));
         }
 

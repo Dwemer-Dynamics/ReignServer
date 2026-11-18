@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         // Bannerlord stores one symmetric native-relation value. Reign is
         // directional, so NPC/player pairs deliberately project only the NPC's
@@ -45,14 +45,14 @@ namespace ReignBetaServer
             RelationshipStandingContext context = RelationshipStandingContext.For(connection);
             if (context != null) return context.PlayerIds();
             if (connection == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            return new HashSet<string>(QuerySql(connection,
+            return new HashSet<string>(Program.QuerySql(connection,
                     "SELECT hero_id FROM identity_roster WHERE is_player=1 AND hero_id<>'';")
                 .Select(row => ReadString(row, "hero_id", ""))
                 .Where(id => !string.IsNullOrWhiteSpace(id)),
                 StringComparer.OrdinalIgnoreCase);
         }
 
-        private static List<Dictionary<string, object>> RunNativeRelationProjectionSelfTests()
+        internal static List<Dictionary<string, object>> RunNativeRelationProjectionSelfTests()
         {
             HashSet<string> player = new HashSet<string>(new[] { "player" },
                 StringComparer.OrdinalIgnoreCase);

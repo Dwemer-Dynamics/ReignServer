@@ -320,11 +320,11 @@ namespace ReignBetaServer
                 {
                     foreach (string table in new[] { "court_social_signal_evidence", "relationship_milestones",
                         "conversation_relationship_receipts", "memories", "conversation_turns", "conversation_sessions" })
-                        if (TableExists(connection, table)) ExecuteSql(connection, "ALTER TABLE " + table + " RENAME TO continuity_absent_" + table + ";");
+                        if (WorldSimulationService.TableExists(connection, table)) ExecuteSql(connection, "ALTER TABLE " + table + " RENAME TO continuity_absent_" + table + ";");
                     var missingSources = new List<string>();
                     string emptyFoundation = BuildEstablishedRelationshipContinuity(connection, campaign, "timeline_a", "npc_a", "player", missingSources, 20d);
                     add("optional_legacy_stores_may_all_be_absent", emptyFoundation.Length == 0 && missingSources.Count == 0
-                        && !TableExists(connection, "conversation_relationship_receipts"), null);
+                        && !WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"), null);
                 }
                 finally { ExecuteSql(connection, "ROLLBACK;"); }
                 var first = StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "event_1", quote,
@@ -521,7 +521,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                 ExecuteSql(connection,"INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts) VALUES('atomic_letter_1','atomic_letter','test_collision',1,'{}',1);");
                 var letterWrite = new Dictionary<string, object>(concern) { ["id"] = "atomic_letter" };
                 bool letterRolledBack = false;
-                try { InsertLetter(connection,"npc_a","Speaker","player","Traveler",quote,"npc_reply","fixture","","","",20,21,
+                try { RelationshipsService.InsertLetter(connection,"npc_a","Speaker","player","Traveler",quote,"npc_reply","fixture","","","",20,21,
                     TestDict("timelineId","timeline_a","continuityWrites",new List<Dictionary<string,object>> {letterWrite})); }
                 catch { letterRolledBack = true; }
                 add("letter_and_author_continuity_commit_atomically", letterRolledBack && QuerySql(connection,"SELECT letter_id FROM letters;").Count == lettersBefore
@@ -610,7 +610,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             const string receipt = "recent_conduct_receipt", summary = "The player offered practical help.";
             using (var connection = OpenCampaignConnection(campaign))
             {
-                EnsureConversationRelationshipSchema(connection);
+                RelationshipsService.EnsureConversationRelationshipSchema(connection);
                 ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts
 (receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,act_kind,severity_tier,summary,current_conduct_quote,created_ts)
 VALUES($receipt,$campaign,'timeline_a','conduct_exchange','conduct_turn','npc_a','player','help','meaningful',$summary,$quote,1);",

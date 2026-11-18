@@ -8,7 +8,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static void EnsurePlayerPerformanceSchema(ReignDbConnection connection)
+        internal static void EnsurePlayerPerformanceSchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_performance_events (
 receipt_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,world_day REAL NOT NULL,sequence INTEGER NOT NULL,
@@ -53,11 +53,11 @@ UNIQUE(event_id,subject_id));");
             return side.Equals(winner, StringComparison.OrdinalIgnoreCase) ? "win" : "loss";
         }
 
-        private static void ProjectPlayerPerformanceEvent(ReignDbConnection connection, Dictionary<string, object> row)
+        internal static void ProjectPlayerPerformanceEvent(ReignDbConnection connection, Dictionary<string, object> row)
         {
             string id = ReadString(row, "event_id", "");
             var rules = QuerySql(connection, "SELECT audience_type,audience_id,available_day,acquisition_mode FROM world_history_knowledge_rules WHERE event_id=$id;", TestDict("id", id));
-            foreach (var receipt in BuildPlayerPerformanceReceipts(row, QueryWorldHistoryEntities(connection, id), rules))
+            foreach (var receipt in BuildPlayerPerformanceReceipts(row, WorldSimulationService.QueryWorldHistoryEntities(connection, id), rules))
                 ExecuteSql(connection, @"INSERT OR IGNORE INTO character_performance_events
 (receipt_id,event_id,timeline_id,subject_id,world_day,sequence,kind,outcome,battle_type,competition_id,source,source_hash,knowledge_rules_json)
 VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind,$outcome,$battle_type,$competition_id,$source,$source_hash,$knowledge_rules_json);", receipt);
@@ -116,7 +116,7 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
         private static Dictionary<string, object> ReadPlayerPerformanceCounts(ReignDbConnection connection, string timeline, string player,
             double day, KnowledgeAccessContext access = null, IEnumerable<KnowledgeAccessContext> additionalObservers = null, bool publicOnly = false)
         {
-            var rows = TableExists(connection, "character_performance_events") ? QuerySql(connection,
+            var rows = WorldSimulationService.TableExists(connection, "character_performance_events") ? QuerySql(connection,
                 "SELECT * FROM character_performance_events WHERE " + MemorySourceTimelineSql("character_performance_events")
                     + " AND subject_id=$player AND world_day<=$day ORDER BY world_day,sequence;",
                 TestDict("timeline", timeline, "player", player, "day", day)) : new List<Dictionary<string, object>>();
@@ -150,18 +150,18 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
         private static string BuildPlayerPerformancePrompt(ReignDbConnection connection, string observer, Dictionary<string, object> payload, List<string> sources,
             IEnumerable<string> additionalObservers = null)
         {
-            string player = TableExists(connection, "identity_roster") ? ReadString(QuerySql(connection,
+            string player = WorldSimulationService.TableExists(connection, "identity_roster") ? ReadString(QuerySql(connection,
                 "SELECT hero_id FROM identity_roster WHERE is_player=1 ORDER BY hero_id LIMIT 1;").FirstOrDefault(), "hero_id", "") : "";
             player = FirstNonEmpty(player, ReadFirstString(payload, "mainHeroStringId", "playerHeroStringId", "playerId"));
             if (player.Length == 0 || observer == player) return "";
             string peer = ReadFirstString(payload, "playerHeroStringId", "playerId", "mainHeroStringId");
             var identity = peer == player ? ReadDictionary(payload, "identityView") : null;
             bool known = identity != null ? ReadBool(identity, "canonicalNameAllowed", false)
-                : TableExists(connection, "acquaintances") && TableExists(connection, "identity_roster") && IdentityStateVerified(ReadAcquaintance(connection, observer, player));
+                : WorldSimulationService.TableExists(connection, "acquaintances") && WorldSimulationService.TableExists(connection, "identity_roster") && CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, observer, player));
             if (!known) return "";
             var others = (additionalObservers ?? Enumerable.Empty<string>()).ToList();
-            if (others.Any(other => !TableExists(connection, "acquaintances") || !TableExists(connection, "identity_roster")
-                || !IdentityStateVerified(ReadAcquaintance(connection, other, player)))) return "";
+            if (others.Any(other => !WorldSimulationService.TableExists(connection, "acquaintances") || !WorldSimulationService.TableExists(connection, "identity_roster")
+                || !CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, other, player)))) return "";
             var access = BuildKnowledgeAccessContext(observer, player, "", payload);
             var counts = ReadPlayerPerformanceCounts(connection, ContinuityTimeline(payload), player, ReadDouble(payload, "worldDay", 0d), access,
                 others.Select(other => BuildKnowledgeAccessContext(other, player, "", payload)), ReadBool(payload, "officialMemoryFirewall", false));

@@ -11,7 +11,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunPromptCompositionSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
-            results.AddRange(RunPregnancyContextAssertions());
+            results.AddRange(RelationshipsService.RunPregnancyContextAssertions());
             Action<string, bool, object> add = (id, passed, data) => results.Add(new Dictionary<string, object> {
                 ["caseId"] = id, ["passed"] = passed, ["summary"] = id, ["data"] = data
             });

@@ -29,12 +29,12 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static Dictionary<string, object> BanterProviderSettings(Dictionary<string, object> payload, Dictionary<string, object> settings)
+        internal static Dictionary<string, object> BanterProviderSettings(Dictionary<string, object> payload, Dictionary<string, object> settings)
         {
             string route = ReadString(payload, "requestType", "");
             bool approach = route == "npc_approach" || route.StartsWith("npc_approach_", StringComparison.Ordinal);
             if (route != "party_banter" && !approach) return settings;
-            var result = DeepCloneProfileDictionary(settings);
+            var result = CharactersService.DeepCloneProfileDictionary(settings);
             string provider = approach ? FirstNonEmpty(ReadString(settings, "npcLivesApproachProvider", ""), ReadString(settings, "banterProvider", "")) : ReadString(settings, "banterProvider", "");
             if (!string.IsNullOrWhiteSpace(provider))
             {

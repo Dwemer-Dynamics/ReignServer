@@ -129,11 +129,11 @@ delta INTEGER NOT NULL,PRIMARY KEY(timeline_id,receipt_id,observer_id,target_id)
             string campaign = ReadString(payload, "campaignId", "");
             string timeline = ReadString(payload, "timelineId", "");
             var acknowledged = new List<string>();
-            lock (Program.CampaignRelationshipWriteLock(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureClanAccordsSchema(connection);
-                Program.EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 var snapshot = new Dictionary<string, object>(payload);
                 snapshot.Remove("events");
                 foreach (Dictionary<string, object> evt in ReadDictionaryList(payload, "events"))
@@ -186,11 +186,11 @@ VALUES($timeline,$player,$json) ON CONFLICT(timeline_id) DO UPDATE SET player_he
                     var args = new Dictionary<string, object> { ["timeline"] = timeline, ["receipt"] = key, ["observer"] = observer, ["target"] = target };
                     if (Program.QuerySql(connection, @"SELECT delta FROM clan_accord_relation_receipts
 WHERE timeline_id=$timeline AND receipt_id=$receipt AND observer_id=$observer AND target_id=$target;", args).Count != 0) continue;
-                    if (kind == "season") Program.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, 0,
+                    if (kind == "season") RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, 0,
                         ReadDouble(evt, "worldDay", 0), "clan_accord_season", timeline, ensurePair: true);
                     int delta = kind == "season" ? ClanAccordLedger.SeasonalGoodwill(ReadInt(
-                        Program.ResolveEffectiveAttitude(connection, campaign, timeline, observer, target, "clan_accord"), "effectiveAttitude", 0)) : -10;
-                    Program.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, delta,
+                        RelationshipsService.ResolveEffectiveAttitude(connection, campaign, timeline, observer, target, "clan_accord"), "effectiveAttitude", 0)) : -10;
+                    RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaign, observer, target, delta,
                         ReadDouble(evt, "worldDay", 0), "clan_accord_" + kind, timeline);
                     args["delta"] = delta;
                     Program.ExecuteSql(connection, @"INSERT INTO clan_accord_relation_receipts(timeline_id,receipt_id,observer_id,target_id,delta)
@@ -328,7 +328,7 @@ VALUES($timeline,$receipt,$observer,$target,$delta);", args);
             string actual = resolution ?? "";
             // Use the complete actual turn, never a first-line extractor or planner-added intent.
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
-            string npcReply = Program.LatestResidentReply(actual);
+            string npcReply = CharactersService.LatestResidentReply(actual);
             string error = ValidateClanAccordDialogueAction(command, raw, terms, playerText, npcReply, speaker, player);
             if (error.Length != 0) errors.Add(error);
             if (command == "cancel_clan_accord" && !ReadDictionaryList(context, "records").Any(x =>

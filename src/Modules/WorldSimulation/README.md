@@ -22,6 +22,16 @@ arrests and dialogue marriage actions. It also hosts the live interaction test c
 - `LiveInteractionTest.cs`: the server side of the live in-game test harness (`/tests/live/*`), driven by
   `tests/ReignLiveTest`.
 
+## Service class
+
+The module's `Program` partials are now `internal static partial class WorldSimulationService` in their existing
+files. It calls `Program` members with an explicit `Program.` qualifier, and `Program` and the other modules call it
+as `WorldSimulationService.X`; the members used across that boundary are `internal`.
+`Program.WorldSimulationRoutes.cs` stays part of `Program` and registers the service handlers. Dialogue,
+Relationships, Reputation and Platform call into it for world history, campaign commands, arrests and the world test.
+Its static state (the world history claim cache and lock, world test telemetry) lives in `WorldSimulationService`. The
+self-tests listed below are `WorldSimulationService` members.
+
 ## Routes
 
 `/world-history/ingest-batch`, `/world-history/timeline/open`, `GET /world-history/query`,

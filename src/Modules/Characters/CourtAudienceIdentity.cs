@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static bool MatchingCourtIdentityId(string left, string right)
             => !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right)
@@ -102,14 +102,14 @@ namespace ReignBetaServer
             }
             // Exercise the real prompt adapter and persisted transition from an
             // unknown encounter, not just the eligibility predicate.
-            using (var connection = OpenCampaignConnection(campaignId))
+            using (var connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureIdentitySchema(connection);
                 InsertUnknownAcquaintance(connection, "court_envoy", "court_ruler", "Court Ruler", "ordinary_visit", 49d,
                     new Dictionary<string, object> { ["mode"] = "dialogue", ["subject"] = subject });
             }
             var recognized = ResolvePromptIdentity(payload, "court_envoy", "dialogue", "formal_court_test");
-            using (var connection = OpenCampaignConnection(campaignId))
+            using (var connection = Program.OpenCampaignConnection(campaignId))
             {
                 var saved = ReadAcquaintance(connection, "court_envoy", "court_ruler");
                 add("court_audience_identity_persists_through_prompt_adapter", ReadBool(recognized, "canonicalNameAllowed", false)

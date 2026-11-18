@@ -14,10 +14,10 @@ namespace ReignBetaServer
             string message = ReadString(test, "messageId", ""), actor = ReadString(test, "actorHeroId", "");
             Dictionary<string, object> data;
             string root, topic, before;
-            using (EnterCampaignWorkLock(GossipGate(campaign)))
+            using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
             using (var c = OpenCampaignConnection(campaign))
             {
-                if (ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
+                if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
                 var row = QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND timeline_id=$timeline;",
                     GossipFields("id", message, "timeline", timeline)).SingleOrDefault();
                 data = PersonalGossipProbeSource(row, actor, timeline);
@@ -26,10 +26,10 @@ namespace ReignBetaServer
             }
             var proposal = PersonalGossipProbeDraft(data, ChatWithLlm);
             if (!GossipTestAuthorized(request)) throw new InvalidOperationException("The exact probe lease or native scope changed.");
-            using (EnterCampaignWorkLock(GossipGate(campaign)))
+            using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
             using (var c = OpenCampaignConnection(campaign))
             {
-                if (ActiveWorldHistoryTimeline(c) != timeline || before != PersonalGossipProbeState(c, timeline, root, topic))
+                if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline || before != PersonalGossipProbeState(c, timeline, root, topic))
                     throw new InvalidOperationException("The frozen gossip state changed during the probe; no proposal may be credited.");
             }
             return GossipFields("ok", true, "schema", "reign-personal-gossip-native-evidence-v1",

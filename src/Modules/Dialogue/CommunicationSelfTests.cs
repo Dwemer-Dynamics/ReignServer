@@ -190,7 +190,7 @@ namespace ReignBetaServer
                 var plan = TestDict("key", "school", "operation", "send", "kind", "inform", "recipientId", "target", "evidenceQuote", reply,
                     "contentEvidence", new[] { TestDict("turnId", "current_player", "quote", request) }, "delayDays", 0d);
                 var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = "source", Player = "player", PlayerName = "Player", HeroName = "Source",
-                    EventId = "comm_exchange", Reply = reply, PlayerText = request, Payload = payload, Parsed = TestDict("communicationPlans", new[] { plan }), Generation = NpcLivesGeneration(c) };
+                    EventId = "comm_exchange", Reply = reply, PlayerText = request, Payload = payload, Parsed = TestDict("communicationPlans", new[] { plan }), Generation = CharactersService.NpcLivesGeneration(c) };
                 var receipt = AcceptCommunicationCommitments(c, unit, exchange, current);
                 var row = QuerySql(c, "SELECT * FROM communication_messages;").SingleOrDefault();
                 Check("accepted_promise_creates_one_draft", ReadStringList(receipt, "accepted").Count == 1 && ReadString(row, "status", "") == "draft", receipt);
@@ -272,11 +272,11 @@ namespace ReignBetaServer
                     IssuerId = "source", TargetId = "target", Purpose = "School meeting", DestinationId = "meeting_town", StayDays = 3, Status = "travelling" });
                 var knowledgePayload = TestDict("campaignId", campaign, "timelineId", "main", "playerHeroStringId", "player", "worldDay", due);
                 var meetingOptions = new NpcLivesOptions(_ => true, _ => null);
-                Check("issuer_cannot_see_distant_acceptance_before_return_receipt", !NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
+                Check("issuer_cannot_see_distant_acceptance_before_return_receipt", !CharactersService.NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
                     meetingOptions, c).Contains("meeting_" + originalId, StringComparison.Ordinal)
-                    && NpcLivesPromptBody(meetingKnowledge, "target", "player", knowledgePayload, meetingOptions, c).Contains("meeting_" + originalId, StringComparison.Ordinal));
+                    && CharactersService.NpcLivesPromptBody(meetingKnowledge, "target", "player", knowledgePayload, meetingOptions, c).Contains("meeting_" + originalId, StringComparison.Ordinal));
                 int controlledReplyCalls = 0;
-                CommunicationPlayers[campaign] = (NpcLivesGeneration(c), "target");
+                CommunicationPlayers[campaign] = (CharactersService.NpcLivesGeneration(c), "target");
                 ProcessCommunicationReplies(campaign, _ => { controlledReplyCalls++; return TestDict("ok", true); });
                 Check("new_player_hero_never_gets_an_automatic_reply", controlledReplyCalls == 0
                     && ReadString(QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "awaiting_player");
@@ -303,10 +303,10 @@ namespace ReignBetaServer
                     && QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='source';").Count == 2
                     && ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id='';").Single(), "status", "") == "replied");
                 knowledgePayload = TestDict("campaignId", campaign, "timelineId", "main", "playerHeroStringId", "player", "worldDay", returnDue);
-                Check("return_receipt_releases_issuer_meeting_knowledge", NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
+                Check("return_receipt_releases_issuer_meeting_knowledge", CharactersService.NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
                     meetingOptions, c).Contains("meeting_" + originalId, StringComparison.Ordinal));
                 knowledgePayload = TestDict("campaignId", campaign, "timelineId", "main", "playerHeroStringId", "player", "worldDay", returnDue, "memoryAsOfAcceptedSequence", 0L);
-                Check("old_observation_cannot_use_future_return_receipt", !NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
+                Check("old_observation_cannot_use_future_return_receipt", !CharactersService.NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
                     meetingOptions, c).Contains("meeting_" + originalId, StringComparison.Ordinal));
                 var data = GossipJson(row);
                 var bad = ComposeCommunicationReply(campaign, row, data, TestDict("recipientMemory", "No supporting fact."), _ =>
@@ -366,7 +366,7 @@ namespace ReignBetaServer
                 var nativeUnit = new AcceptedConversationUnit { Campaign = campaign, Hero = "lord_1_14", Player = "main_hero", Location = "town_EW2",
                     HeroName = "Rhagaea", PlayerName = "Player", PlayerText = nativeText, Reply = nativePromise,
                     EventId = AcceptedConversationEventId(campaign, "lord_1_14", nativePayload), EventType = "dialogue_turn", Timestamp = 200,
-                    Generation = NpcLivesGeneration(c), Payload = nativePayload, Profile = TestDict("name", "Rhagaea"), Motive = TestDict(),
+                    Generation = CharactersService.NpcLivesGeneration(c), Payload = nativePayload, Profile = TestDict("name", "Rhagaea"), Motive = TestDict(),
                     Parsed = TestDict("reply", nativePromise, "communicationPlans", new[] { nativePlan }), CommitEffects = false,
                     Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new(), Continuity = new() };
                 var nativeExchange = PublishAcceptedConversationUnit(nativeUnit, accept => StoreConversationExchange(campaign, nativePayload,
@@ -413,7 +413,7 @@ namespace ReignBetaServer
                 var reaffirmedUnit = new AcceptedConversationUnit { Campaign = campaign, Hero = "lord_1_14", Player = "main_hero", Location = "town_EW2",
                     HeroName = "Rhagaea", PlayerName = "Player", PlayerText = ReadString(reopenPayload, "playerText", ""), Reply = reaffirmation,
                     EventId = AcceptedConversationEventId(campaign, "lord_1_14", reopenPayload), EventType = "dialogue_turn", Timestamp = 201,
-                    Generation = NpcLivesGeneration(c), Payload = reopenPayload, Profile = TestDict("name", "Rhagaea"), Motive = TestDict(),
+                    Generation = CharactersService.NpcLivesGeneration(c), Payload = reopenPayload, Profile = TestDict("name", "Rhagaea"), Motive = TestDict(),
                     Parsed = TestDict("reply", reaffirmation, "communicationPlans", new[] { nativePlan }), CommitEffects = false,
                     Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new(), Continuity = new() };
                 var reaffirmedExchange = PublishAcceptedConversationUnit(reaffirmedUnit, accept => StoreConversationExchange(campaign, reopenPayload,
@@ -476,7 +476,7 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                     var u = new AcceptedConversationUnit { Campaign = campaign, Hero = "lord_1_14", Player = "main_hero", Location = "town_ES5",
                         HeroName = "Rhagaea", PlayerName = "Player", PlayerText = playerText, Reply = npcText,
                         EventId = AcceptedConversationEventId(campaign, "lord_1_14", p), EventType = "dialogue_turn", Timestamp = timestamp,
-                        Generation = NpcLivesGeneration(c), Payload = p, Profile = TestDict("name", "Rhagaea"), Motive = TestDict(),
+                        Generation = CharactersService.NpcLivesGeneration(c), Payload = p, Profile = TestDict("name", "Rhagaea"), Motive = TestDict(),
                         Parsed = TestDict("reply", npcText, "communicationPlans", new[] { proposed }), CommitEffects = false,
                         Memories = new(), Beliefs = new(), Relationships = new(), Obligations = new(), Comprehensions = new(), Continuity = new() };
                     return PublishAcceptedConversationUnit(u, accept => StoreConversationExchange(campaign, p, u.Hero, u.Player, u.PlayerName, u.HeroName,
@@ -621,7 +621,7 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                     });
                 var semanticReviewed = ReadDictionaryList(TryParseJsonObject(ReadString(semanticEnvelope, "content", "")), "communicationPlans").Single();
                 var semanticUnit = new AcceptedConversationUnit { Campaign = campaign, Hero = "lord_1_14", Reply = semanticReply,
-                    EventId = AcceptedConversationEventId(campaign, "lord_1_14", semanticPayload), Generation = NpcLivesGeneration(c) };
+                    EventId = AcceptedConversationEventId(campaign, "lord_1_14", semanticPayload), Generation = CharactersService.NpcLivesGeneration(c) };
                 Check("noncanonical_own_commitment_uses_one_sealed_semantic_review", semanticCalls == 1 && ReadBool(semanticEnvelope, "ok", false)
                     && CommunicationSemanticAccepted(semanticReviewed, semanticUnit)
                     && ReadFirstString(TryParseJsonObject(ReadString(semanticEnvelope, "content", "")), "reply") == semanticReply);

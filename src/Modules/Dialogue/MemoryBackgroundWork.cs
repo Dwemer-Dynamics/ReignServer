@@ -12,7 +12,7 @@ namespace ReignBetaServer
         private sealed class MemoryJobFence { internal string JobId, Token, Generation; }
         private static readonly AsyncLocal<MemoryJobFence> CurrentMemoryJob = new AsyncLocal<MemoryJobFence>();
 
-        private static void EnsureMemoryBackgroundWorkSchema(ReignDbConnection connection)
+        internal static void EnsureMemoryBackgroundWorkSchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS memory_background_jobs (
 job_id TEXT PRIMARY KEY,job_type TEXT NOT NULL,owner_id TEXT NOT NULL DEFAULT '',group_key TEXT NOT NULL DEFAULT '',

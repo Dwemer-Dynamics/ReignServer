@@ -14,12 +14,12 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const int MbtiChemistryVersion = 7;
         private const int LegacyAffinityRebaseCutoffVersion = 6;
-        private const int RelationshipCadenceDays = 1;
-        private const int RelationshipCadenceShardCount = 1;
+        internal const int RelationshipCadenceDays = 1;
+        internal const int RelationshipCadenceShardCount = 1;
         private const int OrdinaryRelationshipMagnitudeSides = 15;
         private const int LoverRelationshipMagnitudeSides = 20;
         private const bool AutomaticRelationshipNormalizationEnabled = false;
@@ -59,7 +59,7 @@ namespace ReignBetaServer
         {
             const string marker =
                 "postgresql_relationship_schema_revision";
-            if (IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlRelationshipSchemaRevision))
             {
                 // Component revisions are independent. A current parent
@@ -94,14 +94,14 @@ namespace ReignBetaServer
                 "relationship_native_targets_status_world_day_pair_key_idx",
                 "relationship_daily_inputs_timeline_id_status_day_key_idx"
             };
-            ExecuteSql(connection, string.Join(" ",
+            Program.ExecuteSql(connection, string.Join(" ",
                 redundantIndexes.Select(index =>
                     "DROP INDEX IF EXISTS " + index + ";")));
             // Frequently updated current-state rows should retain page space for
             // PostgreSQL HOT updates. last_day and processing_shard are diagnostic
             // columns, not selective simulation lookups; removing their indexes
             // lets an ordinary affinity update avoid all secondary-index writes.
-            ExecuteSql(connection, @"
+            Program.ExecuteSql(connection, @"
 ALTER TABLE relationship_pair_chemistry SET (
     fillfactor=80,
     autovacuum_vacuum_scale_factor=0.02,
@@ -115,7 +115,7 @@ ALTER TABLE relationship_native_targets SET (
 ALTER TABLE relationship_daily_inputs SET (
     fillfactor=80,
     autovacuum_vacuum_scale_factor=0.05);");
-            ExecuteSql(connection, @"
+            Program.ExecuteSql(connection, @"
 INSERT INTO schema_meta(key,value)
 VALUES('postgresql_relationship_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
@@ -125,7 +125,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         PostgreSqlRelationshipSchemaRevision.ToString(
                             CultureInfo.InvariantCulture)
                 });
-            MarkPostgreSqlComponentSchemaReady(connection, marker,
+            Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlRelationshipSchemaRevision);
         }
 
@@ -133,7 +133,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             ReignDbConnection connection)
         {
             EnsureNotableMbtiSchema(connection);
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_pair_chemistry (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_pair_chemistry (
 pair_key TEXT PRIMARY KEY,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
 mbti_a TEXT NOT NULL DEFAULT 'XXXX',mbti_b TEXT NOT NULL DEFAULT 'XXXX',
 axes_a_json TEXT NOT NULL DEFAULT '{}',axes_b_json TEXT NOT NULL DEFAULT '{}',
@@ -153,34 +153,34 @@ native_action_pending INTEGER NOT NULL DEFAULT 0,native_action_id TEXT NOT NULL 
 last_decay_period INTEGER NOT NULL DEFAULT -1,
 compatibility_version INTEGER NOT NULL DEFAULT 3,
 state_revision INTEGER NOT NULL DEFAULT 1,updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_day ON relationship_pair_chemistry(last_day DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_hero_a ON relationship_pair_chemistry(hero_a_id,hero_b_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_hero_b ON relationship_pair_chemistry(hero_b_id,hero_a_id);");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "processing_shard", "INTEGER NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_presence_day", "INTEGER NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_batch_size", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_presence_mask", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_version", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_baseline", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_chance_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_chance_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_sign_roll_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_sign_roll_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_magnitude_roll_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_magnitude_roll_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_delta_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_delta_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_affinity_a_to_b", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_affinity_b_to_a", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_eligible", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_provenance", "TEXT NOT NULL DEFAULT ''");
-            ExecuteSql(connection,
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_day ON relationship_pair_chemistry(last_day DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_hero_a ON relationship_pair_chemistry(hero_a_id,hero_b_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_hero_b ON relationship_pair_chemistry(hero_b_id,hero_a_id);");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "social_modifier_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "effective_affinity_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "processing_shard", "INTEGER NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_presence_day", "INTEGER NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_batch_size", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_presence_mask", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_version", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_baseline", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_chance_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_chance_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_sign_roll_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_sign_roll_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_magnitude_roll_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_magnitude_roll_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_delta_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_delta_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_affinity_a_to_b", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_affinity_b_to_a", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_eligible", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "opening_seed_provenance", "TEXT NOT NULL DEFAULT ''");
+            Program.ExecuteSql(connection,
                 "CREATE INDEX IF NOT EXISTS idx_pair_chemistry_shard ON relationship_pair_chemistry(processing_shard,last_day);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_native_sync_batches (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_native_sync_batches (
 plan_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,
 target_count INTEGER NOT NULL DEFAULT 0,issued_ts INTEGER NOT NULL DEFAULT 0,
 client_applied INTEGER NOT NULL DEFAULT 0,client_already_aligned INTEGER NOT NULL DEFAULT 0,
@@ -188,35 +188,35 @@ client_obsolete INTEGER NOT NULL DEFAULT 0,client_failed INTEGER NOT NULL DEFAUL
 client_remaining INTEGER NOT NULL DEFAULT 0,client_duration_ms INTEGER NOT NULL DEFAULT 0,
 last_report_day REAL NOT NULL DEFAULT -1,last_report_ts INTEGER NOT NULL DEFAULT 0,
 last_error TEXT NOT NULL DEFAULT '');");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_native_sync_batch_day ON relationship_native_sync_batches(timeline_id,world_day DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_daily_inputs (
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_native_sync_batch_day ON relationship_native_sync_batches(timeline_id,world_day DESC);");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_daily_inputs (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,day_key INTEGER NOT NULL,world_day REAL NOT NULL,
 status TEXT NOT NULL DEFAULT 'pending',presence_groups_json TEXT NOT NULL DEFAULT '[]',
 hero_changes_json TEXT NOT NULL DEFAULT '[]',group_count INTEGER NOT NULL DEFAULT 0,
 received_ts INTEGER NOT NULL,processed_ts INTEGER NOT NULL DEFAULT 0,
 PRIMARY KEY(campaign_id,timeline_id,day_key));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_relationship_daily_inputs_status ON relationship_daily_inputs(timeline_id,status,day_key);");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "pair_cursor", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "candidate_pairs", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "processed_pairs", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "started_ts", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "last_error", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "cadence_shard", "INTEGER NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "window_start_day", "INTEGER NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "window_day_count", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_daily_inputs", "pair_day_evaluations", "INTEGER NOT NULL DEFAULT 0");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_observed_heroes (
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_relationship_daily_inputs_status ON relationship_daily_inputs(timeline_id,status,day_key);");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "pair_cursor", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "candidate_pairs", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "processed_pairs", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "started_ts", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "last_error", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "cadence_shard", "INTEGER NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "window_start_day", "INTEGER NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "window_day_count", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_daily_inputs", "pair_day_evaluations", "INTEGER NOT NULL DEFAULT 0");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_observed_heroes (
 hero_id TEXT PRIMARY KEY,profile_json TEXT NOT NULL,profile_hash TEXT NOT NULL DEFAULT '',
 first_observed_day INTEGER NOT NULL,last_observed_day INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_hero_observations (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_hero_observations (
 timeline_id TEXT NOT NULL,hero_id TEXT NOT NULL,observed_day INTEGER NOT NULL,
 profile_json TEXT NOT NULL,profile_hash TEXT NOT NULL,
 PRIMARY KEY(timeline_id,hero_id,observed_day));");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_personalities (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_personalities (
 hero_id TEXT PRIMARY KEY,mbti_type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,
 source TEXT NOT NULL,assignment_day REAL NOT NULL,template_version INTEGER NOT NULL,
 traits_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_opening_seed_runs (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_opening_seed_runs (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,seed_version INTEGER NOT NULL,
 generation_id TEXT NOT NULL DEFAULT '',world_day REAL NOT NULL,status TEXT NOT NULL,
 candidate_pairs INTEGER NOT NULL DEFAULT 0,completed_pairs INTEGER NOT NULL DEFAULT 0,
@@ -231,25 +231,25 @@ starting_bands_json TEXT NOT NULL DEFAULT '{}',resulting_bands_json TEXT NOT NUL
 duration_ms INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,seed_version));");
-            EnsureDatabaseColumn(connection, "relationship_opening_seed_runs",
+            Program.EnsureDatabaseColumn(connection, "relationship_opening_seed_runs",
                 "parallel_workers", "INTEGER NOT NULL DEFAULT 1");
-            EnsureDatabaseColumn(connection, "relationship_opening_seed_runs",
+            Program.EnsureDatabaseColumn(connection, "relationship_opening_seed_runs",
                 "parallel_compute_ms", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_opening_seed_runs",
+            Program.EnsureDatabaseColumn(connection, "relationship_opening_seed_runs",
                 "pairs_per_second", "REAL NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_decay_period", "INTEGER NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "native_incident_offset", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "state_revision", "INTEGER NOT NULL DEFAULT 1");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "last_decay_period", "INTEGER NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "native_incident_offset", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_pair_chemistry", "state_revision", "INTEGER NOT NULL DEFAULT 1");
             EnsureRelationshipLifecycleSchema(connection);
             EnsureSharedRelationshipHistorySchema(connection);
             EnsureRelationshipDirectorSchema(connection);
-            EnsureDatabaseColumn(connection, "relationship_native_targets", "requires_observation", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_native_targets", "requires_observation", "INTEGER NOT NULL DEFAULT 0");
             CompactNoisyNativeRelationBacklog(connection);
-            int version = ReadInt(QuerySql(connection,
+            int version = ReadInt(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='mbti_relationship_chemistry_version' LIMIT 1;").FirstOrDefault(), "value", 0);
             if (version >= MbtiChemistryVersion) return;
 
-            ExecuteSql(connection, "SAVEPOINT mbti_relationship_upgrade;");
+            Program.ExecuteSql(connection, "SAVEPOINT mbti_relationship_upgrade;");
             try
             {
                 // The old ambient rows were derived diagnostics and six-facet daily
@@ -259,11 +259,11 @@ PRIMARY KEY(campaign_id,timeline_id,seed_version));");
                     "ambient_relationship_changes", "ambient_relationship_exposure", "ambient_relationship_runs"
                 })
                 {
-                    if (QuerySql(connection,
+                    if (Program.QuerySql(connection,
                         "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
                         new Dictionary<string, object> { ["name"] = retiredTable }).Any())
                     {
-                        ExecuteSql(connection, "DELETE FROM " + retiredTable + ";");
+                        Program.ExecuteSql(connection, "DELETE FROM " + retiredTable + ";");
                     }
                 }
                 if (version == 1)
@@ -271,7 +271,7 @@ PRIMARY KEY(campaign_id,timeline_id,seed_version));");
                     // Version 1 incorrectly treated each daily d10 as a slow
                     // accumulator. Preserve that already-rolled history by
                     // applying the remaining signal directly before retiring it.
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 affinity_a_to_b=MAX(-100,MIN(100,affinity_a_to_b+signal_a_to_b)),
 affinity_b_to_a=MAX(-100,MIN(100,affinity_b_to_a+signal_b_to_a)),
 signal_a_to_b=0,signal_b_to_a=0,compatibility_version=2;");
@@ -281,14 +281,14 @@ signal_a_to_b=0,signal_b_to_a=0,compatibility_version=2;");
                     // Reign's two directional affinities are authoritative. Older
                     // builds could add a separate native-only incident offset,
                     // making Bannerlord relation disagree with their average.
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_incident_offset=0,
 projected_native_relation=MAX(-100,MIN(100,ROUND((affinity_a_to_b+affinity_b_to_a)/2.0))),
 native_action_pending=0,native_action_id='',compatibility_version=3;");
-                    if (QuerySql(connection,
+                    if (Program.QuerySql(connection,
                         "SELECT name FROM sqlite_master WHERE type='table' AND name='relationship_director_actions' LIMIT 1;").Any())
                     {
-                        ExecuteSql(connection, @"UPDATE relationship_director_actions
+                        Program.ExecuteSql(connection, @"UPDATE relationship_director_actions
 SET status='superseded',resolved_ts=$ts,
 result_json='{""status"":""superseded"",""reason"":""reign_directional_affinity_became_authoritative""}'
 WHERE action_type='native_relation' AND status IN ('pending','claimed')
@@ -302,7 +302,7 @@ WHERE action_type='native_relation' AND status IN ('pending','claimed')
                     // calculated scores. The expanded axis objects were write-only
                     // copies repeated once per pair (several megabytes in a normal
                     // campaign), so retain the authoritative codes and remove them.
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
 SET axes_a_json='{}',axes_b_json='{}'
 WHERE axes_a_json<>'{}' OR axes_b_json<>'{}';");
                 }
@@ -311,7 +311,7 @@ WHERE axes_a_json<>'{}' OR axes_b_json<>'{}';");
                     // Public Standing is resolved from its subject row at decision
                     // time. Retire copied per-pair modifiers and cached effective
                     // values so later standing revisions require no pair fanout.
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 social_modifier_a_to_b=0,social_modifier_b_to_a=0,
 effective_affinity_a_to_b=affinity_a_to_b,
 effective_affinity_b_to_a=affinity_b_to_a;");
@@ -320,15 +320,15 @@ effective_affinity_b_to_a=affinity_b_to_a;");
                 // rewriting relationship affinity or narrative history. Each
                 // pair refreshes its stored chance lazily on its next ordinary
                 // relationship evaluation.
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('mbti_relationship_chemistry_version',$version);",
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('mbti_relationship_chemistry_version',$version);",
                     new Dictionary<string, object> { ["version"] = MbtiChemistryVersion.ToString(CultureInfo.InvariantCulture) });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                ExecuteSql(connection, "RELEASE mbti_relationship_upgrade;");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
+                Program.ExecuteSql(connection, "RELEASE mbti_relationship_upgrade;");
             }
             catch
             {
-                try { ExecuteSql(connection, "ROLLBACK TO mbti_relationship_upgrade;"); } catch { }
-                try { ExecuteSql(connection, "RELEASE mbti_relationship_upgrade;"); } catch { }
+                try { Program.ExecuteSql(connection, "ROLLBACK TO mbti_relationship_upgrade;"); } catch { }
+                try { Program.ExecuteSql(connection, "RELEASE mbti_relationship_upgrade;"); } catch { }
                 throw;
             }
         }
@@ -345,13 +345,13 @@ effective_affinity_b_to_a=affinity_b_to_a;");
             List<Dictionary<string, object>> compactHeroes = ReadDictionaryList(input, "heroes");
             List<Dictionary<string, object>> changedHeroes = compactHeroes
                 .Select(NormalizeAmbientLifecycleHero).ToList();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
-                    bool accepted = QuerySql(connection, @"INSERT INTO relationship_daily_inputs(
+                    bool accepted = Program.QuerySql(connection, @"INSERT INTO relationship_daily_inputs(
 campaign_id,timeline_id,day_key,world_day,status,presence_groups_json,hero_changes_json,group_count,received_ts)
 VALUES($campaign,$timeline,$dayKey,$day,'pending',$groups,$heroes,$count,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
@@ -396,7 +396,7 @@ RETURNING day_key;",
                         foreach (Dictionary<string, object> values
                             in observedHeroRows)
                         {
-                            ExecuteSql(connection, @"INSERT INTO relationship_observed_heroes(
+                            Program.ExecuteSql(connection, @"INSERT INTO relationship_observed_heroes(
 hero_id,profile_json,profile_hash,first_observed_day,last_observed_day,updated_ts)
 VALUES($hero,$profile,$hash,$day,$day,$ts)
 ON CONFLICT(hero_id) DO UPDATE SET profile_json=$profile,profile_hash=$hash,
@@ -405,11 +405,11 @@ WHERE relationship_observed_heroes.profile_hash<>$hash;",
                                 values);
                         }
                     }
-                    ExecuteSql(connection, "COMMIT;");
+                    Program.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
                 // The continuous ingestion API only acknowledges durability; its
@@ -432,7 +432,7 @@ WHERE relationship_observed_heroes.profile_hash<>$hash;",
             }
         }
 
-        private static Dictionary<string, object> CampaignOpeningRelationshipSeedApi(
+        internal static Dictionary<string, object> CampaignOpeningRelationshipSeedApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -465,12 +465,12 @@ WHERE relationship_observed_heroes.profile_hash<>$hash;",
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 using (RelationshipStandingContext standingContext = new RelationshipStandingContext(connection, campaignId, timelineId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     EnsureWorldRelationshipSchema(connection);
-                    Dictionary<string, object> priorRun = QuerySql(connection, @"
+                    Dictionary<string, object> priorRun = Program.QuerySql(connection, @"
 SELECT * FROM relationship_opening_seed_runs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version LIMIT 1;",
                         new Dictionary<string, object>
@@ -502,7 +502,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version 
                                 OpeningRelationshipSeedVersion
                         };
                     }
-                    ExecuteSql(connection, @"INSERT INTO relationship_opening_seed_runs(
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_opening_seed_runs(
 campaign_id,timeline_id,seed_version,generation_id,world_day,status,
 candidate_pairs,created_ts,updated_ts)
 VALUES($campaign,$timeline,$version,$generation,$day,'processing',$candidates,$ts,$ts)
@@ -522,14 +522,14 @@ candidate_pairs=$candidates,updated_ts=$ts;",
                             ["candidates"] = candidates.Count, ["ts"] = ts
                         });
                     Dictionary<string, Dictionary<string, object>> existingPairs =
-                        QuerySql(connection,
+                        Program.QuerySql(connection,
                             "SELECT * FROM relationship_pair_chemistry;")
                         .Where(row => !string.IsNullOrWhiteSpace(
                             ReadString(row, "pair_key", "")))
                         .ToDictionary(row => ReadString(row, "pair_key", ""),
                             row => row, StringComparer.OrdinalIgnoreCase);
                     Dictionary<string, Dictionary<string, object>>
-                        existingNativeTargets = QuerySql(connection,
+                        existingNativeTargets = Program.QuerySql(connection,
                             "SELECT * FROM relationship_native_targets;")
                         .Where(row => !string.IsNullOrWhiteSpace(
                             ReadString(row, "pair_key", "")))
@@ -555,12 +555,12 @@ candidate_pairs=$candidates,updated_ts=$ts;",
                         List<Dictionary<string, object>> nativeTargetRows =
                             new List<Dictionary<string, object>>();
                         List<string> nativeTargetDeletes = new List<string>();
-                        ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                        Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                         try
                         {
                             standingContext.Prefetch(heroes.Keys);
                             Dictionary<string, string> openingMbtiByHero =
-                                QuerySql(connection, @"
+                                Program.QuerySql(connection, @"
  SELECT hero_id,mbti_type,2 AS priority FROM relationship_personalities
  UNION ALL
  SELECT hero_id,mbti_type,1 AS priority FROM notable_mbti_profiles;")
@@ -862,7 +862,7 @@ candidate_pairs=$candidates,updated_ts=$ts;",
                                 ExecuteOpeningRelationshipPostgreSqlBulk(
                                     connection, openingPairRows, provenanceRows,
                                     nativeTargetRows, nativeTargetDeletes);
-                            ExecuteSql(connection, "COMMIT;");
+                            Program.ExecuteSql(connection, "COMMIT;");
                             if (usePostgreSqlBulk)
                                 InstallOpeningRelationshipPairStateCache(
                                     campaignId, existingPairs, openingPairRows);
@@ -871,7 +871,7 @@ candidate_pairs=$candidates,updated_ts=$ts;",
                         }
                         catch
                         {
-                            try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                            try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                             throw;
                         }
                     }
@@ -885,7 +885,7 @@ candidate_pairs=$candidates,updated_ts=$ts;",
                         openingParallelWorkers;
                     openingRunParameters["parallelComputeMs"] =
                         openingParallelComputeMs;
-                    ExecuteSql(connection, @"UPDATE relationship_opening_seed_runs SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_opening_seed_runs SET
 status='seeded',completed_pairs=$completed,skipped_pairs=$skipped,
 failed_pairs=$failed,co_location_pairs=$coLocation,spouse_pairs=$spouses,
 family_pairs=$family,kingdom_leadership_pairs=$leadership,
@@ -917,10 +917,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version;
                 if (!suppressVerificationWorker)
                 {
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(campaignId))
+                        Program.OpenCampaignConnection(campaignId))
                     {
                         EnsureMbtiRelationshipSchema(connection);
-                        ExecuteSql(connection, @"UPDATE relationship_daily_inputs
+                        Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
 SET status='initialization_pending',last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
 AND status='pending';",
@@ -951,10 +951,10 @@ AND status='pending';",
                     throw new InvalidOperationException(ReadString(dailyResult,
                         "error", "Opening-day relationship ingestion failed."));
                 timer.Stop();
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"UPDATE relationship_opening_seed_runs SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_opening_seed_runs SET
 status='completed',duration_ms=$duration,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version;",
                         new Dictionary<string, object>
@@ -986,10 +986,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version;
                 failed = Math.Max(1, failed);
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
                         EnsureMbtiRelationshipSchema(connection);
-                        ExecuteSql(connection, @"UPDATE relationship_opening_seed_runs SET
+                        Program.ExecuteSql(connection, @"UPDATE relationship_opening_seed_runs SET
 status='failed',failed_pairs=$failed,missing_mbti=$missing,
 duration_ms=$duration,last_error=$error,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version;",
@@ -999,7 +999,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version;
                                 ["version"] = OpeningRelationshipSeedVersion,
                                 ["failed"] = failed, ["missing"] = missingMbti,
                                 ["duration"] = timer.ElapsedMilliseconds,
-                                ["error"] = LimitText(ex.Message, 1000),
+                                ["error"] = Program.LimitText(ex.Message, 1000),
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                             });
                     }
@@ -1069,7 +1069,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND seed_version=$version;
             string campaignId, int day, Dictionary<string, object> hero)
         {
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
-            Dictionary<string, object> stored = QuerySql(connection, @"
+            Dictionary<string, object> stored = Program.QuerySql(connection, @"
 SELECT mbti_type FROM (
  SELECT mbti_type,2 AS priority FROM relationship_personalities WHERE hero_id=$hero
  UNION ALL
@@ -1264,10 +1264,10 @@ SELECT mbti_type FROM (
         private static void MarkRelationshipDailyInputProcessed(
             string campaignId, string timelineId, int day)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                ExecuteSql(connection, @"UPDATE relationship_daily_inputs
+                Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
 SET status='processed',presence_groups_json='[]',hero_changes_json='[]',
 processed_ts=$ts WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                     new Dictionary<string, object>
@@ -1276,7 +1276,7 @@ processed_ts=$ts WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_k
                         ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
                 PruneRelationshipHeroObservations(connection, timelineId, day);
-                ExecuteSql(connection, @"DELETE FROM relationship_daily_inputs
+                Program.ExecuteSql(connection, @"DELETE FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='processed' AND day_key<$day-7;",
                     new Dictionary<string, object>
@@ -1289,10 +1289,10 @@ AND status='processed' AND day_key<$day-7;",
         private static double OldestPendingRelationshipInputDay(
             string campaignId, string timelineId)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                return ReadDouble(QuerySql(connection, @"SELECT MIN(world_day) AS day
+                return ReadDouble(Program.QuerySql(connection, @"SELECT MIN(world_day) AS day
 FROM relationship_daily_inputs WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='pending';", new Dictionary<string, object>
                 {
@@ -1301,7 +1301,7 @@ AND status='pending';", new Dictionary<string, object>
             }
         }
 
-        private static Dictionary<string, object> MbtiRelationshipSnapshotApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> MbtiRelationshipSnapshotApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             List<Dictionary<string, object>> dailyInputs = ReadDictionaryList(payload, "dailyInputs");
@@ -1341,7 +1341,7 @@ AND status='pending';", new Dictionary<string, object>
             Stopwatch payloadPreparationTimer = Stopwatch.StartNew();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             int day = (int)Math.Floor(ReadDouble(payload, "worldDay", 0d) + 0.000001d);
             int cadenceShard = ReadInt(payload, "cadenceShard", -1);
             List<Dictionary<string, object>> cadenceInputs = ReadDictionaryList(payload, "cadenceInputs");
@@ -1390,14 +1390,14 @@ AND status='pending';", new Dictionary<string, object>
             long transactionBeginMs = 0;
             long commitMs = 0;
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             using (RelationshipStandingContext standingContext = new RelationshipStandingContext(connection, campaignId, timelineId))
             using (RelationshipLifecycleWriteContext lifecycleWriteContext = new RelationshipLifecycleWriteContext(connection))
-            using (SqlReadTimingContext sqlReadTiming = new SqlReadTimingContext())
+            using (Program.SqlReadTimingContext sqlReadTiming = new Program.SqlReadTimingContext())
             {
                 Stopwatch schemaReadinessTimer = Stopwatch.StartNew();
                 EnsureMbtiRelationshipSchema(connection);
-                EnsureWorldTestTelemetrySchema(connection);
+                WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
                 // Component-schema readiness is cached for the lifetime of the
                 // server.  Validation fixtures (and a restored/recreated
                 // PostgreSQL database) can legitimately replace the backing
@@ -1405,12 +1405,12 @@ AND status='pending';", new Dictionary<string, object>
                 // table this hot path writes before using the schema-ready
                 // telemetry helpers.  This is one metadata lookup per
                 // relationship day, never one lookup per pair.
-                if (!TableExists(connection, "world_test_chunk_counters"))
-                    EnsureWorldTestTelemetrySchemaCore(connection);
+                if (!WorldSimulationService.TableExists(connection, "world_test_chunk_counters"))
+                    WorldSimulationService.EnsureWorldTestTelemetrySchemaCore(connection);
                 schemaReadinessTimer.Stop();
                 schemaReadinessMs = schemaReadinessTimer.ElapsedMilliseconds;
                 Stopwatch progressLoadTimer = Stopwatch.StartNew();
-                Dictionary<string, object> dailyProgress = QuerySql(connection, @"
+                Dictionary<string, object> dailyProgress = Program.QuerySql(connection, @"
 SELECT pair_cursor,processed_pairs FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
 LIMIT 1;", new Dictionary<string, object>
@@ -1431,7 +1431,7 @@ LIMIT 1;", new Dictionary<string, object>
                     Dictionary<string, object> repeatedPlan = continuousWorker
                         ? new Dictionary<string, object>
                         {
-                            ["targetCount"] = ReadInt(QuerySql(connection,
+                            ["targetCount"] = ReadInt(Program.QuerySql(connection,
                                 "SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pending','claimed','failed');")
                                 .FirstOrDefault(), "count", 0)
                         }
@@ -1636,7 +1636,7 @@ LIMIT 1;", new Dictionary<string, object>
                     StringComparer.OrdinalIgnoreCase).ToList());
                 List<Dictionary<string, object>> persistedNotableRows =
                     ReignPostgreSqlDialect.IsPostgreSql(connection)
-                        ? QuerySql(connection, @"SELECT profiles.*
+                        ? Program.QuerySql(connection, @"SELECT profiles.*
 FROM notable_mbti_profiles profiles
 JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
   ON requested.value=profiles.hero_id;",
@@ -1644,7 +1644,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                             {
                                 ["heroes"] = neededHeroesJson
                             })
-                        : QuerySql(connection,
+                        : Program.QuerySql(connection,
                             "SELECT * FROM notable_mbti_profiles;");
                 Dictionary<string, Dictionary<string, object>> persistedNotables =
                     persistedNotableRows
@@ -1735,7 +1735,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                     commandPreparationTimer.Stop();
                     commandPreparationMs = commandPreparationTimer.ElapsedMilliseconds;
                     Stopwatch transactionBeginTimer = Stopwatch.StartNew();
-                    ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     transactionBeginTimer.Stop();
                     transactionBeginMs = transactionBeginTimer.ElapsedMilliseconds;
                     try
@@ -1773,7 +1773,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                         .ToList());
                     List<Dictionary<string, object>> existingPairRows =
                         ReignPostgreSqlDialect.IsPostgreSql(connection)
-                            ? QuerySql(connection, @"SELECT pairs.*
+                            ? Program.QuerySql(connection, @"SELECT pairs.*
 FROM relationship_pair_chemistry pairs
 JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
   ON requested.value=pairs.pair_key;",
@@ -1790,7 +1790,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                     stateChemistryReadMs = stateLoadTimer.ElapsedMilliseconds - stateLifecycleReadMs;
                     List<Dictionary<string, object>> existingNativeTargetRows =
                         ReignPostgreSqlDialect.IsPostgreSql(connection)
-                            ? QuerySql(connection, @"SELECT targets.*
+                            ? Program.QuerySql(connection, @"SELECT targets.*
 FROM relationship_native_targets targets
 JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
   ON requested.value=targets.pair_key;",
@@ -1798,7 +1798,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                                 {
                                     ["pairs"] = neededPairsJson
                                 })
-                            : QuerySql(connection,
+                            : Program.QuerySql(connection,
                                 "SELECT * FROM relationship_native_targets;");
                     Dictionary<string, Dictionary<string, object>> existingNativeTargets =
                         existingNativeTargetRows
@@ -1926,7 +1926,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                                 skippedMissing++;
                                 string error = "Missing immutable MBTI assignment for relationship pair " + pair.PairKey
                                     + " (" + pair.HeroAId + "=" + typeA + ", " + pair.HeroBId + "=" + typeB + ").";
-                                ExecuteSql(connection,
+                                Program.ExecuteSql(connection,
                                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('relationship_mbti_error',$error);",
                                     new Dictionary<string, object> { ["error"] = error });
                                 continue;
@@ -2035,19 +2035,19 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                             lifecycleShared = ReadString(lifecycle, "sharedTag", lifecycleShared);
                             lifecycleChanges += new[] { "loverStarted", "loverEnded", "affairStarted", "affairEnded" }
                                 .Count(key => ReadBool(lifecycle, key, false));
-                            IncrementWorldTestObjectCounter(telemetryChunkCounters,
+                            WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters,
                                 "flirtationAttempts",
                                 ReadBool(lifecycle, "flirtationAttempted", false)
                                     ? 1 : 0);
-                            IncrementWorldTestObjectCounter(telemetryChunkCounters,
+                            WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters,
                                 "flirtationsStarted",
                                 ReadBool(lifecycle, "flirtationStarted", false)
                                     ? 1 : 0);
-                            IncrementWorldTestObjectCounter(telemetryChunkCounters,
+                            WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters,
                                 "growingAttractionsStarted",
                                 ReadBool(lifecycle,
                                     "growingAttractionStarted", false) ? 1 : 0);
-                            IncrementWorldTestObjectCounter(telemetryChunkCounters,
+                            WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters,
                                 "affairJudgmentAttempts",
                                 ReadBool(lifecycle,
                                     "affairJudgmentAttempted", false) ? 1 : 0);
@@ -2302,19 +2302,19 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                         // Maintaining its denormalized membership indexes here used
                         // to multiply every affinity change into dozens of SQLite
                         // writes and made diagnostics the simulation bottleneck.
-                        IncrementWorldTestObjectCounter(telemetryChunkCounters, "processedPairs", 1);
-                        IncrementWorldTestObjectCounter(telemetryChunkCounters, "rolledDirections",
+                        WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters, "processedPairs", 1);
+                        WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters, "rolledDirections",
                             pairRolledDirections);
-                        IncrementWorldTestObjectCounter(telemetryChunkCounters, "positiveRolls",
+                        WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters, "positiveRolls",
                             pairPositiveRolls);
-                        IncrementWorldTestObjectCounter(telemetryChunkCounters, "negativeRolls",
+                        WorldSimulationService.IncrementWorldTestObjectCounter(telemetryChunkCounters, "negativeRolls",
                             pairNegativeRolls);
                         telemetryChunkPairs++;
                         telemetryLastPairKey = pair.PairKey;
                         processed++;
                         if (telemetryChunkPairs == relationshipWriteChunkSize)
                         {
-                            RecordWorldTestCounterSchemaReady(connection, campaignId, timelineId, day, "relationships",
+                            WorldSimulationService.RecordWorldTestCounterSchemaReady(connection, campaignId, timelineId, day, "relationships",
                                 "pair_chunk_" + telemetryChunkIndex.ToString("D6", CultureInfo.InvariantCulture)
                                     + "_through_" + telemetryLastPairKey,
                                 telemetryChunkCounters);
@@ -2332,7 +2332,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
                                 nativeTargetDeleteBatch);
                             FlushPostgreSqlRelationshipProvenanceBatch(connection,
                                 provenanceWriteBatch);
-                            ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
+                            Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
 pair_cursor=$cursor,candidate_pairs=$candidates,processed_pairs=$processed
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                                 new Dictionary<string, object>
@@ -2341,13 +2341,13 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                                     ["processed"] = processed, ["campaign"] = campaignId,
                                     ["timeline"] = timelineId, ["day"] = day
                                 });
-                            ExecuteSql(connection, "COMMIT;");
+                            Program.ExecuteSql(connection, "COMMIT;");
                             StoreCommittedRelationshipPairCacheRows(
                                 campaignId, pendingCacheRows);
                             pendingCacheRows.Clear();
                             ThrottleContinuousRelationshipChunk(evaluationUnitsSinceThrottle);
                             evaluationUnitsSinceThrottle = 0;
-                            ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                         }
                     }
                     pairProcessingTimer.Stop();
@@ -2411,7 +2411,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                                 lifecyclePairState, "shared_tag", ""),
                                 StringComparison.OrdinalIgnoreCase))
                         {
-                            ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
+                            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
 SET shared_tag=$shared,state_revision=state_revision+1,updated_ts=$ts
 WHERE pair_key=$pair;",
                                 new Dictionary<string, object>
@@ -2456,7 +2456,7 @@ WHERE pair_key=$pair;",
                     int eligibleNpcCount = matchingGroups.SelectMany(group =>
                             ReadStringList(group, "heroIds"))
                         .Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                    RecordWorldTestCounterSchemaReady(connection, campaignId,
+                    WorldSimulationService.RecordWorldTestCounterSchemaReady(connection, campaignId,
                         timelineId, day, "relationships",
                         "daily_random_matching_summary",
                         new Dictionary<string, object>
@@ -2485,12 +2485,12 @@ WHERE pair_key=$pair;",
                         });
                     if (telemetryChunkPairs > 0)
                     {
-                        RecordWorldTestCounterSchemaReady(connection, campaignId, timelineId, day, "relationships",
+                        WorldSimulationService.RecordWorldTestCounterSchemaReady(connection, campaignId, timelineId, day, "relationships",
                             "pair_chunk_" + telemetryChunkIndex.ToString("D6", CultureInfo.InvariantCulture)
                                 + "_through_" + telemetryLastPairKey,
                             telemetryChunkCounters);
                     }
-                    EnqueueWorldTestRollup(connection, campaignId, timelineId, day,
+                    WorldSimulationService.EnqueueWorldTestRollup(connection, campaignId, timelineId, day,
                         "relationship_day_completed");
                     finalFlushTimer.Stop();
                     finalFlushMs = finalFlushTimer.ElapsedMilliseconds;
@@ -2517,7 +2517,7 @@ WHERE pair_key=$pair;",
                     Dictionary<string, object> nativeSyncPlan = continuousWorker
                         ? new Dictionary<string, object>
                         {
-                            ["targetCount"] = ReadInt(QuerySql(connection,
+                            ["targetCount"] = ReadInt(Program.QuerySql(connection,
                                 "SELECT COUNT(*) AS count FROM relationship_native_targets WHERE status IN ('pending','claimed','failed');")
                                 .FirstOrDefault(), "count", 0)
                         }
@@ -2623,17 +2623,17 @@ WHERE pair_key=$pair;",
                         ["llmCalls"] = 0, ["noLlmConfirmed"] = true
                     };
                     Stopwatch commitTimer = Stopwatch.StartNew();
-                    ExecuteSql(connection,
+                    Program.ExecuteSql(connection,
                         "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,$day);",
                         new Dictionary<string, object>
                         {
                             ["key"] = "mbti_relationship_last_processed_day:" + timelineId,
                             ["day"] = day.ToString(CultureInfo.InvariantCulture)
                         });
-                    ExecuteSql(connection,
+                    Program.ExecuteSql(connection,
                         "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('mbti_relationship_last_processed_day',$day);",
                         new Dictionary<string, object> { ["day"] = day.ToString(CultureInfo.InvariantCulture) });
-                    ExecuteSql(connection, "COMMIT;");
+                    Program.ExecuteSql(connection, "COMMIT;");
                     commitTimer.Stop();
                     commitMs = commitTimer.ElapsedMilliseconds;
                     timer.Stop();
@@ -2677,7 +2677,7 @@ WHERE pair_key=$pair;",
                     }
                     catch
                     {
-                        try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                        try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                         throw;
                     }
                 }
@@ -2695,7 +2695,7 @@ WHERE pair_key=$pair;",
             string planId = "native_sync_" + campaignId + "_" + timelineId + "_"
                 + day.ToString(CultureInfo.InvariantCulture);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<Dictionary<string, object>> targets = QuerySql(connection, @"
+            List<Dictionary<string, object>> targets = Program.QuerySql(connection, @"
 SELECT pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,world_day,
 attempt_count,revision
 FROM relationship_native_targets
@@ -2712,7 +2712,7 @@ ORDER BY ABS(target_relation-observed_relation) DESC,pair_key;")
                     ["attemptCount"] = ReadInt(row, "attempt_count", 0),
                     ["revision"] = ReadInt(row, "revision", 1)
                 }).ToList();
-            ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
+            Program.ExecuteSql(connection, @"INSERT INTO relationship_native_sync_batches(
 plan_id,campaign_id,timeline_id,world_day,target_count,issued_ts,client_remaining)
 VALUES($plan,$campaign,$timeline,$day,$count,$ts,$count)
 ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
@@ -2734,7 +2734,7 @@ ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
             };
         }
 
-        private static Dictionary<string, object> RelationshipNativeSyncReportApi(
+        internal static Dictionary<string, object> RelationshipNativeSyncReportApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -2744,10 +2744,10 @@ ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
             if (string.IsNullOrWhiteSpace(planId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "planId is required." };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                Dictionary<string, object> batch = QuerySql(connection,
+                Dictionary<string, object> batch = Program.QuerySql(connection,
                     "SELECT * FROM relationship_native_sync_batches WHERE plan_id=$plan AND timeline_id=$timeline LIMIT 1;",
                     new Dictionary<string, object> { ["plan"] = planId, ["timeline"] = timelineId }).FirstOrDefault();
                 if (batch == null)
@@ -2762,9 +2762,9 @@ ON CONFLICT(plan_id) DO UPDATE SET target_count=$count,issued_ts=$ts;",
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 foreach (string pairKey in obsolete)
                 {
-                    ExecuteSql(connection, "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
+                    Program.ExecuteSql(connection, "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey });
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
 SET native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey, ["ts"] = ts });
                 }
@@ -2774,13 +2774,13 @@ SET native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$p
                 {
                     string pairKey = ReadString(failure, "pairKey", "");
                     if (string.IsNullOrWhiteSpace(pairKey)) continue;
-                    ExecuteSql(connection, @"UPDATE relationship_native_targets
+                    Program.ExecuteSql(connection, @"UPDATE relationship_native_targets
 SET status='failed',attempt_count=attempt_count+1,claimed_ts=0,last_error=$error,updated_ts=$ts
 WHERE pair_key=$pair AND status<>'failed';",
                         new Dictionary<string, object>
                         {
                             ["pair"] = pairKey,
-                            ["error"] = LimitText(ReadString(failure, "error", "Native relation projection failed."), 500),
+                            ["error"] = Program.LimitText(ReadString(failure, "error", "Native relation projection failed."), 500),
                             ["ts"] = ts
                         });
                 }
@@ -2807,7 +2807,7 @@ WHERE pair_key=$pair AND status<>'failed';",
                     // restore only failures explicitly reported for this
                     // attempt. Newer targets are protected by world_day.
                     double batchDay = ReadDouble(batch, "world_day", 0d);
-                    ExecuteSql(connection, @"UPDATE relationship_native_targets
+                    Program.ExecuteSql(connection, @"UPDATE relationship_native_targets
 SET status='pending',claimed_ts=0,last_error='',updated_ts=$ts
 WHERE world_day<=$day;",
                         new Dictionary<string, object> { ["day"] = batchDay, ["ts"] = ts });
@@ -2815,19 +2815,19 @@ WHERE world_day<=$day;",
                     {
                         string pairKey = ReadString(failure, "pairKey", "");
                         if (string.IsNullOrWhiteSpace(pairKey)) continue;
-                        ExecuteSql(connection, @"UPDATE relationship_native_targets
+                        Program.ExecuteSql(connection, @"UPDATE relationship_native_targets
 SET status='failed',claimed_ts=0,last_error=$error,updated_ts=$ts
 WHERE pair_key=$pair AND world_day<=$day;",
                             new Dictionary<string, object>
                             {
                                 ["pair"] = pairKey,
                                 ["day"] = batchDay,
-                                ["error"] = LimitText(ReadString(failure, "error",
+                                ["error"] = Program.LimitText(ReadString(failure, "error",
                                     "Native relation projection failed."), 500),
                                 ["ts"] = ts
                             });
                     }
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
 SET native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts
 WHERE pair_key IN (
     SELECT pair_key FROM relationship_native_targets
@@ -2838,12 +2838,12 @@ WHERE pair_key IN (
                             ["day"] = batchDay,
                             ["ts"] = ts
                         });
-                    ExecuteSql(connection, @"DELETE FROM relationship_native_targets
+                    Program.ExecuteSql(connection, @"DELETE FROM relationship_native_targets
 WHERE world_day<=$day AND status<>'failed';",
                         new Dictionary<string, object> { ["day"] = batchDay });
                 }
 
-                ExecuteSql(connection, @"UPDATE relationship_native_sync_batches SET
+                Program.ExecuteSql(connection, @"UPDATE relationship_native_sync_batches SET
 client_applied=$applied,client_already_aligned=$aligned,client_obsolete=$obsolete,
 client_failed=$failed,client_remaining=$remaining,client_duration_ms=$duration,
 last_report_day=$day,last_report_ts=$ts,last_error=$error
@@ -2858,7 +2858,7 @@ WHERE plan_id=$plan AND timeline_id=$timeline;",
                         ["duration"] = Math.Max(0, ReadInt(payload, "durationMs", 0)),
                         ["day"] = ReadDouble(payload, "worldDay", ReadDouble(batch, "world_day", 0d)),
                         ["ts"] = ts,
-                        ["error"] = LimitText(ReadString(payload, "lastError", ""), 1000),
+                        ["error"] = Program.LimitText(ReadString(payload, "lastError", ""), 1000),
                         ["plan"] = planId,
                         ["timeline"] = timelineId
                     });
@@ -2874,12 +2874,12 @@ WHERE plan_id=$plan AND timeline_id=$timeline;",
             }
         }
 
-        private static Dictionary<string, object> MbtiRelationshipStatusApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> MbtiRelationshipStatusApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             int limit = Clamp(ReadInt(payload, "limit", 60), 1, 250);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 return new Dictionary<string, object>
@@ -2890,30 +2890,30 @@ WHERE plan_id=$plan AND timeline_id=$timeline;",
                     ["nativeRelationRule"] = "Bannerlord native relation converges to the rounded average of the two authoritative Reign directional affinities.",
                     ["lastProcessedDay"] = RelationshipLastProcessedDay(connection,
                         ReadString(payload, "timelineId", "main")),
-                    ["latestIngestedDay"] = ReadDouble(QuerySql(connection,
+                    ["latestIngestedDay"] = ReadDouble(Program.QuerySql(connection,
                         "SELECT MAX(world_day) AS day FROM relationship_daily_inputs;").FirstOrDefault(),
                         "day", -1d),
-                    ["pendingDailyInputCount"] = ReadInt(QuerySql(connection,
+                    ["pendingDailyInputCount"] = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_daily_inputs WHERE status IN ('pending','processing');")
                         .FirstOrDefault(), "count", 0),
-                    ["oldestPendingDailyInputDay"] = ReadDouble(QuerySql(connection,
+                    ["oldestPendingDailyInputDay"] = ReadDouble(Program.QuerySql(connection,
                         "SELECT MIN(world_day) AS day FROM relationship_daily_inputs WHERE status='pending';")
                         .FirstOrDefault(), "day", -1d),
-                    ["partialDay"] = QuerySql(connection, @"SELECT day_key,pair_cursor,candidate_pairs,processed_pairs,
+                    ["partialDay"] = Program.QuerySql(connection, @"SELECT day_key,pair_cursor,candidate_pairs,processed_pairs,
 started_ts,last_error FROM relationship_daily_inputs WHERE status='processing'
 ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>(),
                     ["worker"] = ContinuousRelationshipWorkerStatus(),
-                    ["mbtiInitializationError"] = ReadString(QuerySql(connection,
+                    ["mbtiInitializationError"] = ReadString(Program.QuerySql(connection,
                         "SELECT value FROM schema_meta WHERE key='relationship_mbti_error' LIMIT 1;")
                         .FirstOrDefault(), "value", ""),
-                    ["currentPairs"] = QuerySql(connection, "SELECT * FROM relationship_pair_chemistry ORDER BY last_day DESC,weighted_exposure DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["pendingNativeChanges"] = QuerySql(connection, "SELECT pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,projected_native_relation,native_action_pending,native_action_id FROM relationship_pair_chemistry WHERE native_action_pending=1 ORDER BY last_day DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
+                    ["currentPairs"] = Program.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry ORDER BY last_day DESC,weighted_exposure DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
+                    ["pendingNativeChanges"] = Program.QuerySql(connection, "SELECT pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,projected_native_relation,native_action_pending,native_action_id FROM relationship_pair_chemistry WHERE native_action_pending=1 ORDER BY last_day DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
                     ["retiredDailyFacetRows"] = 0
                 };
             }
         }
 
-        private static Dictionary<string, object> DeriveMbtiAxes(Dictionary<string, object> profile)
+        internal static Dictionary<string, object> DeriveMbtiAxes(Dictionary<string, object> profile)
         {
             double ei = WeightedMbtiAxis(profile,
                 new[] { "sociability", "assertiveness", "confidence", "flirtatiousness", "optimism", "shame" },
@@ -2938,9 +2938,9 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             };
         }
 
-        private static int RelationshipLastProcessedDay(ReignDbConnection connection, string timelineId)
+        internal static int RelationshipLastProcessedDay(ReignDbConnection connection, string timelineId)
         {
-            Dictionary<string, object> row = QuerySql(connection,
+            Dictionary<string, object> row = Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 new Dictionary<string, object>
                 {
@@ -2948,7 +2948,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
                         + (string.IsNullOrWhiteSpace(timelineId) ? "main" : timelineId)
                 }).FirstOrDefault();
             if (row != null) return ReadInt(row, "value", -1);
-            return ReadInt(QuerySql(connection,
+            return ReadInt(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='mbti_relationship_last_processed_day' LIMIT 1;")
                 .FirstOrDefault(), "value", -1);
         }
@@ -2962,15 +2962,15 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
                 sum += signed * weights[i];
                 denominator += Math.Abs(weights[i]);
             }
-            return denominator <= 0d ? 0d : ClampDouble(sum / denominator, -1d, 1d);
+            return denominator <= 0d ? 0d : Program.ClampDouble(sum / denominator, -1d, 1d);
         }
 
         private static double MbtiTraitPercent(Dictionary<string, object> profile, string key)
         {
             Dictionary<string, object> percentages = ReadDictionary(profile, "traitPercentages") ?? new Dictionary<string, object>();
-            if (percentages.ContainsKey(key)) return ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
+            if (percentages.ContainsKey(key)) return Program.ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
             Dictionary<string, object> foundation = ReadDictionary(profile, "foundationTraits") ?? new Dictionary<string, object>();
-            return ClampDouble(50d + 20d * ReadDouble(foundation, key, 0d), 0d, 100d);
+            return Program.ClampDouble(50d + 20d * ReadDouble(foundation, key, 0d), 0d, 100d);
         }
 
         private static int MbtiCompatibility(string observerType, string targetType)
@@ -3026,7 +3026,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
         private static int StableDieFromUnit(double unit, int sides)
         {
             return Clamp(1 + (int)Math.Floor(
-                ClampDouble(unit, 0d, 0.9999999999999999d) * sides),
+                Program.ClampDouble(unit, 0d, 0.9999999999999999d) * sides),
                 1, Math.Max(1, sides));
         }
 
@@ -3125,7 +3125,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             return (int)Math.Round(value, MidpointRounding.AwayFromZero);
         }
 
-        private static string DirectionalRelationshipTag(string campaignId, string pairKey, string direction, int affinity, int reverseAffinity)
+        internal static string DirectionalRelationshipTag(string campaignId, string pairKey, string direction, int affinity, int reverseAffinity)
         {
             string[] pool;
             if (affinity <= -70) pool = new[] { "nemesis", "hated_enemy" };
@@ -3170,7 +3170,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             return true;
         }
 
-        private static int InitialReignAffinity(Dictionary<string, object> a, Dictionary<string, object> b)
+        internal static int InitialReignAffinity(Dictionary<string, object> a, Dictionary<string, object> b)
         {
             string aId = ReadFirstString(a, "heroStringId", "heroId", "id");
             string bId = ReadFirstString(b, "heroStringId", "heroId", "id");
@@ -3208,12 +3208,12 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
             return "bonded";
         }
 
-        private static string RelationshipTagForObserver(ReignDbConnection connection, string campaignId, string observerId, string targetId, int nativeRelation)
+        internal static string RelationshipTagForObserver(ReignDbConnection connection, string campaignId, string observerId, string targetId, int nativeRelation)
         {
             string pairKey = AmbientPairKey(observerId, targetId);
             if (!string.IsNullOrWhiteSpace(pairKey))
             {
-                Dictionary<string, object> row = QuerySql(connection,
+                Dictionary<string, object> row = Program.QuerySql(connection,
                     "SELECT hero_a_id,hero_b_id,tag_a_to_b,tag_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 if (row != null)
@@ -3261,7 +3261,7 @@ ORDER BY day_key LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>()
                         ?? new Dictionary<string, object>()
                 };
                 long notableTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"INSERT INTO relationship_personalities(
+                Program.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
 hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 VALUES($hero,$type,$title,$description,'notable_mbti_template',$day,$version,$traits,$ts,$ts)
 ON CONFLICT(hero_id) DO UPDATE SET
@@ -3298,7 +3298,7 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
                     resolvedNotable);
                 return resolvedNotable;
             }
-            Dictionary<string, object> stored = QuerySql(connection,
+            Dictionary<string, object> stored = Program.QuerySql(connection,
                 "SELECT * FROM relationship_personalities WHERE hero_id=$hero LIMIT 1;",
                 new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
             if (stored != null)
@@ -3321,7 +3321,7 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
             string source;
             double assignmentDay;
             Dictionary<string, Dictionary<string, object>> catalog =
-                RelationshipStandingContext.FilesFor(connection, campaignId)?.Catalog ?? LoadCharacterProfileLibrary();
+                RelationshipStandingContext.FilesFor(connection, campaignId)?.Catalog ?? CharactersService.LoadCharacterProfileLibrary();
             if (catalog.TryGetValue(heroId, out Dictionary<string, object> pregenerated))
             {
                 mbti = ReadDictionary(pregenerated, "mbtiProfile")
@@ -3333,7 +3333,7 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
             }
             else
             {
-                string type = MbtiTypes[StableIndex(campaignId + "|runtime_mbti|" + heroId, MbtiTypes.Length)];
+                string type = MbtiTypes[CharactersService.StableIndex(campaignId + "|runtime_mbti|" + heroId, MbtiTypes.Length)];
                 MbtiDefinition definition = MbtiDefinitions[type];
                 traits = BuildNotableMbtiTraitDocument(campaignId, heroId,
                     ReadString(hero, "name", heroId), type);
@@ -3352,7 +3352,7 @@ OR relationship_personalities.traits_json<>excluded.traits_json;",
             if (!MbtiDefinitions.TryGetValue(resolvedType, out MbtiDefinition resolvedDefinition))
                 return new Dictionary<string, object> { ["type"] = "XXXX", ["source"] = source };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT INTO relationship_personalities(
+            Program.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
 hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 VALUES($hero,$type,$title,$description,$source,$day,$version,$traits,$ts,$ts)
 ON CONFLICT(hero_id) DO NOTHING;",
@@ -3404,7 +3404,7 @@ ON CONFLICT(hero_id) DO NOTHING;",
                 string requestedJson = Json.Serialize(missing);
                 List<Dictionary<string, object>> rows =
                     ReignPostgreSqlDialect.IsPostgreSql(connection)
-                        ? QuerySql(connection, @"SELECT personalities.hero_id,
+                        ? Program.QuerySql(connection, @"SELECT personalities.hero_id,
 personalities.mbti_type,personalities.title,personalities.description,
 personalities.source
 FROM relationship_personalities personalities
@@ -3414,7 +3414,7 @@ JOIN jsonb_array_elements_text(CAST($heroes AS jsonb)) requested
                             {
                                 ["heroes"] = requestedJson
                             })
-                        : QuerySql(connection, @"SELECT hero_id,mbti_type,title,
+                        : Program.QuerySql(connection, @"SELECT hero_id,mbti_type,title,
 description,source FROM relationship_personalities;")
                             .Where(row => required.Contains(
                                 ReadString(row, "hero_id", ""))).ToList();
@@ -3538,7 +3538,7 @@ description,source FROM relationship_personalities;")
             nativeTargetDeletes.Clear();
         }
 
-        private static string PostgreSqlRelationshipRowsJson(
+        internal static string PostgreSqlRelationshipRowsJson(
             List<Dictionary<string, object>> rows)
         {
             return Json.Serialize((rows
@@ -3550,7 +3550,7 @@ description,source FROM relationship_personalities;")
                 .ToList());
         }
 
-        private static void ExecutePostgreSqlJsonCommand(
+        internal static void ExecutePostgreSqlJsonCommand(
             ReignDbConnection connection, string sql, string json)
         {
             NpgsqlConnection postgreSql = connection as NpgsqlConnection;
@@ -3910,7 +3910,7 @@ OR ((relationship_pair_chemistry.affinity_a_to_b
                     item => item.Key.ToLowerInvariant(),
                     item => item.Value,
                     StringComparer.OrdinalIgnoreCase)).ToList());
-            ExecuteSql(connection, @"
+            Program.ExecuteSql(connection, @"
 WITH x AS (
     SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
         campaign text,timeline text,pair text,source text,required integer,
@@ -4111,7 +4111,7 @@ OR relationship_pair_provenance.details_json<>$details;",
                         StringComparer.OrdinalIgnoreCase)).ToList());
             if (pairRows != null && pairRows.Count > 0)
             {
-                ExecuteSql(connection, @"
+                Program.ExecuteSql(connection, @"
 WITH x AS (
     SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
         pair text,a text,b text,typea text,typeb text,baseab integer,
@@ -4188,7 +4188,7 @@ WHERE relationship_pair_chemistry.opening_seed_version
             }
             if (provenanceRows != null && provenanceRows.Count > 0)
             {
-                ExecuteSql(connection, @"
+                Program.ExecuteSql(connection, @"
 WITH x AS (
     SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
         campaign text,timeline text,pair text,source text,required integer,
@@ -4212,7 +4212,7 @@ OR relationship_pair_provenance.details_json<>excluded.details_json;",
             }
             if (nativeTargetRows != null && nativeTargetRows.Count > 0)
             {
-                ExecuteSql(connection, @"
+                Program.ExecuteSql(connection, @"
 WITH x AS (
     SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb)) AS r(
         pair text,actor text,targethero text,targetrelation integer,
@@ -4243,7 +4243,7 @@ updated_ts=excluded.updated_ts;",
             }
             if (nativeTargetDeletes != null && nativeTargetDeletes.Count > 0)
             {
-                ExecuteSql(connection, @"
+                Program.ExecuteSql(connection, @"
 DELETE FROM relationship_native_targets
 WHERE pair_key IN (
     SELECT value FROM jsonb_array_elements_text(CAST($pairs AS jsonb)));",
@@ -4269,7 +4269,7 @@ WHERE pair_key IN (
                     {
                         cached = new ConcurrentDictionary<string,
                             Dictionary<string, object>>(
-                                QuerySql(connection,
+                                Program.QuerySql(connection,
                                     "SELECT * FROM relationship_pair_chemistry;")
                                 .Where(row => !string.IsNullOrWhiteSpace(
                                     ReadString(row, "pair_key", "")))
@@ -4435,7 +4435,7 @@ WHERE pair_key IN (
                 cached.TryRemove(pairKey, out _);
         }
 
-        private static void InvalidateRelationshipPairCacheForMutation(
+        internal static void InvalidateRelationshipPairCacheForMutation(
             ReignDbConnection connection, string sql,
             Dictionary<string, object> parameters)
         {
@@ -4505,7 +4505,7 @@ target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updat
             else if (preparedCommand != null)
                 ExecutePreparedRelationshipCommand(preparedCommand, parameters);
             else
-                ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,last_sync_day,
 attempt_count,claimed_ts,last_error,updated_ts,requires_observation)
 VALUES($pair,$actor,$targetHero,$targetRelation,$observed,'pending',$day,-1000,0,0,'',$ts,$requiresObservation)
@@ -4550,7 +4550,7 @@ target_relation=excluded.target_relation,last_error='',updated_ts=excluded.updat
                 ? "affinity_a_to_b" : "affinity_b_to_a";
             int day = (int)Math.Floor(worldDay + 0.000001d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<Dictionary<string, object>> updated = QuerySql(connection,
+            List<Dictionary<string, object>> updated = Program.QuerySql(connection,
                 @"UPDATE relationship_pair_chemistry SET "
                 + affinityColumn + @"=MAX(-100,MIN(100,"
                 + affinityColumn + @"+$delta)),
@@ -4563,7 +4563,7 @@ RETURNING *;",
                 {
                     ["delta"] = delta, ["day"] = day,
                     ["kind"] = "consequence",
-                    ["context"] = LimitText(reason ?? string.Empty, 240),
+                    ["context"] = Program.LimitText(reason ?? string.Empty, 240),
                     ["ts"] = ts, ["pair"] = pairKey
                 });
             Dictionary<string, object> pair = updated.FirstOrDefault();
@@ -4577,7 +4577,7 @@ RETURNING *;",
                 connection, campaignId, timelineId, pairHeroA, pairHeroB), "value", 0), -100, 100);
             int effectiveBA = Clamp(affinityBA + ReadInt(ResolveObserverPublicStanding(
                 connection, campaignId, timelineId, pairHeroB, pairHeroA), "value", 0), -100, 100);
-            ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 effective_affinity_a_to_b=$effectiveAB,
 effective_affinity_b_to_a=$effectiveBA,
 tag_a_to_b=$tagAB,tag_b_to_a=$tagBA
@@ -4601,7 +4601,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
                 pairKey, "b_to_a", affinityBA, affinityAB);
             RefreshEffectivePairProjection(connection, campaignId,
                 timelineId, pair, worldDay, reason);
-            Dictionary<string, object> committed = QuerySql(connection,
+            Dictionary<string, object> committed = Program.QuerySql(connection,
                 "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey })
                 .FirstOrDefault() ?? pair;
@@ -4633,7 +4633,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
             string heroB = observerIsA ? targetId : observerId;
             int day = (int)Math.Floor(worldDay + 0.000001d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Dictionary<string, object> existing = QuerySql(connection,
+            Dictionary<string, object> existing = Program.QuerySql(connection,
                 "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             if (existing != null)
@@ -4663,7 +4663,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
             int baseBA = existing == null ? MbtiCompatibility(typeB, typeA) : ReadInt(existing, "base_chance_b_to_a", 50);
             int projected = ProjectNativeRelation(connection, heroA, heroB,
                 affinityAB, affinityBA, effectiveAB, effectiveBA);
-            Dictionary<string, object> existingNativeTarget = QuerySql(connection,
+            Dictionary<string, object> existingNativeTarget = Program.QuerySql(connection,
                 "SELECT observed_relation,requires_observation FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             int observedNative = existingNativeTarget != null
@@ -4673,7 +4673,7 @@ WHERE pair_key=$pair AND state_revision=$revision;",
                     : 0;
             bool requiresNativeTarget = projected != observedNative || RelationshipNativeObservationRequired(existing, existingNativeTarget);
             string nativeActionId = requiresNativeTarget ? "native_target:" + pairKey : "";
-            ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+            Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,base_chance_b_to_a,
 chance_a_to_b,chance_b_to_a,affinity_a_to_b,affinity_b_to_a,social_modifier_a_to_b,social_modifier_b_to_a,
 effective_affinity_a_to_b,effective_affinity_b_to_a,tag_a_to_b,tag_b_to_a,
@@ -4708,7 +4708,7 @@ native_action_id=$action,updated_ts=$ts;",
                 RecordRelationshipPairProvenance(connection, campaignId, timelineId,
                     pairKey, "consequential_event", false, worldDay,
                     new Dictionary<string, object> { ["reason"] = reason ?? string.Empty });
-            Dictionary<string, object> current = QuerySql(connection,
+            Dictionary<string, object> current = Program.QuerySql(connection,
                 "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey })
                 .FirstOrDefault();
@@ -4720,7 +4720,7 @@ native_action_id=$action,updated_ts=$ts;",
         private static string ResolvePermanentMbtiTypeById(
             ReignDbConnection connection, string campaignId, string heroId, int day)
         {
-            Dictionary<string, object> stored = QuerySql(connection,
+            Dictionary<string, object> stored = Program.QuerySql(connection,
                 "SELECT mbti_type FROM relationship_personalities WHERE hero_id=$hero LIMIT 1;",
                 new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
             string storedType = ReadString(stored, "mbti_type", "");
@@ -4728,7 +4728,7 @@ native_action_id=$action,updated_ts=$ts;",
             // A cold library load logs under FileLock; a file-input scope supplies the
             // catalog reference it captured before its database locks.
             Dictionary<string, Dictionary<string, object>> catalog =
-                RelationshipStandingContext.FilesFor(connection, campaignId)?.Catalog ?? LoadCharacterProfileLibrary();
+                RelationshipStandingContext.FilesFor(connection, campaignId)?.Catalog ?? CharactersService.LoadCharacterProfileLibrary();
             if (catalog.TryGetValue(heroId, out Dictionary<string, object> pregenerated))
             {
                 Dictionary<string, object> mbti = ReadDictionary(pregenerated, "mbtiProfile")
@@ -4748,32 +4748,32 @@ native_action_id=$action,updated_ts=$ts;",
 
         private static void CompactNoisyNativeRelationBacklog(ReignDbConnection connection)
         {
-            if (ReadString(QuerySql(connection,
+            if (ReadString(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='mbti_native_relation_bulk_projection_v1' LIMIT 1;")
                 .FirstOrDefault(), "value", "") == "1") return;
 
-            ExecuteSql(connection, "SAVEPOINT compact_native_relation_backlog;");
+            Program.ExecuteSql(connection, "SAVEPOINT compact_native_relation_backlog;");
             try
             {
-                ExecuteSql(connection, "UPDATE relationship_native_targets SET status='pending',claimed_ts=0,last_error='';");
-                if (ReadInt(QuerySql(connection,
+                Program.ExecuteSql(connection, "UPDATE relationship_native_targets SET status='pending',claimed_ts=0,last_error='';");
+                if (ReadInt(Program.QuerySql(connection,
                     "SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name='relationship_director_actions';")
                     .FirstOrDefault(), "count", 0) > 0)
                 {
-                    ExecuteSql(connection, @"UPDATE relationship_director_actions
+                    Program.ExecuteSql(connection, @"UPDATE relationship_director_actions
 SET status='superseded',resolved_ts=$ts,
 result_json='{""status"":""superseded"",""reason"":""native_relation_bulk_projection""}'
 WHERE action_type='native_relation' AND status IN ('pending','claimed');",
                         new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('mbti_native_relation_bulk_projection_v1','1');");
-                ExecuteSql(connection, "RELEASE compact_native_relation_backlog;");
+                Program.ExecuteSql(connection, "RELEASE compact_native_relation_backlog;");
             }
             catch
             {
-                try { ExecuteSql(connection, "ROLLBACK TO compact_native_relation_backlog;"); } catch { }
-                try { ExecuteSql(connection, "RELEASE compact_native_relation_backlog;"); } catch { }
+                try { Program.ExecuteSql(connection, "ROLLBACK TO compact_native_relation_backlog;"); } catch { }
+                try { Program.ExecuteSql(connection, "RELEASE compact_native_relation_backlog;"); } catch { }
                 throw;
             }
         }
@@ -4787,12 +4787,12 @@ WHERE action_type='native_relation' AND status IN ('pending','claimed');",
                 ["caseId"] = id, ["name"] = id, ["summary"] = summary, ["durationMs"] = 0
             });
 
-            var scopedStatusRequest = new HttpRequest { Method = "GET",
+            var scopedStatusRequest = new Program.HttpRequest { Method = "GET",
                 Query = new Dictionary<string, string> { ["campaignId"] = "requested_campaign", ["timelineId"] = "requested_timeline" },
                 JsonBody = TestDict("campaignId", "wrong_body_campaign", "timelineId", "wrong_body_timeline") };
-            var getScope = RelationshipStatusPayload(scopedStatusRequest);
+            var getScope = Program.RelationshipStatusPayload(scopedStatusRequest);
             scopedStatusRequest.Method = "POST";
-            var postScope = RelationshipStatusPayload(scopedStatusRequest);
+            var postScope = Program.RelationshipStatusPayload(scopedStatusRequest);
             add("ambient_status_scope_follows_request_transport",
                 ReadString(getScope, "campaignId", "") == "requested_campaign"
                 && ReadString(getScope, "timelineId", "") == "requested_timeline"
@@ -5047,7 +5047,7 @@ WHERE action_type='native_relation' AND status IN ('pending','claimed');",
             string ingestCampaignId = "mr_ingest_" + Guid.NewGuid().ToString("N").Substring(0, 10);
             try
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(ingestCampaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(ingestCampaignId))
                     EnsureMbtiRelationshipSchema(connection);
                 Stopwatch ingestTimer = Stopwatch.StartNew();
                 Dictionary<string, object> accepted = PersistAndHydrateRelationshipDailyInput(
@@ -5063,15 +5063,15 @@ WHERE action_type='native_relation' AND status IN ('pending','claimed');",
                 int observedHeroes;
                 int pendingDays;
                 long unchangedHeroTimestamp;
-                using (ReignDbConnection connection = OpenCampaignConnection(ingestCampaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(ingestCampaignId))
                 {
-                    observedHeroes = ReadInt(QuerySql(connection,
+                    observedHeroes = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_observed_heroes;")
                         .FirstOrDefault(), "count", 0);
-                    pendingDays = ReadInt(QuerySql(connection,
+                    pendingDays = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_daily_inputs WHERE status='pending';")
                         .FirstOrDefault(), "count", 0);
-                    ExecuteSql(connection, @"UPDATE relationship_observed_heroes
+                    Program.ExecuteSql(connection, @"UPDATE relationship_observed_heroes
 SET updated_ts=17 WHERE hero_id='campaign_hero_0';");
                 }
                 PersistAndHydrateRelationshipDailyInput(
@@ -5084,9 +5084,9 @@ SET updated_ts=17 WHERE hero_id='campaign_hero_0';");
                         ["presenceGroups"] = compactGroups
                     });
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(ingestCampaignId))
+                    Program.OpenCampaignConnection(ingestCampaignId))
                 {
-                    unchangedHeroTimestamp = ReadLong(QuerySql(connection,
+                    unchangedHeroTimestamp = ReadLong(Program.QuerySql(connection,
                         @"SELECT updated_ts FROM relationship_observed_heroes
 WHERE hero_id='campaign_hero_0' LIMIT 1;")
                         .FirstOrDefault(), "updated_ts", -1);
@@ -5104,7 +5104,7 @@ WHERE hero_id='campaign_hero_0' LIMIT 1;")
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(ingestCampaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(ingestCampaignId));
             }
             results.AddRange(RunCampaignOpeningRelationshipSeedSelfTests());
             results.AddRange(RunDailyRandomRelationshipMatchingSelfTests());
@@ -5186,7 +5186,7 @@ WHERE hero_id='campaign_hero_0' LIMIT 1;")
                 string authoritativeNotableType = MbtiTypes[Clamp(
                     authoritativeNotableIndex, 0, MbtiTypes.Length - 1)];
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     string conflictingType = MbtiTypes.First(type =>
@@ -5195,7 +5195,7 @@ WHERE hero_id='campaign_hero_0' LIMIT 1;")
                     MbtiDefinition conflictingDefinition =
                         MbtiDefinitions[conflictingType];
                     long fixtureTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ExecuteSql(connection, @"INSERT INTO relationship_personalities(
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
 hero_id,mbti_type,title,description,source,assignment_day,template_version,
 traits_json,created_ts,updated_ts)
 VALUES('seed_b',$type,$title,$description,'fixture_conflict',0,1,'{}',$ts,$ts)
@@ -5219,33 +5219,33 @@ source=excluded.source,updated_ts=excluded.updated_ts;",
                 Dictionary<string, object> daily;
                 Dictionary<string, object> persistedNotable;
                 Dictionary<string, object> politicalProvenance;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    spouse = QuerySql(connection, @"
+                    spouse = Program.QuerySql(connection, @"
 SELECT * FROM relationship_pair_chemistry
 WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object>
                         {
                             ["pair"] = AmbientPairKey("seed_a", "seed_b")
                         }).FirstOrDefault() ?? new Dictionary<string, object>();
-                    child = QuerySql(connection, @"
+                    child = Program.QuerySql(connection, @"
 SELECT * FROM relationship_pair_chemistry
 WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object>
                         {
                             ["pair"] = AmbientPairKey("seed_a", "seed_child")
                         }).FirstOrDefault() ?? new Dictionary<string, object>();
-                    run = QuerySql(connection,
+                    run = Program.QuerySql(connection,
                         "SELECT * FROM relationship_opening_seed_runs LIMIT 1;")
                         .FirstOrDefault() ?? new Dictionary<string, object>();
-                    daily = QuerySql(connection,
+                    daily = Program.QuerySql(connection,
                         "SELECT * FROM relationship_daily_inputs LIMIT 1;")
                         .FirstOrDefault() ?? new Dictionary<string, object>();
-                    persistedNotable = QuerySql(connection, @"
+                    persistedNotable = Program.QuerySql(connection, @"
 SELECT mbti_type FROM notable_mbti_profiles
 WHERE hero_id='seed_b' LIMIT 1;").FirstOrDefault()
                         ?? new Dictionary<string, object>();
-                    politicalProvenance = QuerySql(connection, @"
+                    politicalProvenance = Program.QuerySql(connection, @"
 SELECT active,required FROM relationship_pair_provenance
 WHERE pair_key=$pair AND source='kingdom_leadership' LIMIT 1;",
                         new Dictionary<string, object>
@@ -5260,8 +5260,8 @@ WHERE pair_key=$pair AND source='kingdom_leadership' LIMIT 1;",
                 Dictionary<string, object> repeated =
                     CampaignOpeningRelationshipSeedApi(payload);
                 Dictionary<string, object> repeatedSpouse;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    repeatedSpouse = QuerySql(connection, @"
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    repeatedSpouse = Program.QuerySql(connection, @"
 SELECT * FROM relationship_pair_chemistry
 WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object>
@@ -5328,7 +5328,7 @@ WHERE pair_key=$pair LIMIT 1;",
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaignId);
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             string scaleCampaignId = "opening_seed_scale_"
                 + Guid.NewGuid().ToString("N").Substring(0, 10);
@@ -5349,10 +5349,10 @@ WHERE pair_key=$pair LIMIT 1;",
                         ["isNotable"] = true
                     }).ToList();
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(scaleCampaignId))
+                    Program.OpenCampaignConnection(scaleCampaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"
+                    Program.ExecuteSql(connection, @"
 WITH x AS (
     SELECT * FROM jsonb_to_recordset(CAST($rows AS jsonb))
     AS r(hero_id text)
@@ -5401,9 +5401,9 @@ ON CONFLICT(hero_id) DO NOTHING;",
                 int expectedPairs = scaleHeroCount * (scaleHeroCount - 1) / 2;
                 int persistedPairs;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(scaleCampaignId))
+                    Program.OpenCampaignConnection(scaleCampaignId))
                 {
-                    persistedPairs = ReadInt(QuerySql(connection,
+                    persistedPairs = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;")
                         .FirstOrDefault(), "count", 0);
                 }
@@ -5419,7 +5419,7 @@ ON CONFLICT(hero_id) DO NOTHING;",
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(scaleCampaignId);
-                TryDeleteDirectory(CampaignDirectory(scaleCampaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(scaleCampaignId));
             }
             return results;
         }
@@ -5653,13 +5653,13 @@ ON CONFLICT(hero_id) DO NOTHING;",
                         dailyDay == 1 || dailyDay == 3 || dailyDay == 4));
                 }
                 Dictionary<string, object> dailyPair;
-                using (ReignDbConnection dailyConnection = OpenCampaignConnection(batchCampaign))
-                    dailyPair = QuerySql(dailyConnection,
+                using (ReignDbConnection dailyConnection = Program.OpenCampaignConnection(batchCampaign))
+                    dailyPair = Program.QuerySql(dailyConnection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
                 ReignPostgreSqlStorage.DropCampaign(batchCampaign);
-                TryDeleteDirectory(CampaignDirectory(batchCampaign));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(batchCampaign));
 
                 int shard = RelationshipCadenceShard(batchCampaign, pairKey);
                 Dictionary<string, object> batchResult = MbtiRelationshipSnapshotApi(
@@ -5687,8 +5687,8 @@ ON CONFLICT(hero_id) DO NOTHING;",
                             .Cast<object>().ToList()
                     });
                 Dictionary<string, object> batchPair;
-                using (ReignDbConnection batchConnection = OpenCampaignConnection(batchCampaign))
-                    batchPair = QuerySql(batchConnection,
+                using (ReignDbConnection batchConnection = Program.OpenCampaignConnection(batchCampaign))
+                    batchPair = Program.QuerySql(batchConnection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
@@ -5713,7 +5713,7 @@ ON CONFLICT(hero_id) DO NOTHING;",
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(batchCampaign);
-                TryDeleteDirectory(CampaignDirectory(batchCampaign));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(batchCampaign));
             }
             return results;
         }
@@ -5728,7 +5728,7 @@ ON CONFLICT(hero_id) DO NOTHING;",
             });
             string campaignId = "mr_" + Guid.NewGuid().ToString("N").Substring(0, 12);
             string heroA = "mbti_a", heroB = "mbti_b";
-            Dictionary<string, object> traits = CoreTraitKeys.ToDictionary(x => x, x => (object)50, StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> traits = CharactersService.CoreTraitKeys.ToDictionary(x => x, x => (object)50, StringComparer.OrdinalIgnoreCase);
             traits["sociability"] = 85; traits["confidence"] = 80; traits["discipline"] = 75; traits["dutyMotivation"] = 70;
             List<Dictionary<string, object>> heroes = new List<Dictionary<string, object>>
             {
@@ -5770,30 +5770,30 @@ ON CONFLICT(hero_id) DO NOTHING;",
                 long firstBandUniqueB;
                 long firstBandEdgesB;
                 long firstBandPairsB;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    EnsureWorldTestTelemetrySchema(connection);
-                    pairRows = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;").FirstOrDefault(), "count", 0);
-                    firstPair = QuerySql(connection, "SELECT * FROM relationship_pair_chemistry LIMIT 1;").FirstOrDefault()
+                    WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
+                    pairRows = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;").FirstOrDefault(), "count", 0);
+                    firstPair = Program.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry LIMIT 1;").FirstOrDefault()
                         ?? new Dictionary<string, object>();
-                    firstNativeTarget = QuerySql(connection,
+                    firstNativeTarget = Program.QuerySql(connection,
                         "SELECT * FROM relationship_native_targets ORDER BY world_day,pair_key LIMIT 1;")
                         .FirstOrDefault() ?? new Dictionary<string, object>();
-                    oldChangeTableExists = QuerySql(connection,
+                    oldChangeTableExists = Program.QuerySql(connection,
                         "SELECT name FROM sqlite_master WHERE type='table' AND name='ambient_relationship_changes' LIMIT 1;").Any();
                     string bandA = RelationshipBand(ReadInt(firstPair, "affinity_a_to_b", 0));
                     string bandB = RelationshipBand(ReadInt(firstPair, "affinity_b_to_a", 0));
-                    firstBandUniqueA = WorldTestMetricValue(connection, campaignId, "main",
+                    firstBandUniqueA = WorldSimulationService.WorldTestMetricValue(connection, campaignId, "main",
                         "relationships", "band:" + bandA + ":uniqueNpcCount");
-                    firstBandEdgesA = WorldTestMetricValue(connection, campaignId, "main",
+                    firstBandEdgesA = WorldSimulationService.WorldTestMetricValue(connection, campaignId, "main",
                         "relationships", "band:" + bandA + ":directionalEdgeCount");
-                    firstBandPairsA = WorldTestMetricValue(connection, campaignId, "main",
+                    firstBandPairsA = WorldSimulationService.WorldTestMetricValue(connection, campaignId, "main",
                         "relationships", "band:" + bandA + ":pairCount");
-                    firstBandUniqueB = WorldTestMetricValue(connection, campaignId, "main",
+                    firstBandUniqueB = WorldSimulationService.WorldTestMetricValue(connection, campaignId, "main",
                         "relationships", "band:" + bandB + ":uniqueNpcCount");
-                    firstBandEdgesB = WorldTestMetricValue(connection, campaignId, "main",
+                    firstBandEdgesB = WorldSimulationService.WorldTestMetricValue(connection, campaignId, "main",
                         "relationships", "band:" + bandB + ":directionalEdgeCount");
-                    firstBandPairsB = WorldTestMetricValue(connection, campaignId, "main",
+                    firstBandPairsB = WorldSimulationService.WorldTestMetricValue(connection, campaignId, "main",
                         "relationships", "band:" + bandB + ":pairCount");
                 }
                 add("compact_single_pair_row", ReadBool(first, "noLlmConfirmed", false) && pairRows == 1 && !oldChangeTableExists,
@@ -5835,18 +5835,18 @@ ON CONFLICT(hero_id) DO NOTHING;",
                 int reportedRemaining;
                 int targetsAfterSuccess;
                 int chemistryPendingAfterSuccess;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    Dictionary<string, object> batch = QuerySql(connection,
+                    Dictionary<string, object> batch = Program.QuerySql(connection,
                         "SELECT * FROM relationship_native_sync_batches WHERE plan_id=$plan LIMIT 1;",
                         new Dictionary<string, object> { ["plan"] = ReadString(firstPlan, "planId", "") })
                         .FirstOrDefault() ?? new Dictionary<string, object>();
                     reportedApplied = ReadInt(batch, "client_applied", 0);
                     reportedRemaining = ReadInt(batch, "client_remaining", -1);
-                    targetsAfterSuccess = ReadInt(QuerySql(connection,
+                    targetsAfterSuccess = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_native_targets;").FirstOrDefault(),
                         "count", -1);
-                    chemistryPendingAfterSuccess = ReadInt(QuerySql(connection,
+                    chemistryPendingAfterSuccess = ReadInt(Program.QuerySql(connection,
                         "SELECT native_action_pending FROM relationship_pair_chemistry LIMIT 1;").FirstOrDefault(),
                         "native_action_pending", -1);
                 }
@@ -5868,8 +5868,8 @@ ON CONFLICT(hero_id) DO NOTHING;",
                         ["worldDay"] = 1d
                     });
                 int targetsAfterRepeatedSuccess;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    targetsAfterRepeatedSuccess = ReadInt(QuerySql(connection,
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    targetsAfterRepeatedSuccess = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_native_targets;").FirstOrDefault(),
                         "count", -1);
                 add("bulk_native_success_report_is_idempotent", targetsAfterRepeatedSuccess == 0,
@@ -5901,8 +5901,8 @@ ON CONFLICT(hero_id) DO NOTHING;",
                 RelationshipNativeSyncReportApi(failureReport);
                 RelationshipNativeSyncReportApi(failureReport);
                 int failureAttempts;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    failureAttempts = ReadInt(QuerySql(connection,
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    failureAttempts = ReadInt(Program.QuerySql(connection,
                         "SELECT attempt_count FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = secondPairKey }).FirstOrDefault(),
                         "attempt_count", 0);
@@ -5913,17 +5913,17 @@ ON CONFLICT(hero_id) DO NOTHING;",
                     && ReadString(ReadDictionary(replay, "nativeSyncPlan"), "planId", "")
                         == ReadString(secondPlan, "planId", ""),
                     "Replaying the same campaign day does not roll twice and returns the same recoverable bulk plan.");
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    ExecuteSql(connection, "DELETE FROM relationship_native_targets;");
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    Program.ExecuteSql(connection, "DELETE FROM relationship_native_targets;");
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 affinity_a_to_b=92,affinity_b_to_a=92,projected_native_relation=92,
 native_action_pending=0,native_action_id='',compatibility_version=3;");
                 }
                 run(3);
                 Dictionary<string, object> rebasedPair;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    rebasedPair = QuerySql(connection, "SELECT * FROM relationship_pair_chemistry LIMIT 1;").FirstOrDefault()
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    rebasedPair = Program.QuerySql(connection, "SELECT * FROM relationship_pair_chemistry LIMIT 1;").FirstOrDefault()
                         ?? new Dictionary<string, object>();
                 add("legacy_pair_affinities_rebase_once",
                     Math.Abs(ReadInt(rebasedPair, "affinity_a_to_b", 999)) <= 15
@@ -5935,15 +5935,15 @@ native_action_pending=0,native_action_id='',compatibility_version=3;");
                 int targetRowsAfter;
                 int legacyNativeActionRows;
                 bool runTableExists;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    rowsAfter = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;").FirstOrDefault(), "count", 0);
-                    targetRowsAfter = ReadInt(QuerySql(connection,
+                    rowsAfter = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;").FirstOrDefault(), "count", 0);
+                    targetRowsAfter = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_native_targets;").FirstOrDefault(), "count", 0);
-                    legacyNativeActionRows = ReadInt(QuerySql(connection,
+                    legacyNativeActionRows = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_director_actions WHERE action_type='native_relation';")
                         .FirstOrDefault(), "count", 0);
-                    runTableExists = QuerySql(connection,
+                    runTableExists = Program.QuerySql(connection,
                         "SELECT name FROM sqlite_master WHERE type='table' AND name='ambient_relationship_runs' LIMIT 1;").Any();
                 }
                 add("five_year_storage_bounded", rowsAfter == 1 && targetRowsAfter <= 1
@@ -5982,16 +5982,16 @@ native_action_pending=0,native_action_id='',compatibility_version=3;");
                 int durableProcessedRows;
                 int durableHeroRows;
                 int durableLastDay;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    durableProcessedRows = ReadInt(QuerySql(connection, @"
+                    durableProcessedRows = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_daily_inputs
 WHERE status='processed' AND presence_groups_json='[]' AND hero_changes_json='[]';")
                         .FirstOrDefault(), "count", 0);
-                    durableHeroRows = ReadInt(QuerySql(connection,
+                    durableHeroRows = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_observed_heroes;")
                         .FirstOrDefault(), "count", 0);
-                    durableLastDay = ReadInt(QuerySql(connection,
+                    durableLastDay = ReadInt(Program.QuerySql(connection,
                         "SELECT last_day FROM relationship_pair_chemistry LIMIT 1;")
                         .FirstOrDefault(), "last_day", -1);
                 }
@@ -6004,9 +6004,9 @@ WHERE status='processed' AND presence_groups_json='[]' AND hero_changes_json='[]
                         && durableLastDay == 636,
                     "Ordered daily inputs are durably acknowledged before calculation, process sequentially, and discard payloads after completion.");
                 Dictionary<string, object> currentNativeTarget;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    currentNativeTarget = QuerySql(connection,
+                    currentNativeTarget = Program.QuerySql(connection,
                         "SELECT * FROM relationship_native_targets LIMIT 1;").FirstOrDefault()
                         ?? new Dictionary<string, object>();
                     // The 636-day simulation can legitimately finish with the
@@ -6016,7 +6016,7 @@ WHERE status='processed' AND presence_groups_json='[]' AND hero_changes_json='[]
                     // instead of sending an empty pair key.
                     if (currentNativeTarget.Count == 0)
                     {
-                        Dictionary<string, object> pair = QuerySql(connection,
+                        Dictionary<string, object> pair = Program.QuerySql(connection,
                             "SELECT * FROM relationship_pair_chemistry LIMIT 1;")
                             .FirstOrDefault() ?? new Dictionary<string, object>();
                         string pairKey = ReadString(pair, "pair_key", "");
@@ -6024,7 +6024,7 @@ WHERE status='processed' AND presence_groups_json='[]' AND hero_changes_json='[]
                             "projected_native_relation", 0);
                         int priorObserved = targetRelation >= 100
                             ? 99 : targetRelation + 1;
-                        ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                        Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,
 last_sync_day,attempt_count,claimed_ts,last_error,updated_ts,revision)
 VALUES($pair,$a,$b,$target,$observed,'pending',636,-1000,0,0,'',$ts,1);",
@@ -6037,7 +6037,7 @@ VALUES($pair,$a,$b,$target,$observed,'pending',636,-1000,0,0,'',$ts,1);",
                                 ["observed"] = priorObserved,
                                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                             });
-                        currentNativeTarget = QuerySql(connection,
+                        currentNativeTarget = Program.QuerySql(connection,
                             "SELECT * FROM relationship_native_targets LIMIT 1;")
                             .FirstOrDefault() ?? new Dictionary<string, object>();
                     }
@@ -6060,8 +6060,8 @@ VALUES($pair,$a,$b,$target,$observed,'pending',636,-1000,0,0,'',$ts,1);",
                         }
                     });
                 int targetsAfterAlignedReceipt;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    targetsAfterAlignedReceipt = ReadInt(QuerySql(connection,
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    targetsAfterAlignedReceipt = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_native_targets;")
                         .FirstOrDefault(), "count", -1);
                 add("continuous_already_aligned_receipt_clears_target",
@@ -6079,8 +6079,8 @@ VALUES($pair,$a,$b,$target,$observed,'pending',636,-1000,0,0,'',$ts,1);",
                 add("continuous_native_pull_uses_backlog_batch",
                     ReadInt(emptyNativePull, "batchLimit", 0) == 1024,
                     "The continuous native projection protocol accepts 1,024-target backlog batches while retaining coalesced per-pair revisions.");
-                add("transient_profiles_do_not_construct", !Directory.Exists(CharacterDirectory(campaignId, heroA))
-                    && !Directory.Exists(CharacterDirectory(campaignId, heroB)),
+                add("transient_profiles_do_not_construct", !Directory.Exists(Program.CharacterDirectory(campaignId, heroA))
+                    && !Directory.Exists(Program.CharacterDirectory(campaignId, heroB)),
                     "Unconstructed participants use transient traits without profile or backstory generation.");
             }
             catch (Exception ex)
@@ -6090,7 +6090,7 @@ VALUES($pair,$a,$b,$target,$observed,'pending',636,-1000,0,0,'',$ts,1);",
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
 
             string atomicCampaignId = "mr_atomic_"
@@ -6099,10 +6099,10 @@ VALUES($pair,$a,$b,$target,$observed,'pending',636,-1000,0,0,'',$ts,1);",
             {
                 string pairKey = AmbientPairKey("atomic_a", "atomic_b");
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(atomicCampaignId))
+                    Program.OpenCampaignConnection(atomicCampaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
 affinity_a_to_b,affinity_b_to_a,effective_affinity_a_to_b,
 effective_affinity_b_to_a,first_day,last_day,state_revision,updated_ts)
@@ -6120,7 +6120,7 @@ VALUES($pair,'atomic_a','atomic_b','INTJ','ESFP',
                 {
                     start.Wait();
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(atomicCampaignId))
+                        Program.OpenCampaignConnection(atomicCampaignId))
                         ApplyAtomicDirectionalRelationshipDelta(connection,
                             atomicCampaignId, "atomic_a", "atomic_b", 4,
                             2d, "atomic_plus", "main");
@@ -6129,7 +6129,7 @@ VALUES($pair,'atomic_a','atomic_b','INTJ','ESFP',
                 {
                     start.Wait();
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(atomicCampaignId))
+                        Program.OpenCampaignConnection(atomicCampaignId))
                         ApplyAtomicDirectionalRelationshipDelta(connection,
                             atomicCampaignId, "atomic_a", "atomic_b", -3,
                             2d, "atomic_minus", "main");
@@ -6139,8 +6139,8 @@ VALUES($pair,'atomic_a','atomic_b','INTJ','ESFP',
 
                 Dictionary<string, object> atomicPair;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(atomicCampaignId))
-                    atomicPair = QuerySql(connection,
+                    Program.OpenCampaignConnection(atomicCampaignId))
+                    atomicPair = Program.QuerySql(connection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = pairKey })
                         .FirstOrDefault() ?? new Dictionary<string, object>();
@@ -6158,7 +6158,7 @@ VALUES($pair,'atomic_a','atomic_b','INTJ','ESFP',
             {
                 InvalidateRelationshipPairStateCache(atomicCampaignId);
                 ReignPostgreSqlStorage.DropCampaign(atomicCampaignId);
-                TryDeleteDirectory(CampaignDirectory(atomicCampaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(atomicCampaignId));
             }
 
             string scaleCampaignId = "mr_scale_" + Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -6218,11 +6218,11 @@ VALUES($pair,'atomic_a','atomic_b','INTJ','ESFP',
                 });
                 steadyStateTimer.Stop();
                 int scalePairRows, scaleNotables;
-                using (ReignDbConnection connection = OpenCampaignConnection(scaleCampaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(scaleCampaignId))
                 {
-                    scalePairRows = ReadInt(QuerySql(connection,
+                    scalePairRows = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;").FirstOrDefault(), "count", 0);
-                    scaleNotables = ReadInt(QuerySql(connection,
+                    scaleNotables = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM notable_mbti_profiles;").FirstOrDefault(), "count", 0);
                 }
                 add("large_snapshot_completes",
@@ -6246,7 +6246,7 @@ VALUES($pair,'atomic_a','atomic_b','INTJ','ESFP',
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(scaleCampaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(scaleCampaignId));
             }
             return results;
         }

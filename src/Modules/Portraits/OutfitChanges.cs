@@ -26,7 +26,7 @@ namespace ReignBetaServer
             public byte[] Before, After;
             public Dictionary<string, object> PortraitReceipt;
             public DateTime Expires = DateTime.UtcNow.AddMinutes(30);
-            public long CampaignGeneration = Interlocked.Read(ref Program.CampaignReplacementGeneration);
+            public long CampaignGeneration = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
         }
 
         // The native client supplies fresh profiles on both begin and confirm. Never accept an
@@ -123,7 +123,7 @@ namespace ReignBetaServer
                 if (op == null)
                     return (action == "confirm" ? CommittedOutfitResponse(payload, Program.CharacterDirectory(campaign, hero)) : null)
                         ?? OutfitFailure("This outfit preview expired or the server restarted. Please submit it again.");
-                if (op.CampaignGeneration != Interlocked.Read(ref Program.CampaignReplacementGeneration))
+                if (op.CampaignGeneration != Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration))
                 {
                     op.Status = "cancelled"; op.Before = op.After = null;
                     return OutfitFailure("The loaded save changed. Please submit the outfit again.");
@@ -206,7 +206,7 @@ namespace ReignBetaServer
             lock (OutfitChangeGate)
             {
                 if (op.Status != "changing" || op.Expires < DateTime.UtcNow
-                    || op.CampaignGeneration != Interlocked.Read(ref Program.CampaignReplacementGeneration)) return;
+                    || op.CampaignGeneration != Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration)) return;
                 if (call == null || !call.Ok)
                 {
                     op.Status = "failed";

@@ -37,7 +37,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
-            Dictionary<string, object> run = LoadLiveTestRun(campaignId, runId);
+            Dictionary<string, object> run = WorldSimulationService.LoadLiveTestRun(campaignId, runId);
             if (run.Count == 0)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Live-test run was not found." };
             if (!ReadString(run, "status", "").Equals("completed", StringComparison.OrdinalIgnoreCase))
@@ -144,7 +144,7 @@ namespace ReignBetaServer
             run["assertions"] = assertions;
             run["failures"] = failures;
             run["readinessEvaluatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            SaveLiveTestRun(run);
+            WorldSimulationService.SaveLiveTestRun(run);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -637,7 +637,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void MergeConversationReadinessJudgeCases(
+        internal static void MergeConversationReadinessJudgeCases(
             List<Dictionary<string, object>> destination,
             IEnumerable<Dictionary<string, object>> incoming,
             HashSet<string> expectedCaseIds)
@@ -660,7 +660,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static List<Dictionary<string, object>> MissingConversationReadinessJudgeCases(
+        internal static List<Dictionary<string, object>> MissingConversationReadinessJudgeCases(
             IEnumerable<Dictionary<string, object>> expected,
             IEnumerable<Dictionary<string, object>> judged)
         {
@@ -1022,7 +1022,7 @@ namespace ReignBetaServer
             {
                 using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
                 {
-                    EnsureSharedRelationshipHistorySchema(connection);
+                    RelationshipsService.EnsureSharedRelationshipHistorySchema(connection);
                     foreach (Dictionary<string, object> target in
                         ReadDictionaryList(relationshipPrompt, "targets"))
                     {
@@ -1200,7 +1200,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> command in ReadDictionaryList(run, "commands"))
-                rows.AddRange(CollectLiveTestCommandAuditEvidence(run, command));
+                rows.AddRange(WorldSimulationService.CollectLiveTestCommandAuditEvidence(run, command));
             return rows.GroupBy(row => ReadString(row, "auditId", ""))
                 .Select(group => group.First()).ToList();
         }

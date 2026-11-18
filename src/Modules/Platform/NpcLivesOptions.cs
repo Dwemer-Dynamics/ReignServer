@@ -10,7 +10,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static NpcLivesOptions ReadNpcLivesOptions(Dictionary<string, object> settings = null)
+        internal static NpcLivesOptions ReadNpcLivesOptions(Dictionary<string, object> settings = null)
         {
             settings ??= LoadSettings();
             return new NpcLivesOptions(k => ReadBool(settings, k, true), k =>
@@ -26,7 +26,7 @@ namespace ReignBetaServer
             value = Convert.ToDouble(raw, CultureInfo.InvariantCulture);
             return NpcLivesPolicy.Finite(value);
         }
-        private static string ValidateNpcLivesOptions(Dictionary<string, object> incoming)
+        internal static string ValidateNpcLivesOptions(Dictionary<string, object> incoming)
         {
             if (incoming == null) return "";
             foreach (var pair in NpcLivesOptions.Switches)
@@ -44,7 +44,7 @@ namespace ReignBetaServer
                 && !ChatProviders.Contains(ReadString(incoming, "npcLivesApproachProvider", ""))) return "Select a supported Approach provider.";
             return "";
         }
-        private static Dictionary<string, object> NpcLivesOptionsForClient(Dictionary<string, object> settings)
+        internal static Dictionary<string, object> NpcLivesOptionsForClient(Dictionary<string, object> settings)
         {
             var options = ReadNpcLivesOptions(settings);
             var result = NpcLivesOptions.Switches.Keys.ToDictionary(k => k, k => (object)options.Preference(k), StringComparer.Ordinal);
@@ -78,13 +78,13 @@ namespace ReignBetaServer
                     .Append("<span>").Append(WebUtility.HtmlEncode(s.Unit)).Append("</span><button type='button' onclick=\"resetNpcLivesOption('").Append(s.Key).Append("')\">Reset</button></div>");
             }
         }
-        private static string NpcLivesDiagnosticsHtml()
+        internal static string NpcLivesDiagnosticsHtml()
         {
             var html = new StringBuilder("<section id='npclivesdiagnostics' class='page'><h2>NPC Lives and Story Editor</h2><div class='xpOptions'><h3>Advanced Approach and timing</h3><p class='xpHelp'>Configure the fast Approach model and base timing. Feature switches and percentage adjustments are in Options. Existing commitments retain their accepted terms.</p>");
             html.Append("<div class='xpRow'><label for='npcLivesApproachProvider'>Fast Approach provider</label><select id='npcLivesApproachProvider'><option value=''>Use banter provider</option><option value='nanogpt'>NanoGPT</option><option value='openrouter'>OpenRouter</option><option value='ollama_cloud'>Ollama Cloud</option><option value='openai_compatible'>OpenAI compatible</option><option value='codex_subscription'>Codex subscription</option></select></div><div class='xpRow'><label for='npcLivesApproachModel'>Fast Approach model</label><input id='npcLivesApproachModel' maxlength='200' placeholder='Use banter model'></div>");
             AppendNpcLivesNumberControls(html, true);
             html.Append("<button type='button' onclick='resetNpcLivesAdvancedOptions()'>Reset advanced defaults</button> <button id='saveNpcLivesAdvancedOptions' type='button' onclick='saveNpcLivesOptions(true)'>Save advanced settings</button><div id='npcLivesAdvancedOptionsStatus' role='status' aria-live='polite'></div></div>");
-            return html.Append(NpcStoryEditorHtml()).Append("</section>").ToString();
+            return html.Append(CharactersService.NpcStoryEditorHtml()).Append("</section>").ToString();
         }
         private static string NpcLivesOptionsScript() => "const npcLivesSwitchIds=" + Json.Serialize(NpcLivesOptions.Switches.Keys.ToArray())
             + ";const npcLivesNumberSpecs=" + Json.Serialize(NpcLivesOptions.Numbers.Select(s => TestDict("key", s.Key, "value", s.Default, "min", s.Minimum, "max", s.Maximum, "step", s.Step, "advanced", NpcLivesAdvancedNumber(s))).ToArray())

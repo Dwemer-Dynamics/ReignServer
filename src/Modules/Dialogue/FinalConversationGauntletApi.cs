@@ -481,7 +481,7 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
             Dictionary<string, object> liveRun =
                 string.IsNullOrWhiteSpace(liveRunId)
                     ? new Dictionary<string, object>()
-                    : LoadLiveTestRun(campaignId, liveRunId);
+                    : WorldSimulationService.LoadLiveTestRun(campaignId, liveRunId);
             Dictionary<string, object> evidence =
                 new Dictionary<string, object>
                 {
@@ -502,7 +502,7 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
                 };
             if (liveRun.Count > 0)
                 evidence["sourceAuditEntries"] =
-                    CollectLiveTestAuditEvidence(liveRun);
+                    WorldSimulationService.CollectLiveTestAuditEvidence(liveRun);
             ExecuteSql(
                 connection,
                 @"INSERT INTO final_gauntlet_evidence(
@@ -575,8 +575,8 @@ created_ts=excluded.created_ts;",
                 payload, "campaignId", ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             Dictionary<string, object> runtime =
-                LoadLiveTestRuntime(campaignId);
-            if (!IsFreshLiveTestRuntime(runtime))
+                WorldSimulationService.LoadLiveTestRuntime(campaignId);
+            if (!WorldSimulationService.IsFreshLiveTestRuntime(runtime))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,

@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
         private const int SaveSyncFormatVersion = 5;
         private const int SaveSyncRecoveryRetention = 2;
@@ -34,11 +34,11 @@ namespace ReignBetaServer
         private static string SaveSyncFailureInjectionForTests = "";
         private static bool? SaveSyncEnabledOverrideForTests;
         private static bool SaveSyncSkipSemanticForTests;
-        private static bool SaveSyncDisableBackgroundOptimizationForTests;
+        internal static bool SaveSyncDisableBackgroundOptimizationForTests;
 
 
         // The same-directory Unix rename atomically replaces JSON and Save Sync files.
-        private static bool MoveFileEx(string existingFileName, string newFileName, uint flags)
+        internal static bool MoveFileEx(string existingFileName, string newFileName, uint flags)
         {
             File.Move(existingFileName, newFileName, (flags & 0x1) != 0);
             return true;
@@ -58,19 +58,19 @@ namespace ReignBetaServer
             "profile_library.json", "save_quirks.json", "schema_manifest.json", "template.json", "traits.json", "voice.json"
         };
 
-        private static Dictionary<string, object> SaveSyncRegisterApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SaveSyncRegisterApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!IsSaveSyncEnabled()) return SaveSyncDisabledResult(payload);
             Stopwatch requestTimer = Stopwatch.StartNew();
-            CampaignDataGate.EnterWriteLock();
+            Program.CampaignDataGate.EnterWriteLock();
             long gateWaitMs = requestTimer.ElapsedMilliseconds;
             try
             {
                 var result = SaveSyncRegisterCore(payload);
                 result["gateWaitMs"] = gateWaitMs;
                 result["requestDurationMs"] = requestTimer.ElapsedMilliseconds;
-                LogOperational("save_sync.register_completed", new Dictionary<string, object>
+                Program.LogOperational("save_sync.register_completed", new Dictionary<string, object>
                 {
                     ["campaignId"] = ReadString(payload, "campaignId", ""),
                     ["gateWaitMs"] = gateWaitMs, ["requestDurationMs"] = requestTimer.ElapsedMilliseconds,
@@ -78,7 +78,7 @@ namespace ReignBetaServer
                 });
                 return result;
             }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
         internal static Dictionary<string, object> SaveSyncRegisterCore(Dictionary<string, object> payload)
@@ -105,7 +105,7 @@ namespace ReignBetaServer
             string campaignMetadataPath = Path.Combine(campaignDir, "campaign.json");
             if (!File.Exists(campaignMetadataPath))
             {
-                WriteJsonObject(campaignMetadataPath, new Dictionary<string, object>
+                Program.WriteJsonObject(campaignMetadataPath, new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["campaignLabel"] = ReadString(payload, "campaignLabel", campaignId),
@@ -122,7 +122,7 @@ namespace ReignBetaServer
                 && File.Exists(Path.Combine(pointRoot, "manifest.json"))
                 && Directory.Exists(Path.Combine(pointRoot, "campaign")))
             {
-                Dictionary<string, object> existingManifest = ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
+                Dictionary<string, object> existingManifest = Program.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
                 if (!ReadString(existingManifest, "campaignId", "").Equals(campaignId, StringComparison.OrdinalIgnoreCase)
                     || !ReadString(existingManifest, "fingerprint", "").Equals(ReadString(existing, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Save Sync storage-key collision detected; no snapshot was changed.");
@@ -246,7 +246,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static Dictionary<string, object> SaveSyncFinalizeApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SaveSyncFinalizeApi(Dictionary<string, object> payload)
         {
             Stopwatch finalizeTimer = Stopwatch.StartNew();
             payload = payload ?? new Dictionary<string, object>();
@@ -263,7 +263,7 @@ namespace ReignBetaServer
             if (SaveSyncPoint(preflightLedger, savePointId) == null)
                 return SaveSyncMissingFinalizeResult(campaignId, savePointId);
             long preflightMs = finalizeTimer.ElapsedMilliseconds;
-            CampaignDataGate.EnterWriteLock();
+            Program.CampaignDataGate.EnterWriteLock();
             long gateWaitMs = finalizeTimer.ElapsedMilliseconds - preflightMs;
             try
             {
@@ -271,7 +271,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> point = SaveSyncPoint(ledger, savePointId);
                 if (point == null) return SaveSyncMissingFinalizeResult(campaignId, savePointId);
                 bool successful = ReadBool(payload, "successful", false);
-                point["nativeSaveName"] = LimitText(ReadString(payload, "nativeSaveName", ReadString(point, "nativeSaveName", "")), 240);
+                point["nativeSaveName"] = Program.LimitText(ReadString(payload, "nativeSaveName", ReadString(point, "nativeSaveName", "")), 240);
                 point["saveFinalizedUtc"] = DateTime.UtcNow.ToString("o");
                 point["status"] = successful ? "ready" : "save_failed";
                 if (!successful)
@@ -320,7 +320,7 @@ namespace ReignBetaServer
                 AppendSaveSyncAudit(campaignId, "save_point.finalized", result);
                 return result;
             }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
         private static Dictionary<string, object> SaveSyncMissingFinalizeResult(
@@ -337,23 +337,23 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> SaveSyncLoadApi(Dictionary<string, object> payload, bool forcePreview)
+        internal static Dictionary<string, object> SaveSyncLoadApi(Dictionary<string, object> payload, bool forcePreview)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!IsSaveSyncEnabled()) return SaveSyncDisabledResult(payload);
-            CampaignDataGate.EnterWriteLock();
+            Program.CampaignDataGate.EnterWriteLock();
             try { return SaveSyncLoadCore(payload, forcePreview || ReadBool(payload, "dryRun", false)); }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
         private static Dictionary<string, object> SaveSyncLoadCore(Dictionary<string, object> payload, bool dryRun)
         {
-            if (!dryRun) InvalidateCodexConversationTimeline(ReadString(payload, "campaignId", ""));
+            if (!dryRun) Program.InvalidateCodexConversationTimeline(ReadString(payload, "campaignId", ""));
             return SaveSyncLoadPostgreSql(payload, dryRun);
         }
 
 
-        private static Dictionary<string, object> SaveSyncStatusApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> SaveSyncStatusApi(Dictionary<string, string> query)
         {
             string campaignId = query != null && query.TryGetValue("campaignId", out string value) ? value : "";
             if (string.IsNullOrWhiteSpace(campaignId))
@@ -427,7 +427,7 @@ namespace ReignBetaServer
                 .Equals(id, StringComparison.OrdinalIgnoreCase));
         }
 
-        private static Dictionary<string, object> SaveSyncDeleteNativeSaveApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SaveSyncDeleteNativeSaveApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string requestedCampaignId = ReadString(payload, "campaignId", "");
@@ -436,7 +436,7 @@ namespace ReignBetaServer
             if (string.IsNullOrWhiteSpace(savePointId) && string.IsNullOrWhiteSpace(nativeSaveName))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "savePointId or nativeSaveName is required." };
 
-            CampaignDataGate.EnterWriteLock();
+            Program.CampaignDataGate.EnterWriteLock();
             try
             {
                 IEnumerable<string> campaignIds = string.IsNullOrWhiteSpace(requestedCampaignId)
@@ -505,7 +505,7 @@ namespace ReignBetaServer
                             }
                             else
                             {
-                                Dictionary<string, object> metadata = ReadJsonObject(
+                                Dictionary<string, object> metadata = Program.ReadJsonObject(
                                     Path.Combine(StrictCampaignDirectory(campaignId),
                                         "campaign.json"));
                                 Dictionary<string, object> deletion =
@@ -553,7 +553,7 @@ namespace ReignBetaServer
                     ["savePointId"] = savePointId, ["nativeSaveName"] = nativeSaveName
                 };
             }
-            finally { CampaignDataGate.ExitWriteLock(); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
         }
 
         private static List<Dictionary<string, object>> SaveSyncCampaignStatuses()
@@ -567,8 +567,8 @@ namespace ReignBetaServer
             string root = SaveSyncRoot();
             if (!Directory.Exists(root)) return new List<string>();
             return Directory.GetDirectories(root).Where(path => File.Exists(Path.Combine(path, "ledger.json")))
-                .Select(path => ReadString(ReadJsonObject(Path.Combine(path, "ledger.json")), "campaignId", ""))
-                .Where(id => HasLocalCampaignMetadata(id))
+                .Select(path => ReadString(Program.ReadJsonObject(Path.Combine(path, "ledger.json")), "campaignId", ""))
+                .Where(id => Program.HasLocalCampaignMetadata(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -665,7 +665,7 @@ namespace ReignBetaServer
                         ["totalMs"] = timer.ElapsedMilliseconds
                     }
                 };
-                WriteJsonObject(Path.Combine(staging, "manifest.json"), manifest);
+                Program.WriteJsonObject(Path.Combine(staging, "manifest.json"), manifest);
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationRoot));
                 MoveDirectoryWithRetries(staging, destinationRoot);
                 return manifest;
@@ -690,7 +690,7 @@ namespace ReignBetaServer
 
         private static void QueueSaveSyncOptimization(string campaignId, string savePointId)
         {
-            if (SaveSyncDisableBackgroundOptimizationForTests || ShutdownRequested) return;
+            if (SaveSyncDisableBackgroundOptimizationForTests || Program.ShutdownRequested) return;
             string key = campaignId + "|" + savePointId;
             lock (SaveSyncOptimizationQueued)
             {
@@ -754,7 +754,7 @@ namespace ReignBetaServer
                 Stopwatch manifestTimer = Stopwatch.StartNew();
                 List<Dictionary<string, object>> files = BackupFileManifest(campaignRoot);
                 manifestTimer.Stop();
-                Dictionary<string, object> oldManifest = ReadJsonObject(Path.Combine(temp, "manifest.json"));
+                Dictionary<string, object> oldManifest = Program.ReadJsonObject(Path.Combine(temp, "manifest.json"));
                 string fingerprint = SaveSyncManifestFingerprint(files);
                 Dictionary<string, object> optimizedManifest =
                     new Dictionary<string, object>(oldManifest, StringComparer.OrdinalIgnoreCase)
@@ -775,11 +775,11 @@ namespace ReignBetaServer
                             ["fileManifestMs"] = manifestTimer.ElapsedMilliseconds
                         }
                     };
-                WriteJsonObject(Path.Combine(temp, "manifest.json"), optimizedManifest);
+                Program.WriteJsonObject(Path.Combine(temp, "manifest.json"), optimizedManifest);
                 string optimizedStorageId = SaveSyncStorageKey("content|" + fingerprint);
                 string optimizedRoot = SaveSyncContentRoot(campaignId, optimizedStorageId);
 
-                CampaignDataGate.EnterWriteLock();
+                Program.CampaignDataGate.EnterWriteLock();
                 try
                 {
                     SaveSyncStorageGate.EnterWriteLock();
@@ -806,7 +806,7 @@ namespace ReignBetaServer
                         else if (Directory.Exists(optimizedRoot))
                         {
                             Dictionary<string, object> existingManifest =
-                                ReadJsonObject(Path.Combine(optimizedRoot, "manifest.json"));
+                                Program.ReadJsonObject(Path.Combine(optimizedRoot, "manifest.json"));
                             if (!ReadString(existingManifest, "fingerprint", "")
                                 .Equals(fingerprint, StringComparison.OrdinalIgnoreCase))
                                 throw new InvalidDataException("Save Sync optimized content-key collision.");
@@ -829,7 +829,7 @@ namespace ReignBetaServer
                     }
                     finally { SaveSyncStorageGate.ExitWriteLock(); }
                 }
-                finally { CampaignDataGate.ExitWriteLock(); }
+                finally { Program.CampaignDataGate.ExitWriteLock(); }
                 timer.Stop();
                 AppendSaveSyncAudit(campaignId, "snapshot.optimized", new Dictionary<string, object>
                 {
@@ -849,7 +849,7 @@ namespace ReignBetaServer
                 "manifest.json");
             if (File.Exists(manifestPath))
             {
-                Dictionary<string, object> manifest = ReadJsonObject(manifestPath);
+                Dictionary<string, object> manifest = Program.ReadJsonObject(manifestPath);
                 string campaignId = ReadString(manifest, "campaignId", "");
                 string savePointId = SaveSyncPostgreSqlSnapshotPointId(manifest);
                 if (ReadString(manifest, "databaseProvider", "")
@@ -932,7 +932,7 @@ namespace ReignBetaServer
             return new[] { "conversations", "events", "memories", "relationships", "worldHistory", "rumors", "actions", "diplomacy", "clanConflicts", "rebellions", "court", "identity", "reputation", "characterState", "semantic", "audit", "other" };
         }
 
-        private static string SaveSyncSubsystemForTable(string table)
+        internal static string SaveSyncSubsystemForTable(string table)
         {
             string value = (table ?? "").ToLowerInvariant();
             if (value.StartsWith("conversation_") || value == "letters" || value == "correspondence_threads") return "conversations";
@@ -1053,7 +1053,7 @@ namespace ReignBetaServer
             return copied;
         }
 
-        private static bool IsSaveSyncFingerprintExcluded(string relativePath)
+        internal static bool IsSaveSyncFingerprintExcluded(string relativePath)
         {
             string value = (relativePath ?? "").Replace('\\', '/').ToLowerInvariant();
             if (value == "campaign.json"
@@ -1066,7 +1066,7 @@ namespace ReignBetaServer
             return value.Contains("/portraits/") || SaveSyncRetainedCharacterFiles.Contains(name);
         }
 
-        private static bool ShouldIncludeSaveSyncSnapshotFile(string campaignRoot, string path)
+        internal static bool ShouldIncludeSaveSyncSnapshotFile(string campaignRoot, string path)
         {
             if (IsLiveSqliteSidecar(path)) return false;
             string relative = RelativeBackupPath(campaignRoot, path);
@@ -1076,7 +1076,7 @@ namespace ReignBetaServer
             return !IsSaveSyncFingerprintExcluded(relative);
         }
 
-        private static SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
+        internal static Program.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
             string currentSnapshotRoot, string targetSnapshotRoot)
         {
             Dictionary<string, Dictionary<string, object>> current = ReadSaveSyncEmbeddingDocuments(currentSnapshotRoot);
@@ -1093,17 +1093,17 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool IsSaveSyncSemanticBlocked(string campaignId)
+        internal static bool IsSaveSyncSemanticBlocked(string campaignId)
         {
             lock (SaveSyncSemanticBlockedCampaigns)
                 return SaveSyncSemanticBlockedCampaigns.Contains(campaignId ?? "");
         }
 
-        private static SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
+        internal static Program.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
             Dictionary<string, Dictionary<string, object>> current,
             Dictionary<string, Dictionary<string, object>> target)
         {
-            SaveSyncSemanticReconciliationPlan plan = new SaveSyncSemanticReconciliationPlan();
+            Program.SaveSyncSemanticReconciliationPlan plan = new Program.SaveSyncSemanticReconciliationPlan();
             current = current ?? new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             target = target ?? new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             plan.CurrentDocuments = current.Count;
@@ -1127,7 +1127,7 @@ namespace ReignBetaServer
                 else if (currentHasVector)
                 {
                     plan.DeleteVectorIds.Add(ReadString(currentRow, "vector_id", ""));
-                    plan.InvalidatedCurrentSources.Add(new SemanticSourceIdentity
+                    plan.InvalidatedCurrentSources.Add(new Program.SemanticSourceIdentity
                     {
                         SourceType = ReadString(currentRow, "source_type", ""),
                         SourceId = ReadString(currentRow, "source_id", "")
@@ -1146,7 +1146,7 @@ namespace ReignBetaServer
                     && string.Equals(ReadString(currentRow, "vector_id", ""), ReadString(targetRow, "vector_id", ""), StringComparison.OrdinalIgnoreCase);
                 if (!compatible)
                 {
-                    plan.RequeueSources.Add(new SemanticSourceIdentity
+                    plan.RequeueSources.Add(new Program.SemanticSourceIdentity
                     {
                         SourceType = ReadString(targetRow, "source_type", ""),
                         SourceId = ReadString(targetRow, "source_id", "")
@@ -1160,7 +1160,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, Dictionary<string, object>> rows =
                 new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> manifest = ReadJsonObject(
+            Dictionary<string, object> manifest = Program.ReadJsonObject(
                 Path.Combine(snapshotRoot, "manifest.json"));
             string campaignId = ReadString(manifest, "campaignId", "");
             string savePointId = SaveSyncPostgreSqlSnapshotPointId(manifest);
@@ -1184,7 +1184,7 @@ namespace ReignBetaServer
                     ? @"SELECT d.*,w.event_type,w.dissemination_class FROM embedding_documents d
 LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.event_id=d.source_id;"
                     : "SELECT d.*,'' event_type,'' dissemination_class FROM embedding_documents d;";
-                foreach (Dictionary<string, object> row in QuerySql(connection, sql))
+                foreach (Dictionary<string, object> row in Program.QuerySql(connection, sql))
                 {
                     rows[SaveSyncEmbeddingDocumentKey(row)] = row;
                 }
@@ -1192,7 +1192,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             return rows;
         }
 
-        private static string SaveSyncEmbeddingDocumentKey(Dictionary<string, object> row)
+        internal static string SaveSyncEmbeddingDocumentKey(Dictionary<string, object> row)
         {
             return string.Join("\n", new[]
             {
@@ -1206,17 +1206,17 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
         private static bool SaveSyncEmbeddingDocumentEligible(Dictionary<string, object> row)
         {
             if (!string.Equals(ReadString(row, "source_type", ""), "world_history_event", StringComparison.OrdinalIgnoreCase)) return true;
-            return WorldHistoryEventEmbeddingEligible(row);
+            return Program.WorldHistoryEventEmbeddingEligible(row);
         }
 
-        private static void ClearSaveSyncCaches(string campaignId)
+        internal static void ClearSaveSyncCaches(string campaignId)
         {
             InvalidateWaitingCampaignRequests();
-            lock (WorldHistoryCacheLock) WorldHistoryClaimCache.Clear();
-            lock (CharacterEditorAuthorityCacheLock) CharacterEditorAuthorityByCampaign.Remove(campaignId);
-            InvalidateRelationshipPairStateCache(campaignId);
+            lock (WorldSimulationService.WorldHistoryCacheLock) WorldSimulationService.WorldHistoryClaimCache.Clear();
+            lock (CharactersService.CharacterEditorAuthorityCacheLock) CharactersService.CharacterEditorAuthorityByCampaign.Remove(campaignId);
+            RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
             ReignPostgreSqlStorage.ClearAllPools();
-            ResetRelationshipCampaignScheduling(campaignId);
+            RelationshipsService.ResetRelationshipCampaignScheduling(campaignId);
         }
 
         private static Dictionary<string, object> NormalizeSaveSyncPoint(Dictionary<string, object> payload)
@@ -1225,16 +1225,16 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             {
                 ["campaignId"] = ReadString(payload, "campaignId", ""), ["savePointId"] = ReadString(payload, "savePointId", ""),
                 ["savePointKind"] = ReadString(payload, "savePointKind", "native_save"),
-                ["campaignLabel"] = LimitText(ReadString(payload, "campaignLabel", ""), 500),
+                ["campaignLabel"] = Program.LimitText(ReadString(payload, "campaignLabel", ""), 500),
                 ["campaignTimeDays"] = ReadDouble(payload, "campaignTimeDays", 0d),
                 ["campaignTimeMilliseconds"] = ReadDouble(payload, "campaignTimeMilliseconds", 0d),
                 ["capturedUtc"] = ReadString(payload, "capturedUtc", DateTime.UtcNow.ToString("o")),
-                ["nativeSaveName"] = LimitText(ReadString(payload, "nativeSaveName", ""), 240),
-                ["nativeCreationUtc"] = LimitText(ReadString(payload, "nativeCreationUtc", ""), 100),
-                ["timelineId"] = LimitText(ReadString(payload, "timelineId", ""), 160),
+                ["nativeSaveName"] = Program.LimitText(ReadString(payload, "nativeSaveName", ""), 240),
+                ["nativeCreationUtc"] = Program.LimitText(ReadString(payload, "nativeCreationUtc", ""), 100),
+                ["timelineId"] = Program.LimitText(ReadString(payload, "timelineId", ""), 160),
                 ["worldHistorySequence"] = ReadLong(payload, "worldHistorySequence", 0),
-                ["worldHistoryHeadEventId"] = LimitText(ReadString(payload, "worldHistoryHeadEventId", ""), 200),
-                ["clientVersion"] = LimitText(ReadString(payload, "clientVersion", ""), 100)
+                ["worldHistoryHeadEventId"] = Program.LimitText(ReadString(payload, "worldHistoryHeadEventId", ""), 200),
+                ["clientVersion"] = Program.LimitText(ReadString(payload, "clientVersion", ""), 100)
             };
         }
 
@@ -1289,11 +1289,11 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             catch { return false; }
         }
 
-        private static Dictionary<string, object> ReadSaveSyncLedger(string campaignId)
+        internal static Dictionary<string, object> ReadSaveSyncLedger(string campaignId)
         {
             lock (SaveSyncLedgerLock)
             {
-                Dictionary<string, object> ledger = ReadJsonObject(Path.Combine(SaveSyncCampaignRoot(campaignId), "ledger.json"));
+                Dictionary<string, object> ledger = Program.ReadJsonObject(Path.Combine(SaveSyncCampaignRoot(campaignId), "ledger.json"));
                 if (ledger.Count == 0) ledger = new Dictionary<string, object>();
                 string storedCampaignId = ReadString(ledger, "campaignId", "");
                 if (!string.IsNullOrWhiteSpace(storedCampaignId) && !storedCampaignId.Equals(campaignId, StringComparison.OrdinalIgnoreCase))
@@ -1306,7 +1306,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static void WriteSaveSyncLedger(string campaignId, Dictionary<string, object> ledger)
+        internal static void WriteSaveSyncLedger(string campaignId, Dictionary<string, object> ledger)
         {
             lock (SaveSyncLedgerLock)
             {
@@ -1351,7 +1351,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static Dictionary<string, object> SaveSyncPoint(Dictionary<string, object> ledger, string savePointId)
+        internal static Dictionary<string, object> SaveSyncPoint(Dictionary<string, object> ledger, string savePointId)
         {
             return ReadDictionaryList(ledger, "points").FirstOrDefault(x => ReadString(x, "savePointId", "").Equals(savePointId, StringComparison.OrdinalIgnoreCase));
         }
@@ -1475,7 +1475,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     reconciliation["campaignDeleted"] = false;
                     if (remaining == 0)
                     {
-                        Dictionary<string, object> metadata = ReadJsonObject(
+                        Dictionary<string, object> metadata = Program.ReadJsonObject(
                             Path.Combine(StrictCampaignDirectory(campaignId),
                                 "campaign.json"));
                         Dictionary<string, object> deletion =
@@ -1597,7 +1597,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static string SaveSyncPostgreSqlSnapshotPointId(
+        internal static string SaveSyncPostgreSqlSnapshotPointId(
             Dictionary<string, object> point)
         {
             return ReadString(point, "postgresqlSnapshotPointId",
@@ -1614,7 +1614,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 ["recordsRolledBack"] = ReadLong(result, "recordsRolledBack", 0), ["recordsRestored"] = ReadLong(result, "recordsRestored", 0),
                 ["changedFiles"] = ReadInt(result, "changedFiles", 0),
                 ["countsBySubsystem"] = ReadDictionary(result, "countsBySubsystem") ?? new Dictionary<string, object>(),
-                ["error"] = LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
+                ["error"] = Program.LimitText(ReadString(result, "error", ""), 2000), ["backupId"] = backupId ?? ""
             };
             ledger["lastBackupId"] = backupId ?? "";
             ledger["updatedUtc"] = DateTime.UtcNow.ToString("o");
@@ -1634,10 +1634,10 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     ["durationMs"] = ReadLong(data, "durationMs", 0), ["recordsRolledBack"] = ReadLong(data, "recordsRolledBack", 0),
                     ["recordsRestored"] = ReadLong(data, "recordsRestored", 0), ["changedFiles"] = ReadInt(data, "changedFiles", 0),
                     ["backupId"] = ReadString(data, "backupId", ""), ["countsBySubsystem"] = ReadDictionary(data, "countsBySubsystem") ?? new Dictionary<string, object>(),
-                    ["error"] = LimitText(ReadString(data, "error", ""), 4000)
+                    ["error"] = Program.LimitText(ReadString(data, "error", ""), 4000)
                 };
-                AppendBoundedJsonLineToPath(path, row, 4L * 1024L * 1024L, 2L * 1024L * 1024L);
-                LogOperational("save_sync." + eventType, row);
+                Program.AppendBoundedJsonLineToPath(path, row, 4L * 1024L * 1024L, 2L * 1024L * 1024L);
+                Program.LogOperational("save_sync." + eventType, row);
             }
             catch { }
         }
@@ -1650,7 +1650,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 TryDeleteDirectory(directory.FullName);
         }
 
-        private static void CleanupAllSaveSyncRecoveryAtStartup()
+        internal static void CleanupAllSaveSyncRecoveryAtStartup()
         {
             string root = SaveSyncRoot();
             if (!Directory.Exists(root)) return;
@@ -1658,7 +1658,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             {
                 string ledgerPath = Path.Combine(campaignRoot, "ledger.json");
                 if (!File.Exists(ledgerPath)) continue;
-                string campaignId = ReadString(ReadJsonObject(ledgerPath), "campaignId", "");
+                string campaignId = ReadString(Program.ReadJsonObject(ledgerPath), "campaignId", "");
                 if (string.IsNullOrWhiteSpace(campaignId)) continue;
                 try { CleanupSaveSyncRecovery(campaignId); } catch { }
             }
@@ -1689,7 +1689,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static void MarkSaveSyncActiveStateDirtyForPath(string path)
+        internal static void MarkSaveSyncActiveStateDirtyForPath(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
             string full;
@@ -1697,7 +1697,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             try
             {
                 full = Path.GetFullPath(path);
-                campaigns = Path.GetFullPath(CampaignsRoot())
+                campaigns = Path.GetFullPath(Program.CampaignsRoot())
                     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                     + Path.DirectorySeparatorChar;
             }
@@ -1716,7 +1716,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static void MarkSaveSyncActiveStateDirty(string campaignId)
+        internal static void MarkSaveSyncActiveStateDirty(string campaignId)
         {
             if (string.IsNullOrWhiteSpace(campaignId)) return;
             lock (SaveSyncActiveStateLock)
@@ -1770,7 +1770,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
         {
             if (SaveSyncActiveStates.TryGetValue(campaignId, out SaveSyncActiveState cached))
                 return cached;
-            Dictionary<string, object> json = ReadJsonObject(SaveSyncActiveStatePath(campaignId));
+            Dictionary<string, object> json = Program.ReadJsonObject(SaveSyncActiveStatePath(campaignId));
             SaveSyncActiveState loaded = new SaveSyncActiveState
             {
                 SavePointId = ReadString(json, "savePointId", ""),
@@ -1800,7 +1800,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             ReplaceSaveSyncFileWithRetry(temp, path);
         }
 
-        private static void ResumePendingSaveSyncOptimizations()
+        internal static void ResumePendingSaveSyncOptimizations()
         {
             foreach (string campaignId in SaveSyncCampaignIds())
             {
@@ -1814,7 +1814,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static void PurgeLegacySaveSyncSnapshotsAtStartup()
+        internal static void PurgeLegacySaveSyncSnapshotsAtStartup()
         {
             // Kept as the startup entry point, but startup is observational. Missing
             // database connectivity is never authority to delete a native save's files.
@@ -1829,7 +1829,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             {
                 string ledgerPath = Path.Combine(campaignRoot, "ledger.json");
                 if (!File.Exists(ledgerPath)) continue;
-                Dictionary<string, object> ledger = ReadJsonObject(ledgerPath);
+                Dictionary<string, object> ledger = Program.ReadJsonObject(ledgerPath);
                 string campaignId = ReadString(ledger, "campaignId", "");
                 foreach (Dictionary<string, object> point in ReadDictionaryList(ledger, "points"))
                 {
@@ -1837,7 +1837,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     try
                     {
                         if (snapshotExists(campaignId, pointId)) continue;
-                        LogOperational("save_sync.startup_snapshot_unavailable", new Dictionary<string, object>
+                        Program.LogOperational("save_sync.startup_snapshot_unavailable", new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId, ["savePointId"] = pointId,
                             ["preserved"] = true
@@ -1845,7 +1845,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     }
                     catch (Exception ex)
                     {
-                        LogOperational("save_sync.startup_snapshot_check_deferred", new Dictionary<string, object>
+                        Program.LogOperational("save_sync.startup_snapshot_check_deferred", new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId, ["savePointId"] = pointId,
                             ["preserved"] = true, ["errorType"] = ex.GetType().Name
@@ -1868,7 +1868,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
 
         private static bool IsSaveSyncEnabled()
         {
-            return SaveSyncEnabledOverrideForTests ?? ReadBool(LoadSettings(), "saveSyncEnabled", true);
+            return SaveSyncEnabledOverrideForTests ?? ReadBool(Program.LoadSettings(), "saveSyncEnabled", true);
         }
 
         private static void ValidateSaveSyncId(string value, string name)
@@ -1877,21 +1877,21 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 throw new InvalidDataException(name + " must contain only letters, numbers, underscores, or hyphens.");
         }
 
-        private static string StrictCampaignDirectory(string campaignId)
+        internal static string StrictCampaignDirectory(string campaignId)
         {
             ValidateSaveSyncId(campaignId, "campaignId");
-            string root = Path.GetFullPath(CampaignsRoot());
+            string root = Path.GetFullPath(Program.CampaignsRoot());
             string path = Path.GetFullPath(Path.Combine(root, campaignId));
             string prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Campaign path escaped the campaign storage root.");
             return path;
         }
 
-        private static string SaveSyncRoot()
+        internal static string SaveSyncRoot()
         {
             return ResolveSaveSyncRoot(
                 Environment.GetEnvironmentVariable("REIGN_SAVE_SYNC_ROOT"),
-                Path.Combine(DataDir, "ss"));
+                Path.Combine(Program.DataDir, "ss"));
         }
 
         private static string ResolveSaveSyncRoot(string configuredRoot, string fallbackRoot)
@@ -1929,7 +1929,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
         }
 
-        private static string SaveSyncCampaignRoot(string campaignId)
+        internal static string SaveSyncCampaignRoot(string campaignId)
         {
             ValidateSaveSyncId(campaignId, "campaignId");
             string root = Path.GetFullPath(SaveSyncRoot());
@@ -1954,7 +1954,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             return Path.Combine(SaveSyncCampaignRoot(campaignId), "c", storageId.ToLowerInvariant());
         }
 
-        private static string SaveSyncSnapshotRoot(string campaignId, Dictionary<string, object> point)
+        internal static string SaveSyncSnapshotRoot(string campaignId, Dictionary<string, object> point)
         {
             string storageId = ReadString(point, "snapshotStorageId", "");
             return string.IsNullOrWhiteSpace(storageId)
@@ -1963,7 +1963,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunSaveSyncSelfTests()
+        internal static List<Dictionary<string, object>> RunSaveSyncSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object>
@@ -2043,14 +2043,14 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
             string archivePath = "";
             string nativeSaveFixture = Path.Combine(
-                TestsDir, "native_save_inventory_" + token);
+                Program.TestsDir, "native_save_inventory_" + token);
             SaveSyncEnabledOverrideForTests = true;
             SaveSyncSkipSemanticForTests = true;
             SaveSyncDisableBackgroundOptimizationForTests = true;
             CampaignMutationAllowDuringTests = true;
             try
             {
-                string fallbackRoot = Path.Combine(DataDir, "ss");
+                string fallbackRoot = Path.Combine(Program.DataDir, "ss");
                 string stableRoot = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Bannerlord Reign",
@@ -2059,13 +2059,13 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Bannerlord Reign");
                 add("configured_runtime_root_is_deployment_independent",
-                    ResolveRuntimeDataDirectory(stableRuntimeRoot, fallbackRoot)
+                    Program.ResolveRuntimeDataDirectory(stableRuntimeRoot, fallbackRoot)
                         == Path.GetFullPath(stableRuntimeRoot)
-                    && ResolveRuntimeDataDirectory("", fallbackRoot)
+                    && Program.ResolveRuntimeDataDirectory("", fallbackRoot)
                         == Path.GetFullPath(fallbackRoot),
                     "Packaged binaries can move or update without relocating settings, campaign sidecars, logs, backups, or Save Sync state.");
                 string migrationTestRoot = Path.Combine(
-                    TestsDir,
+                    Program.TestsDir,
                     "runtime_migration_" + token);
                 try
                 {
@@ -2089,7 +2089,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                         Path.Combine(migrationTarget, "campaigns", "existing.json"),
                         "current-existing",
                         Encoding.UTF8);
-                    CopyDirectoryMissingOnly(migrationSource, migrationTarget);
+                    Program.CopyDirectoryMissingOnly(migrationSource, migrationTarget);
                     add("runtime_migration_preserves_current_files",
                         File.ReadAllText(Path.Combine(
                             migrationTarget, "campaigns", "existing.json"))
@@ -2126,15 +2126,15 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 Directory.CreateDirectory(Path.Combine(preexistingCampaign, "world"));
                 File.WriteAllText(Path.Combine(preexistingCampaign, "world", "history.jsonl"), "{}" + Environment.NewLine, Encoding.UTF8);
                 using (ReignDbConnection preexistingConnection =
-                    OpenCampaignConnection(preexistingId))
+                    Program.OpenCampaignConnection(preexistingId))
                 {
-                    ExecuteSql(preexistingConnection,
+                    Program.ExecuteSql(preexistingConnection,
                         "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('preexisting_test','ready');");
                 }
                 Dictionary<string, object> preexistingPayload = SaveSyncTestPointPayload(preexistingId, "pre_" + token, 1d, "Preexisting World History");
                 preexistingPayload["campaignLabel"] = "Preexisting World History";
                 Dictionary<string, object> preexistingRegistered = SaveSyncRegisterApi(preexistingPayload);
-                Dictionary<string, object> preexistingMetadata = ReadJsonObject(Path.Combine(preexistingCampaign, "campaign.json"));
+                Dictionary<string, object> preexistingMetadata = Program.ReadJsonObject(Path.Combine(preexistingCampaign, "campaign.json"));
                 add("preexisting_campaign_directory_gets_metadata", ReadBool(preexistingRegistered, "ok", false)
                     && ReadString(preexistingMetadata, "campaignId", "") == preexistingId
                     && ReadString(preexistingMetadata, "campaignLabel", "") == "Preexisting World History",
@@ -2157,13 +2157,13 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 ManualResetEventSlim finalizeReaderReady = new ManualResetEventSlim(false);
                 Thread finalizeReader = new Thread(() =>
                 {
-                    CampaignDataGate.EnterReadLock();
+                    Program.CampaignDataGate.EnterReadLock();
                     try
                     {
                         finalizeReaderReady.Set();
                         Thread.Sleep(1500);
                     }
-                    finally { CampaignDataGate.ExitReadLock(); }
+                    finally { Program.CampaignDataGate.ExitReadLock(); }
                 });
                 finalizeReader.IsBackground = true;
                 finalizeReader.Start();
@@ -2297,7 +2297,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 string oldSnapshotGeneration = SaveSyncTestSqlValue(campaignId,
                     "SELECT restore_generation FROM " + ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, SaveSyncPostgreSqlSnapshotPointId(oldStoredPoint))
                     + ".memory_precision_state WHERE state_id='current';", "restore_generation");
-                AdvanceMemoryRestoreGeneration(campaignId);
+                Program.AdvanceMemoryRestoreGeneration(campaignId);
                 string preRollbackGeneration = SaveSyncTestSqlValue(campaignId,
                     "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';", "restore_generation");
                 Dictionary<string, object> rolledBack = SaveSyncLoadApi(loadSessionPayload, false);
@@ -2325,7 +2325,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 add("original_input_and_receipt_round_trip_exactly", SaveSyncTestSqlValue(campaignId,
                     "SELECT text FROM conversation_turns WHERE turn_id='old_original';", "text") == "  *I trace a 🌿.*\r\nHello.\t "
                     && SaveSyncTestSqlValue(campaignId, "SELECT source_hash FROM conversation_input_receipts WHERE input_id='old_input';", "source_hash")
-                        == ConversationExactTextHash("  *I trace a 🌿.*\r\nHello.\t "),
+                        == Program.ConversationExactTextHash("  *I trace a 🌿.*\r\nHello.\t "),
                     "Author-only originals and receipt hashes survive snapshot restore byte-for-byte; future receipts and originals are removed with their branch.");
                 add("pre_sync_backup_created", ReadBool(rolledBack, "backupCreated", false) && Directory.Exists(ReadString(rolledBack, "backupPath", "")), "Destructive apply creates a retained pre-sync recovery snapshot.");
 
@@ -2346,7 +2346,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 byte[] portrait = File.ReadAllBytes(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "portraits", "portrait.png"));
                 string audit = File.ReadAllText(Path.Combine(StrictCampaignDirectory(campaignId), "audit", "audit.jsonl"));
                 string liveTestEvidence = File.ReadAllText(Path.Combine(StrictCampaignDirectory(campaignId), "tests", "live-interaction", "runs", "future.json"));
-                Dictionary<string, object> retainedPortraitRoster = ReadJsonObject(
+                Dictionary<string, object> retainedPortraitRoster = Program.ReadJsonObject(
                     Path.Combine(StrictCampaignDirectory(campaignId), "portrait_roster.json"));
                 add("static_assets_and_technical_audit_retained", background.Contains("later static definition") && portrait.SequenceEqual(new byte[] { 9, 8, 7, 6 }) && audit.Contains("future technical audit"), "Reusable existing-character definitions, portrait assets, and technical audit history survive temporal rollback.");
                 add("portrait_roster_retained_across_rollback",
@@ -2405,7 +2405,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 Dictionary<string, object> export = CreateCampaignBackupArchive(campaignId);
                 archivePath = ReadString(export, "path", "");
                 bool archiveReady = ReadBool(export, "ok", false) && File.Exists(archivePath);
-                string upload = Path.Combine(DataDir, "backups", "uploads", Guid.NewGuid().ToString("N") + ".reignbackup");
+                string upload = Path.Combine(Program.DataDir, "backups", "uploads", Guid.NewGuid().ToString("N") + ".reignbackup");
                 Directory.CreateDirectory(Path.GetDirectoryName(upload));
                 if (archiveReady) File.Copy(archivePath, upload, true);
                 TryDeleteFile(oldNativeSavePath);
@@ -2436,8 +2436,8 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 TryDeleteFile(oldNativeSavePath);
                 TryDeleteFile(newestNativeSavePath);
 
-                bool defaultEnabled = ReadBool(DefaultSettings(), "saveSyncEnabled", false);
-                string html = ControlCenterHtml();
+                bool defaultEnabled = ReadBool(Program.DefaultSettings(), "saveSyncEnabled", false);
+                string html = Program.ControlCenterHtml();
                 add("default_enabled_ui_and_preview_contract", defaultEnabled && html.Contains("id='saveSyncEnabled'") && html.Contains("previewSaveSync") && html.Contains("Last loaded point"), "The Campaign Backups UI exposes the default-on toggle, last result/backup status, and manual dry-run preview.");
 
                 File.WriteAllText(Path.Combine(nativeSaveFixture,
@@ -2561,7 +2561,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                     "A retried native deletion receipt cannot recreate or re-delete a retired campaign.");
 
                 using (ReignDbConnection databaseOnlyConnection =
-                    OpenCampaignConnection(databaseOnlyRetirementId)) { }
+                    Program.OpenCampaignConnection(databaseOnlyRetirementId)) { }
                 TryDeleteDirectory(StrictCampaignDirectory(
                     databaseOnlyRetirementId));
                 Dictionary<string, object> databaseOnlyDeleted;
@@ -2684,8 +2684,8 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 bool traversalRejected = false;
                 bool sharedRejected = false;
                 try { ValidateCampaignOwnedDirectory(
-                    Path.Combine(CampaignsRoot(), "..", "escape"),
-                    CampaignsRoot(), false); }
+                    Path.Combine(Program.CampaignsRoot(), "..", "escape"),
+                    Program.CampaignsRoot(), false); }
                 catch (InvalidDataException) { traversalRejected = true; }
                 try { ValidateCampaignOwnedDirectory(
                     Path.Combine(CampaignPortraitCacheRoot(), "_shared"),
@@ -2715,7 +2715,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                         ["fileCount"] = 1,
                         ["bytes"] = 6
                     }
-                }, CampaignsRoot(), false, orphanCleanupResults);
+                }, Program.CampaignsRoot(), false, orphanCleanupResults);
                 DeleteAuditedOrphanRoots(new[]
                 {
                     new Dictionary<string, object>
@@ -2932,17 +2932,17 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
         {
             string campaign = StrictCampaignDirectory(campaignId);
             Directory.CreateDirectory(Path.Combine(campaign, "characters", "hero_a", "portraits"));
-            WriteJsonObject(Path.Combine(campaign, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Save Sync Test" });
-            WriteJsonObject(Path.Combine(campaign, "portrait_roster.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Path.Combine(campaign, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Save Sync Test" });
+            Program.WriteJsonObject(Path.Combine(campaign, "portrait_roster.json"), new Dictionary<string, object>
             {
                 ["version"] = 2,
                 ["campaignId"] = campaignId,
                 ["rosterFingerprint"] = marker,
                 ["characters"] = new List<object>()
             });
-            WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "old static definition" });
+            Program.WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "old static definition" });
             File.WriteAllBytes(Path.Combine(campaign, "characters", "hero_a", "portraits", "portrait.png"), new byte[] { 1, 2, 3, 4 });
-            WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "state.json"), new Dictionary<string, object> { ["knowledge"] = marker });
+            Program.WriteJsonObject(Path.Combine(campaign, "characters", "hero_a", "state.json"), new Dictionary<string, object> { ["knowledge"] = marker });
             AppendSaveSyncTestLine(campaignId, "conversations", marker);
             AppendSaveSyncTestLine(campaignId, "events", marker);
             AppendSaveSyncTestLine(campaignId, "memories", marker);
@@ -2957,19 +2957,19 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             AppendSaveSyncTestPath(campaignId, Path.Combine("actions", "results.jsonl"), marker);
             AppendSaveSyncTestPath(campaignId, Path.Combine("diplomacy", "consequences.jsonl"), marker);
             AppendSaveSyncTestPath(campaignId, Path.Combine("negotiations", "events.jsonl"), marker);
-            WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
-            WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            Program.WriteJsonObject(Path.Combine(campaign, "actions", "action-queue.json"), new Dictionary<string, object> { ["marker"] = marker, ["items"] = new List<object> { marker + "_queued_action" } });
+            Program.WriteJsonObject(Path.Combine(campaign, "world", "calendar.json"), new Dictionary<string, object> { ["marker"] = marker, ["nativeDayAnchor"] = marker == "old" ? 10d : 20d });
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 RebellionService.EnsureRebellionSchema(connection);
-                EnsureRelationshipDirectorSchema(connection);
-                EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureRelationshipDirectorSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 CourtService.EnsureCourtSchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
                 long ts = marker == "old" ? 10 : 1;
-                ExecuteSql(connection, "INSERT OR REPLACE INTO events(event_id,campaign_id,ts,world_day,event_type,summary,created_utc) VALUES($id,$campaign,$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO memories(memory_id,event_id,owner_id,ts,world_day,summary) VALUES($id,$event,'hero_a',$ts,$day,$id);", new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_chemistry(
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO events(event_id,campaign_id,ts,world_day,event_type,summary,created_utc) VALUES($id,$campaign,$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_event", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO memories(memory_id,event_id,owner_id,ts,world_day,summary) VALUES($id,$event,'hero_a',$ts,$day,$id);", new Dictionary<string, object> { ["id"] = marker + "_memory", ["event"] = marker + "_event", ["ts"] = ts, ["day"] = (double)ts });
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
 first_day,last_day,projected_native_relation,last_decay_period,updated_ts)
 VALUES('hero_a|hero_b','hero_a','hero_b',$affinity,$affinity,'neutral','neutral',
@@ -2977,20 +2977,20 @@ $day,$day,$affinity,0,$ts);", new Dictionary<string, object>
                 {
                     ["affinity"] = marker == "future" ? 99 : 1, ["day"] = (double)ts, ["ts"] = ts
                 });
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO relationship_pair_lifecycle(
 pair_key,hero_a_id,hero_b_id,last_processed_day,updated_ts)
 VALUES('hero_a|hero_b','hero_a','hero_b',$day,$ts);",
                     new Dictionary<string, object> { ["day"] = (int)ts, ["ts"] = ts });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
-                EnsureConversationInputSchema(connection);
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
+                Program.EnsureConversationInputSchema(connection);
                 const string exactOriginal = "  *I trace a 🌿.*\r\nHello.\t ";
-                ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
                     TestDict("id", marker + "_original", "session", marker + "_session", "text", exactOriginal, "ts", ts));
-                ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
 VALUES($id,'timeline_test',$session,'player',$source,$hash,'fixture','received',$ts,$ts) ON CONFLICT(input_id) DO NOTHING;",
-                    TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", ConversationExactTextHash(exactOriginal), "ts", ts));
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
+                    TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", Program.ConversationExactTextHash(exactOriginal), "ts", ts));
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
 occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,world_day,expires_day,status,
 exposure_chance,exposure_roll,catalog_revision,participants_json,provenance_summary,snapshot_json,created_ts,updated_ts)
 VALUES($id,$campaign,'timeline_test','marital_strife','hero_a|hero_b',$event,$day,999999,'active',
@@ -3001,7 +3001,7 @@ VALUES($id,$campaign,'timeline_test','marital_strife','hero_a|hero_b',$event,$da
                         ["event"] = marker + "_event", ["day"] = (double)ts,
                         ["summary"] = marker + "_rumor_summary", ["ts"] = ts
                     });
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_subject_tags(
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_subject_tags(
 occurrence_id,subject_id,tag_id,subject_role,description,rumor_value,reputation_value,status,
 co_participants_json,snapshot_json,updated_ts)
 VALUES($occurrence,'hero_a','marital_strife','spouse',$description,-5,-10,'active','[""hero_b""]','{}',$ts);",
@@ -3010,11 +3010,11 @@ VALUES($occurrence,'hero_a','marital_strife','spouse',$description,-5,-10,'activ
                         ["occurrence"] = marker + "_rumor_occurrence",
                         ["description"] = marker + "_rumor_description", ["ts"] = ts
                     });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,created_utc) VALUES($id,$campaign,'timeline_test',$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_history", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,correlation_id,created_day,updated_day)
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,created_utc) VALUES($id,$campaign,'timeline_test',$ts,$day,'test',$id,$utc);", new Dictionary<string, object> { ["id"] = marker + "_history", ["campaign"] = campaignId, ["ts"] = ts, ["day"] = (double)ts, ["utc"] = DateTime.UtcNow.ToString("o") });
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rebellion_movements(movement_id,campaign_id,timeline_id,parent_kingdom_id,leader_clan_id,leader_hero_id,ruler_hero_id,objective,stage,pressure,relationship_pressure,trait_pressure,factual_pressure,viability,readiness,correlation_id,created_day,updated_day)
 VALUES($id,$campaign,'timeline_test','kingdom_a','clan_a','hero_a','hero_b','claimant','organizing',1,1,1,1,1,1,$id,$day,$day);", new Dictionary<string, object> { ["id"] = marker + "_rebellion", ["campaign"] = campaignId, ["day"] = (double)ts });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO court_sessions(session_id,campaign_id,timeline_id,authority,host_settlement_id,created_ts,updated_ts) VALUES($id,$campaign,'timeline_test','royal','town_a',$ts,$ts);", new Dictionary<string, object> { ["id"] = marker + "_court", ["campaign"] = campaignId, ["ts"] = ts });
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO character_reputations(
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO court_sessions(session_id,campaign_id,timeline_id,authority,host_settlement_id,created_ts,updated_ts) VALUES($id,$campaign,'timeline_test','royal','town_a',$ts,$ts);", new Dictionary<string, object> { ["id"] = marker + "_court", ["campaign"] = campaignId, ["ts"] = ts });
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO character_reputations(
 campaign_id,timeline_id,subject_id,tag_id,source_occurrence_id,archetype_id,subject_role,description,
 reputation_value,acquired_day,catalog_revision,snapshot_json,status,updated_ts)
 VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','subject',$description,1,$day,1,'{}','active',$ts);",
@@ -3023,18 +3023,18 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
                         ["campaign"] = campaignId, ["occurrence"] = marker + "_rumor_occurrence",
                         ["description"] = marker + "_reputation", ["day"] = (double)ts, ["ts"] = ts
                     });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts) VALUES($id,'test','pending',$day,'[]',$payload,$ts);", new Dictionary<string, object> { ["id"] = marker + "_outbox", ["day"] = (double)ts, ["payload"] = "{\"marker\":\"" + marker + "\"}", ["ts"] = ts });
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts) VALUES($id,'test','pending',$day,'[]',$payload,$ts);", new Dictionary<string, object> { ["id"] = marker + "_outbox", ["day"] = (double)ts, ["payload"] = "{\"marker\":\"" + marker + "\"}", ["ts"] = ts });
             }
         }
 
         private static void AppendSaveSyncTestFutureState(string campaignId)
         {
             PrepareSaveSyncTestCampaign(campaignId, "future");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, "UPDATE character_reputations SET reputation_value=99,updated_ts=20 WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", new Dictionary<string, object> { ["campaign"] = campaignId });
+                Program.ExecuteSql(connection, "UPDATE character_reputations SET reputation_value=99,updated_ts=20 WHERE campaign_id=$campaign AND subject_id='hero_a' AND tag_id='test_reputation';", new Dictionary<string, object> { ["campaign"] = campaignId });
             }
-            WriteJsonObject(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "later static definition" });
+            Program.WriteJsonObject(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "background.json"), new Dictionary<string, object> { ["text"] = "later static definition" });
             File.WriteAllBytes(Path.Combine(StrictCampaignDirectory(campaignId), "characters", "hero_a", "portraits", "portrait.png"), new byte[] { 9, 8, 7, 6 });
             string audit = Path.Combine(StrictCampaignDirectory(campaignId), "audit", "audit.jsonl");
             Directory.CreateDirectory(Path.GetDirectoryName(audit));
@@ -3084,14 +3084,14 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
             bool fileMarker = gameplayPaths.Select(path => Path.Combine(campaign, path)).Where(File.Exists)
                 .Any(path => { try { return File.ReadAllText(path).Contains(marker); } catch { return false; } });
             bool sqlMarker;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                sqlMarker = ReadLong(QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = marker + "_event" }).FirstOrDefault(), "count", 0) > 0;
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                sqlMarker = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) count FROM events WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = marker + "_event" }).FirstOrDefault(), "count", 0) > 0;
             return fileMarker || sqlMarker;
         }
 
         private static long SaveSyncTestFutureSqlRows(string campaignId)
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 string[] queries =
                 {
@@ -3108,11 +3108,11 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
                     "SELECT COUNT(*) count FROM court_sessions WHERE session_id='future_court';",
                     "SELECT COUNT(*) count FROM director_outbox WHERE outbox_id='future_outbox';"
                 };
-                return queries.Sum(sql => ReadLong(QuerySql(connection, sql).FirstOrDefault(), "count", 0));
+                return queries.Sum(sql => ReadLong(Program.QuerySql(connection, sql).FirstOrDefault(), "count", 0));
             }
         }
 
-        private static Dictionary<string, object> SaveSyncTestPointPayload(string campaignId, string pointId, double day, string name)
+        internal static Dictionary<string, object> SaveSyncTestPointPayload(string campaignId, string pointId, double day, string name)
         {
             return new Dictionary<string, object>
             {
@@ -3125,10 +3125,10 @@ VALUES($campaign,'timeline_test','hero_a','test_reputation',$occurrence,'test','
 
         private static string SaveSyncTestSqlValue(string campaignId, string sql, string field, string parameterCampaign = "")
         {
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> parameters = string.IsNullOrWhiteSpace(parameterCampaign) ? null : new Dictionary<string, object> { ["campaign"] = parameterCampaign };
-                Dictionary<string, object> row = QuerySql(connection, sql, parameters).FirstOrDefault();
+                Dictionary<string, object> row = Program.QuerySql(connection, sql, parameters).FirstOrDefault();
                 object value = row != null && row.ContainsKey(field) ? row[field] : null;
                 return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
             }

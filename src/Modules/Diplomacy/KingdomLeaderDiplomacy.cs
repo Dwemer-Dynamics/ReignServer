@@ -88,19 +88,19 @@ PRIMARY KEY(campaign_id,timeline_id,agreement_id));");
             int season = (int)Math.Floor(worldDay / 31.5d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             List<Dictionary<string, object>> allRulers = ReadDictionaryList(heartbeat, "politicalLeaders")
-                .Where(row => Program.ReadPoliticalFlag(row, "is_ruler", "isRuler")
+                .Where(row => RelationshipsService.ReadPoliticalFlag(row, "is_ruler", "isRuler")
                     && ReadBool(row, "isAlive", ReadInt(row, "is_alive", 1) != 0))
                 .GroupBy(row => ReadFirstString(row, "hero_id", "heroStringId", "heroId"),
                     StringComparer.OrdinalIgnoreCase).Select(group => group.First())
                 .Where(row => !string.IsNullOrWhiteSpace(ReadFirstString(row,
                     "hero_id", "heroStringId", "heroId"))).ToList();
             List<Dictionary<string, object>> npcRulers = allRulers
-                .Where(row => !Program.ReadPoliticalFlag(row, "is_player", "isPlayer"))
+                .Where(row => !RelationshipsService.ReadPoliticalFlag(row, "is_player", "isPlayer"))
                 .Where(row => !string.IsNullOrWhiteSpace(FirstNonEmpty(
                     ReadString(row, "kingdom_id", ""), ReadString(row, "kingdomId", ""))))
                 .ToList();
 
-            lock (Program.CampaignRelationshipWriteLock(campaignId))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))
             {
                 Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
@@ -153,21 +153,21 @@ AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object
 
                         string observerKingdom = FirstNonEmpty(ReadString(observerRow, "kingdom_id", ""), ReadString(observerRow, "kingdomId", ""));
                         string targetKingdom = FirstNonEmpty(ReadString(targetRow, "kingdom_id", ""), ReadString(targetRow, "kingdomId", ""));
-                        string pairKey = Program.AmbientPairKey(observer, target);
+                        string pairKey = RelationshipsService.AmbientPairKey(observer, target);
                         Dictionary<string, object> beforePair = Program.QuerySql(connection,
                             "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                             new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         if (beforePair == null)
                         {
-                            Program.ApplyAuthoritativeRelationshipDelta(connection, campaignId, observer,
+                            RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaignId, observer,
                                 target, 1, worldDay, "ruler_diplomacy_contact", timelineId);
-                            Program.ApplyAtomicDirectionalRelationshipDelta(connection, campaignId, observer,
+                            RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection, campaignId, observer,
                                 target, -1, worldDay, "ruler_diplomacy_contact_initialization", timelineId);
                             beforePair = Program.QuerySql(connection,
                                 "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         }
-                        Program.RecordRelationshipPairProvenance(connection, campaignId, timelineId,
+                        RelationshipsService.RecordRelationshipPairProvenance(connection, campaignId, timelineId,
                             pairKey, "ruler_diplomacy_contact", true, worldDay,
                             new Dictionary<string, object> { ["observerId"] = observer, ["targetId"] = target });
                         bool observerIsA = ReadString(beforePair, "hero_a_id", "")
@@ -182,7 +182,7 @@ AND observer_id=$observer AND target_id=$target;", new Dictionary<string, object
                         int magnitude = 1 + (StableRulerD100(campaignId, timelineId, day,
                             observer + "|" + target + "|magnitude") - 1) % 3;
                         int delta = compatibilityRoll <= compatibilityChance ? magnitude : -magnitude;
-                        Dictionary<string, object> afterPair = Program.ApplyAtomicDirectionalRelationshipDelta(
+                        Dictionary<string, object> afterPair = RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(
                             connection, campaignId, observer, target, delta, worldDay,
                             "ruler_diplomacy_remote", timelineId) ?? beforePair;
                         int afterAffinity = ReadInt(afterPair, affinityColumn, beforeAffinity + delta);
@@ -218,7 +218,7 @@ $chance,$roll,$magnitude,$delta,$beforeAffinity,$afterAffinity,$beforeEffective,
                             int presenceDelta = presenceRoll <= compatibilityChance
                                 ? presenceMagnitude : -presenceMagnitude;
                             Dictionary<string, object> presencePair =
-                                Program.ApplyAtomicDirectionalRelationshipDelta(connection,
+                                RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection,
                                     campaignId, observer, target, presenceDelta,
                                     worldDay, "ruler_diplomacy_co_presence", timelineId)
                                 ?? afterPair;
@@ -237,7 +237,7 @@ $chance,$roll,$magnitude,$delta,$beforeAffinity,$afterAffinity,$beforeEffective,
                                     ["delta"] = presenceDelta
                                 });
                         }
-                        Program.RecordWorldTestCounter(connection, campaignId, timelineId,
+                        WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId,
                             day, "kingdom_leaders", correlation,
                             new Dictionary<string, object>
                             {
@@ -304,7 +304,7 @@ $before,$after,$chance,$roll,$passed,$opportunity,$correlation,$ts);", new Dicti
                     "threshold_crossing", polarity, bonusRoll <= chance ? "bonus_passed" : "bonus_failed",
                     threshold, beforeEffective, afterEffective, bonusRoll, chance, "", correlation,
                     "genuine effective-attitude crossing");
-                Program.RecordWorldTestCounter(connection, campaignId, timelineId,
+                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId,
                     (int)Math.Floor(worldDay + 0.000001d), "kingdom_leaders",
                     correlation, new Dictionary<string, object>
                     {
@@ -402,11 +402,11 @@ outcome=$outcome,action_id=$action,updated_ts=$ts WHERE opportunity_id=$id;", ne
             RebellionService.EnsureRebellionSchema(connection);
             int day = (int)Math.Floor(latestDay + 0.000001d);
             List<Dictionary<string, object>> rulers = ReadDictionaryList(nativePayload, "politicalLeaders")
-                .Where(row => Program.ReadPoliticalFlag(row, "is_ruler", "isRuler"))
+                .Where(row => RelationshipsService.ReadPoliticalFlag(row, "is_ruler", "isRuler"))
                 .GroupBy(row => ReadFirstString(row, "hero_id", "heroStringId", "heroId"),
                     StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToList();
             List<Dictionary<string, object>> npcRulers = rulers.Where(row =>
-                !Program.ReadPoliticalFlag(row, "is_player", "isPlayer")).ToList();
+                !RelationshipsService.ReadPoliticalFlag(row, "is_player", "isPlayer")).ToList();
             int expectedEdges = npcRulers.Count * Math.Max(0, npcRulers.Count - 1);
             int expectedRolls = DailyRulerRelationshipRollsEnabled
                 ? expectedEdges : 0;
@@ -456,9 +456,9 @@ FROM ruler_diplomacy_activity WHERE campaign_id=$campaign AND timeline_id=$timel
                 string observer = ReadFirstString(observerRow, "hero_id", "heroStringId", "heroId");
                 string target = ReadFirstString(targetRow, "hero_id", "heroStringId", "heroId");
                 if (observer.Equals(target, StringComparison.OrdinalIgnoreCase)) continue;
-                bool playerContext = Program.ReadPoliticalFlag(observerRow, "is_player", "isPlayer")
-                    || Program.ReadPoliticalFlag(targetRow, "is_player", "isPlayer");
-                Dictionary<string, object> attitude = Program.ResolveRulerDiplomaticAttitude(connection,
+                bool playerContext = RelationshipsService.ReadPoliticalFlag(observerRow, "is_player", "isPlayer")
+                    || RelationshipsService.ReadPoliticalFlag(targetRow, "is_player", "isPlayer");
+                Dictionary<string, object> attitude = RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                     campaignId, timelineId, observer, target, "world_test_kingdom_leaders");
                 Dictionary<string, object> latestRoll = Program.QuerySql(connection, @"
 SELECT * FROM ruler_relationship_rolls WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -524,7 +524,7 @@ WHERE r.campaign_id=$campaign AND r.timeline_id=$timeline AND r.day_key=$day AND
                 && ReadDouble(row, "expiry_day", latestDay) < latestDay);
             if (stale > 0) anomalies.Add(new Dictionary<string, object> { ["code"] = "stale_opportunities", ["count"] = stale, ["severity"] = "error" });
             HashSet<string> playerRulerIds = new HashSet<string>(rulers
-                .Where(row => Program.ReadPoliticalFlag(row, "is_player", "isPlayer"))
+                .Where(row => RelationshipsService.ReadPoliticalFlag(row, "is_player", "isPlayer"))
                 .Select(row => ReadFirstString(row, "hero_id", "heroStringId", "heroId")),
                 StringComparer.OrdinalIgnoreCase);
             int playerRemoteRolls = Program.QuerySql(connection, @"SELECT observer_id,target_id
@@ -938,10 +938,10 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
             string stableIncidentId = campaignId + ":" + timelineId + ":" + incidentId;
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                Program.EnsureMbtiRelationshipSchema(connection);
-                Program.EnsureWorldRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureWorldRelationshipSchema(connection);
                 EnsureKingdomLeaderDiplomacySchema(connection);
-                lock (Program.CampaignRelationshipWriteLock(campaignId))
+                lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))
                 {
                     // Keep the idempotency check inside the same relationship writer
                     // critical section as the insert so duplicate action reports cannot
@@ -953,11 +953,11 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
                     Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     try
                     {
-                        Dictionary<string, object> before = Program.ResolveRulerDiplomaticAttitude(connection,
+                        Dictionary<string, object> before = RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                             campaignId, timelineId, observer, target, eventKind);
                         int beforeEffective = ReadInt(before, "effectiveAttitude", 0);
                         if (affinityDelta != 0)
-                            Program.ApplyAuthoritativeRelationshipDelta(connection, campaignId, observer,
+                            RelationshipsService.ApplyAuthoritativeRelationshipDelta(connection, campaignId, observer,
                                 target, affinityDelta, worldDay, correlationId, timelineId);
                         int boundedPublic = Clamp(publicDelta, -6, 3);
                         if (boundedPublic != 0 && !string.IsNullOrWhiteSpace(publicSubjectId))
@@ -968,7 +968,7 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", new Dictionary<string
                             ReputationService.RecomputePublicStandingForSubjects(connection, campaignId, timelineId,
                                 new[] { publicSubjectId }, worldDay);
                         }
-                        Dictionary<string, object> after = Program.ResolveRulerDiplomaticAttitude(connection,
+                        Dictionary<string, object> after = RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                             campaignId, timelineId, observer, target, eventKind);
                         int afterEffective = ReadInt(after, "effectiveAttitude", beforeEffective + affinityDelta);
                         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

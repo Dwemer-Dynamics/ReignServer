@@ -32,11 +32,11 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static double CorrespondenceOption(Dictionary<string, object> settings, string key)
+        internal static double CorrespondenceOption(Dictionary<string, object> settings, string key)
             => settings != null && settings.TryGetValue(key, out var raw) && ValidCorrespondenceOption(key, raw)
                 ? Convert.ToDouble(raw, CultureInfo.InvariantCulture) : 1d;
 
-        private static int AutonomousLetterChance(int affinity, double frequency)
+        internal static int AutonomousLetterChance(int affinity, double frequency)
             => (int)Math.Round(Math.Clamp(affinity * frequency, 0d, 100d), MidpointRounding.AwayFromZero);
 
         private static List<Dictionary<string, object>> RunCorrespondenceOptionsAssertions()

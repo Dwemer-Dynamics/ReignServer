@@ -192,7 +192,7 @@ AND recipient_id=$sender AND status IN ('delivered','read') LIMIT 1;",
             {
                 var favorites = group.Select(row => ReadString(TryParseJsonObject(ReadString(row, "snapshot_json", "{}")), "linkedHeroId", "")).ToList();
                 if (favorites.Contains(observerId) && favorites.Contains(subjectId)
-                    && Program.IdentityStateVerified(Program.ReadAcquaintance(connection, observerId, group.Key)))
+                    && CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, observerId, group.Key)))
                     return "You and this person both currently receive the same ruler's favor. You have less reason to resent lack of attention. Moderate attention-based jealousy while preserving other motives and your temperament; favor is not evidence of an affair.";
             }
             return "";

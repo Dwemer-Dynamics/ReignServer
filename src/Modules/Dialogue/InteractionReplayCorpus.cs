@@ -121,7 +121,7 @@ namespace ReignBetaServer
             foreach (string value in ReadStringList(assertions, "replyContains")) if (reply.IndexOf(value, StringComparison.OrdinalIgnoreCase) < 0) failures.Add("Reply did not contain: " + value);
             foreach (string value in ReadStringList(assertions, "replyExcludes")) if (reply.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0) failures.Add("Reply contained forbidden text: " + value);
             if (ReadBool(assertions, "requiresIdentityRecognition", false)
-                && !LiveTestReplyRecognizesIdentity(response,
+                && !WorldSimulationService.LiveTestReplyRecognizesIdentity(response,
                     ReadString(assertions, "expectedIdentityName", ""),
                     ReadString(assertions, "expectedIdentityState", ""),
                     ReadString(assertions, "expectedIdentitySource", "")))
@@ -173,15 +173,15 @@ namespace ReignBetaServer
                 Dictionary<string, object> store = ReadDictionary(response, "dynamicCharacteristicsStore")
                     ?? new Dictionary<string, object>();
                 int stored = ReadInt(store, "storedCount", 0);
-                bool reiteratesInjected = LiveTestDynamicCharacteristicPromptLines(prompt)
-                    .Any(line => HasDynamicTextEvidence(line, reply));
-                if (stored <= 0 && ReplyLikelyIntroducesDynamicCharacteristic(reply) && !reiteratesInjected)
+                bool reiteratesInjected = WorldSimulationService.LiveTestDynamicCharacteristicPromptLines(prompt)
+                    .Any(line => CharactersService.HasDynamicTextEvidence(line, reply));
+                if (stored <= 0 && CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(reply) && !reiteratesInjected)
                     failures.Add("The reply introduced an eligible stable self-detail but no active Dynamic Characteristic was stored.");
             }
             if (ReadBool(assertions, "requiresDynamicCharacteristicRecall", false))
             {
-                List<string> injected = LiveTestDynamicCharacteristicPromptLines(prompt);
-                if (injected.Count == 0 || !injected.Any(line => HasDynamicTextEvidence(line, reply)))
+                List<string> injected = WorldSimulationService.LiveTestDynamicCharacteristicPromptLines(prompt);
+                if (injected.Count == 0 || !injected.Any(line => CharactersService.HasDynamicTextEvidence(line, reply)))
                     failures.Add("No injected Dynamic Characteristic was visibly recalled in the response.");
             }
             if (ReadBool(assertions, "allowsDynamicCharacteristicRefusal", false))
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> store = ReadDictionary(response, "dynamicCharacteristicsStore")
                     ?? new Dictionary<string, object>();
                 int stored = ReadInt(store, "storedCount", 0);
-                if (ReplyLikelyIntroducesDynamicCharacteristic(reply))
+                if (CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(reply))
                     failures.Add("The purported refusal actually introduced an eligible stable self-detail.");
                 if (stored > 0)
                     failures.Add("A refusal with no eligible self-detail manufactured a Dynamic Characteristic.");
@@ -247,7 +247,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static void ScheduleReplayCorpusCapture(string campaignId, string correlationId)
+        internal static void ScheduleReplayCorpusCapture(string campaignId, string correlationId)
         {
             if (!ReadBool(LoadSettings(), "autoCaptureReplayCorpus", true)) return;
             // Best-effort: a busy/stopping refusal skips the capture, counted only in scheduler status.

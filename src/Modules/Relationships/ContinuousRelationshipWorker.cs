@@ -8,7 +8,7 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const int RelationshipEvaluationBasePerSecond = 10000;
         private const int RelationshipEvaluationBurstPerSecond = 50000;
@@ -76,7 +76,7 @@ namespace ReignBetaServer
         private static long RelationshipTokenWindowStarted = Stopwatch.GetTimestamp();
         private static int RelationshipTokenWindowUsed;
 
-        private static void StartContinuousRelationshipWorker()
+        internal static void StartContinuousRelationshipWorker()
         {
             lock (ContinuousRelationshipWorkerLock)
             {
@@ -91,16 +91,16 @@ namespace ReignBetaServer
             }
         }
 
-        private static void SignalContinuousRelationshipWorker()
+        internal static void SignalContinuousRelationshipWorker()
         {
-            if (ActiveServerPort <= 0) return;
+            if (Program.ActiveServerPort <= 0) return;
             StartContinuousRelationshipWorker();
             ContinuousRelationshipSignal.Set();
         }
 
         private static void ContinuousRelationshipLoop()
         {
-            while (!ShutdownRequested)
+            while (!Program.ShutdownRequested)
             {
                 try
                 {
@@ -111,8 +111,8 @@ namespace ReignBetaServer
                 }
                 catch (Exception ex)
                 {
-                    ContinuousRelationshipLastError = LimitText(ex.ToString(), 2000);
-                    LogOperational("relationships.continuous_worker_failed",
+                    ContinuousRelationshipLastError = Program.LimitText(ex.ToString(), 2000);
+                    Program.LogOperational("relationships.continuous_worker_failed",
                         new Dictionary<string, object> { ["error"] = ContinuousRelationshipLastError });
                     ContinuousRelationshipSignal.WaitOne(1000);
                 }
@@ -130,26 +130,26 @@ namespace ReignBetaServer
             // Holding the read lock for the complete durable day keeps the atomic
             // boundary honest. ReaderWriterLockSlim gives a waiting Save Sync
             // writer priority, so no later relationship day can begin ahead of it.
-            CampaignDataGate.EnterReadLock();
+            Program.CampaignDataGate.EnterReadLock();
             try
             {
                 return TryProcessNextRelationshipDay();
             }
             finally
             {
-                CampaignDataGate.ExitReadLock();
+                Program.CampaignDataGate.ExitReadLock();
             }
         }
 
         private static bool TryProcessNextRelationshipDay()
         {
             var selectionTimer = Stopwatch.StartNew();
-            string root = CampaignsRoot();
+            string root = Program.CampaignsRoot();
             if (!Directory.Exists(root)) return false;
             Dictionary<string, object> selected = null;
             string selectedCampaign = "";
-            Dictionary<string, object> runtime = LoadLiveTestRuntime("");
-            string preferredCampaign = IsFreshLiveTestRuntime(runtime) ? ReadString(runtime, "campaignId", "") : "";
+            Dictionary<string, object> runtime = WorldSimulationService.LoadLiveTestRuntime("");
+            string preferredCampaign = WorldSimulationService.IsFreshLiveTestRuntime(runtime) ? ReadString(runtime, "campaignId", "") : "";
             string preferredTimeline = ReadString(ReadDictionary(runtime, "saveSync"), "timelineId", "");
             bool serveInactive = ContinuousRelationshipPreferredCampaignDays >= 8;
             int selectedPriority = int.MaxValue;
@@ -160,12 +160,12 @@ namespace ReignBetaServer
                 string campaignId = Path.GetFileName(directory);
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
                         EnsureMbtiRelationshipSchema(connection);
                         RecoverInterruptedRelationshipDays(connection, campaignId);
                         long readyVersion = RelationshipReadyVersion(campaignId);
-                        Dictionary<string, object> row = QuerySql(connection, @"
+                        Dictionary<string, object> row = Program.QuerySql(connection, @"
 SELECT *,COUNT(*) OVER () AS pending_count FROM relationship_daily_inputs
 WHERE status='pending'
 ORDER BY CASE WHEN timeline_id=$preferredTimeline THEN 0 ELSE 1 END,day_key,timeline_id LIMIT 1;",
@@ -192,8 +192,8 @@ ORDER BY CASE WHEN timeline_id=$preferredTimeline THEN 0 ELSE 1 END,day_key,time
                 }
                 catch (Exception ex)
                 {
-                    LogOperational("relationships.pending_scan_failed",
-                        new Dictionary<string, object> { ["campaignId"] = campaignId, ["error"] = LimitText(ex.Message, 800) });
+                    Program.LogOperational("relationships.pending_scan_failed",
+                        new Dictionary<string, object> { ["campaignId"] = campaignId, ["error"] = Program.LimitText(ex.Message, 800) });
                     if (DatabaseAvailability.Shared.BackingOff) break;
                 }
             }
@@ -216,10 +216,10 @@ ORDER BY CASE WHEN timeline_id=$preferredTimeline THEN 0 ELSE 1 END,day_key,time
             int windowStartDay = day - RelationshipCadenceDays + 1;
             double worldDay = ReadDouble(selected, "world_day", day);
             long startedTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = OpenCampaignConnection(selectedCampaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(selectedCampaign))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                ExecuteSql(connection, @"UPDATE relationship_daily_inputs
+                Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
 SET status='processing',started_ts=$ts,last_error=''
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND status='pending';",
                     new Dictionary<string, object>
@@ -238,10 +238,10 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND statu
             TimeSpan cpuStarted = Process.GetCurrentProcess().TotalProcessorTime;
             List<object> cadenceInputs;
             Stopwatch inputLoadTimer = Stopwatch.StartNew();
-            using (ReignDbConnection connection = OpenCampaignConnection(selectedCampaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(selectedCampaign))
             {
                 EnsureMbtiRelationshipSchema(connection);
-                cadenceInputs = QuerySql(connection, @"
+                cadenceInputs = Program.QuerySql(connection, @"
 SELECT day_key,world_day,presence_groups_json,hero_changes_json
 FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -288,7 +288,7 @@ ORDER BY day_key;",
                 object campaignWriteLock =
                     CampaignRelationshipWriteLock(selectedCampaign);
                 Stopwatch lockWaitTimer = Stopwatch.StartNew();
-                using (var ownership = EnterCampaignWorkLock(campaignWriteLock))
+                using (var ownership = PersistenceService.EnterCampaignWorkLock(campaignWriteLock))
                 {
                     ownership.SetStage("relationship_day");
                     lockWaitTimer.Stop();
@@ -351,10 +351,10 @@ ORDER BY day_key;",
                     / Math.Max(0.001d, timer.Elapsed.TotalSeconds);
                 ContinuousRelationshipLastCompletedTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 ContinuousRelationshipLastError = "";
-                using (ReignDbConnection connection = OpenCampaignConnection(selectedCampaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(selectedCampaign))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
 status='processed',pair_cursor='',candidate_pairs=$candidates,processed_pairs=$processed,
 cadence_shard=$shard,window_start_day=$windowStart,window_day_count=$windowDays,
 pair_day_evaluations=$pairDays,processed_ts=$ts,last_error=''
@@ -367,7 +367,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                             ["windowDays"] = cadenceInputs.Count, ["pairDays"] = evaluatedPairDays,
                             ["campaign"] = selectedCampaign, ["timeline"] = timelineId, ["day"] = day
                         });
-                    ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs SET
 presence_groups_json='[]',hero_changes_json='[]'
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='processed' AND day_key<=$consumedThrough;",
@@ -378,21 +378,21 @@ AND status='processed' AND day_key<=$consumedThrough;",
                             ["consumedThrough"] = day - RelationshipCadenceDays + 1
                         });
                     PruneRelationshipHeroObservations(connection, timelineId, day);
-                    ExecuteSql(connection, @"DELETE FROM relationship_daily_inputs
+                    Program.ExecuteSql(connection, @"DELETE FROM relationship_daily_inputs
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND status='processed' AND day_key<$day-7;",
                         new Dictionary<string, object>
                         {
                             ["campaign"] = selectedCampaign, ["timeline"] = timelineId, ["day"] = day
                         });
-                    ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
+                    Program.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
                 }
                 Dictionary<string, object> performance = result
                     .Where(entry => entry.Key.EndsWith("Ms", StringComparison.Ordinal)
                         || entry.Key.EndsWith("Queries", StringComparison.Ordinal))
                     .ToDictionary(entry => entry.Key, entry => entry.Value);
                 ObserveRelationshipCampaignPending(selectedCampaign, Math.Max(0, ReadInt(selected, "pending_count", 1) - 1), ReadLong(selected, "ready_version", -1));
-                SignalWorldTestRollupWorker();
+                WorldSimulationService.SignalWorldTestRollupWorker();
                 performance["schema"] = "reign_relationship_day_performance_v1";
                 performance["selectionMs"] = selectionTimer.ElapsedMilliseconds;
                 performance["firstReceivedTs"] = ReadLong(selected, "received_ts", 0);
@@ -406,16 +406,16 @@ AND status='processed' AND day_key<$day-7;",
                 performance["inputLoadMs"] = ContinuousRelationshipInputLoadMs;
                 performance["campaignLockWaitMs"] = ContinuousRelationshipLockWaitMs;
                 performance["serverModuleId"] = typeof(Program).Module.ModuleVersionId.ToString("D");
-                LogOperational("relationships.day_completed", performance);
+                Program.LogOperational("relationships.day_completed", performance);
             }
             catch (Exception ex)
             {
                 timer.Stop();
-                ContinuousRelationshipLastError = LimitText(ex.ToString(), 2000);
-                using (ReignDbConnection connection = OpenCampaignConnection(selectedCampaign))
+                ContinuousRelationshipLastError = Program.LimitText(ex.ToString(), 2000);
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(selectedCampaign))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"UPDATE relationship_daily_inputs
+                    Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
 SET status='pending',last_error=$error
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                         new Dictionary<string, object>
@@ -608,7 +608,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                 || timelineId.Equals(activeTimelineId, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
         }
 
-        private static Dictionary<string, object> ContinuousRelationshipWorkerStatus()
+        internal static Dictionary<string, object> ContinuousRelationshipWorkerStatus()
         {
             return new Dictionary<string, object>
             {

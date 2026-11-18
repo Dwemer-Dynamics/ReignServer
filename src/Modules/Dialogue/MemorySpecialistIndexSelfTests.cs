@@ -6,7 +6,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static Dictionary<string, object> SpecialistFixtureTurn(ReignDbConnection connection, string campaign,
+        internal static Dictionary<string, object> SpecialistFixtureTurn(ReignDbConnection connection, string campaign,
             string id, string speaker, string text, double day = 10, long ts = 10, string timeline = "main",
             string[] audience = null, string session = "", string role = "npc", Dictionary<string, object> extra = null)
         {

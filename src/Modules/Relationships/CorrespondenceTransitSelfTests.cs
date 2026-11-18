@@ -5,7 +5,7 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private static List<Dictionary<string, object>> RunCorrespondenceTransitAssertions()
         {
@@ -33,14 +33,14 @@ namespace ReignBetaServer
             try
             {
                 string originalId, replyId;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     EnsureRelationshipAndCorrespondenceSchema(connection);
                     var letter = InsertLetter(connection, "sender", "Sender", "player", "Player", "Come through the western gate.",
                         "npc_initiated", "fixture", "", "a", "b", 100d, 105.3893225703d,
                         TestDict("transitPolicyVersion", 99, "baseTransitDays", 0.01d));
                     originalId = ReadString(letter, "letterId", "");
-                    var persisted = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
+                    var persisted = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
                     Check("dispatch_persists_authoritative_unscaled_base", Near(ReadDouble(persisted, "base_transit_days", 0d), 5.3893225703d)
                         && ReadInt(persisted, "transit_policy_version", 0) == CorrespondenceTransitPolicy.Version
                         && Near(ReadDouble(persisted, "delivery_day", 0d), 101.347330642575d));
@@ -56,10 +56,10 @@ namespace ReignBetaServer
                         && Near(ReadDouble(retry, "deliveryDay", 0d), ReadDouble(reply, "deliveryDay", 0d)));
                     // Fixture representing a pre-upgrade row: schema extension
                     // must not retime it, including after another connection.
-                    ExecuteSql(connection, "UPDATE letters SET transit_policy_version=0,base_transit_days=0,delivery_day=105.3893225703 WHERE letter_id=$id;",
+                    Program.ExecuteSql(connection, "UPDATE letters SET transit_policy_version=0,base_transit_days=0,delivery_day=105.3893225703 WHERE letter_id=$id;",
                         TestDict("id", originalId));
                     EnsureRelationshipAndCorrespondenceSchema(connection);
-                    persisted = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
+                    persisted = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
                     Check("legacy_inflight_eta_unchanged", Near(ReadDouble(persisted, "delivery_day", 0d), 105.3893225703d));
                     double legacyReplyBase = CorrespondenceTransitPolicy.ReplyBaseDays(0, 0d, 5.3893225703d);
                     Check("reply_to_legacy_parent_uses_new_speed_once", Near(CorrespondenceTransitPolicy.NewTransitDays(legacyReplyBase), 1.347330642575d));
@@ -73,7 +73,7 @@ namespace ReignBetaServer
                     Check("central_policy_urgent", ReadDouble(urgent, "deliveryDay", -1d) == 200d);
                     var scaled = InsertLetter(connection, "scaled", "Scaled", "player", "Player", "Slower courier.",
                         "npc_initiated", "scaled", "", "a", "b", 300d, 303d, TestDict(), 2d);
-                    var persistedScaled = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;",
+                    var persistedScaled = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;",
                         TestDict("id", ReadString(scaled, "letterId", ""))).Single();
                     double scaledBase = CorrespondenceTransitPolicy.ReplyBaseDays(ReadInt(persistedScaled, "transit_policy_version", 0),
                         ReadDouble(persistedScaled, "base_transit_days", 0), 1.5d);
@@ -105,12 +105,12 @@ namespace ReignBetaServer
                     "contactIds", new[] { "unrelated_contact" }));
                 Check("completion_report_visible_outside_contact_filter", ReadDictionaryList(inbox, "letters")
                     .Any(x => ReadString(x, "letter_id", "") == deliveredId));
-                using (var reports = OpenCampaignConnection(campaign))
+                using (var reports = Program.OpenCampaignConnection(campaign))
                 {
-                    Check("completion_report_retry_preserves_one_body", QuerySql(reports,
+                    Check("completion_report_retry_preserves_one_body", Program.QuerySql(reports,
                         "SELECT * FROM letters WHERE source='campaign_command_report' AND reason='scout_report_receipt';",
                         TestDict()).Count == 1);
-                    ExecuteSql(reports, "UPDATE letters SET status='read' WHERE letter_id=$id;", TestDict("id", deliveredId));
+                    Program.ExecuteSql(reports, "UPDATE letters SET status='read' WHERE letter_id=$id;", TestDict("id", deliveredId));
                     var guidance = QueueImmediateCampaignOrderGuidanceAction(reports, campaign,
                         TestDict("campaignId", campaign), "player", "commander", "continue");
                     Check("completion_report_cannot_become_guidance_order", guidance.Count == 0);
@@ -119,15 +119,15 @@ namespace ReignBetaServer
                 Check("completion_report_lost_ack_after_read_still_deduplicates",
                     ReadBool(readReplay, "deduplicated", false) && ReadString(readReplay, "letterId", "") == deliveredId
                     && ReadString(readReplay, "status", "") == "read");
-                using (var reopened = OpenCampaignConnection(campaign))
+                using (var reopened = Program.OpenCampaignConnection(campaign))
                 {
-                    var original = QuerySql(reopened, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
-                    var reply = QuerySql(reopened, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", replyId)).Single();
+                    var original = Program.QuerySql(reopened, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", originalId)).Single();
+                    var reply = Program.QuerySql(reopened, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", replyId)).Single();
                     Check("reopened_ledger_preserves_both_policy_generations", ReadInt(original, "transit_policy_version", -1) == 0
                         && Near(ReadDouble(original, "delivery_day", 0d), 105.3893225703d)
                         && ReadInt(reply, "transit_policy_version", 0) == CorrespondenceTransitPolicy.Version
                         && Near(ReadDouble(reply, "delivery_day", 0d), 103.347330642575d));
-                    ExecuteSql(reopened, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts)
+                    Program.ExecuteSql(reopened, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts)
 SELECT 'bulk_'||i,'bulk_thread','player','bulk','Fixture read body','read','player',400+i,i,i FROM generate_series(1,1001) AS i;
 INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
 ('old_unread','old_thread','old_contact','player','Old unread body','delivered','npc_initiated',1,1,1),
@@ -146,8 +146,8 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                     "contactIds", new[] { "bulk", "old_contact" }, "correspondentId", "old_contact"));
                 Check("selected_old_contact_loads_its_own_letters", ReadDictionaryList(oldThread, "letters").Count == 1
                     && ReadString(ReadDictionaryList(oldThread, "letters")[0], "letter_id", "") == "old_unread");
-                using (var connection = OpenCampaignConnection(campaign))
-                    ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id IN ('old_unread','bulk_1001');",
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    Program.ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id IN ('old_unread','bulk_1001');",
                         TestDict("payload", System.Text.Json.JsonSerializer.Serialize(TestDict("privatePrompt", new string('x', 1000000)))));
                 var summariesOnly = CorrespondenceThreadsApi(TestDict("campaignId", campaign, "playerId", "player",
                     "contactIds", new[] { "bulk", "old_contact" }, "summaryOnly", true));
@@ -155,8 +155,8 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                     && ReadInt(summariesOnly, "unreadCount", 0) == 1
                     && ReadDictionaryList(summariesOnly, "contactStates").Count == summaries.Count
                     && System.Text.Json.JsonSerializer.Serialize(summariesOnly).Length < 10000);
-                using (var connection = OpenCampaignConnection(campaign))
-                    ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    Program.ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,source,dispatch_day,created_ts,updated_ts) VALUES
 ('arranged_arrived','arranged_thread','unmet_leader','player','Marriage terms','delivered','reign_marriage_offer',5001,5001,5001),
 ('arranged_courier','arranged_other_thread','unmet_other_leader','player','In transit','in_transit','reign_marriage_offer',5002,5002,5002),
 ('arranged_answer','arranged_thread','player','unmet_leader','Signed answer','in_transit','reign_marriage_answer',5003,5003,5003),
@@ -180,9 +180,9 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                     && System.Text.Json.JsonSerializer.Serialize(slimThread).Length < 10000);
                 var batchRead = CorrespondenceReadApi(TestDict("campaignId", campaign, "playerId", "player", "worldDay", 7000d,
                     "letterIds", new[] { "old_unread", "old_unread", "hidden_mail", "foreign_mail", "missing", "bulk_1001" }));
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var statuses = QuerySql(connection, "SELECT letter_id,status,read_day,payload_json FROM letters WHERE letter_id IN ('old_unread','hidden_mail','foreign_mail','bulk_1001');");
+                    var statuses = Program.QuerySql(connection, "SELECT letter_id,status,read_day,payload_json FROM letters WHERE letter_id IN ('old_unread','hidden_mail','foreign_mail','bulk_1001');");
                     Check("batch_read_is_idempotent_and_recipient_scoped", ReadBool(batchRead, "ok", false)
                         && statuses.Any(row => ReadString(row, "letter_id", "") == "old_unread" && ReadString(row, "status", "") == "read" && ReadDouble(row, "read_day", 0) == 7000d)
                         && statuses.Any(row => ReadString(row, "letter_id", "") == "hidden_mail" && ReadString(row, "status", "") == "in_transit")
@@ -190,11 +190,11 @@ INSERT INTO letters(letter_id,thread_id,sender_id,recipient_id,body,status,sourc
                         && statuses.Any(row => ReadString(row, "letter_id", "") == "old_unread" && ReadString(row, "payload_json", "").Length > 1000000));
                 }
                 CorrespondenceReadApi(TestDict("campaignId", campaign, "playerId", "player", "worldDay", 7001d, "letterIds", new[] { "old_unread" }));
-                using (var connection = OpenCampaignConnection(campaign))
-                    Check("batch_read_retry_preserves_original_read_day", ReadDouble(QuerySql(connection,
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    Check("batch_read_retry_preserves_original_read_day", ReadDouble(Program.QuerySql(connection,
                         "SELECT read_day FROM letters WHERE letter_id='old_unread';").Single(), "read_day", 0) == 7000d);
             }
-            catch (Exception ex) { Check("suite_exception", false, LimitText(ex.ToString(), 2000)); }
+            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2000)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

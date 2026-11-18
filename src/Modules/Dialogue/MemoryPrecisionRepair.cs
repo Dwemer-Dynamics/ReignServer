@@ -35,11 +35,11 @@ namespace ReignBetaServer
                     ["expectedSourceHash"] = MemorySourceHash(turns), ["expectedSessionHash"] = MemorySourceHash(new[] { session }),
                     ["prepared"] = prepared });
             }
-            var state = TableExists(connection, "memory_precision_state") ? ReadMemoryPrecisionState(connection) : new Dictionary<string, object>();
+            var state = WorldSimulationService.TableExists(connection, "memory_precision_state") ? ReadMemoryPrecisionState(connection) : new Dictionary<string, object>();
             var derivativeReview = new List<Dictionary<string,object>>();
             foreach (string table in new[] { "summaries", "temporal_knowledge_assertions", "beliefs", "comprehension", "conversation_continuity" })
             {
-                if (!TableExists(connection,table)) continue;
+                if (!WorldSimulationService.TableExists(connection,table)) continue;
                 string key = table=="summaries" ? "summary_id" : table=="temporal_knowledge_assertions" ? "assertion_id" : table=="beliefs" ? "belief_id" : table=="comprehension" ? "comprehension_id" : "record_id";
                 foreach (var row in QuerySql(connection,"SELECT * FROM "+table+" ORDER BY "+key+";"))
                 {

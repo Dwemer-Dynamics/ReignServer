@@ -6,43 +6,43 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
-        private const int FlingMaximumJudgment = 40;
+        internal const int FlingMaximumJudgment = 40;
         private const int FlingMaximumChancePercent = 50;
-        private const int FlingSparkChancePercent = 25;
-        private const int FlingCooldownDays = 7;
-        private const int FlingDiscoveryChancePercent = 20;
+        internal const int FlingSparkChancePercent = 25;
+        internal const int FlingCooldownDays = 7;
+        internal const int FlingDiscoveryChancePercent = 20;
 
-        private static void EnsureRelationshipFlingSchemaCore(
+        internal static void EnsureRelationshipFlingSchemaCore(
             ReignDbConnection connection)
         {
             if (IsRelationshipMaintenanceTableReady(connection, "relationship_fling_profiles")
                 && IsRelationshipMaintenanceTableReady(connection, "relationship_fling_rolls")
                 && IsRelationshipMaintenanceTableReady(connection, "relationship_fling_sparks")
                 && IsRelationshipMaintenanceTableReady(connection, "relationship_fling_encounters")) return;
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_profiles (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_profiles (
 hero_id TEXT PRIMARY KEY,judgment INTEGER NOT NULL,source TEXT NOT NULL DEFAULT '',
 updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_rolls (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_rolls (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day INTEGER NOT NULL,
 hero_id TEXT NOT NULL,location_kind TEXT NOT NULL DEFAULT '',location_id TEXT NOT NULL DEFAULT '',
 judgment INTEGER NOT NULL,chance_percent INTEGER NOT NULL,roll INTEGER NOT NULL,
 passed INTEGER NOT NULL,status TEXT NOT NULL,encounter_id TEXT NOT NULL DEFAULT '',
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,world_day,hero_id));" );
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_rolls_hero
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_rolls_hero
 ON relationship_fling_rolls(timeline_id,hero_id,world_day DESC);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_sparks (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_sparks (
 campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day INTEGER NOT NULL,
 pair_key TEXT NOT NULL,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
 location_kind TEXT NOT NULL DEFAULT '',location_id TEXT NOT NULL DEFAULT '',
 chance_percent INTEGER NOT NULL,roll INTEGER NOT NULL,passed INTEGER NOT NULL,
 encounter_id TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,world_day,pair_key));" );
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_sparks_day
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_sparks_day
 ON relationship_fling_sparks(timeline_id,world_day DESC);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_encounters (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_fling_encounters (
 encounter_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,
 world_day INTEGER NOT NULL,pair_key TEXT NOT NULL,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
 location_kind TEXT NOT NULL DEFAULT '',location_id TEXT NOT NULL DEFAULT '',
@@ -56,11 +56,11 @@ conception_chance REAL NOT NULL DEFAULT 0,conception_roll REAL NOT NULL DEFAULT 
 conceived INTEGER NOT NULL DEFAULT 0,conception_action_id TEXT NOT NULL DEFAULT '',
 status TEXT NOT NULL DEFAULT 'processing',payload_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_encounters_day
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_encounters_day
 ON relationship_fling_encounters(timeline_id,world_day DESC);" );
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_encounters_a
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_encounters_a
 ON relationship_fling_encounters(timeline_id,hero_a_id,world_day DESC);" );
-            ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_encounters_b
+            Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_relationship_fling_encounters_b
 ON relationship_fling_encounters(timeline_id,hero_b_id,world_day DESC);" );
         }
 
@@ -118,7 +118,7 @@ ON relationship_fling_encounters(timeline_id,hero_b_id,world_day DESC);" );
             Dictionary<string, object> percentages = ReadDictionary(document,
                 "traitPercentages");
             if (percentages == null || percentages.Count == 0) return false;
-            virtues = CalculateCourtVirtues(percentages);
+            virtues = CharactersService.CalculateCourtVirtues(percentages);
             if (virtues == null || !virtues.ContainsKey("judgment")) return false;
             judgment = Clamp(ReadInt(virtues, "judgment", 50), 0, 100);
             return true;
@@ -146,8 +146,8 @@ ON relationship_fling_encounters(timeline_id,hero_b_id,world_day DESC);" );
                 return true;
             }
 
-            Dictionary<string, object> campaignTraits = ReadJsonObject(
-                CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> campaignTraits = Program.ReadJsonObject(
+                Program.CharacterFile(campaignId, heroId, "traits.json"));
             if (TryExtractFlingJudgment(hero, out judgment))
                 source = "daily_snapshot";
             else if (TryExtractFlingJudgment(campaignTraits, out judgment))
@@ -168,7 +168,7 @@ ON relationship_fling_encounters(timeline_id,hero_b_id,world_day DESC);" );
                 return false;
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT INTO relationship_fling_profiles(
+            Program.ExecuteSql(connection, @"INSERT INTO relationship_fling_profiles(
 hero_id,judgment,source,updated_ts) VALUES($hero,$judgment,$source,$ts)
 ON CONFLICT(hero_id) DO UPDATE SET judgment=$judgment,source=$source,updated_ts=$ts;",
                 new Dictionary<string, object>
@@ -276,20 +276,20 @@ ON CONFLICT(hero_id) DO UPDATE SET judgment=$judgment,source=$source,updated_ts=
         {
             Stopwatch preparationTimer = Stopwatch.StartNew();
             EnsureRelationshipLifecycleSchema(connection);
-            if (!TableExists(connection, "relationship_fling_profiles")
-                || !TableExists(connection, "relationship_fling_rolls")
-                || !TableExists(connection, "relationship_fling_sparks")
-                || !TableExists(connection, "relationship_fling_encounters"))
+            if (!WorldSimulationService.TableExists(connection, "relationship_fling_profiles")
+                || !WorldSimulationService.TableExists(connection, "relationship_fling_rolls")
+                || !WorldSimulationService.TableExists(connection, "relationship_fling_sparks")
+                || !WorldSimulationService.TableExists(connection, "relationship_fling_encounters"))
                 EnsureRelationshipFlingSchemaCore(connection);
             EnsureRelationshipDirectorSchema(connection);
-            if (!TableExists(connection, "rumor_occurrences"))
+            if (!WorldSimulationService.TableExists(connection, "rumor_occurrences"))
                 ReputationService.EnsureSocialReputationSchema(connection);
             timelineId = string.IsNullOrWhiteSpace(timelineId)
                 ? "main" : timelineId;
             Dictionary<string, object> aggregate =
                 new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> persistedJudgments =
-                QuerySql(connection, "SELECT * FROM relationship_fling_profiles;")
+                Program.QuerySql(connection, "SELECT * FROM relationship_fling_profiles;")
                     .Where(row => !string.IsNullOrWhiteSpace(
                         ReadString(row, "hero_id", "")))
                     .ToDictionary(row => ReadString(row, "hero_id", ""),
@@ -342,8 +342,8 @@ ON CONFLICT(hero_id) DO UPDATE SET judgment=$judgment,source=$source,updated_ts=
                             ?? new Dictionary<string, object>(),
                         StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Dictionary<string, object>> shippedDocuments =
-                LoadCharacterProfileLibrary();
-            Dictionary<string, int> lastFlingByHero = QuerySql(connection, @"
+                CharactersService.LoadCharacterProfileLibrary();
+            Dictionary<string, int> lastFlingByHero = Program.QuerySql(connection, @"
 SELECT hero_id,MAX(world_day) AS world_day FROM (
  SELECT hero_a_id AS hero_id,world_day FROM relationship_fling_encounters
  WHERE timeline_id=$timeline AND status='completed'
@@ -359,13 +359,13 @@ SELECT hero_id,MAX(world_day) AS world_day FROM (
                     row => ReadInt(row, "world_day", -1),
                     StringComparer.OrdinalIgnoreCase);
             HashSet<string> activeLoverPairs = new HashSet<string>(
-                QuerySql(connection, @"SELECT pair_key
+                Program.QuerySql(connection, @"SELECT pair_key
 FROM relationship_pair_lifecycle WHERE lover_active=1;")
                     .Select(row => ReadString(row, "pair_key", ""))
                     .Where(value => !string.IsNullOrWhiteSpace(value)),
                 StringComparer.OrdinalIgnoreCase);
             HashSet<string> pendingMothers = new HashSet<string>(
-                QuerySql(connection, @"SELECT mother_id FROM conceptions
+                Program.QuerySql(connection, @"SELECT mother_id FROM conceptions
 WHERE status='pending_game';")
                     .Select(row => ReadString(row, "mother_id", ""))
                     .Where(value => !string.IsNullOrWhiteSpace(value)),
@@ -384,7 +384,7 @@ WHERE status='pending_game';")
                 int rollWriteCommands = 0;
 
                 Dictionary<string, Dictionary<string, object>> existingRolls =
-                    QuerySql(connection, @"SELECT *
+                    Program.QuerySql(connection, @"SELECT *
 FROM relationship_fling_rolls WHERE campaign_id=$campaign
 AND timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
@@ -525,7 +525,7 @@ AND timeline_id=$timeline AND world_day=$day;",
                             <= FlingSparkChancePercent;
                         long sparkTs = DateTimeOffset.UtcNow
                             .ToUnixTimeSeconds();
-                        ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_fling_sparks(
+                        Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_fling_sparks(
 campaign_id,timeline_id,world_day,pair_key,hero_a_id,hero_b_id,
 location_kind,location_id,chance_percent,roll,passed,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$pair,$a,$b,$kind,$location,$chance,
@@ -544,7 +544,7 @@ $roll,$passed,$ts,$ts);", new Dictionary<string, object>
                             ["ts"] = sparkTs
                         });
                         Dictionary<string, object> sparkReceipt =
-                            QuerySql(connection, @"SELECT * FROM relationship_fling_sparks
+                            Program.QuerySql(connection, @"SELECT * FROM relationship_fling_sparks
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND world_day=$day AND pair_key=$pair LIMIT 1;",
                                 new Dictionary<string, object>
@@ -556,7 +556,7 @@ AND world_day=$day AND pair_key=$pair LIMIT 1;",
                             ?? new Dictionary<string, object>();
                         if (ReadInt(sparkReceipt, "passed", 0) == 0)
                         {
-                            ExecuteSql(connection, @"UPDATE relationship_fling_rolls
+                            Program.ExecuteSql(connection, @"UPDATE relationship_fling_rolls
 SET status='spark_failed',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND world_day=$day
 AND hero_id IN ($a,$b);", new Dictionary<string, object>
@@ -580,7 +580,7 @@ AND hero_id IN ($a,$b);", new Dictionary<string, object>
                         if (string.IsNullOrWhiteSpace(encounterId)) continue;
                         lastFlingByHero[pair.Item1.HeroId] = day;
                         lastFlingByHero[pair.Item2.HeroId] = day;
-                        ExecuteSql(connection, @"UPDATE relationship_fling_sparks
+                        Program.ExecuteSql(connection, @"UPDATE relationship_fling_sparks
 SET encounter_id=$encounter,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND world_day=$day AND pair_key=$pair;",
@@ -593,7 +593,7 @@ AND world_day=$day AND pair_key=$pair;",
                                 ["timeline"] = timelineId,
                                 ["day"] = day, ["pair"] = pairKey
                             });
-                        ExecuteSql(connection, @"UPDATE relationship_fling_rolls
+                        Program.ExecuteSql(connection, @"UPDATE relationship_fling_rolls
 SET status='paired',encounter_id=$encounter,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND world_day=$day
 AND hero_id IN ($a,$b);", new Dictionary<string, object>
@@ -609,16 +609,16 @@ AND hero_id IN ($a,$b);", new Dictionary<string, object>
                 }
 
                 rollWriteCommands += FlushRelationshipFlingRolls(connection, pendingRolls);
-                IncrementWorldTestObjectCounter(aggregate, "rollWriteCommands", rollWriteCommands);
+                WorldSimulationService.IncrementWorldTestObjectCounter(aggregate, "rollWriteCommands", rollWriteCommands);
                 Dictionary<string, object> dayCounters =
                     BuildFlingDayCounters(connection, campaignId, timelineId,
                         day, unavailableJudgment, cooldownExcluded,
                         duplicateSuppressed);
-                RecordWorldTestCounterSchemaReady(connection, campaignId,
+                WorldSimulationService.RecordWorldTestCounterSchemaReady(connection, campaignId,
                     timelineId, day, "relationships", "flings_daily_summary",
                     dayCounters);
                 foreach (KeyValuePair<string, object> counter in dayCounters)
-                    IncrementWorldTestObjectCounter(aggregate, counter.Key,
+                    WorldSimulationService.IncrementWorldTestObjectCounter(aggregate, counter.Key,
                         Convert.ToInt32(counter.Value,
                             CultureInfo.InvariantCulture));
             }
@@ -643,7 +643,7 @@ ON CONFLICT(campaign_id,timeline_id,world_day,hero_id) DO NOTHING;",
             {
                 commands = rows.Count;
                 foreach (Dictionary<string, object> row in rows)
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_fling_rolls(
+                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_fling_rolls(
 campaign_id,timeline_id,world_day,hero_id,location_kind,location_id,
 judgment,chance_percent,roll,passed,status,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$hero,$kind,$location,$judgment,$chance,
@@ -664,18 +664,18 @@ $roll,$passed,$status,$ts,$ts);", row);
                     ["campaign"] = campaignId, ["timeline"] = timelineId,
                     ["day"] = day
                 };
-            Dictionary<string, object> rolls = QuerySql(connection, @"
+            Dictionary<string, object> rolls = Program.QuerySql(connection, @"
 SELECT COUNT(*) AS rolls,SUM(passed) AS passes,
 SUM(CASE WHEN status='passed_unmatched' THEN 1 ELSE 0 END) AS unmatched
 FROM relationship_fling_rolls WHERE campaign_id=$campaign
 AND timeline_id=$timeline AND world_day=$day;", parameters)
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> sparks = QuerySql(connection, @"
+            Dictionary<string, object> sparks = Program.QuerySql(connection, @"
 SELECT COUNT(*) AS attempts,SUM(passed) AS passes
 FROM relationship_fling_sparks WHERE campaign_id=$campaign
 AND timeline_id=$timeline AND world_day=$day;", parameters)
                 .FirstOrDefault() ?? new Dictionary<string, object>();
-            Dictionary<string, object> encounters = QuerySql(connection, @"
+            Dictionary<string, object> encounters = Program.QuerySql(connection, @"
 SELECT COUNT(*) AS pairings,SUM(same_sex) AS same_sex,
 SUM(CASE WHEN same_sex=0 THEN 1 ELSE 0 END) AS opposite_sex,
 SUM(short_affair) AS short_affairs,
@@ -737,7 +737,7 @@ AND timeline_id=$timeline AND world_day=$day AND status='completed';",
                 string.Join("|", campaignId, timelineId,
                     day.ToString(CultureInfo.InvariantCulture),
                     locationKind, locationId, pairKey, "fling_encounter_v1"));
-            Dictionary<string, object> prior = QuerySql(connection, @"
+            Dictionary<string, object> prior = Program.QuerySql(connection, @"
 SELECT encounter_id FROM relationship_fling_encounters
 WHERE encounter_id=$id LIMIT 1;", new Dictionary<string, object>
                 {
@@ -758,7 +758,7 @@ WHERE encounter_id=$id LIMIT 1;", new Dictionary<string, object>
             bool shortAffair = !string.IsNullOrWhiteSpace(spouseA)
                 || !string.IsNullOrWhiteSpace(spouseB);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT INTO relationship_fling_encounters(
+            Program.ExecuteSql(connection, @"INSERT INTO relationship_fling_encounters(
 encounter_id,campaign_id,timeline_id,world_day,pair_key,hero_a_id,hero_b_id,
 location_kind,location_id,same_sex,short_affair,status,created_ts,updated_ts)
 VALUES($id,$campaign,$timeline,$day,$pair,$a,$b,$kind,$location,$sameSex,
@@ -879,7 +879,7 @@ $shortAffair,'processing',$ts,$ts);", new Dictionary<string, object>
                     ? "Two co-located low-judgment characters had a brief fling involving a married participant."
                     : "Two co-located low-judgment characters had a brief fling.",
                 incidentPayload, rumorId);
-            ExecuteSql(connection, @"UPDATE relationship_fling_encounters SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_fling_encounters SET
 fixed_discovery_chance=$fixedChance,fixed_discovery_roll=$fixedRoll,
 fixed_discovered=$fixedFound,pregnancy_discovery_chance=$pregnancyChance,
 pregnancy_discovery_roll=$pregnancyRoll,pregnancy_discovered=$pregnancyFound,
@@ -967,7 +967,7 @@ payload_json=$payload,updated_ts=$ts WHERE encounter_id=$id;",
                     ["motherMarriedElsewhere"] = motherMarriedElsewhere,
                     ["fatherMarriedElsewhere"] = fatherMarriedElsewhere
                 };
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO conception_attempts(
+            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conception_attempts(
 attempt_id,source,event_id,mother_id,father_id,mother_age,chance,roll,success,
 world_day,payload_json,created_ts,status)
 VALUES($id,'npc_fling',$event,$mother,$father,$age,$chance,$roll,$success,
@@ -1004,7 +1004,7 @@ $day,$payload,$ts,'resolved');", new Dictionary<string, object>
                     ["conceptionDay"] = day, ["dueDay"] = day + 36d,
                     ["secrecy"] = secrecy
                 };
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO conceptions(
+            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conceptions(
 conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,
 conception_day,due_day,status,secrecy,payload_json,created_ts,updated_ts)
 VALUES($id,$attempt,$mother,$bio,$legal,$day,$due,'pending_game',$secrecy,
@@ -1189,12 +1189,12 @@ $payload,$ts,$ts);", new Dictionary<string, object>
             try
             {
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureRelationshipDirectorSchema(connection);
                     EnsureMbtiRelationshipSchema(connection);
                     ReputationService.EnsureSocialReputationSchema(connection);
-                    EnsureWorldTestTelemetrySchema(connection);
+                    WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
                     const int day = 50;
                     const string timeline = "fling_test_timeline";
                     List<Dictionary<string, object>> passingHeroes =
@@ -1267,7 +1267,7 @@ $payload,$ts,$ts);", new Dictionary<string, object>
                     heroes["ineligible_child"] = cachedProfileChild;
                     groups[day][0]["heroIds"] = heroes.Keys.Cast<object>().ToList();
                     foreach (string heroId in heroes.Keys)
-                        ExecuteSql(connection, @"INSERT INTO relationship_personalities(
+                        Program.ExecuteSql(connection, @"INSERT INTO relationship_personalities(
 hero_id,mbti_type,title,description,source,assignment_day,template_version,traits_json,created_ts,updated_ts)
 VALUES($hero,'INTJ','Fixture','Fixture','self_test',50,1,$traits,1,1);",
                             new Dictionary<string, object> { ["hero"] = heroId,
@@ -1284,14 +1284,14 @@ VALUES($hero,'INTJ','Fixture','Fixture','self_test',50,1,$traits,1,1);",
                     add("fling_roll_batch_precedes_spark_dependencies",
                         ReadInt(firstRun, "rollWriteCommands", -1) == (ReignPostgreSqlDialect.IsPostgreSql(connection) ? 1 : 3),
                         "All three roll receipts are written together before spark/encounter updates consume them.");
-                    int rollCount = ReadInt(QuerySql(connection, @"
+                    int rollCount = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_rolls
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
                         {
                             ["timeline"] = timeline, ["day"] = day
                         }).FirstOrDefault(), "count", 0);
-                    int encounterCount = ReadInt(QuerySql(connection, @"
+                    int encounterCount = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
@@ -1299,7 +1299,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                             ["timeline"] = timeline, ["day"] = day
                         }).FirstOrDefault(), "count", 0);
                     Dictionary<string, object> sparkCount =
-                        QuerySql(connection, @"
+                        Program.QuerySql(connection, @"
 SELECT COUNT(*) AS attempts,SUM(passed) AS passes
 FROM relationship_fling_sparks
 WHERE timeline_id=$timeline AND world_day=$day;",
@@ -1308,10 +1308,10 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                                 ["timeline"] = timeline, ["day"] = day
                             }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
-                    int lifecycleCount = ReadInt(QuerySql(connection,
+                    int lifecycleCount = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_lifecycle;")
                         .FirstOrDefault(), "count", 0);
-                    int chemistryCount = ReadInt(QuerySql(connection,
+                    int chemistryCount = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry;")
                         .FirstOrDefault(), "count", 0);
                     add("fling_ledger_replay_is_idempotent",
@@ -1342,7 +1342,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                         lifecycleCount == 0 && chemistryCount == 0,
                         "A fling receipt never creates lover/affair lifecycle state or changes directional affinity.");
                     add("same_sex_fling_has_no_conception",
-                        ReadInt(QuerySql(connection, @"
+                        ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE timeline_id=$timeline AND same_sex=1
 AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
@@ -1365,7 +1365,7 @@ AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
                         quietGroups, null, quietHeroes);
                     Dictionary<string, object> quietReplay = ProcessDailyNpcFlings(connection, campaignId, timeline,
                         quietGroups, null, quietHeroes);
-                    Dictionary<string, object> quietRoll = QuerySql(connection,
+                    Dictionary<string, object> quietRoll = Program.QuerySql(connection,
                         "SELECT * FROM relationship_fling_rolls WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object> { ["timeline"] = timeline, ["day"] = quietDay }).SingleOrDefault();
                     int expectedQuietRoll = StableDie(string.Join("|", campaignId, timeline,
@@ -1458,7 +1458,7 @@ AND (conception_attempt_id<>'' OR conception_id<>'' OR conceived=1);",
                         failedSparkGroups, failedSparkRows,
                         failedSparkHeroMap);
                     Dictionary<string, object> failedSparkCounts =
-                        QuerySql(connection, @"
+                        Program.QuerySql(connection, @"
 SELECT COUNT(*) AS attempts,SUM(passed) AS passes
 FROM relationship_fling_sparks WHERE timeline_id=$timeline
 AND world_day=$day;", new Dictionary<string, object>
@@ -1467,7 +1467,7 @@ AND world_day=$day;", new Dictionary<string, object>
                             ["day"] = failedSparkDay
                         }).FirstOrDefault()
                         ?? new Dictionary<string, object>();
-                    int nextDayRolls = ReadInt(QuerySql(connection, @"
+                    int nextDayRolls = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_rolls
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
@@ -1475,7 +1475,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
                             ["timeline"] = timeline,
                             ["day"] = failedSparkDay + 1
                         }).FirstOrDefault(), "count", 0);
-                    int failedSparkEncounters = ReadInt(QuerySql(connection, @"
+                    int failedSparkEncounters = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM relationship_fling_encounters
 WHERE timeline_id=$timeline AND world_day=$day;",
                         new Dictionary<string, object>
@@ -1501,7 +1501,7 @@ WHERE timeline_id=$timeline AND world_day=$day;",
             {
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); }
                 catch { }
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             return results;
         }

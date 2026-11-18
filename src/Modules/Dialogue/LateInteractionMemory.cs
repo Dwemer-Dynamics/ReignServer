@@ -271,7 +271,7 @@ CREATE TABLE IF NOT EXISTS memory_late_interaction_attempts (
                 audit["mode"] = mode;
                 if (!new[] { "shadow", "on", "replay" }.Contains(mode) || string.IsNullOrWhiteSpace(plan.Query)) return empty;
                 string campaign = ReignPostgreSqlStorage.CampaignIdForConnection(connection);
-                if (!isolated && IsSaveSyncSemanticBlocked(campaign)) { audit["status"] = "save_sync_fallback"; return empty; }
+                if (!isolated && PersistenceService.IsSaveSyncSemanticBlocked(campaign)) { audit["status"] = "save_sync_fallback"; return empty; }
                 string eligible = MemorySessionObserverSql("s", "t") + @" AND t.status='active' AND t.text<>''
 AND t.world_day<=$day AND t.accepted_sequence<=$asOfSequence AND t.ts<=$asOfTimestamp AND " + MemorySourceTimelineSql("conversation_turns", "t");
                 var args = TestDict("npc", knowledge.NpcId, "timeline", knowledge.TimelineId, "day", knowledge.WorldDay,
@@ -402,7 +402,7 @@ AND i.source_revision=t.xmin::text AND i.model_hash=$model AND i.schema_version=
                 }
                 foreach (var source in sources)
                 {
-                    if (!isolated && (PriorityBackgroundWorkShouldYield() || IsSaveSyncSemanticBlocked(campaign))) break;
+                    if (!isolated && (PriorityBackgroundWorkShouldYield() || PersistenceService.IsSaveSyncSemanticBlocked(campaign))) break;
                     phase = "source_projection";
                     var views = new[] { "self", "public" }.Select(v => LateInteractionView(source, v)).Where(v => v != null).ToList();
                     if (views.Count == 0) { RecordLateInteractionIndexFailure(campaign, source, "empty_visible_source"); continue; }

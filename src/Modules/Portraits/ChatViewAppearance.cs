@@ -21,9 +21,9 @@ namespace ReignBetaServer
         // Character Editor's active-variant order is deliberately not reused.
         private static string ResolveChatViewPortraitPath(string campaign, string hero)
         {
-            string cacheRoot = Program.CampaignPortraitCacheDirectory(campaign);
+            string cacheRoot = PersistenceService.CampaignPortraitCacheDirectory(campaign);
             var campaignFolders = ChatViewHeroFolders(cacheRoot, hero);
-            string sharedRoot = Program.CharacterEditorPortraitCacheRoot();
+            string sharedRoot = CharactersService.CharacterEditorPortraitCacheRoot();
             bool sharedReadable = !string.IsNullOrWhiteSpace(sharedRoot) && Directory.Exists(Path.Combine(sharedRoot, "_shared"));
             var sharedFolders = sharedReadable ? ChatViewHeroFolders(Path.Combine(sharedRoot, "_shared"), hero) : Array.Empty<string>();
             return SelectChatViewPortraitPath(campaignFolders, sharedFolders,
@@ -74,7 +74,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ChatViewReferenceReceipt(string campaign, string hero, string path, byte[] bytes)
         {
             string folder = Path.GetDirectoryName(path);
-            string origin = path.StartsWith(Program.CampaignPortraitCacheDirectory(campaign) + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            string origin = path.StartsWith(PersistenceService.CampaignPortraitCacheDirectory(campaign) + Path.DirectorySeparatorChar, StringComparison.Ordinal)
                 ? "campaign" : folder == Program.CharacterFile(campaign, hero, "portraits") ? "character" : "shared";
             return TestDict("characterId", hero, "contract", ChatViewReferenceContract, "origin", origin,
                 "folder", Path.GetFileName(folder), "fileName", Path.GetFileName(path), "sha256", Sha256Hex(bytes));

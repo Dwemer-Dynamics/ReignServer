@@ -5,10 +5,13 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Web.Script.Serialization;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace ReignBetaServer
 {
@@ -341,6 +344,41 @@ namespace ReignBetaServer
                     .Replace("-", "")
                     .ToLowerInvariant();
             }
+        }
+
+        internal static int ParseInt(string value) { return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : 0; }
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        internal static int ParseInt(string value, int fallback)
+        {
+            return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback;
+        }
+#endif
+
+        internal static string HttpStatusText(int status) => status switch
+        {
+            200 => "OK", 400 => "Bad Request", 403 => "Forbidden", 404 => "Not Found", 408 => "Request Timeout",
+            411 => "Length Required", 413 => "Content Too Large", 414 => "URI Too Long", 429 => "Too Many Requests", 431 => "Request Header Fields Too Large",
+            503 => "Service Unavailable", _ => "Server Error"
+        };
+
+        internal static void WriteText(NetworkStream stream, int status, string contentType, string text, string downloadName)
+        {
+            string statusText = HttpStatusText(status);
+            byte[] body = Encoding.UTF8.GetBytes(text ?? string.Empty);
+            string header = "HTTP/1.1 " + status + " " + statusText + "\r\n"
+                + "Content-Type: " + contentType + "\r\n"
+                + "Content-Length: " + body.Length + "\r\n"
+                + (string.IsNullOrWhiteSpace(downloadName) ? string.Empty : "Content-Disposition: attachment; filename=\"" + downloadName + "\"\r\n")
+                + "Connection: close\r\n\r\n";
+            byte[] headerBytes = Encoding.ASCII.GetBytes(header);
+            stream.Write(headerBytes, 0, headerBytes.Length);
+            stream.Write(body, 0, body.Length);
+        }
+
+        internal static void WriteText(NpgsqlBinaryImporter writer, string value)
+        {
+            writer.Write(value ?? string.Empty, NpgsqlDbType.Text);
         }
     }
 }

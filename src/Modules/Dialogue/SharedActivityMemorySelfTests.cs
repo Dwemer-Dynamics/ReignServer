@@ -29,7 +29,7 @@ namespace ReignBetaServer
             ReadDictionaryList(battle, "entities").ForEach(e => e["side"] = "attacker");
             ((List<Dictionary<string, object>>)battle["entities"]).Add(TestDict("entityId", "looter_party", "entityType", "party", "name", "Looters", "role", "defender party loser", "quantity", 18));
             var initial = new List<Dictionary<string, object>> { arrival, win, battle };
-            var ingest = WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", timeline, "events", initial));
+            var ingest = WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", timeline, "events", initial));
             check("canonical_ingestion", ReadBool(ingest, "ok", false), ingest);
             using (var connection = OpenCampaignConnection(campaign))
             {

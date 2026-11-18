@@ -9,7 +9,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string LegacyMemoryRecoveryVersion = "verified-prefork-snapshot-v1";
+        internal const string LegacyMemoryRecoveryVersion = "verified-prefork-snapshot-v1";
 
         // A recorded parent name is not source authority. Require a retained
         // boundary, or the exact canonical fork counter plus its immediate child
@@ -61,7 +61,7 @@ namespace ReignBetaServer
                 if (depth == 31) return new();
             }
             if (ancestors.Count == 0) return proofs;
-            foreach (var savedPoint in ReadDictionaryList(ReadSaveSyncLedger(campaign), "points").Take(128))
+            foreach (var savedPoint in ReadDictionaryList(PersistenceService.ReadSaveSyncLedger(campaign), "points").Take(128))
             {
                 string ancestor = ReadString(savedPoint, "timelineId", "");
                 if (!ancestors.TryGetValue(ancestor, out var boundary)) continue;
@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 string head = ReadString(savedPoint, "worldHistoryHeadEventId", "");
                 if (sequence < 0 || sequence > ReadLong(boundary, "ceiling", -1) || head.Length == 0
                     || day > ReadDouble(point, "campaignTimeDays", 0d)) continue;
-                string root = SaveSyncSnapshotRoot(campaign, savedPoint);
+                string root = PersistenceService.SaveSyncSnapshotRoot(campaign, savedPoint);
                 string manifestPath = Path.Combine(root, "manifest.json");
                 if (!File.Exists(manifestPath) || !Directory.Exists(Path.Combine(root, "campaign"))) continue;
                 var manifest = ReadJsonObject(manifestPath);
@@ -78,7 +78,7 @@ namespace ReignBetaServer
                 if (fingerprint.Length == 0 || ReadString(manifest, "campaignId", "") != campaign
                     || ReadString(manifest, "fingerprint", "") != fingerprint
                     || ReadString(manifest, "databaseProvider", "") != "postgresql") continue;
-                string snapshotPoint = SaveSyncPostgreSqlSnapshotPointId(savedPoint);
+                string snapshotPoint = PersistenceService.SaveSyncPostgreSqlSnapshotPointId(savedPoint);
                 string schema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, snapshotPoint);
                 var metadata = QuerySql(connection, @"SELECT extract(epoch FROM created_utc)::double precision AS created_epoch
 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_id=$point AND schema_name=$schema;",
@@ -106,7 +106,7 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
                 foreach (var entry in SnapshotMemoryKeys)
                 {
                     string schema = ReadString(proof, "schema", "");
-                    if (!TableExists(connection, entry.Key) || ReadString(QuerySql(connection, "SELECT to_regclass($table)::text AS name;",
+                    if (!WorldSimulationService.TableExists(connection, entry.Key) || ReadString(QuerySql(connection, "SELECT to_regclass($table)::text AS name;",
                         TestDict("table", schema + "." + entry.Key)).Single(), "name", "").Length == 0) continue;
                     string day = "COALESCE((to_jsonb(saved)->>'world_day')::double precision,(to_jsonb(saved)->>'learned_day')::double precision,"
                         + "((to_jsonb(saved)->>'payload_json')::jsonb->>'worldDay')::double precision,0)";
@@ -155,7 +155,7 @@ FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campaign AND save_point_i
 
         private static void RecoverLegacyPerformanceSources(ReignDbConnection connection, Dictionary<string, object> proof, string generation)
         {
-            if (!TableExists(connection, "character_performance_events")) return;
+            if (!WorldSimulationService.TableExists(connection, "character_performance_events")) return;
             string schema = ReadString(proof, "schema", ""); // Produced only by the canonical verified snapshot resolver.
             foreach (string table in new[] { "world_history_events", "world_history_entities", "world_history_knowledge_rules" })
                 if (ReadString(QuerySql(connection, "SELECT to_regclass($table)::text AS name;", TestDict("table", schema + "." + table)).Single(), "name", "").Length == 0) return;

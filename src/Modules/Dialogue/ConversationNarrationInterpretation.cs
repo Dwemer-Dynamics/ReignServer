@@ -230,7 +230,7 @@ namespace ReignBetaServer
                             ? ValidateNarrationInterpretation(source.Original, TryParseJsonObject(ReadString(response, "content", "")), payload)
                             : TestDict("status", "unresolved", "errors", new[] { "interpretation_unavailable" }, "providerCalls", 1);
                     }
-                    catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))
+                    catch (Exception ex) when (!(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
                     { result = TestDict("status", "unresolved", "errors", new[] { "interpretation_failed:" + ex.GetType().Name }, "providerCalls", 1); }
                 }
                 result["sourceHash"] = ConversationExactTextHash(source.Original);

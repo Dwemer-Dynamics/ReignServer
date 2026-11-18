@@ -431,7 +431,7 @@ namespace ReignBetaServer
             ["proposalId"] = String(), ["revision"] = Integer(), ["termsHash"] = String(), ["reason"] = String(),
             ["clauses"] = Array(Object(new Dictionary<string, object>
             {
-                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible && (d.Id != Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id || Program.TavernActionScopeEnabled)).Select(d => d.Id)),
+                ["actionId"] = String(Reign.Core.Contracts.Actions.ReignActionCatalog.All.Where(d => d.ConversationEligible && (d.Id != Reign.Core.Contracts.Actions.TavernHouseVisitAction.Id || CharactersService.TavernActionScopeEnabled)).Select(d => d.Id)),
                 ["actorId"] = String(), ["recipientId"] = String(),
                 ["arguments"] = Array(Object(new Dictionary<string, object> { ["key"] = String(), ["value"] = String() }, null, false)),
                 ["dueDay"] = Number(0, null), ["durationDays"] = Number(0, null), ["installments"] = Integer(), ["intervalDays"] = Number(0, null),

@@ -19,7 +19,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CodexIdentityPermissions(Dictionary<string, object> identity)
         {
-            var permissions = DeepCloneProfileDictionary(identity ?? TestDict());
+            var permissions = CharactersService.DeepCloneProfileDictionary(identity ?? TestDict());
             foreach (string key in new[] { "encounterCount", "recognitionAttempts", "confidence" }) permissions.Remove(key);
             return permissions;
         }
@@ -50,9 +50,9 @@ namespace ReignBetaServer
                 + "Continue only the accepted conversation. The latest player contribution follows.\n\n"
                 + BuildCodexMessageBlocks(messages.Where((m, i) => i == reference || i == messages.Count - 1));
             if (mode != "direct") return;
-            var accessSource = DeepCloneProfileDictionary(source ?? TestDict());
-            accessSource["identityView"] = DeepCloneProfileDictionary(identity ?? TestDict());
-            accessSource["profile"] = DeepCloneProfileDictionary(profile ?? TestDict());
+            var accessSource = CharactersService.DeepCloneProfileDictionary(source ?? TestDict());
+            accessSource["identityView"] = CharactersService.DeepCloneProfileDictionary(identity ?? TestDict());
+            accessSource["profile"] = CharactersService.DeepCloneProfileDictionary(profile ?? TestDict());
             // Native campaign timeline is separate from the Codex load-generation nonce.
             var knowledge = BuildKnowledgeAccessContext(observer, ReadFirstString(source, "playerId", "playerHeroStringId", "mainHeroStringId"),
                 ReadFirstString(source, "locationId", "settlementId"), accessSource);
@@ -101,7 +101,7 @@ namespace ReignBetaServer
                 using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead);
                 // Access is frozen at the start of this request. Queries never take campaign,
                 // owner, timeline, SQL or paths from the model, and never modify memory.
-                if (TableExists(connection, "conversation_turns"))
+                if (WorldSimulationService.TableExists(connection, "conversation_turns"))
                     foreach (var row in QuerySql(connection, "SELECT * FROM conversation_turns WHERE status='active' AND (speaker_id=$observer OR participants_json::jsonb ? $observer) ORDER BY ts,turn_order,turn_id;", TestDict("observer", Observer)))
                     {
                         if (!PrecisionTurnVisible(row, Observer, Knowledge, connection)) continue;
@@ -109,7 +109,7 @@ namespace ReignBetaServer
                         Add(result, "turn", ReadString(row, "turn_id", ""), text, ReadString(row, "session_id", ""),
                             ReadDouble(row, "world_day", 0), ReadString(row, "role", ""));
                     }
-                if (TableExists(connection, "memories"))
+                if (WorldSimulationService.TableExists(connection, "memories"))
                     foreach (var row in QuerySql(connection, "SELECT * FROM memories WHERE status='active' ORDER BY ts,memory_id;"))
                     {
                         if (!KnowledgeRowVisibleToNpc("memories", row, Knowledge, connection)) continue;
@@ -118,7 +118,7 @@ namespace ReignBetaServer
                         Add(result, "memory", ReadString(row, "memory_id", ""), text, ReadString(row, "session_id", ""),
                             ReadDouble(row, "world_day", 0), "attributed_memory");
                     }
-                if (TableExists(connection, "letters") && !Knowledge.PlayerIdentityUnknown)
+                if (WorldSimulationService.TableExists(connection, "letters") && !Knowledge.PlayerIdentityUnknown)
                     foreach (var row in QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$observer OR recipient_id=$observer ORDER BY created_ts,letter_id;", TestDict("observer", Observer)))
                     {
                         if (!LetterVisibleToObserver(connection, row, Observer, Knowledge, out double day)) continue;

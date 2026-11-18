@@ -37,7 +37,7 @@ PRIMARY KEY(campaign_id,timeline_id,hero_id,exchange_id));");
             double day = ReadDouble(payload, "worldDay", 0d);
             string action = ReadString(payload, "action", "tick");
             if (string.IsNullOrWhiteSpace(player)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "player_required" };
-            lock (Program.CampaignRelationshipWriteLock(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             using (ReignDbConnection c = Program.OpenCampaignConnection(campaign))
             {
                 ReputationService.EnsureSocialReputationSchema(c);
@@ -115,7 +115,7 @@ AND player_id=$player AND visit_id=$visit AND status='pending';", p);
         }
 
         private static int FamilyPatiencePercent(string campaign, string hero) => (int)Math.Ceiling(
-            Program.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json")), "patience"));
+            RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json")), "patience"));
 
         private static bool FamilyVisitProfileEligible(Dictionary<string, object> profile, string player)
         {
@@ -201,11 +201,11 @@ AND player_id=$player AND neglected=1 AND decay_finished=0 AND last_decay_day<$t
                 int relation = ReadInt(member, "directional_relation", 0);
                 bool child = ReadBool(profile, "isChild", false) || (ReadInt(member, "child_relation_owned", 0) != 0 && ReadInt(member, "adult_migrated", 0) == 0);
                 var pair = child ? null : Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                    new Dictionary<string, object> { ["pair"] = Program.AmbientPairKey(hero, player) }).FirstOrDefault();
+                    new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(hero, player) }).FirstOrDefault();
                 if (!child)
                 {
                     if (pair == null) SetFamilyDirectionalRelation(c, campaign, timeline, hero, player, relation, day, "family_attention_initial_relation");
-                    relation = ReadInt(Program.ResolveEffectiveAttitude(c, campaign, timeline, hero, player, "family_neglect"), "effectiveAttitude", relation);
+                    relation = ReadInt(RelationshipsService.ResolveEffectiveAttitude(c, campaign, timeline, hero, player, "family_neglect"), "effectiveAttitude", relation);
                 }
                 int delta = ReignFamilyVisitRules.DecayDelta(relation, today - ReadInt(member, "last_decay_day", today));
                 if (!child && delta != 0)
@@ -223,7 +223,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND 
             if (member == null) return "";
             var profile = TryParseJsonObject(ReadString(member, "profile_json", "{}"));
             bool child = ReadBool(profile, "isChild", false);
-            string context = child ? "Your bond toward your parent is " + Program.RelationshipBand(ReadInt(member, "directional_relation", 0))
+            string context = child ? "Your bond toward your parent is " + RelationshipsService.RelationshipBand(ReadInt(member, "directional_relation", 0))
                 + ". Express affection or distance at your exact age; this is family attachment, never adult romance or court politics. " : "";
             if (ReadInt(member, "neglected", 0) != 0)
                 context += "You feel deeply neglected by your parent or spouse after repeated dismissals. This affects how you speak even about other subjects: show hurt, distance, disappointment or a wish for attention according to your age and personality. Do not instantly forgive ordinary politeness or a gift. You can accept a sincere explicit reconciliation when it suits your response. Never mention counters, thresholds, tags, or daily mechanical changes. ";
@@ -244,11 +244,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND 
             foreach (string rival in favorites.Where(id => id != observer))
             {
                 // Public reputation still requires a known person; private romance is never inferred.
-                if (!Program.IdentityStateVerified(Program.ReadAcquaintance(c, observer, rival))) continue;
+                if (!CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(c, observer, rival))) continue;
                 var target = Program.QuerySql(c, "SELECT * FROM identity_roster WHERE hero_id=$id;", new Dictionary<string, object> { ["id"] = rival }).FirstOrDefault();
                 if (target == null || ReadInt(target, "is_alive", 0) == 0 || ReadInt(target, "is_adult", 0) == 0) continue;
                 if (spouse && (ruler == null || ReadString(target, "sex", "") == ReadString(ruler, "sex", ""))) continue;
-                double temperament = child ? 0.5d : Program.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, observer, "traits.json")), "jealousy") / 100d;
+                double temperament = child ? 0.5d : RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, observer, "traits.json")), "jealousy") / 100d;
                 double weight = temperament * ReignFamilyVisitRules.FavorJealousyWeight(favorites.Contains(observer), true);
                 string name = ReadString(target, "canonical_name", "the courtier");
                 result["eligible"] = weight > 0d; result["weight"] = weight; result["rivalId"] = rival; result["rivalName"] = name;
@@ -270,9 +270,9 @@ AND kingdom_id=(SELECT kingdom_id FROM identity_roster WHERE hero_id=$player) OR
             {
                 string id = ReadString(observer, "hero_id", "");
                 if (ReadInt(ReadFamilyAttention(c, campaign, timeline, player, id), "neglected", 0) != 0) continue;
-                string rival = favorites.FirstOrDefault(target => target != id && Program.IdentityStateVerified(Program.ReadAcquaintance(c, id, target)));
+                string rival = favorites.FirstOrDefault(target => target != id && CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(c, id, target)));
                 if (rival == null) continue;
-                double weight = Program.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json")), "jealousy") / 100d
+                double weight = RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json")), "jealousy") / 100d
                     * ReignFamilyVisitRules.FavorJealousyWeight(favorites.Contains(id), true);
                 if (weight <= 0d) continue;
                 result.Add(new Dictionary<string, object> { ["heroId"] = id, ["rivalId"] = rival, ["weight"] = weight,
@@ -327,7 +327,7 @@ AND kingdom_id=(SELECT kingdom_id FROM identity_roster WHERE hero_id=$player) OR
         private static void ApplyFamilyReconciliation(ReignDbConnection c, string campaign, string timeline, string player, string hero,
             string exchange, double day, Dictionary<string, object> evidence)
         {
-            lock (Program.CampaignRelationshipWriteLock(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             {
                 var p = new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["player"] = player,
                     ["hero"] = hero, ["exchange"] = exchange, ["day"] = day,
@@ -351,7 +351,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND player_id=$player AND 
         private static void MigrateFamilyChildAttentionRelation(ReignDbConnection c, string campaign, string timeline, string hero, double day)
         {
             EnsureFamilyVisitSchema(c);
-            lock (Program.CampaignRelationshipWriteLock(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             {
             Program.ExecuteSql(c, "BEGIN IMMEDIATE;");
             try
@@ -375,12 +375,12 @@ AND hero_id=$hero AND player_id=$player;", new Dictionary<string, object> { ["ca
             string observer, string player, int desiredEffectiveRelation, double day, string reason)
         {
             var pair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                new Dictionary<string, object> { ["pair"] = Program.AmbientPairKey(observer, player) }).FirstOrDefault();
+                new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey(observer, player) }).FirstOrDefault();
             int personal = ReadInt(pair, ReadString(pair, "hero_a_id", "") == observer ? "affinity_a_to_b" : "affinity_b_to_a", 0);
-            int standing = ReadInt(Program.ResolveObserverPublicStanding(c, campaign, timeline, observer, player), "value", 0);
+            int standing = ReadInt(RelationshipsService.ResolveObserverPublicStanding(c, campaign, timeline, observer, player), "value", 0);
             int desiredPersonal = ReignFamilyVisitRules.PersonalAffinityForEffectiveRelation(desiredEffectiveRelation, standing);
-            Program.ApplyAuthoritativeRelationshipDelta(c, campaign, observer, player, desiredPersonal - personal, day, reason, timeline, ensurePair: true);
-            return ReadInt(Program.ResolveEffectiveAttitude(c, campaign, timeline, observer, player, reason), "effectiveAttitude", desiredEffectiveRelation);
+            RelationshipsService.ApplyAuthoritativeRelationshipDelta(c, campaign, observer, player, desiredPersonal - personal, day, reason, timeline, ensurePair: true);
+            return ReadInt(RelationshipsService.ResolveEffectiveAttitude(c, campaign, timeline, observer, player, reason), "effectiveAttitude", desiredEffectiveRelation);
         }
     }
 }

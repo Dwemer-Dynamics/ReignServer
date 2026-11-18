@@ -7,7 +7,7 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         // Player-facing history only. Never call this from NPC recall or prompt construction.
-        private static List<Dictionary<string, object>> ReadOriginalConversationHistory(string campaign,
+        internal static List<Dictionary<string, object>> ReadOriginalConversationHistory(string campaign,
             Dictionary<string, object> payload, string npc, string session, int limit,
             List<Dictionary<string, object>> legacy)
         {

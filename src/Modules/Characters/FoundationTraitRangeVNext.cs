@@ -7,7 +7,7 @@ using System.Xml.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const string FoundationTraitRangeVNextModelId = FoundationTraitModelId;
         private const double FoundationTraitRangeVNextContextWeightCap = 0.25d;
@@ -175,7 +175,7 @@ namespace ReignBetaServer
         {
             double nearestHalf = Math.Round(score * 2d,0,MidpointRounding.AwayFromZero) / 2d;
             if (Math.Abs(score-nearestHalf)<.000000001d) score=nearestHalf;
-            return ClampTrait((int)Math.Round(score, MidpointRounding.AwayFromZero));
+            return Program.ClampTrait((int)Math.Round(score, MidpointRounding.AwayFromZero));
         }
 
         private static Dictionary<string, object> CalculateFoundationTraitsVNext(Dictionary<string, object> hero)
@@ -190,11 +190,11 @@ namespace ReignBetaServer
             Dictionary<string, object> skills = ReadDictionary(hero, "skills") ?? new Dictionary<string, object>();
             Dictionary<string, double> inputs = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["native.valor"] = NativeFoundationSignalVNext(TraitInt(native,"valor")),
-                ["native.generosity"] = NativeFoundationSignalVNext(TraitInt(native,"generosity")),
-                ["native.honor"] = NativeFoundationSignalVNext(TraitInt(native,"honor")),
-                ["native.mercy"] = NativeFoundationSignalVNext(TraitInt(native,"mercy")),
-                ["native.calculating"] = NativeFoundationSignalVNext(TraitInt(native,"calculating")),
+                ["native.valor"] = NativeFoundationSignalVNext(Program.TraitInt(native,"valor")),
+                ["native.generosity"] = NativeFoundationSignalVNext(Program.TraitInt(native,"generosity")),
+                ["native.honor"] = NativeFoundationSignalVNext(Program.TraitInt(native,"honor")),
+                ["native.mercy"] = NativeFoundationSignalVNext(Program.TraitInt(native,"mercy")),
+                ["native.calculating"] = NativeFoundationSignalVNext(Program.TraitInt(native,"calculating")),
                 ["skill.charm"] = SignedSkillSignalVNext(ReadDouble(skills,"charm",0d)),
                 ["skill.leadership"] = SignedSkillSignalVNext(ReadDouble(skills,"leadership",0d)),
                 ["skill.steward"] = SignedSkillSignalVNext(ReadDouble(skills,"steward",0d)),
@@ -216,13 +216,13 @@ namespace ReignBetaServer
             Dictionary<string, FoundationTraitRangeFormulaVNext> formulas = GetFoundationTraitRangeVNextFormulas();
             foreach (string key in FoundationTraitRangeVNextEvaluationOrder())
             {
-                if (key.Equals("courage",StringComparison.OrdinalIgnoreCase)) { rawScores[key] = inputs["native.valor"]; values[key] = ClampTrait((int)inputs["native.valor"]); continue; }
-                if (key.Equals("mercy",StringComparison.OrdinalIgnoreCase)) { rawScores[key] = inputs["native.mercy"]; values[key] = ClampTrait((int)inputs["native.mercy"]); continue; }
-                if (key.Equals("generosity",StringComparison.OrdinalIgnoreCase)) { rawScores[key] = inputs["native.generosity"]; values[key] = ClampTrait((int)inputs["native.generosity"]); continue; }
+                if (key.Equals("courage",StringComparison.OrdinalIgnoreCase)) { rawScores[key] = inputs["native.valor"]; values[key] = Program.ClampTrait((int)inputs["native.valor"]); continue; }
+                if (key.Equals("mercy",StringComparison.OrdinalIgnoreCase)) { rawScores[key] = inputs["native.mercy"]; values[key] = Program.ClampTrait((int)inputs["native.mercy"]); continue; }
+                if (key.Equals("generosity",StringComparison.OrdinalIgnoreCase)) { rawScores[key] = inputs["native.generosity"]; values[key] = Program.ClampTrait((int)inputs["native.generosity"]); continue; }
                 FoundationTraitRangeFormulaVNext formula = formulas[key];
                 double raw = EvaluateFoundationFormulaVNext(formula, inputKey =>
                 {
-                    if (inputKey.StartsWith("trait.",StringComparison.OrdinalIgnoreCase)) return TraitInt(values,inputKey.Substring("trait.".Length));
+                    if (inputKey.StartsWith("trait.",StringComparison.OrdinalIgnoreCase)) return Program.TraitInt(values,inputKey.Substring("trait.".Length));
                     return inputs.TryGetValue(inputKey,out double value) ? value : 0d;
                 });
                 rawScores[key] = raw;
@@ -442,8 +442,8 @@ namespace ReignBetaServer
                 Dictionary<string, object> nextPercentages = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                 foreach (string trait in CoreTraitKeys)
                 {
-                    int oldValue = ClampTrait(TraitInt(existing,trait));
-                    int newValue = ClampTrait(TraitInt(calculated,trait));
+                    int oldValue = Program.ClampTrait(Program.TraitInt(existing,trait));
+                    int newValue = Program.ClampTrait(Program.TraitInt(calculated,trait));
                     int oldPercentage = existingPercentages.ContainsKey(trait) ? ReadInt(existingPercentages,trait,StableTraitPercentage(heroId,trait,oldValue)) : StableTraitPercentage(heroId,trait,oldValue);
                     int newPercentage = RemapTraitPercentage(oldPercentage,oldValue,newValue);
                     current[trait][oldValue]++;
@@ -538,7 +538,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static List<Dictionary<string, object>> RunFoundationTraitRangeVNextSelfTests()
+        internal static List<Dictionary<string, object>> RunFoundationTraitRangeVNextSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string,bool,string,object> add = (name,passed,detail,data) => rows.Add(new Dictionary<string, object>{{"name","foundation_vnext_"+name},{"passed",passed},{"detail",detail},{"data",data}});
@@ -570,7 +570,7 @@ namespace ReignBetaServer
             Dictionary<string,object> nativeNegative=nativeHero(-1),nativeNeutral=nativeHero(0),nativePositive=nativeHero(1);
             string nativePositiveBefore=Json.Serialize(ReadDictionary(nativePositive,"traits"));
             Dictionary<string,object> negativeNativeTraits=CalculateFoundationTraitsVNext(nativeNegative),neutralNativeTraits=CalculateFoundationTraitsVNext(nativeNeutral),positiveNativeTraits=CalculateFoundationTraitsVNext(nativePositive);
-            bool nativeLocks=new[]{"courage","mercy","generosity"}.All(key=>TraitInt(negativeNativeTraits,key)==-2&&TraitInt(neutralNativeTraits,key)==0&&TraitInt(positiveNativeTraits,key)==2);
+            bool nativeLocks=new[]{"courage","mercy","generosity"}.All(key=>Program.TraitInt(negativeNativeTraits,key)==-2&&Program.TraitInt(neutralNativeTraits,key)==0&&Program.TraitInt(positiveNativeTraits,key)==2);
             add("native_locked_full_range",nativeLocks,"Courage, Mercy, and Generosity remain native-locked while expanding native -1, 0, and +1 to foundation -2, 0, and +2.",new Dictionary<string,object>{{"negative",negativeNativeTraits},{"neutral",neutralNativeTraits},{"positive",positiveNativeTraits}});
             add("native_provenance_unchanged",nativePositiveBefore==Json.Serialize(ReadDictionary(nativePositive,"traits")),"Native source values remain unchanged after vNext calculation.",ReadDictionary(nativePositive,"traits"));
             Dictionary<string,object> neutralPercentages=new Dictionary<string,object>(StringComparer.OrdinalIgnoreCase),positivePercentages=new Dictionary<string,object>(StringComparer.OrdinalIgnoreCase);
@@ -578,7 +578,7 @@ namespace ReignBetaServer
             {
                 int oldPercentage=StableTraitPercentage("foundation_vnext_downstream",key,0);
                 neutralPercentages[key]=oldPercentage;
-                positivePercentages[key]=RemapTraitPercentage(oldPercentage,0,TraitInt(positiveNativeTraits,key));
+                positivePercentages[key]=RemapTraitPercentage(oldPercentage,0,Program.TraitInt(positiveNativeTraits,key));
             }
             Dictionary<string,object> neutralVirtues=CalculateCourtVirtues(neutralPercentages),positiveVirtues=CalculateCourtVirtues(positivePercentages),positiveVirtuesRepeat=CalculateCourtVirtues(new Dictionary<string,object>(positivePercentages,StringComparer.OrdinalIgnoreCase));
             bool downstreamPercentages=new[]{"courage","mercy","generosity"}.All(key=>ReadInt(positivePercentages,key,0)>=81&&ReadInt(positivePercentages,key,0)<=100);
@@ -651,7 +651,7 @@ namespace ReignBetaServer
             using (SHA256 sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(path))).Replace("-","").ToLowerInvariant();
         }
 
-        private static Dictionary<string, object> AuditFoundationTraitRangeVNext(string[] args)
+        internal static Dictionary<string, object> AuditFoundationTraitRangeVNext(string[] args)
         {
             string beforeHash = FoundationTraitRangeVNextFileHash(CharacterProfileCatalogPath);
             List<Dictionary<string, object>> tests = RunFoundationTraitRangeVNextSelfTests();

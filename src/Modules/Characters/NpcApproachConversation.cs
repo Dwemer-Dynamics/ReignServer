@@ -7,7 +7,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         // Only the saved NPC Lives operation creates this authority. Serialized
         // client/provider flags can never skip ordinary dialogue publication.
@@ -23,10 +23,10 @@ namespace ReignBetaServer
         private static readonly ConditionalWeakTable<Dictionary<string, object>, NpcApproachDraftScope> NpcApproachRequests = new();
         private static readonly ConditionalWeakTable<Dictionary<string, object>, NpcApproachDraftScope> NpcApproachDrafts = new();
 
-        private const string NpcLifeArrivalCue =
+        internal const string NpcLifeArrivalCue =
             "[ARRIVAL EVENT: The player has approached. No new player speech, request, consent, delivery or completed action has occurred. React first in character using your established relationship, current circumstances and any expected return.]";
 
-        private static bool IsNpcLifeApproach(Dictionary<string, object> payload) =>
+        internal static bool IsNpcLifeApproach(Dictionary<string, object> payload) =>
             payload != null && NpcApproachRequests.TryGetValue(payload, out _);
 
         private static Dictionary<string, object> RunNpcApproachDialogue(Dictionary<string, object> payload,
@@ -34,27 +34,27 @@ namespace ReignBetaServer
         {
             if (payload == null || !NpcApproachRequests.TryGetValue(payload, out var scope))
                 return TestDict("ok", false, "status", "superseded");
-            if (prepare != null && string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (prepare != null && string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Injected approach preparation requires the isolated Verification Lab.");
             // The job outlives its initiating HTTP request. Ordinary dialogue's
             // preparation may upsert a character, so it needs its own admission
             // lease before touching context, not just a publication lease later.
-            var access = EnterCampaignRequestAccess("/npc-lives/opening");
+            var access = Program.EnterCampaignRequestAccess("/npc-lives/opening");
             try
             {
-                using (var c = OpenCampaignConnection(scope.Campaign))
+                using (var c = Program.OpenCampaignConnection(scope.Campaign))
                 {
                     var current = ReadNpcLives(c, scope.Campaign, scope.Timeline);
                     if (NpcLivesGeneration(c) != scope.Generation
-                        || scope.Invitation != null && ResolveNpcLifeInvitationOpening(current, payload, scope.Hero, ReadNpcLivesOptions())?.ReceiptKey != scope.Invitation.ReceiptKey
+                        || scope.Invitation != null && ResolveNpcLifeInvitationOpening(current, payload, scope.Hero, Program.ReadNpcLivesOptions())?.ReceiptKey != scope.Invitation.ReceiptKey
                         || !current.Encounters.Any(e => e.OpeningPending
                             && e.HeroId == scope.Hero && e.OpeningOperationId == scope.Operation
                             && e.OpeningGeneration == scope.Generation && e.SessionId == scope.Session && e.OpeningDay == scope.Day))
                         return TestDict("ok", false, "status", "superseded");
                 }
-                return RunInteractiveRequest(() => prepare == null ? DialogueRespondCore(payload) : prepare(payload));
+                return Program.RunInteractiveRequest(() => prepare == null ? Program.DialogueRespondCore(payload) : prepare(payload));
             }
-            finally { ExitCampaignRequestAccess(access); }
+            finally { Program.ExitCampaignRequestAccess(access); }
         }
 
         private static Dictionary<string, object> CreateNpcApproachPayload(NpcLivesState state, NpcConversationEncounter encounter,
@@ -63,7 +63,7 @@ namespace ReignBetaServer
             var p = DeepCloneProfileDictionary(source);
             p["campaignId"] = state.CampaignId; p["timelineId"] = state.TimelineId;
             p["heroStringId"] = hero; p["playerHeroStringId"] = player; p["playerId"] = player;
-            p["hero"] = CloneDictionary(ReadDictionary(source, "hero") ?? ReadDictionary(source, "profile") ?? TestDict());
+            p["hero"] = Program.CloneDictionary(ReadDictionary(source, "hero") ?? ReadDictionary(source, "profile") ?? TestDict());
             p["correlationId"] = operation; p["sceneTurnId"] = operation;
             p["conversationSessionId"] = encounter.SessionId; p["worldDay"] = day;
             p["playerText"] = ""; p.Remove("text"); p.Remove("message");
@@ -82,7 +82,7 @@ namespace ReignBetaServer
             return p;
         }
 
-        private static string NpcApproachInstructions(Dictionary<string, object> p)
+        internal static string NpcApproachInstructions(Dictionary<string, object> p)
         {
             if (!IsNpcLifeApproach(p)) return "";
             return "NPC LIVES ARRIVAL — accuracy has priority over speed and brevity.\n"
@@ -108,33 +108,33 @@ namespace ReignBetaServer
                 + NpcLifeInvitationInstructions(NpcApproachRequests.TryGetValue(p, out var scope) ? scope.Invitation : null);
         }
 
-        private static void ConfigureNpcApproachGeneration(Dictionary<string, object> request, Dictionary<string, object> payload)
+        internal static void ConfigureNpcApproachGeneration(Dictionary<string, object> request, Dictionary<string, object> payload)
         {
             if (!IsNpcLifeApproach(payload)) return;
             request["requestType"] = "npc_approach";
             request["eventId"] = ReadString(payload, "correlationId", "");
             request["heroName"] = ReadString(ReadDictionary(payload, "hero"), "name", "");
             var nativeSpeaker = ReadDictionary(payload, "hero");
-            if (nativeSpeaker != null && CharacterIdFrom(nativeSpeaker) == ReadString(request, "heroStringId", ""))
+            if (nativeSpeaker != null && Program.CharacterIdFrom(nativeSpeaker) == ReadString(request, "heroStringId", ""))
             {
-                var author = CloneDictionary(nativeSpeaker);
-                author["politicalTimelineId"] = ContinuityTimeline(payload);
+                var author = Program.CloneDictionary(nativeSpeaker);
+                author["politicalTimelineId"] = Program.ContinuityTimeline(payload);
                 request["politicalAuthors"] = new[] { author };
             }
             // Retain the ordinary schema budget, provider reasoning preference and
             // bounded repairs. A tiny output allowance must not force false brevity.
         }
 
-        private static Dictionary<string, object> BuildNpcApproachDraft(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> BuildNpcApproachDraft(Dictionary<string, object> payload,
             Dictionary<string, object> llm, Dictionary<string, object> parsed, string reply,
             Dictionary<string, object> motive, Dictionary<string, object> identity,
             List<Dictionary<string, object>> prior, string hero, string heroName, string playerName)
         {
-            var view = CloneDictionary(parsed ?? TestDict()); view["reply"] = reply;
+            var view = Program.CloneDictionary(parsed ?? TestDict()); view["reply"] = reply;
             if (parsed == null || !ReadBool(llm, "ok", false) || ReadBool(llm, "visibleRepairFailure", false)
                 || ReadBool(ReadDictionary(llm, "conversationAgency"), "visibleFailure", false)
                 || !NpcApproachReplyShape(view)
-                || !IsSinglePassConversation(payload) && !ValidateAgencyRepairedResponse(view, motive, payload, identity, prior, hero, heroName, playerName))
+                || !Program.IsSinglePassConversation(payload) && !Program.ValidateAgencyRepairedResponse(view, motive, payload, identity, prior, hero, heroName, playerName))
                 return TestDict("ok", false, "error", "The approach could not be grounded in the current conversation. Please try again.",
                     "npcApproachGroundingFailed", true);
             var draft = TestDict("ok", true, "reply", reply,
@@ -149,7 +149,7 @@ namespace ReignBetaServer
         {
             string reply = ReadString(draft, "reply", "").Trim();
             return reply.Length > 0 && reply.Length <= 24000
-                && ReadString(draft, "activity", "").Length <= 400 && !IsTechnicalConversationNotice(reply)
+                && ReadString(draft, "activity", "").Length <= 400 && !Program.IsTechnicalConversationNotice(reply)
                 && !reply.StartsWith("[Bannerlord Reign:", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -163,7 +163,7 @@ namespace ReignBetaServer
                 Review = CapturedNpcAnnouncementReview(payload, scope.Hero, scope.Player),
                 Invitation = scope.Invitation,
                 PublicationContext = NpcApproachPublicationContext(payload),
-                ReplyHash = PromptHash(ReadString(draft, "reply", "")), ActivityHash = PromptHash(ReadString(draft, "activity", ""))
+                ReplyHash = Program.PromptHash(ReadString(draft, "reply", "")), ActivityHash = Program.PromptHash(ReadString(draft, "activity", ""))
             };
             NpcApproachDrafts.Add(draft, receipt);
             return draft;
@@ -179,9 +179,9 @@ namespace ReignBetaServer
                 || captured.Hero != encounter.HeroId || captured.Player != ReadString(saved, "playerId", "")
                 || captured.Operation != encounter.OpeningOperationId || captured.Generation != generation
                 || captured.Session != encounter.SessionId || captured.Day != encounter.OpeningDay
-                || captured.ReplyHash != PromptHash(ReadString(draft, "reply", ""))
-                || captured.ActivityHash != PromptHash(ReadString(draft, "activity", ""))
-                || captured.Invitation != null && ResolveNpcLifeInvitationOpening(state, saved, encounter.HeroId, ReadNpcLivesOptions())?.ReceiptKey != captured.Invitation.ReceiptKey) return false;
+                || captured.ReplyHash != Program.PromptHash(ReadString(draft, "reply", ""))
+                || captured.ActivityHash != Program.PromptHash(ReadString(draft, "activity", ""))
+                || captured.Invitation != null && ResolveNpcLifeInvitationOpening(state, saved, encounter.HeroId, Program.ReadNpcLivesOptions())?.ReceiptKey != captured.Invitation.ReceiptKey) return false;
             receipt = captured; return true;
         }
 

@@ -36,14 +36,14 @@ namespace ReignBetaServer
             string validatedServer = Path.Combine(validationRoot, "server", "out", "ReignServer.dll");
             string runningServer = typeof(Program).Assembly.Location;
             if (!ReadBool(validation, "Ok", false) || ReadString(ReadDictionary(validation, "Plan"), "Configuration", "") != "Release"
-                || !File.Exists(validatedServer) || FileSha256(validatedServer) != FileSha256(runningServer))
+                || !File.Exists(validatedServer) || PersistenceService.FileSha256(validatedServer) != PersistenceService.FileSha256(runningServer))
                 throw new ArgumentException("The running server must match the selected successful Release validation artifact.");
             plan["sourceFingerprint"] = ReadString(validation, "SourceFingerprintSha256", "unknown");
-            plan["validationFingerprint"] = FileSha256(reportPath);
+            plan["validationFingerprint"] = PersistenceService.FileSha256(reportPath);
             plan["validationRunId"] = validationId;
-            plan["serverArtifactFingerprint"] = FileSha256(runningServer);
+            plan["serverArtifactFingerprint"] = PersistenceService.FileSha256(runningServer);
             string runtimeExecutable = ReadString(settings, "codexExecutable", "");
-            plan["runtimeExecutableFingerprint"] = File.Exists(runtimeExecutable) ? FileSha256(runtimeExecutable) : "unknown";
+            plan["runtimeExecutableFingerprint"] = File.Exists(runtimeExecutable) ? PersistenceService.FileSha256(runtimeExecutable) : "unknown";
             return plan;
         }
 
@@ -71,11 +71,11 @@ namespace ReignBetaServer
                 var traits = ReadDictionary(snapshot, "traits") ?? ReadDictionary(stack, "traits");
                 var snapshotHero = ReadDictionary(casePayload, "hero") ?? ReadDictionary(casePayload, "speaker") ?? ReadDictionary(snapshot, "profile");
                 bool narrativeRequired = ReadInt(snapshotHero, "narrativeVersion", 0) >= 5
-                    || ReadString(prepared, "narrativeSchema", "") == NarrativeSchema;
-                if (!LoadCharacterProfileLibrary().ContainsKey(speakerId)
+                    || ReadString(prepared, "narrativeSchema", "") == CharactersService.NarrativeSchema;
+                if (!CharactersService.LoadCharacterProfileLibrary().ContainsKey(speakerId)
                     && (!IsCharacterConstructionReady(prepared) || !TraitDocumentReady(traits)
                         || !ReadBool(prepared, "llmUsed", false)
-                        || (narrativeRequired && !NarrativeDocumentReady(ReadDictionary(snapshot, "narrative") ?? ReadDictionary(stack, "narrative")))))
+                        || (narrativeRequired && !CharactersService.NarrativeDocumentReady(ReadDictionary(snapshot, "narrative") ?? ReadDictionary(stack, "narrative")))))
                     throw new ArgumentException("Case " + id + " requires a shipped character or an explicitly completed character snapshot with constructed and traits documents; comparison runs do not author fixture personalities.");
                 selected.Add(matches[0]);
             }
@@ -93,8 +93,8 @@ namespace ReignBetaServer
                     {
                         if (ShouldCancelVerification() || budget.Used >= budget.Maximum) break;
                         string variant = arm == 0 ? "baseline" : "variant";
-                        var settings = DeepCloneProfileDictionary(originalSettings);
-                        settings["codexOptions"] = DeepCloneProfileDictionary(ReadDictionary(plan, variant == "baseline" ? "baselineOptions" : "variantOptions"));
+                        var settings = CharactersService.DeepCloneProfileDictionary(originalSettings);
+                        settings["codexOptions"] = CharactersService.DeepCloneProfileDictionary(ReadDictionary(plan, variant == "baseline" ? "baselineOptions" : "variantOptions"));
                         NormalizeCodexOptions(settings);
                         foreach (string key in ChatModelKeys) settings[key] = model;
                         CodexPerformanceSettings.Value = settings;
@@ -105,13 +105,13 @@ namespace ReignBetaServer
                         payload["conversationSessionId"] = "comparison_session";
                         string heroId = ReadFirstString(payload, "heroStringId", "speakerHeroStringId", "heroId");
                         if (string.IsNullOrWhiteSpace(heroId)) throw new ArgumentException("Comparison case is missing speaker identity.");
-                        var hero = DeepCloneProfileDictionary(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? ReadDictionary(snapshot, "hero") ?? new Dictionary<string, object>());
+                        var hero = CharactersService.DeepCloneProfileDictionary(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? ReadDictionary(snapshot, "hero") ?? new Dictionary<string, object>());
                         hero["heroStringId"] = heroId;
                         payload["hero"] = hero;
                         // Seed each arm independently. This runs beneath Verification Lab's isolated campaign root.
-                        if (LoadCharacterProfileLibrary().ContainsKey(heroId)) MaterializeCharacterProfile(campaignId, heroId, hero, false, false);
+                        if (CharactersService.LoadCharacterProfileLibrary().ContainsKey(heroId)) CharactersService.MaterializeCharacterProfile(campaignId, heroId, hero, false, false);
                         else ConstructCharacterFiles(campaignId, heroId, hero, true, false, "codex_performance_fixture");
-                        MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "codex_performance_fixture");
+                        CharactersService.MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "codex_performance_fixture");
                         var characterStack = ReadDictionary(snapshot, "characteristics") ?? snapshot;
                         foreach (var mapping in new[] { new[] { "profile", "profile.json" }, new[] { "state", "state.json" },
                             new[] { "relationships", "memory/relationships.json" }, new[] { "memorySummary", "memory/summary.json" },
@@ -121,7 +121,7 @@ namespace ReignBetaServer
                             new[] { "narrative", "narrative.json" }, new[] { "constructed", "constructed.json" } })
                         {
                             var document = ReadDictionary(snapshot, mapping[0]) ?? ReadDictionary(characterStack, mapping[0]);
-                            if (document != null) WriteJsonObject(CharacterFile(campaignId, heroId, mapping[1]), DeepCloneProfileDictionary(document));
+                            if (document != null) WriteJsonObject(CharacterFile(campaignId, heroId, mapping[1]), CharactersService.DeepCloneProfileDictionary(document));
                         }
                         foreach (var memory in ReadDictionaryList(snapshot, "memories"))
                             AppendJsonLineToPath(CharacterFile(campaignId, heroId, "memory", "memories.jsonl"), memory);
@@ -143,7 +143,7 @@ namespace ReignBetaServer
                         for (int turnIndex = 0; turnIndex < turns.Count; turnIndex++)
                         {
                         if (ShouldCancelVerification() || budget.Used >= budget.Maximum) break;
-                        var turnPayload = DeepCloneProfileDictionary(payload);
+                        var turnPayload = CharactersService.DeepCloneProfileDictionary(payload);
                         foreach (string key in new[] { "playerText", "text", "message", "sceneContext", "worldDay" })
                             if (turns[turnIndex].ContainsKey(key)) turnPayload[key] = turns[turnIndex][key];
                         turnPayload["correlationId"] = "codexperf_" + Guid.NewGuid().ToString("N");
@@ -227,7 +227,7 @@ namespace ReignBetaServer
             var previousProtocol = CodexRuntimeProtocol;
             var previousCapacityMetadata = CodexCapacityMetadataOverride.Value;
             var previousFailureStatus = CodexFailureStatus();
-            var previousAccount = DeepCloneProfileDictionary(CodexAccount);
+            var previousAccount = CharactersService.DeepCloneProfileDictionary(CodexAccount);
             bool previousAccountRequired = CodexAccountIdentityVerificationRequired;
             long previousAccountGeneration = CodexAccountNotificationGeneration;
             var checks = new List<Dictionary<string, object>>();
@@ -263,8 +263,8 @@ namespace ReignBetaServer
                 "evidenceKeys", new List<string>(), "violations", new List<string>(), "warnings", new List<string>(), "rhetoricalConvergence", false);
             var normalizationScope = new CodexConversationScope { AcceptedPoliticalConduct = observedConduct, AcceptedPoliticalConductReply = "Good evening." };
             add("accepted_political_classification_receipt_matches", CodexAcceptedPoliticalConductMatches(normalizationScope, responseContract, "politicalConduct", observedConduct), null);
-            var changedConduct = DeepCloneProfileDictionary(observedConduct); changedConduct["defianceTier"] = 4;
-            var changedSpeech = DeepCloneProfileDictionary(responseContract); changedSpeech["reply"] = "I refuse.";
+            var changedConduct = CharactersService.DeepCloneProfileDictionary(observedConduct); changedConduct["defianceTier"] = 4;
+            var changedSpeech = CharactersService.DeepCloneProfileDictionary(responseContract); changedSpeech["reply"] = "I refuse.";
             add("political_classification_rejects_unproven_changes",
                 !CodexAcceptedPoliticalConductMatches(normalizationScope, responseContract, "politicalConduct", changedConduct)
                 && !CodexAcceptedPoliticalConductMatches(normalizationScope, changedSpeech, "politicalConduct", observedConduct)
@@ -333,7 +333,7 @@ namespace ReignBetaServer
                             ["usage"] = new Dictionary<string, object> { ["inputTokens"] = reportedInputTokens, ["outputTokens"] = 8, ["totalTokens"] = reportedInputTokens + 8 } } } });
                     return new Dictionary<string, object> { ["turn"] = new Dictionary<string, object> { ["id"] = id } };
                 };
-                var fixtureSettings = DeepCloneProfileDictionary(LoadSettings());
+                var fixtureSettings = CharactersService.DeepCloneProfileDictionary(LoadSettings());
                 fixtureSettings["llmProvider"] = CodexSubscriptionProvider;
                 fixtureSettings["codexOptions"] = new Dictionary<string, object> { ["reasoningMode"] = "selective", ["reasoningEffort"] = "high" };
                 NormalizeCodexOptions(fixtureSettings);
@@ -434,12 +434,12 @@ namespace ReignBetaServer
                 add("ambiguous_generation_not_replayed", !ReadBool(failed, "ok", true) && calls - before == 1, calls - before);
                 ambiguousFailure = false;
                 ReadDictionary(fixtureSettings, "codexOptions")["fastMode"] = false;
-                var fixtureProfile = LoadCharacterProfileLibrary().OrderBy(pair => pair.Key, StringComparer.Ordinal).First();
+                var fixtureProfile = CharactersService.LoadCharacterProfileLibrary().OrderBy(pair => pair.Key, StringComparer.Ordinal).First();
                 string fixtureHeroId = fixtureProfile.Key;
-                var hero = DeepCloneProfileDictionary(ReadDictionary(fixtureProfile.Value, "sourceFacts") ?? new Dictionary<string, object>());
+                var hero = CharactersService.DeepCloneProfileDictionary(ReadDictionary(fixtureProfile.Value, "sourceFacts") ?? new Dictionary<string, object>());
                 hero["heroStringId"] = fixtureHeroId;
                 hero["name"] = ReadString(fixtureProfile.Value, "name", fixtureHeroId);
-                MaterializeCharacterProfile(campaign, fixtureHeroId, hero, false, false);
+                CharactersService.MaterializeCharacterProfile(campaign, fixtureHeroId, hero, false, false);
                 CodexAccount = TestDict("type", "chatgpt", "accountId", fixtureAccountId,
                     "email", "fixture@example.invalid", "planType", fixturePlan);
                 CodexAccountIdentityVerificationRequired = false;
@@ -458,8 +458,8 @@ namespace ReignBetaServer
                         ["sceneParticipants"] = new List<Dictionary<string, object>> {
                             TestDict("heroStringId", fixtureHeroId, "name", ReadString(hero, "name", fixtureHeroId), "role", "npc", "nativeLocationDescription", "a quiet roadside"),
                             TestDict("heroStringId", "fixture_player", "name", "Traveler", "role", "player", "nativeLocationDescription", "a quiet roadside") } };
-                    var followupPayload = DeepCloneProfileDictionary(dialoguePayload);
-                    var accountSwitchPayload = DeepCloneProfileDictionary(dialoguePayload);
+                    var followupPayload = CharactersService.DeepCloneProfileDictionary(dialoguePayload);
+                    var accountSwitchPayload = CharactersService.DeepCloneProfileDictionary(dialoguePayload);
                     var dialogue = DialogueRespond(dialoguePayload);
                     var lines = ReadDictionaryList(dialogue, "lines");
                     var diag = ReadDictionary(dialogue, "codexDiagnostics");
@@ -525,7 +525,7 @@ namespace ReignBetaServer
                 }
                 foreach (string provider in new[] { NanoGptProvider, OpenRouterProvider, OpenAiCompatibleProvider })
                 {
-                    var settings = DeepCloneProfileDictionary(fixtureSettings);
+                    var settings = CharactersService.DeepCloneProfileDictionary(fixtureSettings);
                     settings["llmProvider"] = provider;
                     settings["reasoningMode"] = "selective"; settings["reasoningEffort"] = "medium";
                     string url = provider == NanoGptProvider ? "https://nano-gpt.com/api/v1/chat/completions" : provider == OpenRouterProvider ? "https://openrouter.ai/api/v1/chat/completions" : "https://custom.invalid/v1/chat/completions";

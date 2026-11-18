@@ -11,24 +11,24 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const int PostgreSqlSharedRelationshipHistorySchemaRevision = 1;
         private static readonly object SharedRelationshipHistoryGenerationLocksGuard = new object();
         private static readonly Dictionary<string, object> SharedRelationshipHistoryGenerationLocks =
             new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
-        private static void EnsureSharedRelationshipHistorySchema(ReignDbConnection connection)
+        internal static void EnsureSharedRelationshipHistorySchema(ReignDbConnection connection)
         {
             const string marker =
                 "postgresql_shared_relationship_history_schema_revision";
-            if (IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlSharedRelationshipHistorySchemaRevision))
                 return;
             EnsureSharedRelationshipHistorySchemaCore(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                ExecuteSql(connection, @"
+                Program.ExecuteSql(connection, @"
 INSERT INTO schema_meta(key,value)
 VALUES('postgresql_shared_relationship_history_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
@@ -38,7 +38,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                             PostgreSqlSharedRelationshipHistorySchemaRevision
                                 .ToString()
                     });
-                MarkPostgreSqlComponentSchemaReady(connection, marker,
+                Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
                     PostgreSqlSharedRelationshipHistorySchemaRevision);
             }
         }
@@ -46,7 +46,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         private static void EnsureSharedRelationshipHistorySchemaCore(
             ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_relationship_history_chapters (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS shared_relationship_history_chapters (
 history_id TEXT PRIMARY KEY,pair_key TEXT NOT NULL,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
 chapter_ordinal INTEGER NOT NULL,state_fingerprint TEXT NOT NULL,
 objective_summary TEXT NOT NULL DEFAULT '',a_interpretation TEXT NOT NULL DEFAULT '',
@@ -55,9 +55,9 @@ source_kind TEXT NOT NULL DEFAULT 'lazy_dialogue_generation',source_basis_json T
 generation_status TEXT NOT NULL DEFAULT 'generated',provider TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',
 created_world_day REAL NOT NULL DEFAULT 0,created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 UNIQUE(pair_key,chapter_ordinal));");
-            ExecuteSql(connection,
+            Program.ExecuteSql(connection,
                 "CREATE INDEX IF NOT EXISTS idx_shared_relationship_history_pair ON shared_relationship_history_chapters(pair_key,chapter_ordinal DESC);");
-            ExecuteSql(connection,
+            Program.ExecuteSql(connection,
                 "CREATE INDEX IF NOT EXISTS idx_shared_relationship_history_heroes ON shared_relationship_history_chapters(hero_a_id,hero_b_id,chapter_ordinal DESC);");
         }
 
@@ -75,12 +75,12 @@ UNIQUE(pair_key,chapter_ordinal));");
             }
         }
 
-        private static Dictionary<string, object> SharedRelationshipHistoryEnsureApi(
+        internal static Dictionary<string, object> SharedRelationshipHistoryEnsureApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
-            List<string> heroIds = MergeStringLists(
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            List<string> heroIds = Program.MergeStringLists(
                 ReadStringList(payload, "heroIds"),
                 ReadStringList(payload, "participantHeroIds"))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -92,7 +92,7 @@ UNIQUE(pair_key,chapter_ordinal));");
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "At least two heroIds are required." };
             Dictionary<string, Dictionary<string, object>> profiles = heroIds.ToDictionary(
                 id => id,
-                id => ReadJsonObject(CharacterFile(campaignId, id, "profile.json")),
+                id => Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "profile.json")),
                 StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> requests = SharedRelationshipHistoryPairRequests(
                 heroIds, new List<string>(), "", profiles);
@@ -102,22 +102,22 @@ UNIQUE(pair_key,chapter_ordinal));");
             return result;
         }
 
-        private static Dictionary<string, object> SharedRelationshipHistoryQueryApi(
+        internal static Dictionary<string, object> SharedRelationshipHistoryQueryApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string heroId = ReadFirstString(payload, "heroStringId", "heroId");
             string otherId = ReadFirstString(payload, "otherHeroStringId", "otherHeroId");
             if (string.IsNullOrWhiteSpace(campaignId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "campaignId is required." };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureSharedRelationshipHistorySchema(connection);
                 List<Dictionary<string, object>> rows;
                 if (!string.IsNullOrWhiteSpace(heroId) && !string.IsNullOrWhiteSpace(otherId))
                 {
-                    rows = QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters
+                    rows = Program.QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters
 WHERE pair_key=$pair ORDER BY chapter_ordinal DESC LIMIT 100;",
                         new Dictionary<string, object> { ["pair"] = AmbientPairKey(heroId, otherId) });
                 }
@@ -127,7 +127,7 @@ WHERE pair_key=$pair ORDER BY chapter_ordinal DESC LIMIT 100;",
                 }
                 else
                 {
-                    rows = QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters
+                    rows = Program.QuerySql(connection, @"SELECT * FROM shared_relationship_history_chapters
 ORDER BY created_ts DESC LIMIT 250;");
                 }
                 return new Dictionary<string, object>
@@ -228,14 +228,14 @@ ORDER BY created_ts DESC LIMIT 250;");
             {
                 List<Dictionary<string, object>> pending = new List<Dictionary<string, object>>();
                 int reused = 0;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     EnsureSharedRelationshipHistorySchema(connection);
                     foreach (Dictionary<string, object> request in requests.Take(10))
                     {
                         string pairKey = ReadString(request, "pairKey", "");
-                        Dictionary<string, object> chemistry = QuerySql(connection,
+                        Dictionary<string, object> chemistry = Program.QuerySql(connection,
                             "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                             new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         if (chemistry == null) continue;
@@ -272,7 +272,7 @@ ORDER BY created_ts DESC LIMIT 250;");
                     .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
                 int generated = 0, fallback = 0;
                 List<Dictionary<string, object>> stored = new List<Dictionary<string, object>>();
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureSharedRelationshipHistorySchema(connection);
                     using var transaction = connection.BeginTransaction();
@@ -320,21 +320,21 @@ ORDER BY created_ts DESC LIMIT 250;");
             Dictionary<string, object> profileB = SharedRelationshipHistoryProfile(
                 campaignId, heroBId, profiles.TryGetValue(heroBId, out Dictionary<string, object> suppliedB) ? suppliedB : null);
             Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, heroAId, heroBId);
-            Dictionary<string, object> latestIncident = QuerySql(connection, @"SELECT incident_id,kind,world_day,summary
+            Dictionary<string, object> latestIncident = Program.QuerySql(connection, @"SELECT incident_id,kind,world_day,summary
 FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created_ts DESC LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
-            var evidenceContext = CloneDictionary(context);
+            var evidenceContext = Program.CloneDictionary(context);
             evidenceContext["worldDay"] = ReadDouble(context, "worldDay", ReadDouble(chemistry, "last_day", 0d));
-            evidenceContext["timelineId"] = ContinuityTimeline(context);
-            evidenceContext["memoryAsOfAcceptedSequence"] = ReadAcceptedMemorySourceWatermark(connection);
+            evidenceContext["timelineId"] = Program.ContinuityTimeline(context);
+            evidenceContext["memoryAsOfAcceptedSequence"] = Program.ReadAcceptedMemorySourceWatermark(connection);
             evidenceContext["memoryAsOfTimestamp"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             return new Dictionary<string, object>
             {
                 ["pairKey"] = pairKey,
                 ["campaignId"] = campaignId,
-                ["timelineId"] = ContinuityTimeline(context),
-                ["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""),
+                ["timelineId"] = Program.ContinuityTimeline(context),
+                ["restoreGeneration"] = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", ""),
                 ["sharedSources"] = RelationshipHistorySourceEvidence(connection, heroAId, heroBId, evidenceContext, true),
                 ["heroAId"] = heroAId,
                 ["heroBId"] = heroBId,
@@ -371,7 +371,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         private static Dictionary<string, object> SharedRelationshipHistoryProfile(
             string campaignId, string heroId, Dictionary<string, object> supplied)
         {
-            Dictionary<string, object> stored = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> stored = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
             Dictionary<string, object> result = new Dictionary<string, object>(stored, StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, object> pair in supplied ?? new Dictionary<string, object>())
                 result[pair.Key] = pair.Value;
@@ -382,7 +382,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         private static Dictionary<string, object> SharedRelationshipHistoryCharacterBrief(
             string campaignId, string heroId, Dictionary<string, object> profile)
         {
-            Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> portrait = ReadDictionary(traits, "personalityPortrait")
                 ?? new Dictionary<string, object>();
             Dictionary<string, object> mbti = ResolveCharacterMbtiProfile(campaignId, heroId, profile, traits);
@@ -398,7 +398,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 ["fatherId"] = ReadString(profile, "fatherId", ""),
                 ["motherId"] = ReadString(profile, "motherId", ""),
                 ["mbti"] = ReadString(mbti, "type", "XXXX"),
-                ["personality"] = LimitText(FirstNonEmpty(
+                ["personality"] = Program.LimitText(FirstNonEmpty(
                     ReadString(traits, "basePersonalitySummary", ""),
                     string.Join(" ", portrait.Values.Select(Convert.ToString))), 1200)
             };
@@ -427,7 +427,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             List<Dictionary<string, object>> pending,
             Dictionary<string, Dictionary<string, object>> profiles)
         {
-            return ChatWithLlm(BuildSharedRelationshipHistoryBatchRequest(pending, profiles, LoadSettings()));
+            return Program.ChatWithLlm(BuildSharedRelationshipHistoryBatchRequest(pending, profiles, Program.LoadSettings()));
         }
 
         private static Dictionary<string, object> BuildSharedRelationshipHistoryBatchRequest(
@@ -506,7 +506,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 ["requestType"] = "relationship",
                 ["campaignId"] = campaignId,
                 ["politicalAuthors"] = politicalAuthors,
-                ["model"] = ModelForRequest(settings, "relationship"),
+                ["model"] = Program.ModelForRequest(settings, "relationship"),
                 ["correlationId"] = "relationship_history_" + Guid.NewGuid().ToString("N"),
                 ["maxTokens"] = Math.Min(5000, 900 + pending.Count * 360),
                 ["temperature"] = 0.45d,
@@ -618,7 +618,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         {
             ValidateSharedRelationshipHistorySources(connection, basis);
             string pairKey = ReadString(basis, "pairKey", "");
-            int ordinal = ReadInt(QuerySql(connection, @"SELECT COALESCE(MAX(chapter_ordinal),0) value
+            int ordinal = ReadInt(Program.QuerySql(connection, @"SELECT COALESCE(MAX(chapter_ordinal),0) value
 FROM shared_relationship_history_chapters WHERE pair_key=$pair;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "value", 0) + 1;
             string historyId = "relhist_" + Guid.NewGuid().ToString("N");
@@ -643,13 +643,13 @@ FROM shared_relationship_history_chapters WHERE pair_key=$pair;",
                 ["day"] = ReadDouble(basis, "worldDay", ReadDouble(basis, "lastDay", 0)),
                 ["ts"] = ts
             };
-            ExecuteSql(connection, @"INSERT INTO shared_relationship_history_chapters(
+            Program.ExecuteSql(connection, @"INSERT INTO shared_relationship_history_chapters(
 history_id,pair_key,hero_a_id,hero_b_id,chapter_ordinal,state_fingerprint,
 objective_summary,a_interpretation,b_interpretation,canon_status,source_kind,source_basis_json,
 generation_status,provider,model,created_world_day,created_ts,updated_ts)
 VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
 'soft_relational_canon','lazy_dialogue_generation',$basis,$status,$provider,$model,$day,$ts,$ts);", args);
-            return QuerySql(connection,
+            return Program.QuerySql(connection,
                 "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = historyId }).FirstOrDefault()
                 ?? new Dictionary<string, object>();
@@ -686,7 +686,7 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             StringBuilder builder = new StringBuilder();
             var originals = context == null ? new List<Dictionary<string, object>>()
                 : RelationshipHistorySourceEvidence(connection, speakerHeroId, targetHeroId, context, false);
-            var supplied = PlannedPromptSources(context);
+            var supplied = Program.PlannedPromptSources(context);
             originals = originals.Where(record => ReadString(record, "kind", "") != "attributed_turn"
                 || supplied == null || !supplied.TryGetValue(ReadString(record, "sourceId", ""), out var hash)
                 || hash != ReadString(record, "sourceHash", "")).ToList();
@@ -733,9 +733,9 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
                 ?? new Dictionary<string, object>();
             var active = new HashSet<string>(new[] { "activeHeroIds", "activeHeroStringIds", "activeParticipantIds" }
                 .SelectMany(key => ReadStringList(eventPayload, key)), StringComparer.OrdinalIgnoreCase);
-            var candidates = MentionedResolverEntries(index, "heroes", "name", text, int.MaxValue)
+            var candidates = Program.MentionedResolverEntries(index, "heroes", "name", text, int.MaxValue)
                 .Where(row => ReadFirstString(row, "heroStringId", "heroId", "id").Length > 0)
-                .GroupBy(row => NormalizeLookup(ReadString(row, "name", "")), StringComparer.OrdinalIgnoreCase);
+                .GroupBy(row => Program.NormalizeLookup(ReadString(row, "name", "")), StringComparer.OrdinalIgnoreCase);
             foreach (var namesakes in candidates)
             {
                 var ids = namesakes.Select(row => ReadFirstString(row, "heroStringId", "heroId", "id"))
@@ -753,11 +753,11 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             return result.Where(id => !string.IsNullOrWhiteSpace(id)).Take(5).ToList();
         }
 
-        private static List<Dictionary<string, object>> SharedRelationshipHistoryForCharacter(
+        internal static List<Dictionary<string, object>> SharedRelationshipHistoryForCharacter(
             string campaignId, string heroId, ReignDbConnection connection)
         {
             EnsureSharedRelationshipHistorySchema(connection);
-            List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT *
+            List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT *
 FROM shared_relationship_history_chapters WHERE hero_a_id=$id OR hero_b_id=$id
 ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                 new Dictionary<string, object> { ["id"] = heroId });
@@ -765,7 +765,7 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
             {
                 bool isA = ReadString(row, "hero_a_id", "").Equals(heroId, StringComparison.OrdinalIgnoreCase);
                 string otherId = ReadString(row, isA ? "hero_b_id" : "hero_a_id", "");
-                Dictionary<string, object> other = ReadJsonObject(CharacterFile(campaignId, otherId, "profile.json"));
+                Dictionary<string, object> other = Program.ReadJsonObject(Program.CharacterFile(campaignId, otherId, "profile.json"));
                 row["otherHeroId"] = otherId;
                 row["otherHeroName"] = ReadString(other, "name", otherId);
                 row["thisCharacterInterpretation"] = ReadString(row,
@@ -838,7 +838,7 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                 ReadInt(result, "dailyWorkerCalls", -1) == 0
                 && ReadBool(result, "dailyWorkerUnaffected", false),
                 "Lazy relationship-history generation performs no daily-worker calls.");
-            string sourceRoot = FindVerificationSourceRoot();
+            string sourceRoot = Program.FindVerificationSourceRoot();
             string serverRoot = string.IsNullOrWhiteSpace(sourceRoot)
                 ? "" : Path.Combine(sourceRoot, "ReignServer");
             string workerSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ContinuousRelationshipWorker.cs", "src"));
@@ -858,10 +858,10 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
             string campaignId = "_shared_relationship_history_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                var politicalBatchBasis = CloneDictionary(mixed);
+                var politicalBatchBasis = Program.CloneDictionary(mixed);
                 politicalBatchBasis["campaignId"] = campaignId;
                 politicalBatchBasis["timelineId"] = "saved_branch";
-                var politicalPlayerPair = CloneDictionary(politicalBatchBasis);
+                var politicalPlayerPair = Program.CloneDictionary(politicalBatchBasis);
                 politicalPlayerPair["pairKey"] = "a|player";
                 politicalPlayerPair["heroBId"] = "player";
                 politicalPlayerPair["heroB"] = TestDict("name", "Player");
@@ -875,13 +875,13 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                     new List<Dictionary<string, object>> { politicalBatchBasis, politicalPlayerPair }, politicalProfiles, TestDict());
                 var politicalAuthors = ReadDictionaryList(politicalBatchRequest, "politicalAuthors");
                 add("batch_uses_actual_deduplicated_authors", politicalAuthors.Count == 3
-                    && politicalAuthors.Select(CharacterIdFrom).OrderBy(x => x, StringComparer.Ordinal)
+                    && politicalAuthors.Select(Program.CharacterIdFrom).OrderBy(x => x, StringComparer.Ordinal)
                         .SequenceEqual(new[] { "a", "b", "player" })
                     && !politicalBatchRequest.ContainsKey("heroStringId")
                     && !Json.Serialize(politicalBatchRequest).Contains("__relationship_history_batch__", StringComparison.Ordinal),
                     "A multi-pair history request names its actual participants; batch metadata is never a character.");
                 var politicalMessages = ReadDictionaryList(politicalBatchRequest, "messages");
-                var politicalOutbound = BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalMessages, "offline-capture");
+                var politicalOutbound = Program.BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalMessages, "offline-capture");
                 var politicalActual = ReadDictionaryList(politicalOutbound, "messages");
                 var politicalBlocks = politicalActual.Where(row => ReadString(row, "content", "")
                     .StartsWith("REQUIRED PRIVATE POLITICAL BELIEFS", StringComparison.Ordinal)).ToList();
@@ -893,12 +893,12 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                     && Enum.GetValues(typeof(Reign.Core.Contracts.Government.ReignGovernmentPlank))
                         .Cast<Reign.Core.Contracts.Government.ReignGovernmentPlank>()
                         .All(plank => politicalBlocks.All(row => ReadString(row, "content", "").Contains(plank + ":", StringComparison.Ordinal)))
-                    && ReadDictionaryList(BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalActual, "offline-capture"), "messages").Count == politicalActual.Count,
+                    && ReadDictionaryList(Program.BuildChatRequestBody(TestDict(), politicalBatchRequest, politicalActual, "offline-capture"), "messages").Count == politicalActual.Count,
                     "The final provider envelope has one complete private foundation per actual NPC, preserves saved timelines, skips the human player and remains idempotent.");
                 add("private_batch_authors_do_not_mutate_shared_history_basis", CanonicalJson(politicalBatchBasis) == politicalBasisBefore
                     && !politicalBatchBasis.ContainsKey("politicalAuthors"),
                     "Private political author context is transient request metadata; it is not added to the persisted objective history basis.");
-                var missingPoliticalBasis = CloneDictionary(politicalBatchBasis);
+                var missingPoliticalBasis = Program.CloneDictionary(politicalBatchBasis);
                 missingPoliticalBasis["heroBId"] = "missing_named_character";
                 bool missingPoliticalProfileRefused = false;
                 try { BuildSharedRelationshipHistoryBatchRequest(new List<Dictionary<string, object>> { missingPoliticalBasis }, politicalProfiles, TestDict()); }
@@ -917,7 +917,7 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                     ["aInterpretation"] = "A treats those meetings as the beginning of a trusted friendship.",
                     ["bInterpretation"] = "B treats the same meetings as an obligation requiring careful distance."
                 };
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
                     InsertSharedRelationshipHistoryChapter(connection, campaignId, persistedBasis, persisted,
@@ -947,36 +947,36 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             string fixtureCampaignId =
                 "_relationship_fixture_test_" + Guid.NewGuid().ToString("N");
-            string armPath = LiveTestArmPath();
+            string armPath = WorldSimulationService.LiveTestArmPath();
             bool armExisted = File.Exists(armPath);
             Dictionary<string, object> originalArm =
-                armExisted ? ReadJsonObject(armPath) : null;
+                armExisted ? Program.ReadJsonObject(armPath) : null;
             try
             {
-                WriteJsonObject(armPath, new Dictionary<string, object>
+                Program.WriteJsonObject(armPath, new Dictionary<string, object>
                 {
                     ["expiresUtc"] = DateTimeOffset.UtcNow
                         .AddMinutes(5).ToString("o")
                 });
-                WriteJsonObject(
-                    ConversationReadinessStatePath(fixtureCampaignId),
+                Program.WriteJsonObject(
+                    Program.ConversationReadinessStatePath(fixtureCampaignId),
                     new Dictionary<string, object>
                     {
                         ["schemaVersion"] = 1,
                         ["qualificationId"] = "fixture-qualification",
                         ["campaignId"] = fixtureCampaignId,
-                        ["buildVersion"] = CurrentConversationBuildVersion(),
+                        ["buildVersion"] = Program.CurrentConversationBuildVersion(),
                         ["status"] = "running"
                     });
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(fixtureCampaignId))
+                    Program.OpenCampaignConnection(fixtureCampaignId))
                 {
                     EnsureMbtiRelationshipSchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,
 affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
 first_day,last_day,projected_native_relation,updated_ts)
@@ -988,7 +988,7 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
                         });
                 }
                 Dictionary<string, object> applied =
-                    ConversationQualificationRelationshipFixtureApi(
+                    Program.ConversationQualificationRelationshipFixtureApi(
                         new Dictionary<string, object>
                         {
                             ["confirmation"] = "qualification_fixture",
@@ -1001,7 +1001,7 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
                             ["affinityBtoA"] = -34
                         });
                 Dictionary<string, object> restored =
-                    ConversationQualificationRelationshipFixtureApi(
+                    Program.ConversationQualificationRelationshipFixtureApi(
                         new Dictionary<string, object>
                         {
                             ["confirmation"] = "qualification_fixture",
@@ -1011,9 +1011,9 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
                         });
                 Dictionary<string, object> finalRow;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(fixtureCampaignId))
+                    Program.OpenCampaignConnection(fixtureCampaignId))
                 {
-                    finalRow = QuerySql(connection,
+                    finalRow = Program.QuerySql(connection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key='fixture_a|fixture_b' LIMIT 1;")
                         .FirstOrDefault();
                 }
@@ -1033,12 +1033,12 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(fixtureCampaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(fixtureCampaignId));
                 if (armExisted)
-                    WriteJsonObject(armPath,
+                    Program.WriteJsonObject(armPath,
                         originalArm ?? new Dictionary<string, object>());
                 else
-                    TryDeleteFile(armPath);
+                    PersistenceService.TryDeleteFile(armPath);
             }
             return rows;
         }

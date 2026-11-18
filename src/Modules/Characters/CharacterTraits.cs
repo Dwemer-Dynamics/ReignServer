@@ -7,15 +7,15 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private const int CoreTraitDocumentVersion = 5;
+        internal const int CoreTraitDocumentVersion = 5;
         private const int FoundationTraitModelVersion = 2;
         private const string FoundationTraitModelId = "reign_foundation_weighted_v2";
         private const string EditorFoundationTraitModelId = "reign_foundation_editor_override_v1";
         private const int PersonalityPortraitVersion = 1;
         private const string PersonalityPortraitModelId = "reign_personality_portrait_v1";
-        private const int PersonalitySummaryMinimumCharacters = 1200;
+        internal const int PersonalitySummaryMinimumCharacters = 1200;
         private const int PersonalitySummaryMaximumCharacters = 1600;
 
         private static readonly string[] PersonalityPortraitKeys =
@@ -44,7 +44,7 @@ namespace ReignBetaServer
             Dictionary<string, object> native = ReadDictionary(hero, "traits") ?? new Dictionary<string, object>();
             Dictionary<string, object> skills = ReadDictionary(hero, "skills") ?? new Dictionary<string, object>();
             Dictionary<string, object> foundation = CalculateFoundationTraitsVNext(hero);
-            Dictionary<string, object> attractiveness = BuildAttractiveness(hero);
+            Dictionary<string, object> attractiveness = Program.BuildAttractiveness(hero);
 
             Dictionary<string, object> document = new Dictionary<string, object>
             {
@@ -86,7 +86,7 @@ namespace ReignBetaServer
             return document;
         }
 
-        private static Dictionary<string, object> FoundationTraitModelDefinition(bool editorOverride)
+        internal static Dictionary<string, object> FoundationTraitModelDefinition(bool editorOverride)
         {
             return new Dictionary<string, object>
             {
@@ -101,7 +101,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static void MarkEditorFoundationTraitsCurrent(Dictionary<string, object> traits)
+        internal static void MarkEditorFoundationTraitsCurrent(Dictionary<string, object> traits)
         {
             if (traits == null) return;
             traits["foundationTraitModel"] = FoundationTraitModelDefinition(true);
@@ -109,7 +109,7 @@ namespace ReignBetaServer
             traits["model"] = EditorFoundationTraitModelId;
         }
 
-        private static bool FoundationTraitModelCurrent(Dictionary<string, object> traits)
+        internal static bool FoundationTraitModelCurrent(Dictionary<string, object> traits)
         {
             Dictionary<string, object> model = ReadDictionary(traits, "foundationTraitModel") ?? new Dictionary<string, object>();
             if (ReadInt(model, "version", 0) != FoundationTraitModelVersion) return false;
@@ -118,7 +118,7 @@ namespace ReignBetaServer
                 || id.Equals(EditorFoundationTraitModelId, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> CoreTraitAssignmentSources()
+        internal static Dictionary<string, object> CoreTraitAssignmentSources()
         {
             Dictionary<string, object> sources = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
@@ -139,7 +139,7 @@ namespace ReignBetaServer
             return sources;
         }
 
-        private static Dictionary<string, object> TraitDefinitions()
+        internal static Dictionary<string, object> TraitDefinitions()
         {
             Dictionary<string, object> definitions = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, string[]> pair in TraitSentenceDescriptors())
@@ -152,7 +152,7 @@ namespace ReignBetaServer
             return definitions;
         }
 
-        private static Dictionary<string, string[]> TraitSentenceDescriptors()
+        internal static Dictionary<string, string[]> TraitSentenceDescriptors()
         {
             return new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
@@ -207,7 +207,7 @@ namespace ReignBetaServer
             return new[] { minusTwo, minusOne, zero, plusOne, plusTwo };
         }
 
-        private static void ApplyGeneratedTraitConstruction(Dictionary<string, object> traits, Dictionary<string, object> generated, Dictionary<string, object> hero)
+        internal static void ApplyGeneratedTraitConstruction(Dictionary<string, object> traits, Dictionary<string, object> generated, Dictionary<string, object> hero)
         {
             if (traits == null || generated == null) return;
             Dictionary<string, object> foundation = ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>();
@@ -219,10 +219,10 @@ namespace ReignBetaServer
                 foreach (Dictionary<string, object> assignment in ReadDictionaryList(generated, "traitAssignments").Take(12))
                 {
                     string key = ReadFirstString(assignment, "trait", "key", "id");
-                    string evidence = LimitText(ReadFirstString(assignment, "evidence", "reason"), 300);
+                    string evidence = Program.LimitText(ReadFirstString(assignment, "evidence", "reason"), 300);
                     if (!foundation.ContainsKey(key) || NativeLockedCoreTraits.Contains(key) || string.IsNullOrWhiteSpace(evidence)) continue;
-                    int prior = TraitInt(foundation, key);
-                    int assigned = ClampTrait(ReadInt(assignment, "value", prior));
+                    int prior = Program.TraitInt(foundation, key);
+                    int assigned = Program.ClampTrait(ReadInt(assignment, "value", prior));
                     foundation[key] = assigned;
                     applied.Add(new Dictionary<string, object> { ["trait"] = key, ["prior"] = prior, ["value"] = assigned, ["evidence"] = evidence, ["source"] = "native_description" });
                 }
@@ -235,7 +235,7 @@ namespace ReignBetaServer
             ApplyGeneratedPersonalityPortrait(traits, generated, ReadString(hero, "name", "This character"));
         }
 
-        private static string BuildRuleBasedPersonalitySummary(string name, Dictionary<string, object> traits)
+        internal static string BuildRuleBasedPersonalitySummary(string name, Dictionary<string, object> traits)
         {
             Dictionary<string, object> wrapper = new Dictionary<string, object>
             {
@@ -245,7 +245,7 @@ namespace ReignBetaServer
             return BuildPersonalitySummaryFromPortrait(FirstNonEmpty(name, "This character"), BuildDeterministicPersonalityPortrait(wrapper, FirstNonEmpty(name, "This character"), ""));
         }
 
-        private static bool EnsurePersonalityPortraitData(Dictionary<string, object> traits, string name, bool force)
+        internal static bool EnsurePersonalityPortraitData(Dictionary<string, object> traits, string name, bool force)
         {
             if (traits == null || traits.Count == 0) return false;
             string fingerprint = PersonalityTraitFingerprint(traits);
@@ -260,7 +260,7 @@ namespace ReignBetaServer
             return true;
         }
 
-        private static bool PersonalityPortraitReady(Dictionary<string, object> traits)
+        internal static bool PersonalityPortraitReady(Dictionary<string, object> traits)
         {
             if (traits == null) return false;
             Dictionary<string, object> portrait = ReadDictionary(traits, "personalityPortrait") ?? new Dictionary<string, object>();
@@ -273,7 +273,7 @@ namespace ReignBetaServer
                 && summary.Length <= PersonalitySummaryMaximumCharacters;
         }
 
-        private static void RebuildPersonalityPortrait(Dictionary<string, object> traits, string name, string extraContradiction, string source)
+        internal static void RebuildPersonalityPortrait(Dictionary<string, object> traits, string name, string extraContradiction, string source)
         {
             Dictionary<string, object> portrait = BuildDeterministicPersonalityPortrait(traits, name, extraContradiction);
             portrait["version"] = PersonalityPortraitVersion;
@@ -284,7 +284,7 @@ namespace ReignBetaServer
             traits["basePersonalitySummary"] = BuildPersonalitySummaryFromPortrait(name, portrait);
         }
 
-        private static void ApplyGeneratedPersonalityPortrait(Dictionary<string, object> traits, Dictionary<string, object> generated, string name)
+        internal static void ApplyGeneratedPersonalityPortrait(Dictionary<string, object> traits, Dictionary<string, object> generated, string name)
         {
             Dictionary<string, object> portrait = BuildDeterministicPersonalityPortrait(traits, name, "");
             Dictionary<string, object> proposed = ReadDictionary(generated, "personalityPortrait") ?? new Dictionary<string, object>();
@@ -332,10 +332,10 @@ namespace ReignBetaServer
         {
             List<string> selected = (keys ?? new string[0])
                 .Where(key => traits.ContainsKey(key))
-                .OrderByDescending(key => Math.Abs(TraitInt(traits, key)))
+                .OrderByDescending(key => Math.Abs(Program.TraitInt(traits, key)))
                 .ThenByDescending(key => PersonalityTraitPercentage(document, key))
                 .Take(2)
-                .Select(key => TraitValueDescriptor(key, TraitInt(traits, key)))
+                .Select(key => Program.TraitValueDescriptor(key, Program.TraitInt(traits, key)))
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .ToList();
             return selected.Count == 0 ? "Their behavior in this area remains balanced and depends heavily on circumstance." : string.Join(" ", selected);
@@ -398,7 +398,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
             if (percentages.ContainsKey(key)) return Math.Max(0, Math.Min(100, ReadInt(percentages, key, 50)));
-            int modifier = TraitInt(ReadDictionary(traits, "foundationTraits") ?? traits, key);
+            int modifier = Program.TraitInt(ReadDictionary(traits, "foundationTraits") ?? traits, key);
             TraitPercentageBand(modifier, out int minimum, out int maximum);
             return (minimum + maximum) / 2;
         }
@@ -407,7 +407,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> foundation = ReadDictionary(traits, "foundationTraits") ?? ReadDictionary(traits, "hiddenReignTraits") ?? new Dictionary<string, object>();
             Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
-            string material = string.Join("|", CoreTraitKeys.Select(key => key + ":" + TraitInt(foundation, key).ToString(CultureInfo.InvariantCulture) + ":" + ReadInt(percentages, key, -1).ToString(CultureInfo.InvariantCulture)));
+            string material = string.Join("|", CoreTraitKeys.Select(key => key + ":" + Program.TraitInt(foundation, key).ToString(CultureInfo.InvariantCulture) + ":" + ReadInt(percentages, key, -1).ToString(CultureInfo.InvariantCulture)));
             unchecked
             {
                 uint hash = 2166136261;
@@ -416,20 +416,20 @@ namespace ReignBetaServer
             }
         }
 
-        private static string BuildRelevantTraitEmphasis(Dictionary<string, object> characteristics, string playerText, string sceneContext)
+        internal static string BuildRelevantTraitEmphasis(Dictionary<string, object> characteristics, string playerText, string sceneContext)
         {
             Dictionary<string, object> traitDocument = ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>();
             Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? new Dictionary<string, object>();
             if (traits.Count == 0) return string.Empty;
-            List<Dictionary<string, object>> domains = SelectMotiveDomains(playerText, sceneContext,
+            List<Dictionary<string, object>> domains = Program.SelectMotiveDomains(playerText, sceneContext,
                 new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>());
             List<string> selected = domains
-                .Select(item => MotiveDomainDefinitions.FirstOrDefault(domain => domain.Id == ReadString(item, "id", "")))
+                .Select(item => Program.MotiveDomainDefinitions.FirstOrDefault(domain => domain.Id == ReadString(item, "id", "")))
                 .Where(domain => domain != null)
                 .SelectMany(domain => domain.TraitKeys)
                 .Where(key => traits.ContainsKey(key))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(key => Math.Abs(TraitInt(traits, key)))
+                .OrderByDescending(key => Math.Abs(Program.TraitInt(traits, key)))
                 .ThenBy(key => Array.IndexOf(CoreTraitKeys, key))
                 .Take(5)
                 .ToList();
@@ -439,7 +439,7 @@ namespace ReignBetaServer
             builder.AppendLine("RELEVANT PERSONALITY EMPHASIS");
             builder.AppendLine("Deterministic motive routing selected these traits as relevant to this exchange. Give them extra weight without replacing the complete base personality.");
             foreach (string key in selected)
-                builder.AppendLine("- " + HumanizeKey(key) + ": " + TraitValueDescriptor(key, TraitInt(traits, key)));
+                builder.AppendLine("- " + Program.HumanizeKey(key) + ": " + Program.TraitValueDescriptor(key, Program.TraitInt(traits, key)));
             return builder.ToString().TrimEnd();
         }
     }

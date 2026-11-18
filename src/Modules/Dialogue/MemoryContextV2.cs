@@ -21,7 +21,7 @@ namespace ReignBetaServer
             internal double EventDay, LearnedDay;
         }
 
-        private sealed class MemoryQueryPlan
+        internal sealed class MemoryQueryPlan
         {
             internal string Observer = "", Peer = "", Timeline = "main", Generation = "", Query = "", Session = "";
             internal double WorldDay;
@@ -33,7 +33,7 @@ namespace ReignBetaServer
             internal readonly Dictionary<string, string> SuppliedSources = new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        private sealed class MemoryEvidence
+        internal sealed class MemoryEvidence
         {
             internal string SourceId = "", SourceHash = "", Kind = "reported", Text = "", Owner = "", Session = "";
             internal string RankingText = "";
@@ -99,7 +99,7 @@ VALUES('current','shadow',$generation,$ts) ON CONFLICT(state_id) DO NOTHING;",
 BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE state_id='current'; RETURN NULL; END $$;");
             foreach (string table in new[] { "conversation_turns", "conversation_sessions", "conversation_continuity", "conversation_relationship_receipts",
                 "court_social_signal_evidence", "relationship_milestones", "temporal_knowledge_assertions", "memories", "summaries", "beliefs", "comprehension", "obligations" })
-                if (TableExists(connection, table))
+                if (WorldSimulationService.TableExists(connection, table))
                     ExecuteSql(connection, "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='precision_revision_" + table
                         + "' AND tgrelid='" + table + "'::regclass) THEN CREATE TRIGGER precision_revision_" + table + " AFTER INSERT OR UPDATE OR DELETE ON "
                         + table + " FOR EACH STATEMENT EXECUTE FUNCTION memory_precision_source_changed(); END IF; END $$;");
@@ -149,7 +149,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
             }
         }
 
-        private static string MemorySourceHash(IEnumerable<Dictionary<string, object>> rows) =>
+        internal static string MemorySourceHash(IEnumerable<Dictionary<string, object>> rows) =>
             PromptHash(CanonicalJson((rows ?? Enumerable.Empty<Dictionary<string, object>>()).Select(row => row
                 .Where(p => p.Key != "vector_id" && p.Key != "embedding_status")
                 .ToDictionary(p => p.Key, p => p.Value)).ToList()));
@@ -492,7 +492,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
             "(" + sessionAlias + ".npc_id=$npc OR " + MemoryJsonContainsSql(sessionAlias + ".participants_json", "$npc") + ") AND ("
             + turnAlias + ".speaker_id=$npc OR " + MemoryJsonContainsSql(turnAlias + ".participants_json", "$npc") + ")";
 
-        private static MemoryQueryPlan PlanMemoryQuery(string observer, string peer, string query, Dictionary<string, object> context)
+        internal static MemoryQueryPlan PlanMemoryQuery(string observer, string peer, string query, Dictionary<string, object> context)
         {
             var plan = new MemoryQueryPlan { Observer = observer ?? "", Peer = peer ?? "",
                 Timeline = ContinuityTimeline(context), Query = query ?? "", Session = GroupConversationSessionId(context),
@@ -521,7 +521,7 @@ BEGIN UPDATE memory_precision_state SET source_revision=source_revision+1 WHERE 
             return plan;
         }
 
-        private static string MemoryTranscriptSourceHash(Dictionary<string, object> row) => PromptHash(
+        internal static string MemoryTranscriptSourceHash(Dictionary<string, object> row) => PromptHash(
             ReadString(row, "role", "") + "\n" + ReadFirstString(row, "speaker_id", "speakerHeroStringId", "speakerId")
             + "\n" + ReadString(row, "text", ""));
 
@@ -742,7 +742,7 @@ AND (kind<>'agenda' OR status NOT IN ('resolved','abandoned')) ORDER BY importan
             }
             // Preserve foundation and development, including present boundaries,
             // without replaying every reinforcing incident or creating a score.
-            if (plan.Peer.Length > 0 && TableExists(connection, "court_social_signal_evidence"))
+            if (plan.Peer.Length > 0 && WorldSimulationService.TableExists(connection, "court_social_signal_evidence"))
             {
                 var signals = QuerySql(connection, @"SELECT * FROM court_social_signal_evidence WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("court_social_signal_evidence") + @"
 AND accepted=1 AND signal_type='sexual_intimacy_completed'
@@ -753,12 +753,12 @@ AND ((speaker_id=$owner AND target_id=$peer) OR (speaker_id=$peer AND target_id=
                         + "; history is not present consent or a relationship label. Accepted quote: " + ReadString(row, "supporting_quote", ""),
                         "relationship", plan.Observer, true, 100));
             }
-            if (plan.Peer.Length > 0 && TableExists(connection, "relationship_milestones"))
+            if (plan.Peer.Length > 0 && WorldSimulationService.TableExists(connection, "relationship_milestones"))
                 foreach (var row in QuerySql(connection, @"SELECT * FROM relationship_milestones WHERE subject_id=$owner AND target_id=$peer
 AND status='active' ORDER BY stability DESC,updated_ts DESC;", parameters).Where(r => MemoryTimeVisible(r, knowledge, connection)))
                     evidence.Add(EvidenceFromRow(row, "milestone_id", ReadString(row, "kind", "") + ": " + ReadString(row, "reason", ""),
                         "relationship", plan.Observer, true, 95));
-            if (plan.Peer.Length > 0 && TableExists(connection, "conversation_relationship_receipts"))
+            if (plan.Peer.Length > 0 && WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"))
             {
                 var receipts = QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @"
 AND observer_id=$owner AND target_id=$peer AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts,receipt_id;", parameters)
@@ -871,7 +871,7 @@ ON CONFLICT(projection_id) DO UPDATE SET restore_generation=$generation,projecti
                 SourceTurns = sourceTurns };
         }
 
-        private static List<MemoryEvidence> FindPrecisionExchanges(ReignDbConnection connection, MemoryQueryPlan plan,
+        internal static List<MemoryEvidence> FindPrecisionExchanges(ReignDbConnection connection, MemoryQueryPlan plan,
             KnowledgeAccessContext knowledge, int limit, int maximumCandidatePages = int.MaxValue, bool requirePlayerSource = true,
             bool compactAdjacentContext = true, bool includeRecentFloor = true)
         {
@@ -1441,13 +1441,13 @@ ORDER BY t.ts,t.turn_order,t.turn_id;", TestDict("type", documentType, "id", id,
             catch { return source; }
         }
 
-        private static long ReadAcceptedMemorySourceWatermark(ReignDbConnection connection)
+        internal static long ReadAcceptedMemorySourceWatermark(ReignDbConnection connection)
         {
             // Letters and spoken turns use the same sequence. A letter accepted
             // after the last spoken turn must still be visible at the next read.
-            string letterPart = TableExists(connection, "letters")
+            string letterPart = WorldSimulationService.TableExists(connection, "letters")
                 ? " UNION ALL SELECT COALESCE(MAX(COALESCE((to_jsonb(l)->>'dispatch_sequence')::bigint,0)),0) AS n FROM letters l" : "";
-            string communicationPart = TableExists(connection, "communication_history")
+            string communicationPart = WorldSimulationService.TableExists(connection, "communication_history")
                 ? " UNION ALL SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM communication_history" : "";
             return ReadLong(QuerySql(connection, "SELECT MAX(n) AS watermark FROM (SELECT COALESCE(MAX(accepted_sequence),0) AS n FROM conversation_turns"
                 + letterPart + communicationPart + ") sources;").Single(), "watermark", 0);

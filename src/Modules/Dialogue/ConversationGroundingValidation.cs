@@ -258,7 +258,7 @@ namespace ReignBetaServer
             });
         }
 
-        private static string RenderGroundedSceneHeading(Dictionary<string, object> payload, string observer, Dictionary<string, object> parsed, string reply)
+        internal static string RenderGroundedSceneHeading(Dictionary<string, object> payload, string observer, Dictionary<string, object> parsed, string reply)
         {
             if (ReadString(payload, "channel", "").Contains("correspond", StringComparison.OrdinalIgnoreCase)) return reply;
             string venue = ConversationLocationLabel(ResolvedNarrativeVenue(payload, observer, parsed, reply));
@@ -342,7 +342,7 @@ namespace ReignBetaServer
                     "semanticCoverage", "not_run", "additionalProviderCalls", 0);
                 return true;
             }
-            ConstrainNpcLeaveReply(payload, observer, parsed, ref reply);
+            CharactersService.ConstrainNpcLeaveReply(payload, observer, parsed, ref reply);
             var candidate = CloneDictionary(parsed ?? TestDict()); candidate["reply"] = reply;
             var issues = FindCriticalConversationContinuityViolations(candidate, payload, observer);
             // Run after any continuity rewrite. A conditional NPC choice cannot

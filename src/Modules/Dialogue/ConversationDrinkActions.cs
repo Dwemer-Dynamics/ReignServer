@@ -290,7 +290,7 @@ namespace ReignBetaServer
                 || reply.StartsWith("[Bannerlord Reign:", StringComparison.Ordinal)
                 || ReadBool(payload, "governmentCertificationMemoryIsolation", false)
                 || ReadFirstString(payload, "turnId", "sceneTurnId", "correlationId").Length == 0) return reply;
-            lock (CampaignRelationshipWriteLock(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             using (var connection = OpenCampaignConnection(campaign))
             {
                 EnsureIntoxicationSchema(connection);

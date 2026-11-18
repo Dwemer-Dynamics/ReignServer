@@ -1323,7 +1323,7 @@ namespace ReignBetaServer
                     {
                         Status = turn == null ? ReadString(parameters, "status", "completed") : ReadString(turn, "status", "completed");
                         Dictionary<string, object> error = turn == null ? ReadDictionary(parameters, "error") : ReadDictionary(turn, "error");
-                        ProviderError = error == null ? null : DeepCloneProfileDictionary(error);
+                        ProviderError = error == null ? null : CharactersService.DeepCloneProfileDictionary(error);
                         Error = error == null ? "" : ReadString(error, "message", Json.Serialize(error));
                         Dictionary<string, object> completedUsage = turn == null ? ReadUsage(parameters) : ReadUsage(turn);
                         if (completedUsage != null && !UsageFromThreadTokenUpdate) Usage = completedUsage;
@@ -1348,7 +1348,7 @@ namespace ReignBetaServer
                         Text = final ?? "",
                         Status = Status,
                         Error = Error,
-                        ProviderError = ProviderError == null ? null : DeepCloneProfileDictionary(ProviderError),
+                        ProviderError = ProviderError == null ? null : CharactersService.DeepCloneProfileDictionary(ProviderError),
                         AuthoritativeModel = ServedModel,
                         ReportedModel = ReportedModel,
                         ServedModel = ServedModel,

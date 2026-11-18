@@ -9,7 +9,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private const string CampaignCommandScenarioManifestVersion = "campaign-command-v9";
         private static readonly object CampaignCommandCertificationLock = new object();
@@ -28,7 +28,7 @@ namespace ReignBetaServer
             "engage_party", "withdraw", "return_home"
         };
 
-        private static void CopyCampaignCommandTerms(Dictionary<string, object> raw,
+        internal static void CopyCampaignCommandTerms(Dictionary<string, object> raw,
             Dictionary<string, object> terms)
         {
             if (raw == null || terms == null) return;
@@ -43,7 +43,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> CampaignCommandManifestApi(
+        internal static Dictionary<string, object> CampaignCommandManifestApi(
             Dictionary<string, string> query)
         {
             List<Dictionary<string, object>> capabilities = CampaignCommandObjectives.Select(id =>
@@ -112,7 +112,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CampaignCommandPrepareApi(
+        internal static Dictionary<string, object> CampaignCommandPrepareApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -148,7 +148,7 @@ namespace ReignBetaServer
                 && !string.Equals(saveName, baseline, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> CampaignCommandSaveVerifyApi(
+        internal static Dictionary<string, object> CampaignCommandSaveVerifyApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -177,7 +177,7 @@ namespace ReignBetaServer
             return aligned;
         }
 
-        private static Dictionary<string, object> CampaignCommandProfileResultApi(
+        internal static Dictionary<string, object> CampaignCommandProfileResultApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -224,7 +224,7 @@ namespace ReignBetaServer
             }
             payload.Remove("caseLedgerRows");
             payload["metrics"] = metrics;
-            WriteJsonObject(replayPath, payload);
+            Program.WriteJsonObject(replayPath, payload);
             sections[profile] = new Dictionary<string, object>
             {
                 ["profile"] = profile, ["status"] = passed ? "passed" : "failed",
@@ -249,7 +249,7 @@ namespace ReignBetaServer
             return CampaignCommandStatusResult(state, false);
         }
 
-        private static Dictionary<string, object> CampaignCommandStatusApi(
+        internal static Dictionary<string, object> CampaignCommandStatusApi(
             Dictionary<string, string> query, bool includeReport)
         {
             string runId = QueryCampaignCommandId(query, "runId");
@@ -258,7 +258,7 @@ namespace ReignBetaServer
             return CampaignCommandStatusResult(state, includeReport);
         }
 
-        private static Dictionary<string, object> CampaignCommandReplayApi(
+        internal static Dictionary<string, object> CampaignCommandReplayApi(
             Dictionary<string, string> query)
         {
             string runId = QueryCampaignCommandId(query, "runId");
@@ -278,7 +278,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CampaignCommandResumeApi(
+        internal static Dictionary<string, object> CampaignCommandResumeApi(
             Dictionary<string, object> payload)
         {
             string runId = RequiredCampaignCommandId(payload, "runId");
@@ -330,7 +330,7 @@ namespace ReignBetaServer
             return result.OrderBy(x => Array.IndexOf(CampaignCommandProfiles, x)).ToList();
         }
 
-        private static Dictionary<string, object> CampaignCommandCancelApi(
+        internal static Dictionary<string, object> CampaignCommandCancelApi(
             Dictionary<string, object> payload)
         {
             string runId = RequiredCampaignCommandId(payload, "runId");
@@ -372,7 +372,7 @@ namespace ReignBetaServer
             return CampaignCommandStatusResult(state, false);
         }
 
-        private static Dictionary<string, object> CampaignCommandExecutionApi(
+        internal static Dictionary<string, object> CampaignCommandExecutionApi(
             Dictionary<string, object> payload)
         {
             string runId = RequiredCampaignCommandId(payload, "runId");
@@ -385,7 +385,7 @@ namespace ReignBetaServer
             return CampaignCommandStatusResult(state, false);
         }
 
-        private static Dictionary<string, object> CampaignCommandReadinessApi(
+        internal static Dictionary<string, object> CampaignCommandReadinessApi(
             Dictionary<string, string> query)
         {
             string runId = QueryCampaignCommandId(query, "runId");
@@ -504,12 +504,12 @@ namespace ReignBetaServer
                 ["evaluatedUtc"] = DateTime.UtcNow.ToString("o")
             };
             string summaryPath = Path.Combine(CampaignCommandRunDirectory(runId), "launch-readiness.json");
-            WriteJsonObject(summaryPath, readiness);
+            Program.WriteJsonObject(summaryPath, readiness);
             readiness["summaryPath"] = summaryPath;
             return readiness;
         }
 
-        private static Dictionary<string, object> CampaignCommandReportApi(
+        internal static Dictionary<string, object> CampaignCommandReportApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -517,7 +517,7 @@ namespace ReignBetaServer
             Dictionary<string, object> order = ReadDictionary(payload, "order")
                 ?? new Dictionary<string, object>();
             string orderId = ReadString(order, "OrderId", ReadString(order, "orderId", "unknown"));
-            string directory = Path.Combine(TestsDir, "campaign-command", "runtime",
+            string directory = Path.Combine(Program.TestsDir, "campaign-command", "runtime",
                 SafeCampaignCommandSegment(campaignId));
             Directory.CreateDirectory(directory);
             Dictionary<string, object> evidence = new Dictionary<string, object>(payload,
@@ -529,12 +529,12 @@ namespace ReignBetaServer
             {
                 File.AppendAllText(Path.Combine(directory, "events.jsonl"),
                     Json.Serialize(evidence) + Environment.NewLine, Encoding.UTF8);
-                WriteJsonObject(Path.Combine(directory, SafeCampaignCommandSegment(orderId) + ".json"), evidence);
+                Program.WriteJsonObject(Path.Combine(directory, SafeCampaignCommandSegment(orderId) + ".json"), evidence);
             }
             return new Dictionary<string, object> { ["ok"] = true, ["orderId"] = orderId };
         }
 
-        private static Dictionary<string, object> CampaignCommandJudgeApi(
+        internal static Dictionary<string, object> CampaignCommandJudgeApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -545,8 +545,8 @@ namespace ReignBetaServer
             Dictionary<string, object> state = ReadDictionary(payload, "state")
                 ?? new Dictionary<string, object>();
             string deterministic = CampaignCommandFallbackOutcome(payload, state);
-            Dictionary<string, object> characterState = ReadJsonObject(
-                CharacterFile(ReadString(payload, "campaignId", "default"), heroId, "state.json"));
+            Dictionary<string, object> characterState = Program.ReadJsonObject(
+                Program.CharacterFile(ReadString(payload, "campaignId", "default"), heroId, "state.json"));
             string mbti = ReadFirstString(characterState, "mbti", "mbtiType", "personalityType");
             string system = "You are an advisory military judgment layer for Bannerlord Reign. "
                 + "Native state, authority, and identifiers are authoritative. Return only compact JSON with outcome and reason. "
@@ -556,7 +556,7 @@ namespace ReignBetaServer
             string prompt = "Commander MBTI: " + FirstNonEmpty(mbti, "unknown") + "\n"
                 + "Validated order and native state: " + Json.Serialize(payload) + "\n"
                 + "Deterministic safety recommendation: " + deterministic;
-            Dictionary<string, object> llm = ChatWithLlm(new Dictionary<string, object>
+            Dictionary<string, object> llm = Program.ChatWithLlm(new Dictionary<string, object>
             {
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
                 ["correlationId"] = ReadString(payload, "correlationId", ""),
@@ -650,7 +650,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> ReadCampaignCommandState(string runId)
         {
-            return ReadJsonObject(Path.Combine(CampaignCommandRunDirectory(runId), "state.json"));
+            return Program.ReadJsonObject(Path.Combine(CampaignCommandRunDirectory(runId), "state.json"));
         }
 
         private static void WriteCampaignCommandState(string runId, Dictionary<string, object> state)
@@ -658,7 +658,7 @@ namespace ReignBetaServer
             string directory = CampaignCommandRunDirectory(runId);
             Directory.CreateDirectory(directory);
             lock (CampaignCommandCertificationLock)
-                WriteJsonObject(Path.Combine(directory, "state.json"), state);
+                Program.WriteJsonObject(Path.Combine(directory, "state.json"), state);
         }
 
         private static void AppendCampaignCommandLedger(string runId, Dictionary<string, object> payload)
@@ -699,7 +699,7 @@ namespace ReignBetaServer
 
         private static string CampaignCommandRunDirectory(string runId)
         {
-            return Path.Combine(TestsDir, "campaign-command", "runs", SafeCampaignCommandSegment(runId));
+            return Path.Combine(Program.TestsDir, "campaign-command", "runs", SafeCampaignCommandSegment(runId));
         }
 
         private static string SafeCampaignCommandSegment(string value)
@@ -816,7 +816,7 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunCampaignCommandSystemSelfTests()
+        internal static List<Dictionary<string, object>> RunCampaignCommandSystemSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, summary, data) => rows.Add(
@@ -870,7 +870,7 @@ namespace ReignBetaServer
                     }
                 }
             };
-            List<string> draftMissing = CampaignCommandMissingDetails(incompleteDraft,
+            List<string> draftMissing = Program.CampaignCommandMissingDetails(incompleteDraft,
                 "Recruit forces and patrol Zeonica.");
             add("multistage_clarification", draftMissing.Any(x =>
                     x.IndexOf("recruitment goal", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -878,30 +878,30 @@ namespace ReignBetaServer
                     StringComparison.OrdinalIgnoreCase) >= 0),
                 "A compound recruit-and-patrol request asks for force kind and recruitment goal before confirmation.",
                 draftMissing);
-            Dictionary<string, object> completeDraft = CampaignCommandCloneDictionary(incompleteDraft);
+            Dictionary<string, object> completeDraft = Program.CampaignCommandCloneDictionary(incompleteDraft);
             Dictionary<string, object> recruitStep = ReadDictionaryList(
                 ReadDictionary(completeDraft, "terms"), "steps")[0];
             recruitStep["minimumTroops"] = 100;
-            add("confirmation_hash_safety", IsUnqualifiedCampaignCommandConfirmation("yes")
-                && IsUnqualifiedCampaignCommandConfirmation("go")
-                && IsUnqualifiedCampaignCommandConfirmation("Yes, that's right.")
-                && IsUnqualifiedCampaignCommandConfirmation("Okay, go ahead!")
-                && !IsUnqualifiedCampaignCommandConfirmation("yes, but use 120 men")
-                && IsCampaignCommandDraftCancellation("Scratch that.")
-                && CampaignCommandMissingDetails(completeDraft,
+            add("confirmation_hash_safety", Program.IsUnqualifiedCampaignCommandConfirmation("yes")
+                && Program.IsUnqualifiedCampaignCommandConfirmation("go")
+                && Program.IsUnqualifiedCampaignCommandConfirmation("Yes, that's right.")
+                && Program.IsUnqualifiedCampaignCommandConfirmation("Okay, go ahead!")
+                && !Program.IsUnqualifiedCampaignCommandConfirmation("yes, but use 120 men")
+                && Program.IsCampaignCommandDraftCancellation("Scratch that.")
+                && Program.CampaignCommandMissingDetails(completeDraft,
                     "Use your personal party: recruit 100 men and patrol Zeonica.").Count == 0
-                && CampaignCommandPlanHash(completeDraft).Length == 64,
+                && Program.CampaignCommandPlanHash(completeDraft).Length == 64,
                 "Only unqualified confirmations advance the immutable two-readback dialogue plan.", null);
             Dictionary<string, object> naturalPayload = new Dictionary<string, object>
             {
                 ["speakerHeroStringId"] = "hero_morwyn", ["worldDay"] = 10d
             };
             add("natural_dialogue_routing",
-                ShouldRouteCampaignCommandDraft("verification", naturalPayload,
+                Program.ShouldRouteCampaignCommandDraft("verification", naturalPayload,
                     new Dictionary<string, object>(), "Morwyn, keep an eye on Zeonica with your own men.")
-                && ShouldRouteCampaignCommandDraft("verification", naturalPayload,
+                && Program.ShouldRouteCampaignCommandDraft("verification", naturalPayload,
                     new Dictionary<string, object>(), "Get your men together, then head to Zeonica.")
-                && ShouldRouteCampaignCommandDraft("verification", naturalPayload,
+                && Program.ShouldRouteCampaignCommandDraft("verification", naturalPayload,
                     new Dictionary<string, object>(), "Call the lords and break the siege."),
                 "Natural player phrasing reaches the same deterministic campaign-order draft gate as formal command language.", null);
             Dictionary<string, object> naturalReadbackDraft = new Dictionary<string, object>
@@ -924,19 +924,19 @@ namespace ReignBetaServer
                     }
                 }
             };
-            string naturalReadback = BuildCampaignCommandReadback(naturalReadbackDraft, false);
+            string naturalReadback = Program.BuildCampaignCommandReadback(naturalReadbackDraft, false);
             add("natural_readback_contract", naturalReadback.Contains("First, recruit and provision your party")
                 && naturalReadback.Contains("Finally, patrol with your party at Zeonica")
                 && !naturalReadback.Contains("recruit_resupply") && !naturalReadback.Contains("town_"),
                 "Clarification readbacks use conversational transitions and names without leaking planner identifiers.",
                 naturalReadback);
             add("control_action_mapping",
-                MapCommandToActionType("issue_campaign_order") == "RegularIssueCampaignOrder"
-                && MapCommandToActionType("revise_campaign_order") == "RegularReviseCampaignOrder"
-                && MapCommandToActionType("respond_to_order_report") == "RegularRespondToOrderReport"
-                && MapCommandToActionType("cancel_campaign_order") == "RegularCancelCampaignOrder",
+                Program.MapCommandToActionType("issue_campaign_order") == "RegularIssueCampaignOrder"
+                && Program.MapCommandToActionType("revise_campaign_order") == "RegularReviseCampaignOrder"
+                && Program.MapCommandToActionType("respond_to_order_report") == "RegularRespondToOrderReport"
+                && Program.MapCommandToActionType("cancel_campaign_order") == "RegularCancelCampaignOrder",
                 "All four public control commands map to client enum names.", null);
-            List<Dictionary<string, object>> catalog = ReadDictionaryList(ActionCatalog(), "commands");
+            List<Dictionary<string, object>> catalog = ReadDictionaryList(Program.ActionCatalog(), "commands");
             add("planner_catalog", new[] { "issue_campaign_order", "revise_campaign_order",
                     "respond_to_order_report", "cancel_campaign_order" }.All(command => catalog.Any(x =>
                     ReadString(x, "command", "") == command)),
@@ -961,7 +961,7 @@ namespace ReignBetaServer
             add("civilian_relief_fallback", CampaignCommandFallbackOutcome(
                     new Dictionary<string, object>(), fallbackState) == "continue",
                 "Urgent civilian relief weighs compassion toward intervention.", null);
-            add("certification_matrix", ReadStringArray(manifest, "profiles").SequenceEqual(
+            add("certification_matrix", Program.ReadStringArray(manifest, "profiles").SequenceEqual(
                     CampaignCommandProfiles, StringComparer.Ordinal)
                 && ReadInt(manifest, "consecutivePassesRequired", 0) == 1,
                 "All thirteen resumable certification profiles and the one-pass final-fingerprint gate are registered.", null);
@@ -1014,13 +1014,13 @@ namespace ReignBetaServer
 #endif
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static void RunCampaignCommandOfflineSimulationChecks(
+        internal static void RunCampaignCommandOfflineSimulationChecks(
             List<Dictionary<string, object>> checks, string sandbox, int seed)
         {
             List<string> violations = new List<string>();
             int completedOrders = 0;
             int maximumQueue = 0;
-            for (int simulation = 0; simulation < 10 && !ShouldCancelVerification(); simulation++)
+            for (int simulation = 0; simulation < 10 && !Program.ShouldCancelVerification(); simulation++)
             {
                 Random random = new Random(unchecked(seed * 397 ^ simulation * 7919));
                 Dictionary<string, int> active = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1058,16 +1058,16 @@ namespace ReignBetaServer
                 ["completedOrders"] = completedOrders, ["maximumQueue"] = maximumQueue,
                 ["violations"] = violations
             };
-            WriteJsonObject(path, evidence);
-            AddVerificationCheck(checks, "campaign_command.offline_10x5_years", "campaign_command",
-                violations.Count == 0 && !ShouldCancelVerification(),
+            Program.WriteJsonObject(path, evidence);
+            Program.AddVerificationCheck(checks, "campaign_command.offline_10x5_years", "campaign_command",
+                violations.Count == 0 && !Program.ShouldCancelVerification(),
                 "Ten diverse seeded five-year command simulations completed with bounded queues and exactly-once terminal effects.",
                 new Dictionary<string, object>(evidence) { ["evidencePath"] = path });
         }
 #endif
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static void RunCampaignCommandLlmMatrixChecks(
+        internal static void RunCampaignCommandLlmMatrixChecks(
             List<Dictionary<string, object>> checks, string sandbox, Dictionary<string, object> options)
         {
             int requested = Math.Max(1, ReadInt(options, "liveCaseCap", 300));
@@ -1092,14 +1092,14 @@ namespace ReignBetaServer
             string ledger = Path.Combine(sandbox, "campaign-command-llm-matrix.jsonl");
             const int batchSize = 5;
             const int maximumAttempts = 3;
-            for (int offset = 0; offset < cases.Count && !ShouldCancelVerification(); offset += batchSize)
+            for (int offset = 0; offset < cases.Count && !Program.ShouldCancelVerification(); offset += batchSize)
             {
                 List<Dictionary<string, object>> batch = cases.Skip(offset).Take(batchSize).ToList();
                 Dictionary<string, Dictionary<string, object>> resolved =
                     new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
                 Dictionary<string, string> errors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 List<Dictionary<string, object>> pending = new List<Dictionary<string, object>>(batch);
-                for (int attempt = 1; attempt <= maximumAttempts && pending.Count > 0 && !ShouldCancelVerification(); attempt++)
+                for (int attempt = 1; attempt <= maximumAttempts && pending.Count > 0 && !Program.ShouldCancelVerification(); attempt++)
                 {
                     if (attempt > 1) providerRetries++;
                     providerCalls++;
@@ -1225,8 +1225,8 @@ namespace ReignBetaServer
             bool passed = evaluated == total && accuracyGate && naturalCoverage && auditableUtterances
                 && schemaRate == 1d
                 && authorityRate == 1d && identifierRate == 1d && refusalRate == 1d
-                && unsupportedRate == 1d && !ShouldCancelVerification();
-            AddVerificationCheck(checks, lightSmoke ? "campaign_command.live_llm_smoke"
+                && unsupportedRate == 1d && !Program.ShouldCancelVerification();
+            Program.AddVerificationCheck(checks, lightSmoke ? "campaign_command.live_llm_smoke"
                     : "campaign_command.live_llm_300", "campaign_command", passed,
                 "Provider-backed Campaign Command language matrix: " + correct + "/" + evaluated
                     + " correct (" + (accuracy * 100d).ToString("0.00", CultureInfo.InvariantCulture) + "%).",
@@ -1279,7 +1279,7 @@ namespace ReignBetaServer
                 + "Treat the supplied authority field as authoritative. Headcount or troop composition means a personal party; explicit call-lords, gather-parties, or army language means army. "
                 + "forceKind must be army whenever the steps contain form_army, join_army, leave_army, or disband_army; otherwise use party for executable party objectives and unspecified only when no executable plan is accepted. "
                 + "Supported objectives: " + string.Join(",", CampaignCommandObjectives) + ".";
-            return ChatWithLlm(new Dictionary<string, object>
+            return Program.ChatWithLlm(new Dictionary<string, object>
             {
                 ["requestType"] = "action_planner", ["campaignId"] = "verification_campaign_command",
                 ["correlationId"] = "cc-matrix-" + offset + "-attempt-" + attempt, ["system"] = system,

@@ -8,14 +8,14 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const int AmbientCompatibilityVersion = 1;
         private const double AmbientSettlementExposure = 0.35d;
         private const double AmbientPartyExposure = 1d;
         private static readonly string[] AmbientFacetKeys = { "trust", "respect", "affection", "interest_alignment", "resentment", "rivalry" };
 
-        private static void EnsureAmbientRelationshipSchema(ReignDbConnection connection)
+        internal static void EnsureAmbientRelationshipSchema(ReignDbConnection connection)
         {
             // Compatibility entry point retained for identity synchronization. The retired
             // per-facet ambient engine must never recreate its old tables.
@@ -27,7 +27,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             Stopwatch timer = Stopwatch.StartNew();
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             int day = (int)Math.Floor(ReadDouble(payload, "worldDay", 0d) + 0.000001d);
             List<Dictionary<string, object>> groups = ReadDictionaryList(payload, "presenceGroups");
             List<Dictionary<string, object>> heroRows = ReadDictionaryList(payload, "heroes");
@@ -36,9 +36,9 @@ namespace ReignBetaServer
                 .GroupBy(x => ReadFirstString(x, "heroStringId", "heroId", "id"), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                Dictionary<string, object> prior = QuerySql(connection,
+                Dictionary<string, object> prior = Program.QuerySql(connection,
                     "SELECT * FROM ambient_relationship_runs WHERE campaign_id=$campaign AND world_day=$day LIMIT 1;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["day"] = day }).FirstOrDefault();
                 if (prior != null)
@@ -62,7 +62,7 @@ namespace ReignBetaServer
                 int changedDirections = 0, nativeQueued = 0, skippedMissing = 0, skippedSameDay = 0;
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (AmbientPairContext pair in pairs.Values.OrderBy(x => x.PairKey, StringComparer.OrdinalIgnoreCase))
@@ -76,7 +76,7 @@ namespace ReignBetaServer
                             continue;
                         }
 
-                        Dictionary<string, object> exposure = QuerySql(connection,
+                        Dictionary<string, object> exposure = Program.QuerySql(connection,
                             "SELECT * FROM ambient_relationship_exposure WHERE pair_key=$pair LIMIT 1;",
                             new Dictionary<string, object> { ["pair"] = pair.PairKey }).FirstOrDefault();
                         if (exposure != null && (int)Math.Floor(ReadDouble(exposure, "last_day", -1d) + 0.000001d) == day)
@@ -129,7 +129,7 @@ namespace ReignBetaServer
                             ["historyBlockedAToB"] = blockedAB,
                             ["historyBlockedBToA"] = blockedBA
                         };
-                        ExecuteSql(connection, @"INSERT INTO ambient_relationship_exposure(pair_key,hero_a_id,hero_b_id,first_day,last_day,consecutive_days,weighted_exposure,last_context_kind,last_context_id,compatibility_version,compatibility_json,pending_native_signal,last_native_sync_day,native_action_pending,native_action_id,updated_ts)
+                        Program.ExecuteSql(connection, @"INSERT INTO ambient_relationship_exposure(pair_key,hero_a_id,hero_b_id,first_day,last_day,consecutive_days,weighted_exposure,last_context_kind,last_context_id,compatibility_version,compatibility_json,pending_native_signal,last_native_sync_day,native_action_pending,native_action_id,updated_ts)
 VALUES($pair,$a,$b,$first,$last,$consecutive,$weighted,$kind,$context,$version,$compatibility,$signal,$nativeDay,$pending,$action,$ts)
 ON CONFLICT(pair_key) DO UPDATE SET last_day=$last,consecutive_days=$consecutive,weighted_exposure=$weighted,last_context_kind=$kind,last_context_id=$context,compatibility_version=$version,compatibility_json=$compatibility,pending_native_signal=$signal,native_action_pending=$pending,native_action_id=$action,updated_ts=$ts;",
                             new Dictionary<string, object>
@@ -154,7 +154,7 @@ ON CONFLICT(pair_key) DO UPDATE SET last_day=$last,consecutive_days=$consecutive
                         ["skippedReasons"] = new Dictionary<string, object> { ["missing_hero"] = skippedMissing, ["already_processed_day"] = skippedSameDay },
                         ["llmCalls"] = 0, ["noLlmConfirmed"] = true
                     };
-                    ExecuteSql(connection, @"INSERT INTO ambient_relationship_runs(run_id,campaign_id,world_day,status,group_count,pair_count,direction_count,positive_drift,negative_drift,native_changes,duration_ms,summary_json,created_ts)
+                    Program.ExecuteSql(connection, @"INSERT INTO ambient_relationship_runs(run_id,campaign_id,world_day,status,group_count,pair_count,direction_count,positive_drift,negative_drift,native_changes,duration_ms,summary_json,created_ts)
 VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$negative,$native,$duration,$summary,$ts);",
                         new Dictionary<string, object>
                         {
@@ -163,14 +163,14 @@ VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$nega
                             ["positive"] = positive, ["negative"] = negative, ["native"] = nativeQueued,
                             ["duration"] = timer.ElapsedMilliseconds, ["summary"] = Json.Serialize(summary), ["ts"] = ts
                         });
-                    ExecuteSql(connection, "COMMIT;");
-                    WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
+                    Program.ExecuteSql(connection, "COMMIT;");
+                    Program.WriteAudit(campaignId, correlationId, "server", "relationships", "relationships.ambient_daily", "", "", "", "completed",
                         timer.ElapsedMilliseconds, "Deterministic ambient NPC relationship chemistry processed without an LLM call.", summary);
                     return summary;
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }
@@ -181,17 +181,17 @@ VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$nega
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             int limit = Clamp(ReadInt(payload, "limit", 60), 1, 250);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true,
                     ["campaignId"] = campaignId,
                     ["noLlmConfirmed"] = true,
-                    ["lastRun"] = QuerySql(connection, "SELECT * FROM ambient_relationship_runs ORDER BY world_day DESC LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>(),
-                    ["currentPairs"] = QuerySql(connection, "SELECT * FROM ambient_relationship_exposure ORDER BY last_day DESC,weighted_exposure DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["recentDrift"] = QuerySql(connection, "SELECT * FROM ambient_relationship_changes ORDER BY world_day DESC,created_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["pendingNativeChanges"] = QuerySql(connection, "SELECT pair_key,hero_a_id,hero_b_id,pending_native_signal,native_action_pending,native_action_id,last_native_sync_day FROM ambient_relationship_exposure WHERE ABS(pending_native_signal)>=0.01 OR native_action_pending=1 ORDER BY ABS(pending_native_signal) DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";")
+                    ["lastRun"] = Program.QuerySql(connection, "SELECT * FROM ambient_relationship_runs ORDER BY world_day DESC LIMIT 1;").FirstOrDefault() ?? new Dictionary<string, object>(),
+                    ["currentPairs"] = Program.QuerySql(connection, "SELECT * FROM ambient_relationship_exposure ORDER BY last_day DESC,weighted_exposure DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
+                    ["recentDrift"] = Program.QuerySql(connection, "SELECT * FROM ambient_relationship_changes ORDER BY world_day DESC,created_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
+                    ["pendingNativeChanges"] = Program.QuerySql(connection, "SELECT pair_key,hero_a_id,hero_b_id,pending_native_signal,native_action_pending,native_action_id,last_native_sync_day FROM ambient_relationship_exposure WHERE ABS(pending_native_signal)>=0.01 OR native_action_pending=1 ORDER BY ABS(pending_native_signal) DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";")
                 };
             }
         }
@@ -448,7 +448,7 @@ VALUES($id,$campaign,$day,'completed',$groups,$pairs,$directions,$positive,$nega
             List<Dictionary<string, object>> rows;
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                rows = QuerySql(connection, @"SELECT pairs.pair_key,
+                rows = Program.QuerySql(connection, @"SELECT pairs.pair_key,
 pairs.affinity_a_to_b,pairs.affinity_b_to_a,
 pairs.chance_a_to_b,pairs.chance_b_to_a
 FROM relationship_pair_chemistry pairs
@@ -463,7 +463,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested
             }
             else
             {
-                rows = QuerySql(connection, @"SELECT pair_key,
+                rows = Program.QuerySql(connection, @"SELECT pair_key,
 affinity_a_to_b,affinity_b_to_a,chance_a_to_b,chance_b_to_a
 FROM relationship_pair_chemistry;")
                     .Where(row => candidatePairKeys.Contains(
@@ -477,14 +477,14 @@ FROM relationship_pair_chemistry;")
         {
             string heroId = ReadFirstString(snapshot, "heroStringId", "heroId", "id");
             Dictionary<string, object> profile = new Dictionary<string, object>(snapshot ?? new Dictionary<string, object>(), StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> storedProfile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> storedProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
             foreach (KeyValuePair<string, object> item in storedProfile) profile[item.Key] = item.Value;
-            Dictionary<string, object> traitDocument = ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
+            Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> storedTraits = ReadDictionary(traitDocument, "foundationTraits")
                 ?? ReadDictionary(snapshot,"foundationTraits");
             if (storedTraits == null || storedTraits.Count == 0)
             {
-                Dictionary<string, object> transient = BuildTraitDocument(snapshot);
+                Dictionary<string, object> transient = CharactersService.BuildTraitDocument(snapshot);
                 storedTraits = ReadDictionary(transient, "foundationTraits") ?? new Dictionary<string, object>();
                 profile["traitPercentages"] = ReadDictionary(transient, "traitPercentages") ?? new Dictionary<string, object>();
                 profile["ambientTraitSource"] = "transient_deterministic_native_traits_and_skills";
@@ -515,23 +515,23 @@ FROM relationship_pair_chemistry;")
             double targetMerit = AmbientAverage01(target, "courage", "discipline", "confidence", "dutyMotivation");
             double observerRespect = AmbientAverage01(observer, "authorityRespect", "dutyMotivation", "ambition");
             double admiration = Map01ToSigned(0.70d * targetMerit + 0.30d * observerRespect);
-            double statusFriction = ClampDouble((AmbientTo01(AmbientTrait(observer, "pride")) + AmbientTo01(AmbientTrait(observer, "envy"))
+            double statusFriction = Program.ClampDouble((AmbientTo01(AmbientTrait(observer, "pride")) + AmbientTo01(AmbientTrait(observer, "envy"))
                 + AmbientTo01(AmbientTrait(observer, "irritability")) + AmbientTo01(AmbientTrait(target, "ambition"))
                 + AmbientTo01(AmbientTrait(target, "assertiveness")) + AmbientTo01(AmbientTrait(target, "powerMotivation"))
                 + AmbientTo01(AmbientTrait(target, "aggression"))) / 7d, 0d, 1d);
             double goalOverlap = new[] { "ambition", "powerMotivation", "fameMotivation", "wealthMotivation", "legacyMotivation" }
                 .Select(x => Math.Min(AmbientTo01(AmbientTrait(observer, x)), AmbientTo01(AmbientTrait(target, x)))).Average();
-            double rivalryPotential = ClampDouble(0.55d * goalOverlap + 0.25d * statusFriction
+            double rivalryPotential = Program.ClampDouble(0.55d * goalOverlap + 0.25d * statusFriction
                 + 0.20d * Math.Min(AmbientTo01(AmbientTrait(observer, "pride")), AmbientTo01(AmbientTrait(target, "pride"))), 0d, 1d);
             double affiliation = pair == null ? 0d : pair.SameClan ? 1d : pair.SameKingdom ? 0.5d : 0d;
             Dictionary<string, object> equilibrium = new Dictionary<string, object>
             {
-                ["trust"] = Math.Round(ClampDouble(12d * trustPerception + 8d * valueAlignment + 5d * socialEase, -25d, 25d), 3),
-                ["respect"] = Math.Round(ClampDouble(15d * admiration + 8d * valueAlignment - 8d * statusFriction, -25d, 25d), 3),
-                ["affection"] = Math.Round(ClampDouble(12d * socialEase + 10d * valueAlignment + 3d * trustPerception - 6d * statusFriction, -25d, 25d), 3),
-                ["interest_alignment"] = Math.Round(ClampDouble(24d * valueAlignment + 6d * affiliation, -30d, 30d), 3),
-                ["resentment"] = Math.Round(ClampDouble(14d * statusFriction - 4d * socialEase - 4d * valueAlignment, 0d, 20d), 3),
-                ["rivalry"] = Math.Round(ClampDouble(14d * rivalryPotential + 6d * statusFriction, 0d, 20d), 3)
+                ["trust"] = Math.Round(Program.ClampDouble(12d * trustPerception + 8d * valueAlignment + 5d * socialEase, -25d, 25d), 3),
+                ["respect"] = Math.Round(Program.ClampDouble(15d * admiration + 8d * valueAlignment - 8d * statusFriction, -25d, 25d), 3),
+                ["affection"] = Math.Round(Program.ClampDouble(12d * socialEase + 10d * valueAlignment + 3d * trustPerception - 6d * statusFriction, -25d, 25d), 3),
+                ["interest_alignment"] = Math.Round(Program.ClampDouble(24d * valueAlignment + 6d * affiliation, -30d, 30d), 3),
+                ["resentment"] = Math.Round(Program.ClampDouble(14d * statusFriction - 4d * socialEase - 4d * valueAlignment, 0d, 20d), 3),
+                ["rivalry"] = Math.Round(Program.ClampDouble(14d * rivalryPotential + 6d * statusFriction, 0d, 20d), 3)
             };
             return new Dictionary<string, object>
             {
@@ -562,13 +562,13 @@ FROM relationship_pair_chemistry;")
                 }
                 double gap = desired - current;
                 if (Math.Abs(gap) < 0.5d) continue;
-                double delta = ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
+                double delta = Program.ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
                 if (Math.Abs(delta) < 0.00001d) continue;
                 double next = ClampRelationship(current + delta);
                 changes[facet] = delta;
-                ExecuteSql(connection, "UPDATE relationships SET " + facet + "=$value,updated_ts=$ts,last_updated_from_json=$source WHERE subject_id=$subject AND target_id=$target;",
+                Program.ExecuteSql(connection, "UPDATE relationships SET " + facet + "=$value,updated_ts=$ts,last_updated_from_json=$source WHERE subject_id=$subject AND target_id=$target;",
                     new Dictionary<string, object> { ["value"] = next, ["ts"] = ts, ["source"] = Json.Serialize(new[] { "ambient:" + day.ToString(CultureInfo.InvariantCulture) }), ["subject"] = subject, ["target"] = target });
-                ExecuteSql(connection, @"INSERT INTO ambient_relationship_changes(change_id,run_id,pair_key,subject_id,target_id,facet,old_value,delta,new_value,equilibrium,world_day,context_kind,context_id,compatibility_json,created_ts)
+                Program.ExecuteSql(connection, @"INSERT INTO ambient_relationship_changes(change_id,run_id,pair_key,subject_id,target_id,facet,old_value,delta,new_value,equilibrium,world_day,context_kind,context_id,compatibility_json,created_ts)
 VALUES($id,$run,$pair,$subject,$target,$facet,$old,$delta,$new,$equilibrium,$day,$kind,$context,'{}',$ts)
 ON CONFLICT(pair_key,subject_id,target_id,facet) DO UPDATE SET
 run_id=excluded.run_id,old_value=excluded.old_value,delta=excluded.delta,new_value=excluded.new_value,
@@ -587,10 +587,10 @@ context_id=excluded.context_id,compatibility_json='{}',created_ts=excluded.creat
 
         private static bool HasAmbientHistoryBlock(ReignDbConnection connection, string subject, string target)
         {
-            int milestone = ReadInt(QuerySql(connection,
+            int milestone = ReadInt(Program.QuerySql(connection,
                 "SELECT COUNT(*) AS count FROM relationship_milestones WHERE subject_id=$subject AND target_id=$target AND status='active' AND kind IN ('betrayed','nemesis','estranged','heartbroken');",
                 new Dictionary<string, object> { ["subject"] = subject, ["target"] = target }).FirstOrDefault(), "count", 0);
-            int pressure = ReadInt(QuerySql(connection,
+            int pressure = ReadInt(Program.QuerySql(connection,
                 "SELECT COUNT(*) AS count FROM relationship_pressures WHERE subject_id=$subject AND target_id=$target AND status='active' AND intensity>=50;",
                 new Dictionary<string, object> { ["subject"] = subject, ["target"] = target }).FirstOrDefault(), "count", 0);
             return milestone > 0 || pressure > 0;
@@ -604,7 +604,7 @@ context_id=excluded.context_id,compatibility_json='{}',created_ts=excluded.creat
                 ["delta"] = delta, ["source"] = "ambient_relationship_drift", ["pairKey"] = pair.PairKey,
                 ["sourceSignal"] = sourceSignal, ["silent"] = true
             };
-            ExecuteSql(connection, @"INSERT INTO relationship_director_actions(director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,created_ts)
+            Program.ExecuteSql(connection, @"INSERT INTO relationship_director_actions(director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,created_ts)
 VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 new Dictionary<string, object> { ["id"] = id, ["day"] = day, ["actor"] = pair.HeroAId, ["target"] = pair.HeroBId, ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
             return id;
@@ -628,10 +628,10 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
             return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? a + "|" + b : b + "|" + a;
         }
 
-        private static double AmbientTrait(Dictionary<string, object> profile, string key) => ClampDouble(TraitFromProfile(profile, key) / 2d, -1d, 1d);
-        private static double AmbientTo01(double signed) => ClampDouble((signed + 1d) / 2d, 0d, 1d);
-        private static double Map01ToSigned(double value) => ClampDouble(value * 2d - 1d, -1d, 1d);
-        private static double AmbientSimilarity(double a, double b) => ClampDouble(1d - Math.Abs(a - b) / 2d, 0d, 1d);
+        private static double AmbientTrait(Dictionary<string, object> profile, string key) => Program.ClampDouble(TraitFromProfile(profile, key) / 2d, -1d, 1d);
+        private static double AmbientTo01(double signed) => Program.ClampDouble((signed + 1d) / 2d, 0d, 1d);
+        private static double Map01ToSigned(double value) => Program.ClampDouble(value * 2d - 1d, -1d, 1d);
+        private static double AmbientSimilarity(double a, double b) => Program.ClampDouble(1d - Math.Abs(a - b) / 2d, 0d, 1d);
         private static double AmbientAverage01(Dictionary<string, object> profile, params string[] keys) => keys.Select(x => AmbientTo01(AmbientTrait(profile, x))).Average();
 
         private static List<Dictionary<string, object>> RunAmbientRelationshipSelfTests()
@@ -650,8 +650,8 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
             add("rival_equilibrium_friction", ReadDouble(friction, "rivalry", 0d) > 5d || ReadDouble(friction, "resentment", 0d) > 5d, "Proud aggressive peers produce rivalry or resentment pressure.");
             Dictionary<string, object> directionalA = CalculateAmbientCompatibility(warm, rivalA, pair), directionalB = CalculateAmbientCompatibility(rivalA, warm, pair);
             add("directional_chemistry", Math.Abs(ReadDouble(ReadDictionary(directionalA, "equilibrium"), "trust", 0d) - ReadDouble(ReadDictionary(directionalB, "equilibrium"), "trust", 0d)) > 0.1d, "Compatibility is evaluated independently in each direction.");
-            double partyDelta = ClampDouble((20d - 0d) * 0.02d * AmbientPartyExposure, -0.50d, 0.50d);
-            double settlementDelta = ClampDouble((20d - 0d) * 0.02d * AmbientSettlementExposure, -0.50d, 0.50d);
+            double partyDelta = Program.ClampDouble((20d - 0d) * 0.02d * AmbientPartyExposure, -0.50d, 0.50d);
+            double settlementDelta = Program.ClampDouble((20d - 0d) * 0.02d * AmbientSettlementExposure, -0.50d, 0.50d);
             add("party_stronger_than_settlement", partyDelta > settlementDelta && Math.Abs(settlementDelta - 0.14d) < 0.0001d, "Party exposure is stronger and settlement drift uses the doubled convergence rate.");
             add("seven_day_settlement_drift", Math.Abs(settlementDelta * 7d - 0.98d) < 0.0001d, "A twenty-point settlement gap moves approximately one point over a seven-day stay.");
             add("ambient_facet_allowlist", AmbientFacetKeys.All(x => new[] { "trust", "respect", "affection", "interest_alignment", "resentment", "rivalry" }.Contains(x)) && !AmbientFacetKeys.Contains("attraction") && !AmbientFacetKeys.Contains("loyalty"), "Ambient drift cannot directly alter romance, loyalty, fear, debt, or other gated facets.");
@@ -703,11 +703,11 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 int initialChanges;
                 double initialMagnitude;
                 Dictionary<string, object> forbiddenBefore;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    initialChanges = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM ambient_relationship_changes;").FirstOrDefault(), "count", 0);
-                    initialMagnitude = ReadDouble(QuerySql(connection, "SELECT COALESCE(AVG(ABS(delta)),0) AS value FROM ambient_relationship_changes WHERE world_day=1;").FirstOrDefault(), "value", 0d);
-                    forbiddenBefore = QuerySql(connection, "SELECT loyalty,fear,envy,attraction,jealousy,dependence,debt FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
+                    initialChanges = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM ambient_relationship_changes;").FirstOrDefault(), "count", 0);
+                    initialMagnitude = ReadDouble(Program.QuerySql(connection, "SELECT COALESCE(AVG(ABS(delta)),0) AS value FROM ambient_relationship_changes WHERE world_day=1;").FirstOrDefault(), "value", 0d);
+                    forbiddenBefore = Program.QuerySql(connection, "SELECT loyalty,fear,envy,attraction,jealousy,dependence,debt FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
                         new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault() ?? new Dictionary<string, object>();
                 }
                 add("persistence_real_api_drift", ReadBool(first, "noLlmConfirmed", false) && initialChanges > 0,
@@ -715,8 +715,8 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
 
                 Dictionary<string, object> replay = run(1, new List<Dictionary<string, object>> { group("party", "party_test") });
                 int replayChanges;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    replayChanges = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM ambient_relationship_changes;").FirstOrDefault(), "count", 0);
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    replayChanges = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM ambient_relationship_changes;").FirstOrDefault(), "count", 0);
                 add("persistence_same_day_idempotent", ReadBool(replay, "idempotent", false) && replayChanges == initialChanges,
                     "Replaying the same campaign day returns the stored run without duplicate drift.");
 
@@ -724,10 +724,10 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 run(3, new List<Dictionary<string, object>> { group("settlement", "town_test") });
                 double settlementMagnitude, weightedExposure;
                 int consecutiveDays;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    settlementMagnitude = ReadDouble(QuerySql(connection, "SELECT COALESCE(AVG(ABS(delta)),0) AS value FROM ambient_relationship_changes WHERE world_day=3;").FirstOrDefault(), "value", 0d);
-                    Dictionary<string, object> exposure = QuerySql(connection, "SELECT weighted_exposure,consecutive_days FROM ambient_relationship_exposure WHERE pair_key=$pair LIMIT 1;",
+                    settlementMagnitude = ReadDouble(Program.QuerySql(connection, "SELECT COALESCE(AVG(ABS(delta)),0) AS value FROM ambient_relationship_changes WHERE world_day=3;").FirstOrDefault(), "value", 0d);
+                    Dictionary<string, object> exposure = Program.QuerySql(connection, "SELECT weighted_exposure,consecutive_days FROM ambient_relationship_exposure WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = AmbientPairKey(heroA, heroB) }).FirstOrDefault() ?? new Dictionary<string, object>();
                     weightedExposure = ReadDouble(exposure, "weighted_exposure", 0d);
                     consecutiveDays = ReadInt(exposure, "consecutive_days", 0);
@@ -738,11 +738,11 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                 for (int day = 4; day <= 18; day++) run(day, new List<Dictionary<string, object>> { group("party", "party_test") });
                 int nativeActions;
                 Dictionary<string, object> forbiddenAfter;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    nativeActions = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_director_actions WHERE action_type='native_relation' AND actor_id=$a AND target_id=$b;",
+                    nativeActions = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM relationship_director_actions WHERE action_type='native_relation' AND actor_id=$a AND target_id=$b;",
                         new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "count", 0);
-                    forbiddenAfter = QuerySql(connection, "SELECT loyalty,fear,envy,attraction,jealousy,dependence,debt FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
+                    forbiddenAfter = Program.QuerySql(connection, "SELECT loyalty,fear,envy,attraction,jealousy,dependence,debt FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
                         new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault() ?? new Dictionary<string, object>();
                 }
                 add("persistence_native_relation_batched", nativeActions == 1,
@@ -753,22 +753,22 @@ VALUES($id,'native_relation','pending',$day,$actor,$target,$payload,$ts);",
                     "Daily ambient processing did not change loyalty, fear, envy, attraction, jealousy, dependence, or debt.");
 
                 double trustBeforeBlock;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    trustBeforeBlock = ReadDouble(QuerySql(connection, "SELECT trust FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
+                    trustBeforeBlock = ReadDouble(Program.QuerySql(connection, "SELECT trust FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
                         new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
-                    ExecuteSql(connection, @"INSERT INTO relationship_milestones(milestone_id,subject_id,target_id,kind,status,stability,strength,reason,created_event_id,last_event_id,evidence_json,created_day,last_meaningful_day,updated_ts,payload_json)
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_milestones(milestone_id,subject_id,target_id,kind,status,stability,strength,reason,created_event_id,last_event_id,evidence_json,created_day,last_meaningful_day,updated_ts,payload_json)
 VALUES($id,$a,$b,'betrayed','active',80,80,'ambient self-test','','','[]',18,18,$ts,'{}');",
                         new Dictionary<string, object> { ["id"] = "ambient_block_" + Guid.NewGuid().ToString("N"), ["a"] = heroA, ["b"] = heroB, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 }
                 run(19, new List<Dictionary<string, object>> { group("party", "party_test") });
                 double trustAfterBlock;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                    trustAfterBlock = ReadDouble(QuerySql(connection, "SELECT trust FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                    trustAfterBlock = ReadDouble(Program.QuerySql(connection, "SELECT trust FROM relationships WHERE subject_id=$a AND target_id=$b LIMIT 1;",
                         new Dictionary<string, object> { ["a"] = heroA, ["b"] = heroB }).FirstOrDefault(), "trust", 0d);
                 add("persistence_major_history_blocks_healing", Math.Abs(trustAfterBlock - trustBeforeBlock) < 0.000001d,
                     "Active betrayal evidence prevents ordinary proximity from increasing trust.");
-                add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(CharacterDirectory(campaignId, heroA)) && !Directory.Exists(CharacterDirectory(campaignId, heroB)),
+                add("persistence_unconstructed_heroes_stay_transient", !Directory.Exists(Program.CharacterDirectory(campaignId, heroA)) && !Directory.Exists(Program.CharacterDirectory(campaignId, heroB)),
                     "Ambient processing used transient deterministic traits without constructing profiles or backstories.");
             }
             catch (Exception ex)
@@ -777,7 +777,7 @@ VALUES($id,$a,$b,'betrayed','active',80,80,'ambient self-test','','','[]',18,18,
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             return results;
         }

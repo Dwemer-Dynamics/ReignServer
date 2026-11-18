@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private static bool HistoryClaimContainsTerm(string text, params string[] terms) =>
             terms.Any(term => Regex.IsMatch(text ?? "", @"\b" + Regex.Escape(term) + @"\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
@@ -15,10 +15,10 @@ namespace ReignBetaServer
             + @"(?:(?:imperial|victorious|defending|attacking|enemy)\s+)?(?:battle|army|troops|soldiers|siege|raid|cavalry|infantry|forces|men)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        private static bool HistoryEventRosterComplete(Dictionary<string, object> row) =>
+        internal static bool HistoryEventRosterComplete(Dictionary<string, object> row) =>
             ReadBool(row, "is_complete", false) || ReadInt(row, "is_complete", 0) == 1;
 
-        private static List<Dictionary<string, object>> ExtractAssertedWorldHistorySpans(string source)
+        internal static List<Dictionary<string, object>> ExtractAssertedWorldHistorySpans(string source)
         {
             source ??= "";
             var result = new List<Dictionary<string, object>>();
@@ -51,19 +51,19 @@ namespace ReignBetaServer
                 if (family == "payment" && !Regex.IsMatch(quote, @"\b(?:gold|coins?|denars?|money|payment|tribute|wages?|rent)\b|\d", RegexOptions.IgnoreCase)) continue;
                 if (family == "meeting" && Regex.IsMatch(quote, @"\bmet\s+(?:(?:the|your|my|their|our)\s+)?(?:expectations?|requirements?|conditions?|needs?|standards?)\b", RegexOptions.IgnoreCase)) continue;
                 result.Add(new Dictionary<string, object> { ["quote"] = quote, ["start"] = start,
-                    ["length"] = quote.Length, ["sourceHash"] = PromptHash(source), ["claimFamily"] = family,
+                    ["length"] = quote.Length, ["sourceHash"] = Program.PromptHash(source), ["claimFamily"] = family,
                     ["actor"] = "claimant", ["evidenceType"] = "spoken_statement" });
             }
             return result;
         }
 
-        private static bool HistoryClaimMatchesNamedLocation(string claim, Dictionary<string, object> row)
+        internal static bool HistoryClaimMatchesNamedLocation(string claim, Dictionary<string, object> row)
         {
             var place = Regex.Match(claim ?? "", @"\b(?:at|near|outside|inside)\s+(?:the\s+)?(?<place>[A-Z][\p{L}'’-]*(?:\s+[A-Z][\p{L}'’-]*){0,4})",
                 RegexOptions.CultureInvariant);
             if (!place.Success) return true;
-            string named = NormalizeLookup(place.Groups["place"].Value);
-            string actual = NormalizeLookup(ReadString(row, "location_name", ""));
+            string named = Program.NormalizeLookup(place.Groups["place"].Value);
+            string actual = Program.NormalizeLookup(ReadString(row, "location_name", ""));
             return actual.Length > 0 && named == actual;
         }
     }

@@ -174,7 +174,7 @@ namespace ReignBetaServer
                 ["version"] = CourtCharacterModelVersion,
                 ["id"] = CourtCharacterModelId,
                 ["source"] = "fixed sex-specific Honor-Boldness matrix",
-                ["scoreBands"] = Program.TraitPercentageBands(),
+                ["scoreBands"] = CharactersService.TraitPercentageBands(),
                 ["fixedCellRule"] = "Honor selects one column and Boldness selects one row. Scene conditions never shift either coordinate.",
                 ["adultRule"] = "Every adult NPC receives one cell; children are unavailable.",
                 ["opportunityRule"] = "Known public identity and visible presentation may strengthen relevant tactics but never change the cell.",

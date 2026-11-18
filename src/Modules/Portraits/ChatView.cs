@@ -32,7 +32,7 @@ namespace ReignBetaServer
                 string campaign = ReadString(request, "campaignId", ""), timeline = ReadString(request, "timelineId", "");
                 string session = ReadString(request, "sessionId", ""), player = ReadString(request, "playerId", "");
                 if (campaign.Length == 0 || timeline.Length == 0 || player.Length == 0) return ChatViewError("A current campaign, timeline and player are required.");
-                long generation = Interlocked.Read(ref Program.CampaignReplacementGeneration);
+                long generation = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
                 using var connection = Program.OpenCampaignConnection(campaign);
                 Program.EnsureChatViewSchema(connection);
                 if (action == "archive")
@@ -181,7 +181,7 @@ VALUES($id,$session,$timeline,$player,$ts,$payload) ON CONFLICT(job_id) DO UPDAT
         {
             string campaign = ReadString(job, "campaignId", ""), id = ReadString(job, "jobId", ""), key = campaign + "|" + id;
             long generation = ReadLong(job, "campaignGeneration", -1);
-            bool current() => generation == Interlocked.Read(ref Program.CampaignReplacementGeneration);
+            bool current() => generation == Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
             void persist()
             {
                 if (!current()) throw new OperationCanceledException("The campaign was replaced while View was pending.");
@@ -206,7 +206,7 @@ VALUES($id,$session,$timeline,$player,$ts,$payload) ON CONFLICT(job_id) DO UPDAT
                 string selectionData = clothingContract ? Json.Serialize(ChatViewClothingSelectionInput(window, history,
                     coverageContract.Length == 0 ? null : ReadDictionaryList(identity, "wardrobeCoverageEvidence"))) : Json.Serialize(ChatViewSelectionWindow(window));
                 var envelope = Program.BuildSimplePromptEnvelope("chat_view", "chat_view", ReadString(identity, "selectionPrompt", ""), selectionData);
-                var reply = Program.WithCampaignReadLeaseSuspended(() => Program.ChatWithLlm(TestDict("requestType", "chat_view", "campaignId", campaign, "model", ReadString(identity, "dialogueModel", ""),
+                var reply = PersistenceService.WithCampaignReadLeaseSuspended(() => Program.ChatWithLlm(TestDict("requestType", "chat_view", "campaignId", campaign, "model", ReadString(identity, "dialogueModel", ""),
                     "correlationId", "view_" + id, "messages", envelope.Messages, "promptEnvelope", envelope.Diagnostics,
                     "singleProviderAttempt", true, "response_format", TestDict("type", "json_object")), null, () => !current(), settings));
                 if (!ReadBool(reply, "ok", false)) throw new InvalidOperationException(ReadString(reply, "error", "The scene could not be selected."));
@@ -247,7 +247,7 @@ VALUES($id,$session,$timeline,$player,$ts,$payload) ON CONFLICT(job_id) DO UPDAT
                 job["status"] = "generating"; job["imageAttempted"] = true; persist();
                 var capability = ReadDictionary(identity, "capability");
                 profile.ChatView = true;
-                var call = Program.WithCampaignReadLeaseSuspended(() => CallImageProvider(settings, profile, prompt, sheet, ReadString(capability, "size", "")));
+                var call = PersistenceService.WithCampaignReadLeaseSuspended(() => CallImageProvider(settings, profile, prompt, sheet, ReadString(capability, "size", "")));
                 if (!call.Ok || call.ImageBytes == null) throw new InvalidOperationException(call.Error ?? "The image provider returned no image.");
                 job["imageReturned"] = true;
                 if (!current()) throw new OperationCanceledException("The campaign changed before image publication.");

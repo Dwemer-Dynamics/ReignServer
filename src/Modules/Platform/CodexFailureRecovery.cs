@@ -75,7 +75,7 @@ namespace ReignBetaServer
         {
             lock (CodexFailureStateLock)
                 return TestDict("lastGenerationFailure", CloneDictionary(CodexLastGenerationFailure),
-                    "rateLimits", DeepCloneProfileDictionary(CodexLastRateLimits));
+                    "rateLimits", CharactersService.DeepCloneProfileDictionary(CodexLastRateLimits));
         }
 
         private static bool CodexQuotaBlocksRetry(Dictionary<string, object> limits)
@@ -110,7 +110,7 @@ namespace ReignBetaServer
                     var limits = readLimits();
                     failure.Failure["rateLimits"] = limits;
                     failure.Failure["attemptCount"] = attempt;
-                    recovery["lastFailure"] = DeepCloneProfileDictionary(failure.Failure);
+                    recovery["lastFailure"] = CharactersService.DeepCloneProfileDictionary(failure.Failure);
                     if (!CanRetryTerminalCodexFailure(failure, attempt, maximum, limits)) throw;
                     int delay = Math.Max(2000, ReadInt(failure.Failure, "retryAfterSeconds", 0) * 1000);
                     recovery["retryDelayMs"] = delay;
@@ -131,7 +131,7 @@ namespace ReignBetaServer
             var recovery = TestDict("schema", "reign-codex-terminal-retry-v1", "maximumAttempts", maximum);
             void Current()
             {
-                ThrowIfCampaignRequestReplaced();
+                PersistenceService.ThrowIfCampaignRequestReplaced();
                 if (canceled?.Invoke() == true) throw new OperationCanceledException("Codex request was canceled.");
                 if (timer.ElapsedMilliseconds >= timeout) throw new TimeoutException("Codex provider deadline expired; retry was not started.");
             }
@@ -145,7 +145,7 @@ namespace ReignBetaServer
                     if (!DateTime.TryParse(ReadString(CodexLastRateLimits, "observedUtc", ""), out observed)
                         || DateTime.UtcNow - observed.ToUniversalTime() > TimeSpan.FromMinutes(1))
                         return TestDict("available", false);
-                    return DeepCloneProfileDictionary(CodexLastRateLimits);
+                    return CharactersService.DeepCloneProfileDictionary(CodexLastRateLimits);
                 }
             }
             try
@@ -175,7 +175,7 @@ namespace ReignBetaServer
                 diagnostics["terminalRetry"] = recovery;
                 diagnostics["failure"] = failure.Failure;
                 failure.Data["codexDiagnostics"] = diagnostics;
-                lock (CodexFailureStateLock) CodexLastGenerationFailure = DeepCloneProfileDictionary(failure.Failure);
+                lock (CodexFailureStateLock) CodexLastGenerationFailure = CharactersService.DeepCloneProfileDictionary(failure.Failure);
                 throw;
             }
         }

@@ -8,9 +8,9 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string ConversationInputSchema = "reign-conversation-input-v1";
+        internal const string ConversationInputSchema = "reign-conversation-input-v1";
 
-        private static AcceptedPlayerInputSource CapturePlayerInput(Dictionary<string, object> payload)
+        internal static AcceptedPlayerInputSource CapturePlayerInput(Dictionary<string, object> payload)
         {
             if (payload == null) return null;
             if (!PlayerInputSources.TryGetValue(payload, out var source))
@@ -22,10 +22,10 @@ namespace ReignBetaServer
             return source;
         }
 
-        private static string OriginalPlayerInput(Dictionary<string, object> payload) =>
+        internal static string OriginalPlayerInput(Dictionary<string, object> payload) =>
             CapturePlayerInput(payload)?.Original ?? "";
 
-        private static void EnsureConversationInputSchema(ReignDbConnection connection)
+        internal static void EnsureConversationInputSchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_input_receipts (
 input_id TEXT PRIMARY KEY, timeline_id TEXT NOT NULL, session_id TEXT NOT NULL,
@@ -38,7 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_input_session ON conversation_input_
 
         // Admission is a separate, durable transaction BEFORE interpretation or generation.
         // Acceptance may roll back without erasing what the player actually submitted.
-        private static Dictionary<string, object> AdmitConversationInput(string campaign,
+        internal static Dictionary<string, object> AdmitConversationInput(string campaign,
             Dictionary<string, object> payload, string generation, string observer = "")
         {
             var source = CapturePlayerInput(payload);
@@ -110,7 +110,7 @@ VALUES($id,$timeline,$session,$player,$source,$hash,$generation,'received',$now,
             return source.Receipt;
         }
 
-        private static string ConversationExactTextHash(string text)
+        internal static string ConversationExactTextHash(string text)
         {
             using var sha = System.Security.Cryptography.SHA256.Create();
             return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? ""))).Replace("-", "").ToLowerInvariant();
@@ -168,7 +168,7 @@ WHERE input_id=$id AND restore_generation=$generation;",
             transaction.Commit();
         }
 
-        private static void BindAcceptedInputSource(ReignDbConnection connection, Dictionary<string, object> payload,
+        internal static void BindAcceptedInputSource(ReignDbConnection connection, Dictionary<string, object> payload,
             string session, string exchange, IEnumerable<string> turnIds)
         {
             var captured = CapturePlayerInput(payload);
@@ -206,7 +206,7 @@ WHERE input_id=$id AND restore_generation=$generation;",
                     "exchangeId", ReadString(exchange, "exchangeId", ""), "turnIds", ReadStringList(exchange, "turnIds"), "acceptedUnit", accepted),
                 "deliveryRecovery", TestDict("status", "accepted_response_recovered", "nativeActionPublication", "not_confirmed"));
             if (unit.GroupConversation || unit.EventType == "social_event_turn")
-                replay["participation"] = NormalizeSocialEventParticipation(unit.Parsed);
+                replay["participation"] = WorldSimulationService.NormalizeSocialEventParticipation(unit.Parsed);
             ExecuteSql(connection, @"UPDATE conversation_input_receipts SET
 response_json=((response_json::jsonb)||jsonb_build_object(CAST($observer AS text),CAST($response AS jsonb)))::text,
 status='accepted',updated_ts=$now WHERE input_id=$id AND restore_generation=$generation;",

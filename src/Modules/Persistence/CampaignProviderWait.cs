@@ -5,23 +5,23 @@ using System.Runtime.CompilerServices;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
         // Only the synchronous HTTP owner can suspend its read lease. Background
         // workers and write owners keep their existing snapshot exclusion.
-        [ThreadStatic] private static CampaignRequestLease CurrentCampaignRequestLease;
+        [ThreadStatic] internal static CampaignRequestLease CurrentCampaignRequestLease;
         internal static long CampaignReplacementGeneration;
         // Isolated concurrency contracts signal the actual monitor wait, rather
         // than relying on scheduling delays. Never installed by runtime code.
-        [ThreadStatic] private static Action<object> CampaignWorkLockWaitObserverForTests;
+        [ThreadStatic] internal static Action<object> CampaignWorkLockWaitObserverForTests;
 
-        private sealed class CampaignRequestLease
+        internal sealed class CampaignRequestLease
         {
             internal long Generation;
             internal bool Invalid;
         }
 
-        private sealed class CampaignRequestReplacedException : InvalidOperationException
+        internal sealed class CampaignRequestReplacedException : InvalidOperationException
         {
             internal CampaignRequestReplacedException()
                 : base("Campaign state changed while the response was being generated. Retry the interaction in the loaded campaign.") { }
@@ -41,7 +41,7 @@ namespace ReignBetaServer
                 throw new CampaignRequestReplacedException();
         }
 
-        private static T WithCampaignProviderWait<T>(string requestType, Func<T> wait)
+        internal static T WithCampaignProviderWait<T>(string requestType, Func<T> wait)
         {
             ThrowIfCampaignRequestReplaced();
             // These call sites finish their DB operations before dispatch and
@@ -56,15 +56,15 @@ namespace ReignBetaServer
         {
             ThrowIfCampaignRequestReplaced();
             CampaignRequestLease lease = CurrentCampaignRequestLease;
-            if (lease == null || !CampaignDataGate.IsReadLockHeld)
+            if (lease == null || !Program.CampaignDataGate.IsReadLockHeld)
                 return wait();
-            CampaignDataGate.ExitReadLock();
+            Program.CampaignDataGate.ExitReadLock();
             try { return wait(); }
             finally
             {
                 // Reacquire even when the provider fails. An exception after a
                 // restore must not turn into an ordinary cached failure later.
-                CampaignDataGate.EnterReadLock();
+                Program.CampaignDataGate.EnterReadLock();
                 if (lease.Generation != Interlocked.Read(ref CampaignReplacementGeneration))
                     lease.Invalid = true;
                 ThrowIfCampaignRequestReplaced();
@@ -80,7 +80,7 @@ namespace ReignBetaServer
             => CampaignWorkLockStates.TryGetValue(gate, out var state)
                 ? Volatile.Read(ref state.Current)?.Source ?? "unknown" : "unknown";
 
-        private sealed class CampaignWorkLock : IDisposable
+        internal sealed class CampaignWorkLock : IDisposable
         {
             private object gate;
             private readonly CampaignWorkLockState state;
@@ -116,7 +116,7 @@ namespace ReignBetaServer
                 // Logging happens after releasing ownership, is bounded to slow
                 // scopes, and cannot change request success or monitor release.
                 if (!stillOwned && (heldMs >= 1000d || WaitMs >= 1000))
-                    try { LogOperational("campaign.work_lock_slow", TestDict(
+                    try { Program.LogOperational("campaign.work_lock_slow", TestDict(
                         "owner", Source, "lastStage", Volatile.Read(ref stage),
                         "heldMs", heldMs, "waitMs", WaitMs,
                         "ownerAtWaitStart", ownerAtWaitStart, "stageAtWaitStart", stageAtWaitStart,
@@ -125,7 +125,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static CampaignWorkLock EnterCampaignWorkLock(object gate, [CallerMemberName] string source = "")
+        internal static CampaignWorkLock EnterCampaignWorkLock(object gate, [CallerMemberName] string source = "")
         {
             ThrowIfCampaignRequestReplaced();
             bool entered = false;

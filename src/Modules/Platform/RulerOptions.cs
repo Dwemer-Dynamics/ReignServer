@@ -9,9 +9,9 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static Dictionary<string, object> RulerOptionsForClient(Dictionary<string, object> settings) =>
+        internal static Dictionary<string, object> RulerOptionsForClient(Dictionary<string, object> settings) =>
             RulerOptions.Switches.Keys.ToDictionary(k => k, k => (object)ReadBool(settings, k, true), StringComparer.Ordinal);
-        private static string ValidateRulerOptions(Dictionary<string, object> incoming)
+        internal static string ValidateRulerOptions(Dictionary<string, object> incoming)
         {
             foreach (var pair in incoming.Where(p => p.Key.StartsWith("ruler", StringComparison.Ordinal)))
             {
@@ -27,7 +27,7 @@ namespace ReignBetaServer
             }
             return "";
         }
-        private static string RulerOptionsHtml()
+        internal static string RulerOptionsHtml()
         {
             var html = new StringBuilder("<div class='xpOptions' id='rulerOptions'><h3>Rulers, capitals and captivity</h3>");
             foreach (var pair in RulerOptions.Switches)
@@ -35,7 +35,7 @@ namespace ReignBetaServer
             html.Append("<p class='xpHelp'>All switches default to on. Changes apply across campaigns and refresh in the game within five seconds. The master switch controls every feature above. Turning off judgments cancels pending sentences and their uncommitted consequences; completed executions, payments, allegiance changes and memories remain. Settlement effects stop while disabled and keep their original expiry. Turning residence off releases AI travel restrictions. Foreign-owner culture pressure remains active. Turning off the life-and-death requirement allows the normal game option again.</p>");
             return html.Append("<div id='rulerOptionsPreview' class='xpHelp' aria-live='polite'></div><button type='button' onclick='resetRulerOptions()'>Reset to defaults</button> <button type='button' id='saveRulerOptions' disabled onclick='saveRulerOptions()'>Save ruler options</button><div id='rulerOptionsStatus' role='status' aria-live='polite'></div></div>").ToString();
         }
-        private static string RulerOptionsScript() => "const rulerSwitchIds=" + Json.Serialize(RulerOptions.Switches.Keys.ToArray()) + @";
+        internal static string RulerOptionsScript() => "const rulerSwitchIds=" + Json.Serialize(RulerOptions.Switches.Keys.ToArray()) + @";
 ids.push(...rulerSwitchIds);rulerSwitchIds.forEach(k=>boolIds.add(k));
 let rulerOptionsLoaded=false;
 function renderRulerOptions(){const enabled=document.getElementById('rulerSystemEnabled').checked;document.getElementById('rulerOptionsPreview').textContent=enabled?'Ruler features are active according to the switches above.':'Ruler features are disabled.';}

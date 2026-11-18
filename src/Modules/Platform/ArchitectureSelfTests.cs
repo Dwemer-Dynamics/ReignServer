@@ -392,12 +392,12 @@ namespace ReignBetaServer
                         ["turnId"] = "direct_address_turn",
                         ["playerText"] = "Pacarios, this gift is for you. Aevysara and Mostiros are witnesses."
                     };
-                    List<string> directAddressOrder = BuildSocialEventResponseOrder(directAddressPayload, addressedProfiles);
+                    List<string> directAddressOrder = WorldSimulationService.BuildSocialEventResponseOrder(directAddressPayload, addressedProfiles);
                     Dictionary<string, object> nextTurnPayload = new Dictionary<string, object>(directAddressPayload)
                     {
                         ["turnId"] = "direct_address_turn_next"
                     };
-                    List<string> nextTurnOrder = BuildSocialEventResponseOrder(nextTurnPayload, addressedProfiles);
+                    List<string> nextTurnOrder = WorldSimulationService.BuildSocialEventResponseOrder(nextTurnPayload, addressedProfiles);
                     add("group_direct_addressee_speaks_first", directAddressOrder.FirstOrDefault() == "npc_recipient"
                         && nextTurnOrder.FirstOrDefault() == "npc_recipient"
                         && new HashSet<string>(directAddressOrder, StringComparer.OrdinalIgnoreCase).SetEquals(
@@ -442,7 +442,7 @@ namespace ReignBetaServer
                             "Menor the Brewer", "Rhovarion"),
                         "Legacy memories that assign the current NPC's own name to the player are quarantined without suppressing correctly attributed player identities.", null);
 
-                    Dictionary<string, object> disputedIdentity = BuildIdentityView(
+                    Dictionary<string, object> disputedIdentity = CharactersService.BuildIdentityView(
                         new Dictionary<string, object>
                         {
                             ["identity_state"] = "disputed",
@@ -451,8 +451,8 @@ namespace ReignBetaServer
                             ["confidence"] = 0.6d
                         },
                         new Dictionary<string, object> { ["canonicalName"] = "Rhovarion", ["mode"] = "dialogue" });
-                    string disputedIdentityBlock = BuildIdentityPromptBlock(disputedIdentity);
-                    string sanitizedIdentity = SanitizePromptForIdentity(
+                    string disputedIdentityBlock = CharactersService.BuildIdentityPromptBlock(disputedIdentity);
+                    string sanitizedIdentity = CharactersService.SanitizePromptForIdentity(
                         "Usable name or label: the stranger claiming to be Rhovarion\nClaimed name: Rhovarion (not independently verified)\nThe Stranger Claiming To Be Rhovarion gave Menor a cup.\nRhovarion's Party",
                         "", "Rhovarion", disputedIdentity);
                     Dictionary<string, object> unknownIdentity = new Dictionary<string, object>
@@ -462,7 +462,7 @@ namespace ReignBetaServer
                         ["safeLabel"] = "the armed stranger",
                         ["claimedName"] = ""
                     };
-                    string sanitizedUnknownIdentity = SanitizePromptForIdentity(
+                    string sanitizedUnknownIdentity = CharactersService.SanitizePromptForIdentity(
                         "Rhovarion entered the hall with Rhovarion's Party.", "", "Rhovarion", unknownIdentity);
                     add("identity_sanitizer_does_not_recursively_wrap_claimed_label",
                         sanitizedIdentity.Contains("Usable name or label: the stranger claiming to be Rhovarion", StringComparison.Ordinal)
@@ -679,7 +679,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                         new Dictionary<string, object> { ["operation"] = "send", ["mode"] = "party_chat", ["text"] = "Hello." }
                     }
                 };
-                List<Dictionary<string, object>> scenarioCommands = NormalizeLiveTestScenarioCommands(scenarioRun, scenarioPayload);
+                List<Dictionary<string, object>> scenarioCommands = WorldSimulationService.NormalizeLiveTestScenarioCommands(scenarioRun, scenarioPayload);
                 add("scenario_command_batch", scenarioCommands.Count == 2
                     && ReadString(scenarioCommands[0], "operation", "") == "open"
                     && ReadString(scenarioCommands[1], "operation", "") == "send",
@@ -692,8 +692,8 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     ["fixtureRunId"] = "isolated_accord_contracts", ["timeoutSeconds"] = 1800
                 };
                 string accordRunBefore = Json.Serialize(accordRun), accordInputBefore = Json.Serialize(accordInput);
-                var accordCommand = NormalizeLiveTestCommand(accordRun, accordInput);
-                var accordSteps = NormalizeLiveTestScenarioCommands(accordRun, new Dictionary<string, object>
+                var accordCommand = WorldSimulationService.NormalizeLiveTestCommand(accordRun, accordInput);
+                var accordSteps = WorldSimulationService.NormalizeLiveTestScenarioCommands(accordRun, new Dictionary<string, object>
                 { ["steps"] = new List<Dictionary<string, object>> { accordInput } });
                 add("clan_accord_contract_command_reachable", accordCommand != null && accordSteps.Count == 1
                     && ReadString(accordSteps[0], "operation", "") == "clan_accords_test"
@@ -705,22 +705,22 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                     "The fixed native math contract survives real scenario normalization without mutating run/input identity.", accordCommand);
                 bool accordRejected = true;
                 foreach (string badProfile in new[] { "apply", "contracts ", "", "create_accord" })
-                    accordRejected &= NormalizeLiveTestCommand(accordRun,
+                    accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                         new Dictionary<string, object>(accordInput) { ["profile"] = badProfile }) == null;
-                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                     new Dictionary<string, object>(accordInput) { ["mode"] = "party_chat" }) == null;
-                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                     new Dictionary<string, object>(accordInput) { ["fixtureRunId"] = new string('x', 129) }) == null;
-                accordRejected &= NormalizeLiveTestCommand(accordRun,
+                accordRejected &= WorldSimulationService.NormalizeLiveTestCommand(accordRun,
                     new Dictionary<string, object>(accordInput) { ["schemaVersion"] = 3 }) == null;
                 var defaultAccordInput = new Dictionary<string, object>(accordInput);
                 defaultAccordInput.Remove("profile");
-                var defaultAccordCommand = NormalizeLiveTestCommand(accordRun, defaultAccordInput);
+                var defaultAccordCommand = WorldSimulationService.NormalizeLiveTestCommand(accordRun, defaultAccordInput);
                 add("clan_accord_contract_command_bounds", accordRejected && defaultAccordCommand != null
                     && ReadString(defaultAccordCommand, "profile", "") == "contracts",
                     "Only the bounded non-mutating profile is accepted; unsupported profiles, modes, identity size and schema refuse.", null);
 
-                string boundedTurnPath = SocialEventTurnCacheFile(campaignId,
+                string boundedTurnPath = WorldSimulationService.SocialEventTurnCacheFile(campaignId,
                     "reign_live_test_event_" + new string('e', 64),
                     "live-live-run-command-" + new string('t', 64));
                 string boundedRelativePath = boundedTurnPath.Substring(CampaignDirectory(campaignId).Length).TrimStart(Path.DirectorySeparatorChar);
@@ -783,7 +783,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                             }
                     };
                 Dictionary<string, object> compactSocialReply =
-                    CompactSocialEventParticipantResponse(
+                    WorldSimulationService.CompactSocialEventParticipantResponse(
                         "npc_b", fullSocialReply);
                 add("social_turn_private_evidence_parity",
                     ReadDictionary(
@@ -850,7 +850,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                             }
                     };
                 string inferredSocialTarget =
-                    NormalizeSocialEventReactionTarget(
+                    WorldSimulationService.NormalizeSocialEventReactionTarget(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -861,7 +861,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                         attributedGroupPayload,
                         "npc_b");
                 string inferredSocialTargetFromUniqueFirstName =
-                    NormalizeSocialEventReactionTarget(
+                    WorldSimulationService.NormalizeSocialEventReactionTarget(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -912,7 +912,7 @@ WHERE type='table' AND name IN ('group_conversation_state','group_conversation_c
                         },
                         "npc_hazesa");
                 bool orderedFirstNameAwareness =
-                    LiveTestRepliesShowGroupAwareness(
+                    WorldSimulationService.LiveTestRepliesShowGroupAwareness(
                         new List<Dictionary<string, object>>
                         {
                             new Dictionary<string, object>
@@ -1719,9 +1719,9 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     "Native adapters use the tested continuous policy, preserve old save counters, and conserve actual same-realm aid stocks. Deterministic numeric and isolated native hook probes run in MCP tests; campaign balance remains separate.",
                     new Dictionary<string, object> { ["behaviorPath"] = economyBehaviorPath, ["modelsPath"] = economyModelsPath, ["telemetryPath"] = economyTelemetryPath });
                 add("war_economy_relief_float_drift_tolerance",
-                    ReliefFoodIsConserved(46846.6367d, 37907.082d, 8939.383d)
-                    && !ReliefFoodIsConserved(46846.6367d, 37906.5d, 8939.383d)
-                    && !ReliefFoodIsConserved(-1d, 0d, 0d),
+                    WorldSimulationService.ReliefFoodIsConserved(46846.6367d, 37907.082d, 8939.383d)
+                    && !WorldSimulationService.ReliefFoodIsConserved(46846.6367d, 37906.5d, 8939.383d)
+                    && !WorldSimulationService.ReliefFoodIsConserved(-1d, 0d, 0d),
                     "Long-run single-precision relief totals allow only ten parts per million of cumulative summation drift while genuine missing or negative food still fails conservation.",
                     new Dictionary<string, object>
                     {
@@ -1740,15 +1740,15 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "unsupported", 0, "fixtureTainted", false, "nativeAcceptance", "passed")
                 };
                 var coveragePayload = new Dictionary<string, object> { ["warEconomy"] = coverageSample };
-                var freshCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
-                var staleCoverage = BuildWorldTestWarEconomy(coveragePayload, 12d);
+                var freshCoverage = WorldSimulationService.BuildWorldTestWarEconomy(coveragePayload, 10d);
+                var staleCoverage = WorldSimulationService.BuildWorldTestWarEconomy(coveragePayload, 12d);
                 coverageSample["schemaVersion"] = 1;
-                var legacyCoverage = BuildWorldTestWarEconomy(coveragePayload, 10d);
+                var legacyCoverage = WorldSimulationService.BuildWorldTestWarEconomy(coveragePayload, 10d);
                 var missingRaidFoodSample = new Dictionary<string, object>(coverageSample) { ["schemaVersion"] = 2 };
                 missingRaidFoodSample.Remove("raidFood");
-                var missingRaidFoodCoverage = BuildWorldTestWarEconomy(TestDict("warEconomy", missingRaidFoodSample), 10d);
+                var missingRaidFoodCoverage = WorldSimulationService.BuildWorldTestWarEconomy(TestDict("warEconomy", missingRaidFoodSample), 10d);
                 var zeroRaidFoodVersionSample = new Dictionary<string, object>(missingRaidFoodSample) { ["raidFoodEvidenceVersion"] = 0, ["raidFood"] = coverageSample["raidFood"] };
-                var zeroRaidFoodVersionCoverage = BuildWorldTestWarEconomy(TestDict("warEconomy", zeroRaidFoodVersionSample), 10d);
+                var zeroRaidFoodVersionCoverage = WorldSimulationService.BuildWorldTestWarEconomy(TestDict("warEconomy", zeroRaidFoodVersionSample), 10d);
                 add("war_economy_current_coverage_requires_fresh_schema",
                     ReadBool(freshCoverage, "behavioralCoverageComplete", false)
                     && ReadString(freshCoverage, "status", "") == "healthy"
@@ -2185,12 +2185,12 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         ? File.ReadAllText(qualificationFixturesPath)
                         : "";
                 int targetSearchStart = liveInteractionSourceText.IndexOf(
-                    "private static Dictionary<string, object> LiveTestTargetSearchApi",
+                    "internal static Dictionary<string, object> LiveTestTargetSearchApi",
                     StringComparison.Ordinal);
                 int targetSearchEnd = targetSearchStart < 0
                     ? -1
                     : liveInteractionSourceText.IndexOf(
-                        "private static Dictionary<string, object> LiveTestRunStartApi",
+                        "internal static Dictionary<string, object> LiveTestRunStartApi",
                         targetSearchStart,
                         StringComparison.Ordinal);
                 string targetSearchBody = targetSearchStart >= 0 && targetSearchEnd > targetSearchStart
@@ -2260,7 +2260,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                         "[\"profileCacheHit\"] = true",
                         StringComparison.Ordinal)
                     && qualificationFixturesText.Contains(
-                        "traits = BuildTraitDocument(runtimeProfile);",
+                        "traits = CharactersService.BuildTraitDocument(runtimeProfile);",
                         StringComparison.Ordinal)
                     && qualificationFixturesText.Contains(
                         "if (verifyIdentity)",
@@ -2538,7 +2538,7 @@ WHERE session_id='social_event_social_memory_event' AND role='npc';").FirstOrDef
                     CampaignsRootOverride.Value = scopedResumeRoot;
                     using (ReignDbConnection connection = OpenCampaignConnection(oldResumeCampaign))
                     {
-                        EnsureWorldHistorySchema(connection);
+                        WorldSimulationService.EnsureWorldHistorySchema(connection);
                         ReputationService.EnsureSocialReputationSchema(connection);
                         ExecuteSql(connection, @"INSERT INTO world_history_events(
 event_id,campaign_id,timeline_id,sequence,world_day,event_type,summary,payload_json,created_utc)
@@ -2565,7 +2565,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ReignPostgreSqlStorage.DropCampaign(oldResumeCampaign);
                     ReignPostgreSqlStorage.DropCampaign(newResumeCampaign);
                     CampaignsRootOverride.Value = priorScopedResumeRoot;
-                    TryDeleteDirectory(scopedResumeRoot);
+                    PersistenceService.TryDeleteDirectory(scopedResumeRoot);
                 }
 
                 Dictionary<string, object> localSettings = new Dictionary<string, object>();
@@ -3220,11 +3220,11 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     "A lawful NPC-government veto resolves an autonomous diplomacy action as rejected, while ordinary execution failures remain failed.",
                     null);
                 add("world_test_resolved_rejection_is_not_terminal_failure",
-                    !IsTerminalFailureStatus("rejected")
-                    && IsTerminalFailureStatus("failed")
-                    && IsTerminalFailureStatus("blocked")
-                    && IsTerminalFailureStatus("expired")
-                    && IsTerminalFailureStatus("validation_failed"),
+                    !WorldSimulationService.IsTerminalFailureStatus("rejected")
+                    && WorldSimulationService.IsTerminalFailureStatus("failed")
+                    && WorldSimulationService.IsTerminalFailureStatus("blocked")
+                    && WorldSimulationService.IsTerminalFailureStatus("expired")
+                    && WorldSimulationService.IsTerminalFailureStatus("validation_failed"),
                     "World Test treats a resolved action rejection, including a lawful NPC-government veto, as an observed outcome rather than a pipeline failure while retaining every actual terminal failure state.",
                     null);
                 var recordedRefusal = governmentRefusalReport("government_authorization_refused");
@@ -3365,7 +3365,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
             finally
             {
                 ReignPostgreSqlStorage.ClearAllPools();
-                TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "campaign")));
+                PersistenceService.TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "campaign")));
             }
             foreach (Dictionary<string, object> continuityTest in RunRoleplayContinuitySelfTests())
             {
@@ -3374,7 +3374,7 @@ VALUES($event_id,$campaign,'main',1,1,'social_outcome','old outcome',
                     ReadString(continuityTest, "summary", "Role-play continuity contract."),
                     continuityTest);
             }
-            foreach (Dictionary<string, object> liveTest in RunLiveInteractionTestSelfTests())
+            foreach (Dictionary<string, object> liveTest in WorldSimulationService.RunLiveInteractionTestSelfTests())
             {
                 add("bridge_" + ReadString(liveTest, "id", "contract"),
                     ReadBool(liveTest, "passed", false), ReadString(liveTest, "summary", "Live bridge contract."), liveTest);

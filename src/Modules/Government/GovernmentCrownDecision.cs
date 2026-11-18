@@ -49,7 +49,7 @@ namespace ReignBetaServer
             var selected = Program.NormalizeSelectedContextPulls(new List<Dictionary<string, object>>(), Program.ContextPullIds.ToList());
             var bundles = new List<Dictionary<string, object>>();
             SpymasterService.AppendSpymasterRelevantMemoryBundle(campaign, Program.ContinuityTimeline(context), hero, selected, bundles);
-            context["precomputedNpcRelationshipPrompt"] = Program.BuildNpcRelationshipPromptContext(campaign, hero, context);
+            context["precomputedNpcRelationshipPrompt"] = RelationshipsService.BuildNpcRelationshipPromptContext(campaign, hero, context);
             string memories = Program.BuildPromptContext(campaign, hero, profile, query, scene, characteristics,
                 liveRelationships, summary, prior, selected, bundles, false, context, "dialogue");
             string exactPoliticalHistory = GovernmentCrownPoliticalHistory(campaign, hero, ruler, context);

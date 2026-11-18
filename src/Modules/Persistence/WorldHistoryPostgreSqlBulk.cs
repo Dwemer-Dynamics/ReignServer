@@ -7,9 +7,9 @@ using NpgsqlTypes;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
-        private sealed class PreparedWorldHistoryEvent
+        internal sealed class PreparedWorldHistoryEvent
         {
             public string EventId = string.Empty;
             public long Sequence;
@@ -67,7 +67,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static PreparedWorldHistoryEvent PrepareWorldHistoryEvent(
+        internal static PreparedWorldHistoryEvent PrepareWorldHistoryEvent(
             Dictionary<string, object> item, string createdUtc)
         {
             string eventType = FirstNonEmpty(ReadFirstString(item,
@@ -78,13 +78,13 @@ namespace ReignBetaServer
                 "location_name", "settlementName");
             string dissemination = FirstNonEmpty(ReadFirstString(item,
                 "disseminationClass", "dissemination_class"),
-                IsMajorWorldHistoryEvent(eventType)
+                WorldSimulationService.IsMajorWorldHistoryEvent(eventType)
                     ? "major_world"
                     : "ordinary");
             string summary = FirstNonEmpty(ReadFirstString(item, "summary",
                 "text"), eventType);
             List<Dictionary<string, object>> entities =
-                CompactWorldHistoryEntities(eventType,
+                WorldSimulationService.CompactWorldHistoryEntities(eventType,
                     ReadDictionaryList(item, "entities"));
             object payloadValue = item.ContainsKey("payload")
                 ? item["payload"]
@@ -108,7 +108,7 @@ namespace ReignBetaServer
                 WorldDay = worldDay,
                 EventType = eventType,
                 Category = FirstNonEmpty(ReadFirstString(item, "category",
-                    "eventCategory"), ClassifyWorldHistoryCategory(eventType)),
+                    "eventCategory"), WorldSimulationService.ClassifyWorldHistoryCategory(eventType)),
                 Phase = phase,
                 CorrelationId = ReadFirstString(item, "correlationId",
                     "correlation_id"),
@@ -116,17 +116,17 @@ namespace ReignBetaServer
                     "location_id", "settlementId"),
                 LocationName = locationName,
                 Dissemination = dissemination,
-                Retention = ClassifyWorldHistoryRetention(eventType, phase,
+                Retention = WorldSimulationService.ClassifyWorldHistoryRetention(eventType, phase,
                     summary, source, entities, payloadValue),
-                PlayerInvolved = WorldHistoryPlayerInvolved(entities),
+                PlayerInvolved = WorldSimulationService.WorldHistoryPlayerInvolved(entities),
                 Summary = summary,
                 SemanticText = FirstNonEmpty(ReadFirstString(item,
                     "semanticText", "semantic_text"),
-                    BuildWorldHistorySemanticText(eventType, phase, summary,
+                    WorldSimulationService.BuildWorldHistorySemanticText(eventType, phase, summary,
                         entities, locationName)),
                 Source = source,
                 IsComplete = ReadBool(item, "isComplete", true) && (eventType != "public_announcement"
-                    || source == "reign_public_news" && ValidPublicWorldHistory(TestDict("event_type", eventType,
+                    || source == "reign_public_news" && Program.ValidPublicWorldHistory(TestDict("event_type", eventType,
                         "dissemination_class", dissemination, "world_day", worldDay, "payload_json", payloadJson))),
                 Checksum = ReadFirstString(item, "checksum", "hash"),
                 PayloadJson = payloadJson,
@@ -140,7 +140,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             BuildWorldHistoryKnowledgeRules(string eventType, double day,
                 string dissemination,
                 List<Dictionary<string, object>> entities,
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                 dissemination = "participants";
                 rules.RemoveAll(rule => ReadString(rule, "audienceType", "") != "entity");
             }
-            bool publicTournament = IsPublicTournamentHistory(eventType, dissemination);
+            bool publicTournament = Program.IsPublicTournamentHistory(eventType, dissemination);
             if (eventType == "public_announcement" && dissemination == "major_world")
             {
                 rules.Add(new Dictionary<string, object> { ["audienceType"] = "global", ["audienceId"] = "all",
@@ -166,13 +166,13 @@ namespace ReignBetaServer
             }
             if (rules.Count > 0)
             {
-                if (publicTournament) rules.Add(PublicTournamentKnowledgeRule(day));
+                if (publicTournament) rules.Add(Program.PublicTournamentKnowledgeRule(day));
                 return rules;
             }
 
             foreach (string participant in (entities
                     ?? new List<Dictionary<string, object>>())
-                .Where(entity => IsImmediateHistoryParticipant(eventType,
+                .Where(entity => WorldSimulationService.IsImmediateHistoryParticipant(eventType,
                     entity))
                 .Select(entity => ReadFirstString(entity, "entityId",
                     "entity_id", "id"))
@@ -211,7 +211,7 @@ namespace ReignBetaServer
                 });
             }
             if (publicTournament)
-                rules.Add(PublicTournamentKnowledgeRule(day));
+                rules.Add(Program.PublicTournamentKnowledgeRule(day));
             else if (string.Equals(dissemination, "major_world",
                 StringComparison.OrdinalIgnoreCase))
             {
@@ -226,7 +226,7 @@ namespace ReignBetaServer
             return rules;
         }
 
-        private static int InsertWorldHistoryPostgreSqlBulk(
+        internal static int InsertWorldHistoryPostgreSqlBulk(
             ReignDbConnection connection, ReignDbTransaction transaction,
             string campaignId, string timelineId,
             List<PreparedWorldHistoryEvent> events)
@@ -467,15 +467,10 @@ FROM STDIN (FORMAT BINARY)"))
             }
         }
 
-        private static void WriteText(NpgsqlBinaryImporter writer, string value)
-        {
-            writer.Write(value ?? string.Empty, NpgsqlDbType.Text);
-        }
-
-        private static void UpsertWorldHistoryCompactionAggregatesPostgreSql(
+        internal static void UpsertWorldHistoryCompactionAggregatesPostgreSql(
             ReignDbConnection connection, string campaignId,
             string timelineId, long timestamp,
-            List<WorldHistoryCompactionAggregate> aggregates)
+            List<WorldSimulationService.WorldHistoryCompactionAggregate> aggregates)
         {
             if (aggregates == null || aggregates.Count == 0) return;
             NpgsqlConnection postgres = connection as NpgsqlConnection;
@@ -500,7 +495,7 @@ last_world_day=GREATEST(world_history_daily_aggregates.last_world_day,
             using (NpgsqlBatch batch = new NpgsqlBatch(postgres))
             {
                 batch.Timeout = 120;
-                foreach (WorldHistoryCompactionAggregate aggregate in aggregates)
+                foreach (WorldSimulationService.WorldHistoryCompactionAggregate aggregate in aggregates)
                 {
                     NpgsqlBatchCommand command = new NpgsqlBatchCommand(sql);
                     command.Parameters.AddWithValue("campaign", campaignId);

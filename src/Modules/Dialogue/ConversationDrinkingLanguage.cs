@@ -41,7 +41,7 @@ namespace ReignBetaServer
         {
             subjectEnd = 0;
             string pronouns = isFemale.HasValue ? (isFemale.Value ? "she|they" : "he|they") : "he|she|they";
-            var names = new[] { heroName, FirstName(heroName) }.Where(x => !string.IsNullOrWhiteSpace(x))
+            var names = new[] { heroName, WorldSimulationService.FirstName(heroName) }.Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(x => x.Length).Select(Regex.Escape);
             string subjects = string.Join("|", new[] { pronouns }.Concat(names));
             // Fronted descriptive clauses end at a comma; a second explicit subject

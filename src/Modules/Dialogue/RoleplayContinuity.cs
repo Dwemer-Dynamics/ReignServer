@@ -49,7 +49,7 @@ namespace ReignBetaServer
             return window.Select(entry => CloneDictionary(entry.Message)).ToList();
         }
 
-        private static Dictionary<string, object> RetryRoleplayContinuityViolation(
+        internal static Dictionary<string, object> RetryRoleplayContinuityViolation(
             Dictionary<string, object> llm,
             Dictionary<string, object> request,
             Dictionary<string, object> payload,
@@ -470,7 +470,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     ["detail"] = detail
                 });
 
-            List<string> speakerAliases = new[] { heroName, FirstName(heroName) }
+            List<string> speakerAliases = new[] { heroName, WorldSimulationService.FirstName(heroName) }
                 .Where(value => !string.IsNullOrWhiteSpace(value) && value.Length >= 3)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -630,7 +630,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return false;
         }
 
-        private static bool VisibleReplyClaimsCompletedWorldAction(
+        internal static bool VisibleReplyClaimsCompletedWorldAction(
             string reply,
             out string matchedText)
         {
@@ -921,7 +921,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return count;
         }
 
-        private static double RoleplayTextSimilarity(string left, string right)
+        internal static double RoleplayTextSimilarity(string left, string right)
         {
             HashSet<string> a = RoleplayWordNgrams(left, 4);
             HashSet<string> b = RoleplayWordNgrams(right, 4);
@@ -931,7 +931,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return union <= 0 ? 0d : intersection / (double)union;
         }
 
-        private static string NormalizeUnknownIdentityVisibleAddress(
+        internal static string NormalizeUnknownIdentityVisibleAddress(
             string reply,
             Dictionary<string, object> identityView)
         {

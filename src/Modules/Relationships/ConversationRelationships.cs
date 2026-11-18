@@ -8,18 +8,18 @@ using TerminalActionReportProtocol = Reign.Core.Contracts.Actions.TerminalAction
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private static readonly HashSet<string> ConversationRelationshipTiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "routine", "meaningful", "harmful_lie", "hostile", "severe", "transformative", "gift_witness", "gift_leverage"
         };
 
-        private static void EnsureConversationRelationshipSchema(ReignDbConnection connection)
+        internal static void EnsureConversationRelationshipSchema(ReignDbConnection connection)
         {
             EnsureMbtiRelationshipSchema(connection);
-            EnsureWorldHistoryLieDetectionSchema(connection);
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_receipts (
+            Program.EnsureWorldHistoryLieDetectionSchema(connection);
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_receipts (
 receipt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL DEFAULT '',exchange_id TEXT NOT NULL,
 source_turn_id TEXT NOT NULL DEFAULT '',observer_id TEXT NOT NULL,target_id TEXT NOT NULL,mode TEXT NOT NULL DEFAULT '',
 act_kind TEXT NOT NULL DEFAULT 'routine',severity_tier TEXT NOT NULL DEFAULT 'routine',valence TEXT NOT NULL DEFAULT 'positive',
@@ -32,25 +32,25 @@ confidence REAL NOT NULL DEFAULT 0,evidence_json TEXT NOT NULL DEFAULT '[]',modi
             summary TEXT NOT NULL DEFAULT '',current_conduct_quote TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'applied',native_application_status TEXT NOT NULL DEFAULT 'pending',
 native_applied_ts INTEGER NOT NULL DEFAULT 0,native_receipt_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
 UNIQUE(exchange_id,observer_id,target_id));");
-            EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_application_status", "TEXT NOT NULL DEFAULT 'pending'");
-            EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_applied_ts", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_receipt_json", "TEXT NOT NULL DEFAULT '{}'");
-            EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_pair_delta", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "gift_recipient_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "current_conduct_quote", "TEXT NOT NULL DEFAULT ''");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_recent ON conversation_relationship_receipts(created_ts DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_pair ON conversation_relationship_receipts(observer_id,target_id,created_ts DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_benefits (
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_application_status", "TEXT NOT NULL DEFAULT 'pending'");
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_applied_ts", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_receipt_json", "TEXT NOT NULL DEFAULT '{}'");
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "native_pair_delta", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "gift_recipient_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_receipts", "current_conduct_quote", "TEXT NOT NULL DEFAULT ''");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_recent ON conversation_relationship_receipts(created_ts DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_relationship_pair ON conversation_relationship_receipts(observer_id,target_id,created_ts DESC);");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_benefits (
 benefit_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL DEFAULT '',giver_id TEXT NOT NULL,recipient_id TEXT NOT NULL,
 benefit_kind TEXT NOT NULL DEFAULT 'gift',description TEXT NOT NULL DEFAULT '',source_event_id TEXT NOT NULL DEFAULT '',source_turn_id TEXT NOT NULL DEFAULT '',
 original_delta INTEGER NOT NULL DEFAULT 0,retained_appreciation REAL NOT NULL DEFAULT 1,continued_utility REAL NOT NULL DEFAULT 1,
 status TEXT NOT NULL DEFAULT 'retained',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,
 source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAULT '{}');");
-            EnsureDatabaseColumn(connection, "conversation_relationship_benefits", "source_evidence_json", "TEXT NOT NULL DEFAULT '[]'");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_benefit_recipient ON conversation_relationship_benefits(recipient_id,giver_id,updated_ts DESC);");
+            Program.EnsureDatabaseColumn(connection, "conversation_relationship_benefits", "source_evidence_json", "TEXT NOT NULL DEFAULT '[]'");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_conversation_benefit_recipient ON conversation_relationship_benefits(recipient_id,giver_id,updated_ts DESC);");
         }
 
-        private static List<Dictionary<string, object>> NormalizeConversationRelationshipAssessments(
+        internal static List<Dictionary<string, object>> NormalizeConversationRelationshipAssessments(
             Dictionary<string, object> parsed,
             Dictionary<string, object> payload,
             string observerId,
@@ -58,9 +58,9 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             string reactionTargetId,
             string sourceTurnId)
         {
-            List<string> participants = MergeStringLists(
-                MergeStringLists(ReadStringList(payload, "participants"), ReadStringList(payload, "activeHeroIds")),
-                MergeStringLists(ReadStringList(payload, "sceneParticipants"), new[]
+            List<string> participants = Program.MergeStringLists(
+                Program.MergeStringLists(ReadStringList(payload, "participants"), ReadStringList(payload, "activeHeroIds")),
+                Program.MergeStringLists(ReadStringList(payload, "sceneParticipants"), new[]
                 {
                     ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId"), observerId
                 }));
@@ -89,7 +89,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                     evidenceIssue = "negative_assessment_missing_current_conduct";
                 }
                 string actKind = FirstNonEmpty(ReadFirstString(raw, "actKind", "actType", "act_kind"), tier);
-                List<string> sourceIds = MergeStringLists(new[] { sourceTurnId }, ReadStringList(raw, "sourceTurnIds"));
+                List<string> sourceIds = Program.MergeStringLists(new[] { sourceTurnId }, ReadStringList(raw, "sourceTurnIds"));
                 byTarget[target] = new Dictionary<string, object>
                 {
                     ["observerHeroStringId"] = observerId,
@@ -98,19 +98,19 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                     ["assessmentIssue"] = evidenceIssue,
                     ["actKind"] = actKind,
                     ["severityTier"] = tier,
-                    ["confidence"] = ClampDouble(ReadDouble(raw, "confidence", 0.65d), 0d, 1d),
+                    ["confidence"] = Program.ClampDouble(ReadDouble(raw, "confidence", 0.65d), 0d, 1d),
                     ["sourceTurnIds"] = sourceIds,
                     ["lieCheckId"] = ReadFirstString(raw, "lieCheckId", "lie_check_id"),
                     ["benefitEventId"] = ReadFirstString(raw, "benefitEventId", "benefitId", "benefit_event_id"),
                     ["giftRecipientHeroStringId"] = ReadFirstString(raw, "giftRecipientHeroStringId", "giftRecipientId", "gift_recipient_hero_string_id"),
-                    ["summary"] = LimitText(ReadFirstString(raw, "summary", "reason"), 1200),
-                    ["importance"] = ClampDouble(ReadDouble(raw, "importance", 0.5d), 0d, 1d),
-                    ["continuedUtility"] = ClampDouble(ReadDouble(raw, "continuedUtility", 1d), 0d, 1d),
-                    ["retainedAppreciation"] = ClampDouble(ReadDouble(raw, "retainedAppreciation", 1d), 0d, 1d),
-                    ["coercionSeverity"] = ClampDouble(ReadDouble(raw, "coercionSeverity", 0d), 0d, 1d),
+                    ["summary"] = Program.LimitText(ReadFirstString(raw, "summary", "reason"), 1200),
+                    ["importance"] = Program.ClampDouble(ReadDouble(raw, "importance", 0.5d), 0d, 1d),
+                    ["continuedUtility"] = Program.ClampDouble(ReadDouble(raw, "continuedUtility", 1d), 0d, 1d),
+                    ["retainedAppreciation"] = Program.ClampDouble(ReadDouble(raw, "retainedAppreciation", 1d), 0d, 1d),
+                    ["coercionSeverity"] = Program.ClampDouble(ReadDouble(raw, "coercionSeverity", 0d), 0d, 1d),
                     ["evidenceSourceIds"] = ReadStringList(raw, "evidenceSourceIds"),
-                    ["currentConductQuote"] = LimitText(ReadFirstString(raw, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
-                    ["sourceText"] = target.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? LimitText(playerText, 4000) : ""
+                    ["currentConductQuote"] = Program.LimitText(ReadFirstString(raw, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
+                    ["sourceText"] = target.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? Program.LimitText(playerText, 4000) : ""
                 };
             }
 
@@ -131,7 +131,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                 caught["actKind"] = "harmful_lie";
                 caught["severityTier"] = "harmful_lie";
                 caught["confidence"] = Math.Max(0.9d, ReadDouble(caught, "confidence", 0d));
-                caught["sourceTurnIds"] = MergeStringLists(ReadStringList(caught, "sourceTurnIds"), new[] { sourceTurnId });
+                caught["sourceTurnIds"] = Program.MergeStringLists(ReadStringList(caught, "sourceTurnIds"), new[] { sourceTurnId });
                 caught["lieCheckId"] = verifiedLieCheckId;
                 caught["benefitEventId"] = ReadString(caught, "benefitEventId", "");
                 caught["giftRecipientHeroStringId"] = ReadString(caught, "giftRecipientHeroStringId", "");
@@ -140,9 +140,9 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                 caught["continuedUtility"] = ReadDouble(caught, "continuedUtility", 1d);
                 caught["retainedAppreciation"] = ReadDouble(caught, "retainedAppreciation", 1d);
                 caught["coercionSeverity"] = ReadDouble(caught, "coercionSeverity", 0d);
-                caught["evidenceSourceIds"] = MergeStringLists(ReadStringList(caught, "evidenceSourceIds"), ReadStringList(verifiedLie, "evidenceSourceIds"));
-                caught["currentConductQuote"] = LimitText(playerText, 600);
-                caught["sourceText"] = LimitText(playerText, 4000);
+                caught["evidenceSourceIds"] = Program.MergeStringLists(ReadStringList(caught, "evidenceSourceIds"), ReadStringList(verifiedLie, "evidenceSourceIds"));
+                caught["currentConductQuote"] = Program.LimitText(playerText, 600);
+                caught["sourceText"] = Program.LimitText(playerText, 4000);
                 byTarget[playerId] = caught;
             }
 
@@ -159,7 +159,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             string playerTier = ReadFirstString(playerAssessment, "severityTier", "tier").ToLowerInvariant();
             if (playerAssessment != null
                 && observerId.Equals(namedGiftRecipient, StringComparison.OrdinalIgnoreCase)
-                && HasExplicitMaterialGiftOffer(playerText)
+                && Program.HasExplicitMaterialGiftOffer(playerText)
                 && ConversationGiftWasAccepted(parsed)
                 && playerTier != "harmful_lie" && playerTier != "hostile" && playerTier != "severe" && playerTier != "gift_leverage")
             {
@@ -169,9 +169,9 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                 if (playerTier != "transformative") playerAssessment["severityTier"] = "meaningful";
                 playerAssessment["confidence"] = Math.Max(0.8d, ReadDouble(playerAssessment, "confidence", 0d));
                 playerAssessment["importance"] = Math.Max(0.55d, ReadDouble(playerAssessment, "importance", 0d));
-                playerAssessment["evidenceSourceIds"] = MergeStringLists(
+                playerAssessment["evidenceSourceIds"] = Program.MergeStringLists(
                     ReadStringList(playerAssessment, "evidenceSourceIds"), new[] { "accepted_material_gift" });
-                playerAssessment["currentConductQuote"] = LimitText(playerText, 600);
+                playerAssessment["currentConductQuote"] = Program.LimitText(playerText, 600);
                 string priorSummary = ReadString(playerAssessment, "summary", "");
                 playerAssessment["summary"] = string.IsNullOrWhiteSpace(priorSummary)
                     ? "The named recipient accepted the player's explicit material gift."
@@ -190,7 +190,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                     ["observerHeroStringId"] = observerId,
                     ["targetHeroStringId"] = fallbackTarget,
                     ["valence"] = "neutral",
-                    ["assessmentIssue"] = ConversationAssessmentAbsenceReason(parsed),
+                    ["assessmentIssue"] = Program.ConversationAssessmentAbsenceReason(parsed),
                     ["actKind"] = "routine_conversation",
                     ["severityTier"] = "routine",
                     ["confidence"] = 0d,
@@ -202,7 +202,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                     ["retainedAppreciation"] = 1d, ["coercionSeverity"] = 0d,
                     ["evidenceSourceIds"] = new List<string>(),
                     ["currentConductQuote"] = "",
-                    ["sourceText"] = fallbackTarget.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? LimitText(playerText, 4000) : ""
+                    ["sourceText"] = fallbackTarget.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? Program.LimitText(playerText, 4000) : ""
                 };
             }
             return byTarget.Values.ToList();
@@ -240,17 +240,17 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             // same production lie-check receipt before relationship adjudication.
             string playerId = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
-            string settlementName = SceneContextLocationName(ReadString(payload, "sceneContext", ""));
+            string settlementName = Program.SceneContextLocationName(ReadString(payload, "sceneContext", ""));
             string settlementId = ReadString(payload, "locationId", "");
             if (string.IsNullOrWhiteSpace(playerId) || string.IsNullOrWhiteSpace(observerId)
                 || string.IsNullOrWhiteSpace(settlementId) || string.IsNullOrWhiteSpace(settlementName)
-                || !ContradictsNativeCurrentSettlement(playerText, settlementName)
-                || !ContainsConversationDeceptiveIntentEvidence(playerText))
+                || !Program.ContradictsNativeCurrentSettlement(playerText, settlementName)
+                || !Program.ContainsConversationDeceptiveIntentEvidence(playerText))
             {
                 return new Dictionary<string, object>();
             }
 
-            Dictionary<string, object> direct = WorldHistoryLieCheckApi(new Dictionary<string, object>
+            Dictionary<string, object> direct = Program.WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
                 ["timelineId"] = ReadString(payload, "timelineId", "main"),
@@ -293,18 +293,18 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
         {
             if (parsed == null) return false;
             Dictionary<string, object> gate = ReadDictionary(parsed, "actionGate") ?? ReadDictionary(parsed, "action_gate") ?? new Dictionary<string, object>();
-            string combined = NormalizeLookup(string.Join(" ", new[]
+            string combined = Program.NormalizeLookup(string.Join(" ", new[]
             {
                 ReadFirstString(parsed, "reply", "response", "text", "content"),
                 ReadString(parsed, "intent", ""),
                 ReadString(gate, "intent", ""),
                 ReadString(gate, "reason", "")
             }));
-            if (ContainsAny(combined,
+            if (Program.ContainsAny(combined,
                 "refuse the gift", "refuses the gift", "decline the gift", "declines the gift", "reject the gift", "rejects the gift",
                 "will not take", "won't take", "would not take", "wouldn't take", "keep your gift", "keep the gift",
                 "do not accept", "don't accept", "does not accept", "doesn't accept")) return false;
-            if (ContainsAny(combined,
+            if (Program.ContainsAny(combined,
                 "accept the gift", "accepts the gift", "accepted the gift", "accept the cup", "accepts the cup", "accepted the cup",
                 "i will take it", "i'll take it", "i take it", "takes the gift", "takes the cup", "physical handover"))
             {
@@ -324,14 +324,14 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             string quote = ReadFirstString(assessment, "currentConductQuote", "current_conduct_quote", "evidenceQuote");
             return ReadDouble(assessment, "confidence", 0d) >= 0.6d
                 && !string.IsNullOrWhiteSpace(ReadFirstString(assessment, "summary", "reason"))
-                && AgencyContainsExactQuote(currentContribution, quote);
+                && Program.AgencyContainsExactQuote(currentContribution, quote);
         }
 
         private static List<Dictionary<string, object>> LoadPriorPartyConversationContributions(
             Dictionary<string, object> payload,
             string exchangeId)
         {
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string sessionId = ReadFirstString(payload, "conversationSessionId", "sessionId");
             if (string.IsNullOrWhiteSpace(sessionId))
             {
@@ -344,10 +344,10 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
 
             try
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    EnsureCategorizedMemorySchema(connection);
-                    return QuerySql(connection, @"SELECT speaker_id,speaker_name,text,turn_order,exchange_id
+                    Program.EnsureCategorizedMemorySchema(connection);
+                    return Program.QuerySql(connection, @"SELECT speaker_id,speaker_name,text,turn_order,exchange_id
 FROM conversation_turns
 WHERE session_id=$session AND exchange_id<>$exchange AND role='npc' AND status='active'
 ORDER BY turn_order ASC;", new Dictionary<string, object>
@@ -373,7 +373,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                 || new[] { "quiet", "silent", "silence", "none", "skip" }.Contains(participation);
         }
 
-        private static List<Dictionary<string, object>> CompleteSequentialPartyRelationshipAssessments(
+        internal static List<Dictionary<string, object>> CompleteSequentialPartyRelationshipAssessments(
             Dictionary<string, object> payload,
             List<Dictionary<string, object>> suppliedAssessments,
             string playerId,
@@ -386,8 +386,8 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                 .Select(x => new Dictionary<string, object>(x))
                 .ToList();
             Dictionary<string, string> participantNames = ReadDictionaryList(payload, "participantProfiles")
-                .Where(row => !string.IsNullOrWhiteSpace(CharacterIdFrom(row)))
-                .GroupBy(CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
+                .Where(row => !string.IsNullOrWhiteSpace(Program.CharacterIdFrom(row)))
+                .GroupBy(Program.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => ReadString(group.First(), "name", ""), StringComparer.OrdinalIgnoreCase);
             HashSet<string> eligibleParticipants = new HashSet<string>(ReadStringList(payload, "participants"), StringComparer.OrdinalIgnoreCase);
             eligibleParticipants.UnionWith(participantNames.Keys);
@@ -469,10 +469,10 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                         continue;
                     if (!participantNames.TryGetValue(namedPriorSpeaker, out string priorName) || string.IsNullOrWhiteSpace(priorName))
                         continue;
-                    string priorFirstName = FirstName(priorName);
+                    string priorFirstName = WorldSimulationService.FirstName(priorName);
                     bool uniqueFirstName = priorFirstName.Length >= 4
-                        && participantNames.Values.Count(name => FirstName(name).Equals(priorFirstName, StringComparison.OrdinalIgnoreCase)) == 1;
-                    if (!ContainsWholePhrase(replyText, priorName) && !(uniqueFirstName && ContainsWholePhrase(replyText, priorFirstName)))
+                        && participantNames.Values.Count(name => WorldSimulationService.FirstName(name).Equals(priorFirstName, StringComparison.OrdinalIgnoreCase)) == 1;
+                    if (!WorldSimulationService.ContainsWholePhrase(replyText, priorName) && !(uniqueFirstName && WorldSimulationService.ContainsWholePhrase(replyText, priorFirstName)))
                         continue;
                     Dictionary<string, object> fallback = routineFallback(namedPriorSpeaker,
                         "neutral",
@@ -487,7 +487,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                     string targetId = ReadFirstString(assessment, "targetHeroStringId", "targetId");
                     if (string.IsNullOrWhiteSpace(ReadString(assessment, "sourceText", ""))
                         && contributions.TryGetValue(targetId, out string sourceText))
-                        assessment["sourceText"] = LimitText(sourceText, 4000);
+                        assessment["sourceText"] = Program.LimitText(sourceText, 4000);
                 }
                 priorSpeakers.Add(speakerId);
                 contributions[speakerId] = replyText;
@@ -495,10 +495,10 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
             return assessments;
         }
 
-        private static Dictionary<string, object> ConversationRelationshipEvaluateApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationRelationshipEvaluateApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             lock (CampaignRelationshipWriteLock(campaignId))
                 return ConversationRelationshipEvaluateApiLocked(payload);
         }
@@ -506,7 +506,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
         private static Dictionary<string, object> ConversationRelationshipEvaluateApiLocked(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string exchangeId = FirstNonEmpty(ReadFirstString(payload, "exchangeId", "turnId", "sceneTurnId"), "conversation_" + Guid.NewGuid().ToString("N"));
             string timelineId = ReadString(payload, "timelineId", "");
             string mode = ReadString(payload, "mode", "conversation");
@@ -537,10 +537,10 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
             Dictionary<string, Dictionary<string, object>> nativeChanges = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, List<string>> pairReceiptIds =
                 new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (IGrouping<string, Dictionary<string, object>> group in assessments
@@ -561,8 +561,8 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                         {
                             continue;
                         }
-                        string receiptId = "conversation_relation_" + PromptHash(exchangeId + "|" + observerId + "|" + targetId).Substring(0, 24).ToLowerInvariant();
-                        Dictionary<string, object> existing = QuerySql(connection,
+                        string receiptId = "conversation_relation_" + Program.PromptHash(exchangeId + "|" + observerId + "|" + targetId).Substring(0, 24).ToLowerInvariant();
+                        Dictionary<string, object> existing = Program.QuerySql(connection,
                             "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                             new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                         if (existing != null)
@@ -580,7 +580,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                             ReignPostgreSqlDialect.IsPostgreSql(connection)
                                 ? "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1 FOR UPDATE;"
                                 : "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;";
-                        Dictionary<string, object> chemistry = QuerySql(connection,
+                        Dictionary<string, object> chemistry = Program.QuerySql(connection,
                             chemistrySelectSql,
                             new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                         bool observerIsA = chemistry == null
@@ -612,7 +612,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                                     + pairKey + ".");
                             int baseAB = MbtiCompatibility(typeA, typeB);
                             int baseBA = MbtiCompatibility(typeB, typeA);
-                            ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                            Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,base_chance_a_to_b,
 base_chance_b_to_a,chance_a_to_b,chance_b_to_a,
 affinity_a_to_b,affinity_b_to_a,tag_a_to_b,tag_b_to_a,
@@ -658,7 +658,7 @@ $ab,$ba,$tagAB,$tagBA,0,$day,$day,'conversation',$exchange,$shard,$version,$ts);
                                     ["mode"] = mode
                                 });
                         }
-                        chemistry = QuerySql(connection,
+                        chemistry = Program.QuerySql(connection,
                             "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                             new Dictionary<string, object> { ["pair"] = pairKey })
                             .FirstOrDefault();
@@ -684,11 +684,11 @@ $ab,$ba,$tagAB,$tagBA,0,$day,$day,'conversation',$exchange,$shard,$version,$ts);
                             ["lie"] = ReadString(adjudicated, "lieCheckId", ""), ["benefit"] = ReadString(adjudicated, "benefitEventId", ""),
                             ["giftRecipient"] = ReadString(adjudicated, "giftRecipientHeroStringId", ""),
                             ["confidence"] = ReadDouble(assessment, "confidence", 0d), ["evidence"] = Json.Serialize(ReadStringList(assessment, "evidenceSourceIds")),
-                            ["currentConductQuote"] = LimitText(ReadFirstString(assessment, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
+                            ["currentConductQuote"] = Program.LimitText(ReadFirstString(assessment, "currentConductQuote", "current_conduct_quote", "evidenceQuote"), 600),
                             ["modifiers"] = Json.Serialize(adjudicated.ContainsKey("modifiers") ? adjudicated["modifiers"] : new List<object>()), ["summary"] = ReadString(assessment, "summary", ""),
                             ["status"] = ReadString(adjudicated, "status", "applied"), ["ts"] = ts
                         };
-                        ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
+                        Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
 receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,mode,act_kind,severity_tier,valence,
 base_delta,modifier_delta,final_delta,prior_affinity,resulting_affinity,prior_native_relation,resulting_native_relation,native_pair_delta,
   lie_check_id,benefit_event_id,gift_recipient_id,confidence,evidence_json,modifiers_json,summary,current_conduct_quote,status,created_ts)
@@ -696,7 +696,7 @@ VALUES($id,$campaign,$timeline,$exchange,$turn,$observer,$target,$mode,$act,$tie
 $priorAffinity,$resultingAffinity,$priorNative,$resultingNative,0,$lie,$benefit,$giftRecipient,$confidence,$evidence,$modifiers,$summary,$currentConductQuote,$status,$ts);", args);
                         if (finalDelta == 0)
                         {
-                            ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET native_application_status='skipped' WHERE receipt_id=$id;",
+                            Program.ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET native_application_status='skipped' WHERE receipt_id=$id;",
                                 new Dictionary<string, object> { ["id"] = receiptId });
                         }
                         UpdateConversationBenefitLedger(connection, campaignId, timelineId, assessment, adjudicated, receiptId, exchangeId, sourceTurnId, observerId, targetId, ts);
@@ -744,7 +744,7 @@ $priorAffinity,$resultingAffinity,$priorNative,$resultingNative,0,$lie,$benefit,
                         native["resultingNativeRelation"] = resultingNative;
                         foreach (string receiptId in atomicReceiptIds)
                         {
-                            ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                            Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET prior_native_relation=$prior,resulting_native_relation=$result,native_pair_delta=$delta
 WHERE receipt_id=$id;", new Dictionary<string, object>
                             {
@@ -753,15 +753,15 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                             });
                         }
                     }
-                    ExecuteSql(connection, "COMMIT;");
+                    Program.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
                 ReputationService.EnsureSocialReputationSchema(connection);
@@ -788,7 +788,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                     ReputationService.SchedulePendingReputationReasonJobs(campaignId);
                 foreach (KeyValuePair<string, bool> receipt in receiptIdempotency)
                 {
-                    Dictionary<string, object> stored = QuerySql(connection,
+                    Dictionary<string, object> stored = Program.QuerySql(connection,
                         "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = receipt.Key }).FirstOrDefault();
                     if (stored != null)
@@ -804,10 +804,10 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                 ["appliedCount"] = receipts.Count(x => !ReadBool(x, "idempotent", false) && ReadInt(x, "finalDelta", 0) != 0),
                 ["idempotentCount"] = receipts.Count(x => ReadBool(x, "idempotent", false))
             };
-            WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
+            Program.WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
                 "relationship.conversation", "", "", exchangeId, "completed", 0,
                 "Conversation relationship consequences adjudicated.", response);
-            PersonalGossipRelationshipApplied(campaignId, payload);
+            Program.PersonalGossipRelationshipApplied(campaignId, payload);
             return response;
         }
 
@@ -826,7 +826,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
             string exchangeId = ReadString(existing, "exchange_id", "");
             Dictionary<string, object> pairInput = FindRelationshipPair(relationshipPairs, observerId, targetId);
             int currentNative = ReadInt(pairInput, "nativeRelation", int.MinValue);
-            List<Dictionary<string, object>> pairReceipts = QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
+            List<Dictionary<string, object>> pairReceipts = Program.QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
 WHERE exchange_id=$exchange AND ((observer_id=$a AND target_id=$b) OR (observer_id=$b AND target_id=$a));",
                 new Dictionary<string, object> { ["exchange"] = exchangeId, ["a"] = observerId, ["b"] = targetId });
             int priorNative = pairReceipts.Count == 0 ? ReadInt(existing, "prior_native_relation", 0) : ReadInt(pairReceipts[0], "prior_native_relation", 0);
@@ -837,7 +837,7 @@ WHERE exchange_id=$exchange AND ((observer_id=$a AND target_id=$b) OR (observer_
             {
                 foreach (string receiptId in receiptIds)
                 {
-                    ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                    Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET prior_native_relation=$prior,resulting_native_relation=$result,native_pair_delta=$delta,
 native_application_status='applied',native_applied_ts=$ts,native_receipt_json=$receipt
 WHERE receipt_id=$id;", new Dictionary<string, object>
@@ -866,10 +866,10 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
             };
         }
 
-        private static Dictionary<string, object> ConversationRelationshipNativeReceiptApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationRelationshipNativeReceiptApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             List<string> receiptIds = ReadStringList(payload, "receiptIds").Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (receiptIds.Count == 0 || receiptIds.Count > 64) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Between one and 64 relationship receipt ids are required." };
             Dictionary<string, object> nativeReceipt = ReadDictionary(payload, "nativeReceipt")
@@ -886,7 +886,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                 return TestDict("ok", false, "error", "Native receipt participants and measured before/after values are required and must be valid.");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             int updated = 0;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
                 using var transaction = connection.BeginTransaction();
@@ -894,12 +894,12 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                 // The acknowledgment update fires the revision trigger on this row, so
                 // take it for update before any receipt lock to keep one lock order.
                 string currentGeneration = receiptIds.Any(id => id.StartsWith(TerminalActionReportProtocol.ReceiptIdPrefix, StringComparison.Ordinal))
-                    ? ReadString(QuerySql(connection,
+                    ? ReadString(Program.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "")
                     : "";
                 foreach (string receiptId in receiptIds.OrderBy(id => id, StringComparer.Ordinal))
                 {
-                    Dictionary<string, object> prior = QuerySql(connection,
+                    Dictionary<string, object> prior = Program.QuerySql(connection,
                         @"SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id FOR UPDATE;",
                         new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
                     if (prior == null) return TestDict("ok", false, "error", "A native relationship receipt does not exist in this campaign.", "receiptId", receiptId);
@@ -966,14 +966,14 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
                         args["prior"] = actualPriorNativeRelation;
                         args["result"] = actualNativeRelation;
                         args["delta"] = effectiveDelta;
-                        ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                        Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET prior_native_relation=$prior,resulting_native_relation=$result,native_pair_delta=$delta,
 native_application_status='applied',native_applied_ts=$ts,native_receipt_json=$receipt
 WHERE receipt_id=$id AND native_application_status!='applied';", args);
                     }
                     else
                     {
-                        ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
+                        Program.ExecuteSql(connection, @"UPDATE conversation_relationship_receipts
 SET native_application_status='applied',native_applied_ts=$ts,native_receipt_json=$receipt
 WHERE receipt_id=$id AND native_application_status!='applied';", args);
                     }
@@ -989,12 +989,12 @@ WHERE receipt_id=$id AND native_application_status!='applied';", args);
         // readers select status='applied' AND severity_tier<>'routine', so this row
         // never becomes conversation memory. The delta is the action aggregate
         // (-25..15), never the conversation ±20 reconciliation.
-        private static string StageCompletedActionRelationshipReceipt(ReignDbConnection connection, string campaignId,
+        internal static string StageCompletedActionRelationshipReceipt(ReignDbConnection connection, string campaignId,
             string timelineId, string actionId, string generation, string reportSha256,
             string subjectId, string targetId, int sharedDelta, long ts)
         {
             string receiptId = TerminalActionReportProtocol.ReceiptId(actionId, timelineId, generation, reportSha256);
-            ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
+            Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts(
 receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,mode,act_kind,severity_tier,valence,
 base_delta,modifier_delta,final_delta,native_pair_delta,evidence_json,summary,status,native_application_status,created_ts)
 VALUES($id,$campaign,$timeline,$exchange,$action,$subject,$target,$mode,$mode,$tier,$valence,
@@ -1018,10 +1018,10 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
 
         // Reads the staged action receipt after re-deriving its identity. Applied
         // receipts are reported as such and are never offered as a new native effect.
-        private static Dictionary<string, object> CompletedActionRelationshipEffect(ReignDbConnection connection,
+        internal static Dictionary<string, object> CompletedActionRelationshipEffect(ReignDbConnection connection,
             string receiptId, string actionId, string timelineId, string generation, string reportSha256)
         {
-            Dictionary<string, object> row = QuerySql(connection,
+            Dictionary<string, object> row = Program.QuerySql(connection,
                 "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
             var evidence = TryParseJsonObject(ReadString(row, "evidence_json", "{}")) ?? new Dictionary<string, object>();
@@ -1060,9 +1060,9 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
             }
             catch (ArgumentException) { bound = false; }
             if (!bound) return "The native acknowledgment does not match its action report binding.";
-            string proofError = TerminalReportLoadProofError(connection, current, loadProof, out _);
+            string proofError = Program.TerminalReportLoadProofError(connection, current, loadProof, out _);
             if (proofError.Length > 0) return proofError;
-            var admission = TerminalReportMarkerAdmission(connection, actionId, sha);
+            var admission = Program.TerminalReportMarkerAdmission(connection, actionId, sha);
             if (admission != null)
             {
                 var echoed = ReadDictionary(nativeReceipt, TerminalActionReportProtocol.AdmissionField);
@@ -1089,7 +1089,7 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
             string status = "applied";
             if (tier == "harmful_lie" || actKind.Contains("lie"))
             {
-                Dictionary<string, object> lie = string.IsNullOrWhiteSpace(lieCheckId) ? null : QuerySql(connection,
+                Dictionary<string, object> lie = string.IsNullOrWhiteSpace(lieCheckId) ? null : Program.QuerySql(connection,
                     "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                 string verdict = ReadString(lie, "objective_verdict", "").ToLowerInvariant();
@@ -1311,7 +1311,7 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
                         ReadFirstString(assessment,
                             "targetHeroStringId", "targetId"),
                         assessment, out recoveryReason)
-                    : QuerySql(connection,
+                    : Program.QuerySql(connection,
                         "SELECT * FROM conversation_relationship_benefits WHERE benefit_id=$id LIMIT 1;",
                         new Dictionary<string, object>
                         {
@@ -1330,9 +1330,9 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
                     benefit = null;
                     modifiers.Add("benefit_lineage_participants_mismatch");
                 }
-                double retained = ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
+                double retained = Program.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
                 int lost = benefit == null ? 0 : RoundAwayFromZero(ReadInt(benefit, "original_delta", 0) * (1d - retained));
-                int coercion = RoundAwayFromZero(15d * ClampDouble(ReadDouble(assessment, "coercionSeverity", 0d), 0d, 1d));
+                int coercion = RoundAwayFromZero(15d * Program.ClampDouble(ReadDouble(assessment, "coercionSeverity", 0d), 0d, 1d));
                 magnitude = Math.Min(20, Math.Max(1, lost + coercion));
                 valence = "negative";
                 if (benefit == null)
@@ -1378,18 +1378,18 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
                 || string.IsNullOrWhiteSpace(targetId))
                 return null;
 
-            string source = NormalizeLookup(
+            string source = Program.NormalizeLookup(
                 ReadString(assessment, "sourceText", "")
                 + " " + ReadFirstString(assessment,
                     "currentConductQuote", "current_conduct_quote",
                     "evidenceQuote"));
             bool explicitlyInvokesBenefit =
-                ContainsAny(source,
+                Program.ContainsAny(source,
                     "gift", "gave you", "gave the recipient",
                     "home", "house", "deed", "estate", "land",
                     "cup", "gold", "aid", "help i gave",
                     "saved your", "rescued your")
-                && ContainsAny(source,
+                && Program.ContainsAny(source,
                     "invoke", "repay", "owe", "because",
                     "demand", "in return", "return the favor",
                     "leverage", "after i gave", "i just gave");
@@ -1399,7 +1399,7 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
                 && evidenceIds.Count == 0)
                 return null;
 
-            List<Dictionary<string, object>> candidates = QuerySql(
+            List<Dictionary<string, object>> candidates = Program.QuerySql(
                 connection,
                 @"SELECT *
 FROM conversation_relationship_benefits
@@ -1466,7 +1466,7 @@ LIMIT 20;",
                 {
                     Row = row,
                     Score = sourceTerms.Count(term =>
-                        NormalizeLookup(
+                        Program.NormalizeLookup(
                             ReadString(row, "benefit_kind", "")
                             + " " + ReadString(
                                 row, "description", "")
@@ -1562,7 +1562,7 @@ LIMIT 20;",
                 || string.IsNullOrWhiteSpace(recipientId)
                 || supplied.Count == 0)
                 return null;
-            return QuerySql(connection, @"SELECT *
+            return Program.QuerySql(connection, @"SELECT *
 FROM conversation_relationship_benefits
 WHERE campaign_id=$campaign
 AND giver_id=$giver
@@ -1596,8 +1596,8 @@ LIMIT 50;",
 
         private static bool ConversationCurrentConductIsSupported(Dictionary<string, object> assessment)
         {
-            string source = NormalizeLookup(ReadString(assessment, "sourceText", ""));
-            string quote = NormalizeLookup(ReadFirstString(assessment,
+            string source = Program.NormalizeLookup(ReadString(assessment, "sourceText", ""));
+            string quote = Program.NormalizeLookup(ReadFirstString(assessment,
                 "currentConductQuote", "current_conduct_quote", "evidenceQuote"));
             if (string.IsNullOrWhiteSpace(source) || quote.Length < 6) return false;
             if (!source.Contains(quote)) return false;
@@ -1608,9 +1608,9 @@ LIMIT 50;",
             Dictionary<string, object> assessment)
         {
             if (!ConversationCurrentConductIsSupported(assessment)) return false;
-            string quote = NormalizeLookup(ReadFirstString(assessment,
+            string quote = Program.NormalizeLookup(ReadFirstString(assessment,
                 "currentConductQuote", "current_conduct_quote", "evidenceQuote"));
-            string source = NormalizeLookup(ReadString(assessment, "sourceText", ""));
+            string source = Program.NormalizeLookup(ReadString(assessment, "sourceText", ""));
             string conduct = quote + " " + source;
             if (ConversationDirectSevereSpeechIsSupported(conduct)) return true;
 
@@ -1641,7 +1641,7 @@ LIMIT 50;",
             // target's current line. Inspect the full current line for the severe
             // semantics because a valid quote may be only the object of a threat
             // (for example, "kill your family") rather than its modal prefix.
-            string source = NormalizeLookup(ReadString(assessment, "sourceText", ""));
+            string source = Program.NormalizeLookup(ReadString(assessment, "sourceText", ""));
             if (ConversationDirectSevereSpeechIsSupported(source)) return true;
 
             bool lineageRequired = (actKind ?? "").Contains("betray")
@@ -1682,12 +1682,12 @@ LIMIT 50;",
             Dictionary<string, object> assessment)
         {
             if (connection == null || string.IsNullOrWhiteSpace(sourceId)) return false;
-            Dictionary<string, object> evidence = QuerySql(connection,
+            Dictionary<string, object> evidence = Program.QuerySql(connection,
                 "SELECT event_type,summary,payload_json,'' AS category,'completed' AS phase,participants_json,'events' AS source_table FROM events WHERE event_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             if (evidence == null)
             {
-                evidence = QuerySql(connection,
+                evidence = Program.QuerySql(connection,
                     "SELECT event_type,summary,payload_json,category,phase,'[]' AS participants_json,'world_history_events' AS source_table FROM world_history_events WHERE event_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             }
@@ -1696,14 +1696,14 @@ LIMIT 50;",
             if (phase == "planned" || phase == "proposed" || phase == "cancelled"
                 || phase == "failed" || phase == "rumored")
                 return false;
-            string kind = NormalizeLookup(
+            string kind = Program.NormalizeLookup(
                 ReadString(evidence, "event_type", "") + " "
                 + ReadString(evidence, "category", ""));
-            string details = NormalizeLookup(
+            string details = Program.NormalizeLookup(
                 ReadString(evidence, "summary", "") + " "
                 + ReadString(evidence, "payload_json", "{}"));
-            if (ContainsAny(kind, "dialogue", "conversation", "reported speech")
-                && !ContainsAny(kind, "action receipt", "native receipt", "verified event"))
+            if (Program.ContainsAny(kind, "dialogue", "conversation", "reported speech")
+                && !Program.ContainsAny(kind, "action receipt", "native receipt", "verified event"))
                 return false;
             string observerId = ReadFirstString(
                 assessment, "observerHeroStringId", "observerId");
@@ -1716,7 +1716,7 @@ LIMIT 50;",
                 .Equals("world_history_events", StringComparison.OrdinalIgnoreCase))
             {
                 HashSet<string> entities = new HashSet<string>(
-                    QuerySql(connection,
+                    Program.QuerySql(connection,
                         "SELECT entity_id FROM world_history_entities WHERE event_id=$id AND entity_id<>'';",
                         new Dictionary<string, object> { ["id"] = sourceId })
                         .Select(row => ReadString(row, "entity_id", "")),
@@ -1732,19 +1732,19 @@ LIMIT 50;",
             }
             if (!pairMatches) return false;
             if ((actKind ?? "").Contains("betray"))
-                return ContainsAny(kind + " " + details,
+                return Program.ContainsAny(kind + " " + details,
                     "betrayal", "betrayed", "treachery", "sold out", "defection");
             if ((actKind ?? "").Contains("humiliat"))
-                return ContainsAny(kind + " " + details,
+                return Program.ContainsAny(kind + " " + details,
                     "humiliation", "humiliated", "public disgrace", "stripped of honor");
             return (actKind ?? "").Contains("grave_abuse")
-                && ContainsAny(kind + " " + details,
+                && Program.ContainsAny(kind + " " + details,
                     "grave abuse", "torture", "enslavement", "abduction", "atrocity");
         }
 
         private static string ConversationGiftWitnessValence(string campaignId, string observerId, string requestedValence)
         {
-            Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId, observerId, "traits.json"));
+            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "traits.json"));
             double jealousy = FindConversationTrait(traits, "jealousy", "envy");
             double empathy = FindConversationTrait(traits, "empathy", "generosity", "compassion");
             if (jealousy >= 75d && jealousy >= empathy + 15d) return "negative";
@@ -1756,12 +1756,12 @@ LIMIT 50;",
             string actKind, Dictionary<string, object> assessment)
         {
             if (string.IsNullOrWhiteSpace(sourceId)) return false;
-            Dictionary<string, object> evidence = QuerySql(connection,
+            Dictionary<string, object> evidence = Program.QuerySql(connection,
                 "SELECT event_type,summary,payload_json,'' AS category,'completed' AS phase,participants_json,'events' AS source_table FROM events WHERE event_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             if (evidence == null)
             {
-                evidence = QuerySql(connection,
+                evidence = Program.QuerySql(connection,
                     "SELECT event_type,summary,payload_json,category,phase,'[]' AS participants_json,'world_history_events' AS source_table FROM world_history_events WHERE event_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
             }
@@ -1779,7 +1779,7 @@ LIMIT 50;",
                     StringComparison.OrdinalIgnoreCase))
             {
                 HashSet<string> entities = new HashSet<string>(
-                    QuerySql(connection,
+                    Program.QuerySql(connection,
                         @"SELECT entity_id
 FROM world_history_entities
 WHERE event_id=$id AND entity_id<>'';",
@@ -1804,15 +1804,15 @@ WHERE event_id=$id AND entity_id<>'';",
                         targetId, StringComparer.OrdinalIgnoreCase);
             }
             if (!pairMatches) return false;
-            string kind = NormalizeLookup(ReadString(evidence, "event_type", "") + " " + ReadString(evidence, "category", ""));
-            string details = NormalizeLookup(ReadString(evidence, "summary", "") + " " + ReadString(evidence, "payload_json", "{}")
+            string kind = Program.NormalizeLookup(ReadString(evidence, "event_type", "") + " " + ReadString(evidence, "category", ""));
+            string details = Program.NormalizeLookup(ReadString(evidence, "summary", "") + " " + ReadString(evidence, "payload_json", "{}")
                 + " " + ReadString(assessment, "summary", ""));
             bool gift = actKind.Contains("gift");
             if (gift)
             {
-                bool verifiedTransfer = ContainsAny(kind, "gift", "transfer item", "item transfer", "transfer gold", "gold transfer", "property transfer", "property_transfer");
+                bool verifiedTransfer = Program.ContainsAny(kind, "gift", "transfer item", "item transfer", "transfer gold", "gold transfer", "property transfer", "property_transfer");
                 if (!verifiedTransfer) return false;
-                bool transformativeScale = ContainsAny(details,
+                bool transformativeScale = Program.ContainsAny(details,
                     "life changing", "transformative", "valuable home", "new home", "house deed", "estate", "land grant",
                     "fief", "castle", "workshop", "business", "large fortune", "fortune in denars", "paid every debt",
                     "family rescued", "saved the family", "livelihood");
@@ -1825,8 +1825,8 @@ WHERE event_id=$id AND entity_id<>'';",
             }
             bool rescueOrAid = actKind.Contains("rescue") || actKind.Contains("saved") || actKind.Contains("aid");
             return rescueOrAid
-                && ContainsAny(kind, "rescue", "saved", "freed", "liberated", "aid")
-                && ContainsAny(details, "family", "spouse", "husband", "wife", "child", "daughter", "son", "mother", "father", "life", "important");
+                && Program.ContainsAny(kind, "rescue", "saved", "freed", "liberated", "aid")
+                && Program.ContainsAny(details, "family", "spouse", "husband", "wife", "child", "daughter", "son", "mother", "father", "life", "important");
         }
 
         private static string
@@ -1841,7 +1841,7 @@ WHERE event_id=$id AND entity_id<>'';",
                 return string.Empty;
             long cutoff =
                 DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 1800;
-            foreach (Dictionary<string, object> row in QuerySql(
+            foreach (Dictionary<string, object> row in Program.QuerySql(
                 connection,
                 @"SELECT event_id
 FROM events
@@ -1871,7 +1871,7 @@ LIMIT 50;",
 
         private static int ConversationPersonalityModifier(string campaignId, string observerId, string actKind, string valence)
         {
-            Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId, observerId, "traits.json"));
+            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, observerId, "traits.json"));
             double honor = FindConversationTrait(traits, "honor", "integrity", "honesty");
             double generosity = FindConversationTrait(traits, "generosity", "empathy");
             double pride = FindConversationTrait(traits, "pride", "vengefulness", "authorityRespect");
@@ -1903,7 +1903,7 @@ LIMIT 50;",
             return 0d;
         }
 
-        private static Dictionary<string, object> SelectDominantConversationAssessment(List<Dictionary<string, object>> rows)
+        internal static Dictionary<string, object> SelectDominantConversationAssessment(List<Dictionary<string, object>> rows)
         {
             Func<Dictionary<string, object>, int> rank = row =>
             {
@@ -1922,7 +1922,7 @@ LIMIT 50;",
             return rows.OrderByDescending(rank).ThenByDescending(x => ReadDouble(x, "confidence", 0d)).First();
         }
 
-        private static Dictionary<string, object> FindRelationshipPair(List<Dictionary<string, object>> pairs, string observerId, string targetId)
+        internal static Dictionary<string, object> FindRelationshipPair(List<Dictionary<string, object>> pairs, string observerId, string targetId)
         {
             return pairs.FirstOrDefault(x =>
                 (ReadString(x, "subjectId", "").Equals(observerId, StringComparison.OrdinalIgnoreCase)
@@ -1960,13 +1960,13 @@ LIMIT 50;",
                     ? FirstNonEmpty(
                         benefitId,
                         "benefit_"
-                        + PromptHash(receiptId).Substring(0, 24)
+                        + Program.PromptHash(receiptId).Substring(0, 24)
                             .ToLowerInvariant())
                     : ReadString(existing, "benefit_id", "");
                 adjudicated["benefitEventId"] = benefitId;
                 if (existing == null)
                 {
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_relationship_benefits(
+                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_relationship_benefits(
 benefit_id,campaign_id,timeline_id,giver_id,recipient_id,benefit_kind,description,source_event_id,source_turn_id,
 original_delta,retained_appreciation,continued_utility,status,created_ts,updated_ts,source_evidence_json,payload_json)
 VALUES($id,$campaign,$timeline,$giver,$recipient,$kind,$description,$event,$turn,$delta,1,$utility,'retained',$ts,$ts,$evidence,$payload);",
@@ -1976,20 +1976,20 @@ VALUES($id,$campaign,$timeline,$giver,$recipient,$kind,$description,$event,$turn
                             ["utility"] = ReadDouble(assessment, "continuedUtility", 1d), ["ts"] = ts,
                             ["evidence"] = Json.Serialize(evidenceIds), ["payload"] = Json.Serialize(assessment) });
                 }
-                ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET benefit_event_id=$benefit WHERE receipt_id=$receipt;",
+                Program.ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET benefit_event_id=$benefit WHERE receipt_id=$receipt;",
                     new Dictionary<string, object> { ["benefit"] = benefitId, ["receipt"] = receiptId });
             }
             else if (tier == "gift_leverage" && !string.IsNullOrWhiteSpace(benefitId))
             {
-                double retained = ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
-                ExecuteSql(connection, @"UPDATE conversation_relationship_benefits SET retained_appreciation=$retained,
+                double retained = Program.ClampDouble(ReadDouble(assessment, "retainedAppreciation", 1d), 0d, 1d);
+                Program.ExecuteSql(connection, @"UPDATE conversation_relationship_benefits SET retained_appreciation=$retained,
 status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
                     new Dictionary<string, object> { ["retained"] = retained, ["status"] = retained <= 0.01d ? "repudiated" : retained < 0.999d ? "diminished" : "retained",
                         ["ts"] = ts, ["payload"] = Json.Serialize(assessment), ["id"] = benefitId });
             }
         }
 
-        private static Dictionary<string, object> ConversationReceiptResponse(Dictionary<string, object> row, bool idempotent)
+        internal static Dictionary<string, object> ConversationReceiptResponse(Dictionary<string, object> row, bool idempotent)
         {
             return new Dictionary<string, object>
             {
@@ -2031,18 +2031,18 @@ status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
             }
         }
 
-        private static Dictionary<string, object> ConversationRelationshipRecentApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> ConversationRelationshipRecentApi(Dictionary<string, string> query)
         {
-            string campaignId = query != null && query.TryGetValue("campaignId", out string supplied) ? supplied : LatestCampaignId();
+            string campaignId = query != null && query.TryGetValue("campaignId", out string supplied) ? supplied : Program.LatestCampaignId();
             int limit = Math.Max(1, Math.Min(250, query != null && query.TryGetValue("limit", out string raw) && int.TryParse(raw, out int parsed) ? parsed : 80));
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureConversationRelationshipSchema(connection);
                 return new Dictionary<string, object>
                 {
                     ["ok"] = true, ["campaignId"] = campaignId,
-                    ["receipts"] = QuerySql(connection, "SELECT * FROM conversation_relationship_receipts ORDER BY created_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
-                    ["benefits"] = QuerySql(connection, "SELECT * FROM conversation_relationship_benefits ORDER BY updated_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";")
+                    ["receipts"] = Program.QuerySql(connection, "SELECT * FROM conversation_relationship_receipts ORDER BY created_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";"),
+                    ["benefits"] = Program.QuerySql(connection, "SELECT * FROM conversation_relationship_benefits ORDER BY updated_ts DESC LIMIT " + limit.ToString(CultureInfo.InvariantCulture) + ";")
                 };
             }
         }
@@ -2055,11 +2055,11 @@ status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
                 ["ok"] = true, ["passed"] = passed, ["suite"] = "conversation_relationships", ["caseId"] = id,
                 ["name"] = id, ["summary"] = summary, ["evidence"] = evidence, ["durationMs"] = 0
             });
-            string previousCampaignsRoot = CampaignsRootOverride.Value;
+            string previousCampaignsRoot = Program.CampaignsRootOverride.Value;
             string isolatedCampaignsRoot = Path.Combine(
-                string.IsNullOrWhiteSpace(previousCampaignsRoot) ? Path.Combine(TestsDir, "isolated-campaigns") : previousCampaignsRoot,
+                string.IsNullOrWhiteSpace(previousCampaignsRoot) ? Path.Combine(Program.TestsDir, "isolated-campaigns") : previousCampaignsRoot,
                 "conversation_relationships_" + Guid.NewGuid().ToString("N").Substring(0, 10));
-            CampaignsRootOverride.Value = isolatedCampaignsRoot;
+            Program.CampaignsRootOverride.Value = isolatedCampaignsRoot;
             string campaign = "cr_" + Guid.NewGuid().ToString("N").Substring(0, 12);
             try
             {
@@ -2090,10 +2090,10 @@ status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
                     && ReadDictionaryList(ackedRepeat, "nativeChanges").Count == 0
                     && ReadString(ReadDictionaryList(ackedRepeat, "receipts").FirstOrDefault(), "nativeApplicationStatus", "") == "applied",
                     "A confirmed native personal-relation change is retained and never emitted again.", new { nativeAck, ackedRepeat });
-                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationRelationshipSchema(connection);
-                    ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=10 WHERE pair_key=$pair;",
+                    Program.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=10 WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = AmbientPairKey("npc_a", "player") });
                 }
                 Dictionary<string, object> band = run("band", 10, assessment("npc_a", "player", 10, "routine", 0.7d, "positive"));
@@ -2166,27 +2166,27 @@ status=$status,updated_ts=$ts,payload_json=$payload WHERE benefit_id=$id;",
                     ReadString(ReadDictionaryList(inventedQuoteResult, "receipts").FirstOrDefault(), "severityTier", "") == "routine"
                     && ReadInt(ReadDictionaryList(inventedQuoteResult, "receipts").FirstOrDefault(), "finalDelta", 0) == -1,
                     "A provider cannot justify a higher tier by inventing wording absent from the target's actual contribution.", inventedQuoteResult);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
-                    ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
+                    Program.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
 known_by_json,created_utc) VALUES('gift_evidence',$campaign,$ts,10,'verified_gift','A valuable home was transferred.',
 '[""player"",""npc_b""]','[""player"",""npc_b""]',$utc);", new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
-                    ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
+                    Program.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
 known_by_json,created_utc) VALUES('dialogue_gift_claim',$campaign,$ts,10,'dialogue_memory','The player said a fine silver cup was a gift.',
 '[""player"",""npc_c""]','[""player"",""npc_c""]',$utc);", new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
-                    ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
+                    Program.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
 known_by_json,created_utc) VALUES('dialogue_betrayal_claim',$campaign,$ts,10,'dialogue_memory','The player claimed to have betrayed the observer.',
 '[""player"",""npc_dialogue_betrayal""]','[""player"",""npc_dialogue_betrayal""]',$utc);", new Dictionary<string, object>
                     {
                         ["campaign"] = campaign, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
-                    ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
+                    Program.ExecuteSql(connection, @"INSERT INTO events(event_id,campaign_id,ts,world_day,event_type,summary,participants_json,
 known_by_json,created_utc) VALUES('betrayal_evidence',$campaign,$ts,10,'verified_betrayal','A completed action receipt proves the ally sold the observer out to an enemy.',
 '[""player"",""npc_c""]','[""player"",""npc_c""]',$utc);", new Dictionary<string, object>
                     {
@@ -2307,10 +2307,10 @@ known_by_json,created_utc) VALUES('betrayal_evidence',$campaign,$ts,10,'verified
                     "A verified recent transfer for the exact giver-recipient pair remains usable when the model omits its source ID.",
                     recoveredTransformative);
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaign))
+                    Program.OpenCampaignConnection(campaign))
                 {
                     int repeatedLineageCount = ReadInt(
-                        QuerySql(
+                        Program.QuerySql(
                             connection,
                             @"SELECT COUNT(*) AS count
 FROM conversation_relationship_benefits
@@ -2365,7 +2365,7 @@ AND payload_json LIKE '%gift_evidence%';",
                 add("dialogue_memory_cannot_verify_transformative_gift",
                     ReadString(ReadDictionaryList(dialogueClaimGift, "receipts").FirstOrDefault(), "severityTier", "") == "meaningful",
                     "An LLM memory of a player asserting an ordinary gift cannot verify transfer or life-changing value for a high-tier award.", dialogueClaimGift);
-                WriteJsonObject(CharacterFile(campaign, "npc_j", "traits.json"), new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaign, "npc_j", "traits.json"), new Dictionary<string, object>
                 {
                     ["jealousy"] = 95, ["envy"] = 90, ["empathy"] = 10, ["generosity"] = 10
                 });
@@ -2385,7 +2385,7 @@ AND payload_json LIKE '%gift_evidence%';",
                     && jealousDelta < 0 && Math.Abs(jealousDelta) < Math.Abs(recipientGiftDelta)
                     && string.IsNullOrWhiteSpace(ReadString(jealousReceipt, "benefitEventId", "")),
                     "A highly jealous witness may reasonably resent the player, but never inherits or mirrors the recipient's transformative gift value or benefit ledger.", jealousWitness);
-                WriteJsonObject(CharacterFile(campaign, "npc_k", "traits.json"), new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaign, "npc_k", "traits.json"), new Dictionary<string, object>
                 {
                     ["jealousy"] = 5, ["envy"] = 5, ["empathy"] = 90, ["generosity"] = 90
                 });
@@ -2400,21 +2400,21 @@ AND payload_json LIKE '%gift_evidence%';",
                 int happyDelta = ReadInt(ReadDictionaryList(happyWitness, "receipts").FirstOrDefault(), "finalDelta", 0);
                 add("empathetic_gift_witness_gets_small_positive_reaction", happyDelta >= 1 && happyDelta <= 3,
                     "An empathetic witness can be happy for the recipient while receiving only a small normal-scale increase toward the giver.", happyWitness);
-                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
-                    int benefitCount = ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM conversation_relationship_benefits WHERE source_event_id='gift';").FirstOrDefault(), "count", 0);
+                    int benefitCount = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM conversation_relationship_benefits WHERE source_event_id='gift';").FirstOrDefault(), "count", 0);
                     add("only_gift_recipient_owns_transformative_benefit", benefitCount == 1,
                         "A group gift creates one durable high-tier benefit for its actual recipient and none for witnesses.", benefitCount);
 
                     Dictionary<string, object> canonical =
-                        QuerySql(
+                        Program.QuerySql(
                             connection,
                             @"SELECT *
 FROM conversation_relationship_benefits
 WHERE benefit_id='home_gift'
 LIMIT 1;")
                         .FirstOrDefault();
-                    ExecuteSql(
+                    Program.ExecuteSql(
                         connection,
                         @"DELETE FROM conversation_relationship_benefits
 WHERE campaign_id=$campaign
@@ -2425,7 +2425,7 @@ AND recipient_id='npc_b';",
                             ["campaign"] = campaign
                         });
                     const long tiedBenefitTimestamp = 424242;
-                    ExecuteSql(
+                    Program.ExecuteSql(
                         connection,
                         @"INSERT INTO conversation_relationship_benefits(
 benefit_id,campaign_id,timeline_id,giver_id,recipient_id,benefit_kind,description,source_event_id,source_turn_id,
@@ -2459,7 +2459,7 @@ $delta,$retained,$utility,$status,$ts,$ts,$payload);",
                             ["payload"] = ReadString(
                                 canonical, "payload_json", "{}")
                         });
-                    ExecuteSql(
+                    Program.ExecuteSql(
                         connection,
                         @"INSERT INTO conversation_relationship_benefits(
 benefit_id,campaign_id,timeline_id,giver_id,recipient_id,benefit_kind,description,source_event_id,source_turn_id,
@@ -2656,17 +2656,17 @@ $delta,$retained,$utility,$status,$ts,$ts,$payload);",
                     && ReadStringList(unsupportedReceipt, "modifiers").Contains("lie_penalty_downgraded_without_contradictory_evidence"),
                     "Unknown or unsupported claims permit at most routine suspicion, never a caught-lie penalty.", unsupported);
 
-                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationRelationshipSchema(connection);
                     long lieTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ExecuteSql(connection, @"INSERT OR REPLACE INTO world_history_lie_checks(
+                    Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO world_history_lie_checks(
 lie_check_id,episode_key,campaign_id,timeline_id,world_day,claimant_id,target_id,raw_claim,normalized_claim,
 objective_verdict,knowledge_basis,formula_version,outcome,evidence_event_ids_json,known_event_ids_json,matched_json,
 mismatched_json,prompt_packet_json,created_ts,updated_ts)
 VALUES('caught_lie','caught_lie_episode',$campaign,'main',10,'player','npc_c','false claim','false claim',
 'contradicted','firsthand',$formula,'detected_firsthand','[""evidence_1""]','[""evidence_1""]','[]','[]','{}',$ts,$ts);",
-                        new Dictionary<string, object> { ["campaign"] = campaign, ["formula"] = LieFormulaVersion, ["ts"] = lieTs });
+                        new Dictionary<string, object> { ["campaign"] = campaign, ["formula"] = Program.LieFormulaVersion, ["ts"] = lieTs });
                 }
                 foreach (var invalidLie in new[] {
                     TestDict("id", "unknown_verdict", "verdict", "unknown", "basis", "firsthand", "outcome", "detected_firsthand", "claimant", "player", "observer", "npc_c"),
@@ -2676,9 +2676,9 @@ VALUES('caught_lie','caught_lie_episode',$campaign,'main',10,'player','npc_c','f
                     TestDict("id", "wrong_observer", "verdict", "contradicted", "basis", "firsthand", "outcome", "detected_firsthand", "claimant", "player", "observer", "someone_else") })
                 {
                     string invalidId = "lie_control_" + ReadString(invalidLie, "id", "");
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                     {
-                        ExecuteSql(connection, @"INSERT INTO world_history_lie_checks(
+                        Program.ExecuteSql(connection, @"INSERT INTO world_history_lie_checks(
 lie_check_id,episode_key,campaign_id,timeline_id,world_day,claimant_id,target_id,raw_claim,normalized_claim,
 objective_verdict,knowledge_basis,formula_version,outcome,evidence_event_ids_json,known_event_ids_json,matched_json,
 mismatched_json,prompt_packet_json,created_ts,updated_ts)
@@ -2869,7 +2869,7 @@ mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_
                     && ReadString(ReadDictionaryList(npcReaction, "receipts").FirstOrDefault(), "targetHeroStringId", "") == "npc_c"
                     && !ReadBool(npcNative, "showNotification", true),
                     "NPC reactions target the actual earlier speaker and do not produce player notifications.", npcReaction);
-                ApplySocialEventTurnRelationships(new Dictionary<string, object>
+                WorldSimulationService.ApplySocialEventTurnRelationships(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaign, ["turnId"] = "missing_reaction_fallback", ["playerHeroStringId"] = "player",
                     ["conversationRelationshipChangesEnabled"] = true, ["relationshipPairs"] = new List<Dictionary<string, object>>(),
@@ -2895,9 +2895,9 @@ mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_
                         ["relationshipAssessments"] = new List<Dictionary<string, object>> { assessment("npc_second", "player", 0, "routine", 0.7d, "negative") }
                     }
                 }, new List<string> { "npc_first", "npc_second" });
-                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
-                    List<Dictionary<string, object>> fallbackReceipts = QuerySql(connection,
+                    List<Dictionary<string, object>> fallbackReceipts = Program.QuerySql(connection,
                         "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='missing_reaction_fallback' ORDER BY observer_id,target_id;");
                     add("missing_direct_npc_reaction_has_no_inferred_delta",
                         fallbackReceipts.Count == 2
@@ -2950,10 +2950,10 @@ mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_
                     partyBridgeReceipts);
 
                 const string priorSessionId = "party_prior_session";
-                using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
-                    EnsureCategorizedMemorySchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO conversation_turns(
+                    Program.EnsureCategorizedMemorySchema(connection);
+                    Program.ExecuteSql(connection, @"INSERT INTO conversation_turns(
 turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,
 location_id,participants_json,status,payload_json)
 VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_late','Purios',
@@ -3076,9 +3076,9 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                         }
                     });
                 List<Dictionary<string, object>> staleNativeStored;
-                using (ReignDbConnection staleNativeConnection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection staleNativeConnection = Program.OpenCampaignConnection(campaign))
                 {
-                    staleNativeStored = QuerySql(staleNativeConnection,
+                    staleNativeStored = Program.QuerySql(staleNativeConnection,
                         "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='stale_native_snapshot';");
                 }
                 add("native_ack_reconciles_stale_request_snapshot_to_actual_transition",
@@ -3124,9 +3124,9 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                     });
                 List<Dictionary<string, object>> cancellingStored;
                 using (ReignDbConnection cancellingConnection =
-                    OpenCampaignConnection(campaign))
+                    Program.OpenCampaignConnection(campaign))
                 {
-                    cancellingStored = QuerySql(cancellingConnection,
+                    cancellingStored = Program.QuerySql(cancellingConnection,
                         "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='cancelling_directions' ORDER BY observer_id;");
                 }
                 add("zero_sum_directional_judgments_still_acknowledge_native_pair",
@@ -3174,9 +3174,9 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                         }
                     });
                 List<Dictionary<string, object>> bandLimitedStored;
-                using (ReignDbConnection bandLimitedConnection = OpenCampaignConnection(campaign))
+                using (ReignDbConnection bandLimitedConnection = Program.OpenCampaignConnection(campaign))
                 {
-                    bandLimitedStored = QuerySql(bandLimitedConnection,
+                    bandLimitedStored = Program.QuerySql(bandLimitedConnection,
                         "SELECT * FROM conversation_relationship_receipts WHERE exchange_id='band_limited_reciprocal' ORDER BY observer_id;");
                 }
                 add("unrelated_new_pair_ignores_native_baseline_and_acks_net_zero",
@@ -3232,7 +3232,7 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
                 });
                 add("self_relationship_changes_rejected", ReadDictionaryList(noSelf, "receipts").Count == 0,
                     "A speaker never changes their own relationship because of their own words.", noSelf);
-                List<Dictionary<string, object>> disabledSocial = ApplySocialEventTurnRelationships(
+                List<Dictionary<string, object>> disabledSocial = WorldSimulationService.ApplySocialEventTurnRelationships(
                     new Dictionary<string, object> { ["conversationRelationshipChangesEnabled"] = false },
                     new List<Dictionary<string, object>>(), new List<string>());
                 add("all_mode_setting_disables_social_event_changes", disabledSocial.Count == 0,
@@ -3245,7 +3245,7 @@ VALUES('prior_npc_turn',$session,'',2,'party_prior_session_turn_1','npc','npc_la
             finally
             {
                 ReignPostgreSqlStorage.ClearAllPools();
-                CampaignsRootOverride.Value = previousCampaignsRoot;
+                Program.CampaignsRootOverride.Value = previousCampaignsRoot;
                 try { if (Directory.Exists(isolatedCampaignsRoot)) Directory.Delete(isolatedCampaignsRoot, true); } catch { }
             }
             return rows;

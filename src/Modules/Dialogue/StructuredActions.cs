@@ -9,7 +9,7 @@ namespace ReignBetaServer
     {
         internal static bool UsesStructuredActions(Dictionary<string, object> payload) => ReadInt(payload, "structuredActionProtocolVersion", 0) == ActionNegotiation.ProtocolVersion;
 
-        private static void AttachStructuredActionResponseContract(Dictionary<string, object> request,
+        internal static void AttachStructuredActionResponseContract(Dictionary<string, object> request,
             Dictionary<string, object> payload)
         {
             if (!UsesStructuredActions(payload)) return;
@@ -73,7 +73,7 @@ namespace ReignBetaServer
                 TestDict("role", "system", "content", system),
                 TestDict("role", "user", "content", Json.Serialize(TestDict("playerText", ReadString(request, "playerText", ""),
                     "visibleReply", ReadFirstString(parsed, "reply", "body"), "actionContext", StructuredActionModelFacts(context)))
-                    + "\nREGISTERED TERMS: " + StructuredActionCatalogPrompt() + TavernVisitActionPrompt())
+                    + "\nREGISTERED TERMS: " + StructuredActionCatalogPrompt() + CharactersService.TavernVisitActionPrompt())
             };
             var repairRequest = TestDict("requestType", "dialogue_continuity_repair", "campaignId", campaignId,
                 "correlationId", correlationId, "heroStringId", heroId, "eventId", eventId,
@@ -99,7 +99,7 @@ namespace ReignBetaServer
                 var errors = ActionNegotiation.ValidateDecision(offered, decision, player, npc,
                     ReadString(context, "conversationId", ""), ReadDouble(context, "worldDay", 0));
                 if (errors.Count > 0) return Fail(string.Join(" ", errors));
-                ValidateTavernActionDecision(offered, decision, player, npc, ReadString(context, "conversationId", ""), ReadDouble(context, "worldDay", 0));
+                CharactersService.ValidateTavernActionDecision(offered, decision, player, npc, ReadString(context, "conversationId", ""), ReadDouble(context, "worldDay", 0));
                 // Merge only the verified omitted field; preserve every original byte value.
                 parsed["structuredActionDecision"] = raw;
                 llm["content"] = Json.Serialize(parsed);
@@ -124,7 +124,7 @@ namespace ReignBetaServer
 
         // All choices and parameter schemas stay available, independently of a player attachment.
         // Dialogue places this invariant block before character and live context for prefix reuse.
-        private static string StructuredActionFixedPrompt() => "\nEXPLICIT GAMEPLAY ACTIONS: "
+        internal static string StructuredActionFixedPrompt() => "\nEXPLICIT GAMEPLAY ACTIONS: "
             + "Speech never authorizes covered gameplay commands; only a structured proposal and the required consents do. "
             + "Keep legacy actionGate.needed=false and suggestedActions=[] for covered actions. Ordinary social conversation, non-native social gifts, drinking and intimacy retain their own rules. "
             + "Always include structuredActionDecision, including when no proposal is attached: "
@@ -165,7 +165,7 @@ namespace ReignBetaServer
                 + "ACTION REQUEST AND NATIVE FACTS: " + Json.Serialize(StructuredActionModelFacts(context)) + "\n"
                 + AgreementPaymentHistoryPrompt(ReadDictionary(context, "fulfilledPaymentHistory"), false)
                 + RequestedPoliticalServiceQuoteCue(context)
-                + RequestedSpouseSeparationCue(context) + TavernVisitActionPrompt();
+                + RequestedSpouseSeparationCue(context) + CharactersService.TavernVisitActionPrompt();
         }
 
         private static string RequestedSpouseSeparationCue(Dictionary<string, object> context)
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                 + "Principled unconditional support may still be free. If further explanations or unsupported conditions remain, keep negotiating with none instead of publishing a binding offer. These terms never guarantee membership, adoption or a government vote.\n";
         }
 
-        private static string StructuredActionCatalogPrompt(bool tavernOnly = false)
+        internal static string StructuredActionCatalogPrompt(bool tavernOnly = false)
         {
             var parameters = new List<object[]>();
             var indexes = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -215,7 +215,7 @@ namespace ReignBetaServer
             var context = CloneDictionary(ReadDictionary(payload, "structuredActionContext") ?? TestDict());
             context.Remove("tavernHouse");
             var scopedProposal = ReadDictionary(context, "proposal");
-            if (!TavernActionScopeEnabled && scopedProposal != null
+            if (!CharactersService.TavernActionScopeEnabled && scopedProposal != null
                 && TavernHouseVisitAction.Contains(Json.Deserialize<ActionAgreement>(Json.Serialize(scopedProposal))))
                 context.Remove("proposal");
             var payments = VerifiedAgreementPaymentHistory(payload);
@@ -251,7 +251,7 @@ namespace ReignBetaServer
             return context;
         }
 
-        private static Dictionary<string, object> VerifiedAgreementPaymentHistory(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> VerifiedAgreementPaymentHistory(Dictionary<string, object> payload,
             string subjectId = null, string targetId = null)
         {
             var context = ReadDictionary(payload, "structuredActionContext");
@@ -400,7 +400,7 @@ namespace ReignBetaServer
             return issues;
         }
 
-        private static IEnumerable<Dictionary<string, object>> StructuredActionReceiptContradictions(
+        internal static IEnumerable<Dictionary<string, object>> StructuredActionReceiptContradictions(
             string reply, Dictionary<string, object> payload)
         {
             if (!UsesStructuredActions(payload) || string.IsNullOrWhiteSpace(reply)) yield break;
@@ -443,7 +443,7 @@ namespace ReignBetaServer
                 + "Do not substitute legacy actionGate or proposalDecisions for the structured decision.";
         }
 
-        private static bool StructuredActionContinuityDecisionPreserved(Dictionary<string, object> payload,
+        internal static bool StructuredActionContinuityDecisionPreserved(Dictionary<string, object> payload,
             Dictionary<string, object> original, Dictionary<string, object> candidate)
         {
             if (!UsesStructuredActions(payload)) return true;
@@ -538,8 +538,8 @@ namespace ReignBetaServer
                 if (errors.Count > 0) throw new InvalidOperationException(string.Join(" ", errors));
                 var consentIssues = StructuredActionAcceptanceContradictions(parsed, payload);
                 if (consentIssues.Count > 0) throw new InvalidOperationException(ReadString(consentIssues[0], "detail", "Unresolved action consent."));
-                ValidateTavernActionDecision(offered, decision, player, npc, conversation, day);
-                ConstrainNpcStoryDuelProposal(payload, npc, player, decision);
+                CharactersService.ValidateTavernActionDecision(offered, decision, player, npc, conversation, day);
+                CharactersService.ConstrainNpcStoryDuelProposal(payload, npc, player, decision);
                 output["kind"] = decision.Kind; output["proposalId"] = decision.ProposalId;
                 output["revision"] = decision.Revision; output["termsHash"] = decision.TermsHash; output["reason"] = decision.Reason;
                 output["decision"] = decision;

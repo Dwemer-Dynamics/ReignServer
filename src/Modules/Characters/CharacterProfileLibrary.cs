@@ -10,18 +10,18 @@ using System.Xml.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const string CharacterProfilePackVersion = "reign_profiles_v4";
         private static readonly string CharacterProfileCatalogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "profile_catalog.json");
-        private static readonly object CharacterProfileLibraryLock = new object();
+        internal static readonly object CharacterProfileLibraryLock = new object();
         private static Dictionary<string, object> CharacterProfileLibraryRoot;
         private static Dictionary<string, Dictionary<string, object>> CharacterProfilesById;
         private static Dictionary<string, Dictionary<string, object>> LegacyCharacterProfilesById;
-        private static readonly object CharacterEditorAuthorityCacheLock = new object();
-        private static readonly Dictionary<string, HashSet<string>> CharacterEditorAuthorityByCampaign = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        internal static readonly object CharacterEditorAuthorityCacheLock = new object();
+        internal static readonly Dictionary<string, HashSet<string>> CharacterEditorAuthorityByCampaign = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
-        private static void InitializeCharacterProfileLibrary()
+        internal static void InitializeCharacterProfileLibrary()
         {
             LoadCharacterProfileLibrary();
             DeferLegacyBackgroundEnrichmentQueues();
@@ -40,7 +40,7 @@ namespace ReignBetaServer
                     if (!string.IsNullOrWhiteSpace(id) && !CharacterProfilesById.ContainsKey(id)) CharacterProfilesById[id] = profile;
                 }
 
-                LogOperational("character_profile_library.loaded", new Dictionary<string, object>
+                Program.LogOperational("character_profile_library.loaded", new Dictionary<string, object>
                 {
                     ["path"] = CharacterProfileCatalogPath,
                     ["exists"] = File.Exists(CharacterProfileCatalogPath),
@@ -51,7 +51,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> MaterializeCharacterProfile(string campaignId, string heroId, Dictionary<string, object> runtimeProfile, bool forceCanonical, bool rerollHooks)
+        internal static Dictionary<string, object> MaterializeCharacterProfile(string campaignId, string heroId, Dictionary<string, object> runtimeProfile, bool forceCanonical, bool rerollHooks)
         {
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
             runtimeProfile = WithNarrativeCampaignVersion(campaignId, runtimeProfile);
@@ -66,7 +66,7 @@ namespace ReignBetaServer
             return EnsureDeterministicBaseline(campaignId, heroId, runtimeProfile);
         }
 
-        private static Dictionary<string, Dictionary<string, object>> CharacterProfileLibraryFor(Dictionary<string, object> runtimeProfile)
+        internal static Dictionary<string, Dictionary<string, object>> CharacterProfileLibraryFor(Dictionary<string, object> runtimeProfile)
         {
             var library = LoadCharacterProfileLibrary();
             if (ReadInt(runtimeProfile, "narrativeVersion", 0) < 5 && ReadString(CharacterProfileLibraryRoot, "packVersion", "") == NarrativePack)
@@ -74,7 +74,7 @@ namespace ReignBetaServer
                 lock (CharacterProfileLibraryLock)
                 {
                     if (LegacyCharacterProfilesById == null)
-                        LegacyCharacterProfilesById = ReadDictionaryList(ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                        LegacyCharacterProfilesById = ReadDictionaryList(Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                             "profiles", "profile_catalog_v4.json")), "profiles").ToDictionary(x => ReadString(x, "heroStringId", ""), StringComparer.OrdinalIgnoreCase);
                     library = LegacyCharacterProfilesById;
                 }
@@ -82,18 +82,18 @@ namespace ReignBetaServer
             return library;
         }
 
-        private static Dictionary<string, object> WithNarrativeCampaignVersion(string campaignId, Dictionary<string, object> profile)
+        internal static Dictionary<string, object> WithNarrativeCampaignVersion(string campaignId, Dictionary<string, object> profile)
         {
             if (profile != null && profile.ContainsKey("narrativeVersion")) return profile;
             var result = new Dictionary<string, object>(profile ?? new Dictionary<string, object>());
-            result["narrativeVersion"] = ReadInt(ReadJsonObject(CampaignFile(campaignId, "campaign.json")), "narrativeVersion", 0);
+            result["narrativeVersion"] = ReadInt(Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json")), "narrativeVersion", 0);
             return result;
         }
 
-        private static Dictionary<string, object> MigrateCharacterProfilesToCurrentModels(string[] args)
+        internal static Dictionary<string, object> MigrateCharacterProfilesToCurrentModels(string[] args)
         {
             string requestedCampaign = ProfileArg(args, "--campaign-id", "");
-            string campaignsRoot = CampaignsRoot();
+            string campaignsRoot = Program.CampaignsRoot();
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             if (!Directory.Exists(campaignsRoot))
                 return new Dictionary<string, object>{{"ok",true},{"campaignCount",0},{"characterCount",0},{"migratedCount",0},{"skippedCount",0},{"failedCount",0},{"results",results}};
@@ -113,7 +113,7 @@ namespace ReignBetaServer
                 {
                     characterCount++;
                     string heroId = Path.GetFileName(characterDirectory);
-                    Dictionary<string, object> runtimeProfile = ReadJsonObject(Path.Combine(characterDirectory, "profile.json"));
+                    Dictionary<string, object> runtimeProfile = Program.ReadJsonObject(Path.Combine(characterDirectory, "profile.json"));
                     if(runtimeProfile.Count==0&&library.TryGetValue(heroId,out Dictionary<string,object> shippedProfile))
                         runtimeProfile=DeepCloneProfileDictionary(ReadDictionary(shippedProfile,"sourceFacts"));
                     if(runtimeProfile.Count==0)
@@ -129,7 +129,7 @@ namespace ReignBetaServer
                         Dictionary<string, object> result;
                         if (!library.ContainsKey(heroId))
                         {
-                            Dictionary<string, object> dynamicTraits = ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
+                            Dictionary<string, object> dynamicTraits = Program.ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
                             if ((ReadDictionary(dynamicTraits, "foundationTraits") ?? new Dictionary<string, object>()).Count == CoreTraitKeys.Length
                                 && FoundationTraitModelCurrent(dynamicTraits))
                             {
@@ -137,7 +137,7 @@ namespace ReignBetaServer
                                 RebuildPersonalityPortrait(dynamicTraits, ReadString(runtimeProfile, "name", heroId), "", "migrated_dynamic_profile");
                                 dynamicTraits["definitions"] = TraitDefinitions();
                                 dynamicTraits["assignmentSources"] = CoreTraitAssignmentSources();
-                                WriteJsonObject(Path.Combine(characterDirectory, "traits.json"), dynamicTraits);
+                                Program.WriteJsonObject(Path.Combine(characterDirectory, "traits.json"), dynamicTraits);
                                 result = new Dictionary<string, object>
                                 {
                                     ["ok"] = true, ["status"] = "dynamic_personality_regenerated", ["profileSource"] = "dynamic",
@@ -147,13 +147,13 @@ namespace ReignBetaServer
                             else result = MaterializeCharacterProfile(campaignId, heroId, runtimeProfile, false, false);
                         }
                         else result = MaterializeCharacterProfile(campaignId, heroId, runtimeProfile, false, false);
-                        Dictionary<string, object> migratedTraits = ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
-                        Dictionary<string, object> migratedBackground = ReadJsonObject(Path.Combine(characterDirectory, "background.json"));
+                        Dictionary<string, object> migratedTraits = Program.ReadJsonObject(Path.Combine(characterDirectory, "traits.json"));
+                        Dictionary<string, object> migratedBackground = Program.ReadJsonObject(Path.Combine(characterDirectory, "background.json"));
                         string nativeText = ReadString(runtimeProfile, "nativeEncyclopediaText", "").Trim();
                         bool nativePreserved = string.IsNullOrWhiteSpace(nativeText)
                             || (ReadString(migratedBackground, "summary", "").StartsWith(nativeText, StringComparison.Ordinal)
                                 && ReadString(migratedBackground, "encyclopediaText", "").StartsWith(nativeText, StringComparison.Ordinal));
-                        bool ready = TraitDocumentReady(migratedTraits) && nativePreserved;
+                        bool ready = Program.TraitDocumentReady(migratedTraits) && nativePreserved;
                         if (!ready) failedCount++; else migratedCount++;
                         results.Add(new Dictionary<string, object>
                         {
@@ -193,9 +193,9 @@ namespace ReignBetaServer
 
         private static Dictionary<string,object> BuildMigrationProfileFromCharacterDirectory(string characterDirectory,string heroId)
         {
-            Dictionary<string,object> schema=ReadJsonObject(Path.Combine(characterDirectory,"schema_manifest.json"));
+            Dictionary<string,object> schema=Program.ReadJsonObject(Path.Combine(characterDirectory,"schema_manifest.json"));
             Dictionary<string,object> summary=DeepCloneProfileDictionary(ReadDictionary(schema,"profileSummary"));
-            Dictionary<string,object> existingTraits=ReadJsonObject(Path.Combine(characterDirectory,"traits.json"));
+            Dictionary<string,object> existingTraits=Program.ReadJsonObject(Path.Combine(characterDirectory,"traits.json"));
             Dictionary<string,object> native=DeepCloneProfileDictionary(ReadDictionary(existingTraits,"visibleBannerlordTraits"));
             Dictionary<string,object> skills=DeepCloneProfileDictionary(ReadDictionary(existingTraits,"nativeSkills"));
             if(summary.Count==0&&native.Count==0&&skills.Count==0)return new Dictionary<string,object>();
@@ -206,31 +206,31 @@ namespace ReignBetaServer
             summary["skills"]=skills;
             string nativeDescription=ReadString(existingTraits,"nativeDescriptionEvidence","");
             if(!string.IsNullOrWhiteSpace(nativeDescription))summary["nativeEncyclopediaText"]=nativeDescription;
-            string archetype=ReadString(ReadJsonObject(Path.Combine(characterDirectory,"template.json")),"archetype","");
+            string archetype=ReadString(Program.ReadJsonObject(Path.Combine(characterDirectory,"template.json")),"archetype","");
             summary["isLord"]=archetype.Equals("lord",StringComparison.OrdinalIgnoreCase);
             summary["isNotable"]=archetype.Equals("notable",StringComparison.OrdinalIgnoreCase);
             summary["isWanderer"]=archetype.Equals("wanderer",StringComparison.OrdinalIgnoreCase);
             return summary;
         }
 
-        private static Dictionary<string, object> MaterializeCanonicalProfile(string campaignId, string heroId, Dictionary<string, object> runtimeProfile, Dictionary<string, object> shipped, bool forceCanonical, bool rerollHooks)
+        internal static Dictionary<string, object> MaterializeCanonicalProfile(string campaignId, string heroId, Dictionary<string, object> runtimeProfile, Dictionary<string, object> shipped, bool forceCanonical, bool rerollHooks)
         {
             var narrative = ReadDictionary(shipped, "narrative");
             bool richNarrative = ReadInt(runtimeProfile, "narrativeVersion", 0) >= 5 && ReadString(narrative, "schema", "") == NarrativeSchema;
             string packVersion = richNarrative ? NarrativePack : CharacterProfilePackVersion;
             if (richNarrative && rerollHooks)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "This character's interests are stable. Edit an interest explicitly or let substantial personal development change it." };
-            string metadataPath = CharacterFile(campaignId, heroId, "profile_library.json");
-            Dictionary<string, object> currentMetadata = ReadJsonObject(metadataPath);
+            string metadataPath = Program.CharacterFile(campaignId, heroId, "profile_library.json");
+            Dictionary<string, object> currentMetadata = Program.ReadJsonObject(metadataPath);
             bool editorOwned = CharacterHasEditorCorrections(campaignId, heroId);
             bool current = string.Equals(ReadString(currentMetadata, "packVersion", ""), packVersion, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(ReadString(ReadJsonObject(CharacterFile(campaignId, heroId, "constructed.json")), "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
-                && TraitDocumentReady(ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json")))
-                && (!richNarrative || NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaignId, heroId, "narrative.json"))));
+                && string.Equals(ReadString(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json")), "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
+                && Program.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json")))
+                && (!richNarrative || NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"))));
 
             if (editorOwned && !forceCanonical)
             {
-                Dictionary<string, object> editorTraits = ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
+                Dictionary<string, object> editorTraits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
                 if (editorTraits.Count > 0)
                 {
                     MarkEditorFoundationTraitsCurrent(editorTraits);
@@ -238,7 +238,7 @@ namespace ReignBetaServer
                     editorTraits["assignmentSources"] = CoreTraitAssignmentSources();
                     EnsureTraitPercentageData(editorTraits, heroId);
                     EnsurePersonalityPortraitData(editorTraits, ReadString(runtimeProfile, "name", heroId), false);
-                    WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), editorTraits);
+                    Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), editorTraits);
                 }
                 Dictionary<string, object> preserved = new Dictionary<string, object>
                 {
@@ -249,7 +249,7 @@ namespace ReignBetaServer
                     ["editorCorrectionsPreserved"] = true,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
                 };
-                WriteJsonObject(metadataPath, preserved);
+                Program.WriteJsonObject(metadataPath, preserved);
                 return preserved;
             }
 
@@ -273,7 +273,7 @@ namespace ReignBetaServer
                 };
             }
             Dictionary<string, object> background = DeepCloneProfileDictionary(ReadDictionary(shipped, "background"));
-            EnsureEncyclopediaText(background, runtimeProfile, traits);
+            Program.EnsureEncyclopediaText(background, runtimeProfile, traits);
             Dictionary<string, object> voice = DeepCloneProfileDictionary(ReadDictionary(shipped, "voice"));
             Dictionary<string, object> motivations = DeepCloneProfileDictionary(ReadDictionary(shipped, "motivations"));
             Dictionary<string, object> template = DeepCloneProfileDictionary(ReadDictionary(shipped, "template"));
@@ -320,26 +320,26 @@ namespace ReignBetaServer
                 stableHidden = ReadDictionary(projection, "hiddenHistory");
                 secrets = ReadDictionary(projection, "secrets");
                 overlay = new Dictionary<string, object> { ["source"] = "stable_canonical_narrative", ["rerolled"] = false };
-                WriteJsonObject(CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"), overlay);
-                WriteJsonObject(CharacterFile(campaignId, heroId, "narrative.json"), narrative);
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"), overlay);
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"), narrative);
             }
 
-            WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "background.json"), background);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "voice.json"), voice);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "motivations.json"), motivations);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "template.json"), template);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "save_quirks.json"), saveQuirks);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "hidden_history.json"), stableHidden);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "secrets.json"), secrets);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "pressure.json"), pressure);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), traits);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "background.json"), background);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "voice.json"), voice);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "motivations.json"), motivations);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "template.json"), template);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "save_quirks.json"), saveQuirks);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "hidden_history.json"), stableHidden);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "secrets.json"), secrets);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "pressure.json"), pressure);
 
             Dictionary<string, object> constructed = new Dictionary<string, object>
             {
                 ["ok"] = true,
                 ["version"] = 2,
                 ["status"] = "canonical_ready",
-                ["schemaVersion"] = CharacterSchemaVersion,
+                ["schemaVersion"] = Program.CharacterSchemaVersion,
                 ["campaignId"] = campaignId,
                 ["heroStringId"] = heroId,
                 ["source"] = "shipped_profile_library",
@@ -348,8 +348,8 @@ namespace ReignBetaServer
                 ["llmUsed"] = false,
                 ["constructedUtc"] = DateTime.UtcNow.ToString("o")
             };
-            WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), constructed);
-            WriteJsonObject(CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
             {
                 ["version"] = 1,
                 ["status"] = "not_required",
@@ -364,43 +364,43 @@ namespace ReignBetaServer
                 ["profileSource"] = ReadString(shipped, "source", "shipped"),
                 ["packVersion"] = packVersion,
                 ["catalogHeroId"] = heroId,
-                ["campaignOverlayPath"] = CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"),
+                ["campaignOverlayPath"] = Program.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json"),
                 ["selectedHooks"] = overlay,
                 ["editorCorrectionsPreserved"] = false,
                 ["updatedUtc"] = DateTime.UtcNow.ToString("o")
             };
-            WriteJsonObject(metadataPath, metadata);
+            Program.WriteJsonObject(metadataPath, metadata);
             return metadata;
         }
 
         private static Dictionary<string, object> EnsureDeterministicBaseline(string campaignId, string heroId, Dictionary<string, object> runtimeProfile)
         {
-            Dictionary<string, object> constructed = ReadJsonObject(CharacterFile(campaignId, heroId, "constructed.json"));
+            Dictionary<string, object> constructed = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
             string status = ReadString(constructed, "status", "");
             bool generatedByLlm = ReadBool(constructed, "llmUsed", false)
                 && (string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "enriched", StringComparison.OrdinalIgnoreCase));
-            if ((!IsUsableCharacterStatus(status) && !string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase))
-                || !TraitDocumentReady(ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"))))
+            if ((!Program.IsUsableCharacterStatus(status) && !string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase))
+                || !Program.TraitDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"))))
             {
-                constructed = ConstructCharacterFiles(campaignId, heroId, runtimeProfile, true, false, "deterministic_baseline");
+                constructed = Program.ConstructCharacterFiles(campaignId, heroId, runtimeProfile, true, false, "deterministic_baseline");
                 constructed["ok"] = true;
                 constructed["status"] = "first_contact_pending";
                 constructed["source"] = "deterministic_baseline";
                 constructed["requiresFirstContactConstruction"] = true;
                 constructed["usableForNonInteractiveSystems"] = true;
                 constructed["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
             }
             else if (!generatedByLlm && (string.Equals(status, "baseline_ready", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "fallback_ready", StringComparison.OrdinalIgnoreCase)))
             {
                 constructed["requiresFirstContactConstruction"] = true;
                 constructed["usableForNonInteractiveSystems"] = true;
-                WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), constructed);
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), constructed);
             }
 
-            Dictionary<string, object> deferred = ReadJsonObject(CharacterFile(campaignId, heroId, "enrichment.json"));
+            Dictionary<string, object> deferred = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"));
             if (!string.Equals(ReadString(deferred, "status", ""), "completed_on_first_contact", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(ReadString(deferred, "status", ""), "completed", StringComparison.OrdinalIgnoreCase))
             {
@@ -414,7 +414,7 @@ namespace ReignBetaServer
                     ["backgroundProcessingEnabled"] = false,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
                 };
-                WriteJsonObject(CharacterFile(campaignId, heroId, "enrichment.json"), deferred);
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"), deferred);
             }
             Dictionary<string, object> metadata = new Dictionary<string, object>
             {
@@ -422,18 +422,18 @@ namespace ReignBetaServer
                 ["status"] = generatedByLlm ? status : "first_contact_pending",
                 ["profileSource"] = "deterministic_runtime_baseline",
                 ["packVersion"] = "",
-                ["enrichment"] = ReadJsonObject(CharacterFile(campaignId, heroId, "enrichment.json"))
+                ["enrichment"] = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"))
             };
-            WriteJsonObject(CharacterFile(campaignId, heroId, "profile_library.json"), metadata);
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "profile_library.json"), metadata);
             return metadata;
         }
 
         private static Dictionary<string, object> LoadOrCreateCampaignProfileOverlay(string campaignId, string heroId, Dictionary<string, object> shipped, bool reroll)
         {
-            string path = CharacterFile(campaignId, heroId, "campaign_profile_overlay.json");
+            string path = Program.CharacterFile(campaignId, heroId, "campaign_profile_overlay.json");
             if (!reroll)
             {
-                Dictionary<string, object> existing = ReadJsonObject(path);
+                Dictionary<string, object> existing = Program.ReadJsonObject(path);
                 if (existing.Count > 0) return existing;
             }
 
@@ -458,9 +458,9 @@ namespace ReignBetaServer
             };
             List<Dictionary<string, object>> pressureProfiles = ReadDictionaryList(pools, "pressureProfiles");
             overlay["pressure"] = pressureProfiles.Count == 0
-                ? DefaultPressure(ReadDictionary(shipped, "sourceFacts"))
+                ? Program.DefaultPressure(ReadDictionary(shipped, "sourceFacts"))
                 : DeepCloneProfileDictionary(pressureProfiles[StableIndex(campaignId + "|" + heroId + "|pressure|" + nonce, pressureProfiles.Count)]);
-            WriteJsonObject(path, overlay);
+            Program.WriteJsonObject(path, overlay);
             return overlay;
         }
 
@@ -470,7 +470,7 @@ namespace ReignBetaServer
             return values.Count == 0 ? "" : values[StableIndex(campaignId + "|" + heroId + "|" + key + "|" + nonce, values.Count)];
         }
 
-        private static int StableIndex(string text, int count)
+        internal static int StableIndex(string text, int count)
         {
             if (count <= 1) return 0;
             unchecked
@@ -481,7 +481,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> CharacterProfileLibraryStatusApi()
+        internal static Dictionary<string, object> CharacterProfileLibraryStatusApi()
         {
             Dictionary<string, object> validation = ValidateCharacterProfileLibrary();
             validation["path"] = CharacterProfileCatalogPath;
@@ -489,29 +489,29 @@ namespace ReignBetaServer
             return validation;
         }
 
-        private static Dictionary<string, object> CharacterProfileLibraryActionApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CharacterProfileLibraryActionApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string heroId = ReadFirstString(payload, "heroStringId", "heroId", "characterId");
             string action = ReadString(payload, "action", "").Trim().ToLowerInvariant();
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "heroStringId is required." };
             switch (action)
             {
                 case "reapply_canonical": return MaterializeCharacterProfile(campaignId, heroId, profile, true, false);
                 case "reroll_hooks": return MaterializeCharacterProfile(campaignId, heroId, profile, true, true);
                 case "request_enrichment":
-                    Dictionary<string, object> generated = ConstructCharacterFiles(campaignId, heroId, profile, true, true, "manual_character_editor");
-                    if (IsCharacterConstructionReady(generated)) MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "manual_character_editor");
+                    Dictionary<string, object> generated = Program.ConstructCharacterFiles(campaignId, heroId, profile, true, true, "manual_character_editor");
+                    if (Program.IsCharacterConstructionReady(generated)) MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, "manual_character_editor");
                     return generated;
                 default: return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Unknown profile-library action." };
             }
         }
 
-        private static bool CharacterHasEditorCorrections(string campaignId, string heroId)
+        internal static bool CharacterHasEditorCorrections(string campaignId, string heroId)
         {
-            if (File.Exists(CharacterFile(campaignId, heroId, "editor_authority.json"))) return true;
+            if (File.Exists(Program.CharacterFile(campaignId, heroId, "editor_authority.json"))) return true;
             lock (CharacterEditorAuthorityCacheLock)
             {
                 if (!CharacterEditorAuthorityByCampaign.TryGetValue(campaignId, out HashSet<string> corrected))
@@ -519,8 +519,8 @@ namespace ReignBetaServer
                     corrected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     try
                     {
-                        using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
-                            foreach (Dictionary<string, object> row in QuerySql(connection, "SELECT DISTINCT hero_id FROM character_editor_revisions;"))
+                        using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
+                            foreach (Dictionary<string, object> row in Program.QuerySql(connection, "SELECT DISTINCT hero_id FROM character_editor_revisions;"))
                                 corrected.Add(ReadString(row, "hero_id", ""));
                     }
                     catch { }
@@ -532,7 +532,7 @@ namespace ReignBetaServer
 
         private static void DeferLegacyBackgroundEnrichmentQueues()
         {
-            string campaignsRoot = CampaignsRoot();
+            string campaignsRoot = Program.CampaignsRoot();
             if (!Directory.Exists(campaignsRoot)) return;
 
             int scanned = 0;
@@ -541,7 +541,7 @@ namespace ReignBetaServer
             foreach (string path in Directory.GetFiles(campaignsRoot, "enrichment.json", SearchOption.AllDirectories))
             {
                 scanned++;
-                Dictionary<string, object> item = ReadJsonObject(path);
+                Dictionary<string, object> item = Program.ReadJsonObject(path);
                 string status = ReadString(item, "status", "");
                 if (!string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)
@@ -558,11 +558,11 @@ namespace ReignBetaServer
                 item["backgroundProcessingEnabled"] = false;
                 item["migratedUtc"] = DateTime.UtcNow.ToString("o");
                 item["updatedUtc"] = DateTime.UtcNow.ToString("o");
-                WriteJsonObject(path, item);
+                Program.WriteJsonObject(path, item);
                 deferred++;
             }
 
-            LogOperational("character_enrichment.background_disabled", new Dictionary<string, object>
+            Program.LogOperational("character_enrichment.background_disabled", new Dictionary<string, object>
             {
                 ["workerStarted"] = false,
                 ["scannedRecords"] = scanned,
@@ -572,13 +572,13 @@ namespace ReignBetaServer
             });
         }
 
-        private static bool RequiresFirstContactConstruction(string campaignId, string heroId, Dictionary<string, object> constructed)
+        internal static bool RequiresFirstContactConstruction(string campaignId, string heroId, Dictionary<string, object> constructed)
         {
             if (LoadCharacterProfileLibrary().ContainsKey(heroId)) return false;
             if (CharacterHasEditorCorrections(campaignId, heroId)) return false;
 
-            if (ReadInt(ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json")), "narrativeVersion", 0) >= 5)
-                return !NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaignId, heroId, "narrative.json")));
+            if (ReadInt(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json")), "narrativeVersion", 0) >= 5)
+                return !NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json")));
 
             string status = ReadString(constructed, "status", "");
             if (ReadBool(constructed, "llmUsed", false)
@@ -589,7 +589,7 @@ namespace ReignBetaServer
             }
 
             string source = ReadString(constructed, "source", "");
-            Dictionary<string, object> metadata = ReadJsonObject(CharacterFile(campaignId, heroId, "profile_library.json"));
+            Dictionary<string, object> metadata = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile_library.json"));
             return string.Equals(status, "first_contact_pending", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "baseline_ready", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "fallback_ready", StringComparison.OrdinalIgnoreCase)
@@ -597,15 +597,15 @@ namespace ReignBetaServer
                 || string.Equals(ReadString(metadata, "profileSource", ""), "deterministic_runtime_baseline", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Dictionary<string, object> LoadPassiveCharacterStack(string campaignId, string heroId, Dictionary<string, object> runtimeProfile)
+        internal static Dictionary<string, object> LoadPassiveCharacterStack(string campaignId, string heroId, Dictionary<string, object> runtimeProfile)
         {
             runtimeProfile = WithNarrativeCampaignVersion(campaignId, runtimeProfile);
-            string characterDir = CharacterDirectory(campaignId, heroId);
+            string characterDir = Program.CharacterDirectory(campaignId, heroId);
             if (Directory.Exists(characterDir)
-                && (File.Exists(CharacterFile(campaignId, heroId, "constructed.json"))
-                    || File.Exists(CharacterFile(campaignId, heroId, "profile.json"))))
+                && (File.Exists(Program.CharacterFile(campaignId, heroId, "constructed.json"))
+                    || File.Exists(Program.CharacterFile(campaignId, heroId, "profile.json"))))
             {
-                return LoadCharacterStack(campaignId, heroId);
+                return Program.LoadCharacterStack(campaignId, heroId);
             }
 
             Dictionary<string, Dictionary<string, object>> library = CharacterProfileLibraryFor(runtimeProfile);
@@ -638,9 +638,9 @@ namespace ReignBetaServer
             };
         }
 
-        private static void MarkCharacterConstructionCompletedOnInteraction(string campaignId, string heroId, string source)
+        internal static void MarkCharacterConstructionCompletedOnInteraction(string campaignId, string heroId, string source)
         {
-            WriteJsonObject(CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "enrichment.json"), new Dictionary<string, object>
             {
                 ["version"] = 2,
                 ["status"] = "completed_on_first_contact",
@@ -653,15 +653,15 @@ namespace ReignBetaServer
             });
         }
 
-        private static Dictionary<string, object> CharacterConstructionPolicyStatus()
+        internal static Dictionary<string, object> CharacterConstructionPolicyStatus()
         {
             Dictionary<string, int> statuses = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            string campaignsRoot = CampaignsRoot();
+            string campaignsRoot = Program.CampaignsRoot();
             if (Directory.Exists(campaignsRoot))
             {
                 foreach (string path in Directory.GetFiles(campaignsRoot, "enrichment.json", SearchOption.AllDirectories))
                 {
-                    string status = ReadString(ReadJsonObject(path), "status", "missing");
+                    string status = ReadString(Program.ReadJsonObject(path), "status", "missing");
                     statuses[status] = statuses.TryGetValue(status, out int count) ? count + 1 : 1;
                 }
             }
@@ -672,11 +672,11 @@ namespace ReignBetaServer
                 ["backgroundWorkerStarted"] = TownProfiles.Count > 0,
                 ["automaticProfileUploadsEnabled"] = false,
                 ["legacyQueueStatuses"] = statuses,
-                ["pendingBackgroundCalls"] = PendingCharacterEnrichmentCount()
+                ["pendingBackgroundCalls"] = Program.PendingCharacterEnrichmentCount()
             };
         }
 
-        private static Dictionary<string, object> ValidateCharacterProfileLibrary(bool includeCourt = true)
+        internal static Dictionary<string, object> ValidateCharacterProfileLibrary(bool includeCourt = true)
         {
             Dictionary<string, Dictionary<string, object>> profiles = LoadCharacterProfileLibrary();
             List<Dictionary<string, object>> profileRows = ReadDictionaryList(CharacterProfileLibraryRoot, "profiles");
@@ -700,7 +700,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> traitMbti = ReadDictionary(traitDocument, "mbtiProfile")
                     ?? new Dictionary<string, object>();
                 string immutableMbtiType = ReadString(profileMbti, "type", "XXXX");
-                if (!MbtiDefinitions.ContainsKey(immutableMbtiType))
+                if (!RelationshipsService.MbtiDefinitions.ContainsKey(immutableMbtiType))
                     errors.Add(pair.Key + " has no valid immutable pregenerated MBTI type.");
                 if (!immutableMbtiType.Equals(ReadString(traitMbti, "type", "XXXX"), StringComparison.OrdinalIgnoreCase))
                     errors.Add(pair.Key + " has mismatched root and trait MBTI assignments.");
@@ -739,9 +739,9 @@ namespace ReignBetaServer
                     if(score!=ReadInt(calculatedVirtues,virtue,int.MinValue))errors.Add(pair.Key+" has a stale or incorrect "+virtue+" court virtue score.");
                 }
                 Dictionary<string, object> native = ReadDictionary(ReadDictionary(pair.Value, "sourceFacts"), "traits") ?? new Dictionary<string, object>();
-                if (TraitInt(traits, "courage") != (int)NativeFoundationSignalVNext(TraitInt(native, "valor"))) errors.Add(pair.Key + " does not expand native Valor into Courage.");
-                if (TraitInt(traits, "mercy") != (int)NativeFoundationSignalVNext(TraitInt(native, "mercy"))) errors.Add(pair.Key + " does not expand native Mercy.");
-                if (TraitInt(traits, "generosity") != (int)NativeFoundationSignalVNext(TraitInt(native, "generosity"))) errors.Add(pair.Key + " does not expand native Generosity.");
+                if (Program.TraitInt(traits, "courage") != (int)NativeFoundationSignalVNext(Program.TraitInt(native, "valor"))) errors.Add(pair.Key + " does not expand native Valor into Courage.");
+                if (Program.TraitInt(traits, "mercy") != (int)NativeFoundationSignalVNext(Program.TraitInt(native, "mercy"))) errors.Add(pair.Key + " does not expand native Mercy.");
+                if (Program.TraitInt(traits, "generosity") != (int)NativeFoundationSignalVNext(Program.TraitInt(native, "generosity"))) errors.Add(pair.Key + " does not expand native Generosity.");
                 if (!FoundationTraitModelCurrent(traitDocument)) errors.Add(pair.Key + " does not use the active foundation trait model.");
                 Dictionary<string,object> percentageModel=ReadDictionary(traitDocument,"traitPercentageModel")??new Dictionary<string,object>();
                 if(ReadInt(percentageModel,"version",0)!=TraitPercentageModelVersion) errors.Add(pair.Key+" does not use trait percentage model v"+TraitPercentageModelVersion+".");
@@ -818,14 +818,14 @@ namespace ReignBetaServer
             return text.Length==prefix.Length||char.IsWhiteSpace(text[prefix.Length]);
         }
 
-        private static Dictionary<string, object> GenerateCharacterProfileLibrary(string[] args)
+        internal static Dictionary<string, object> GenerateCharacterProfileLibrary(string[] args)
         {
             string sandbox = ProfileArg(args, "--sandbox-data", "");
             string reign = ProfileArg(args, "--reign-data", "");
             string courtManifestPath = ProfileArg(args, "--court-manifest", "");
             string naval = ProfileArg(args, "--naval-data", Path.GetFullPath(Path.Combine(sandbox, "..", "..", "NavalDLC", "ModuleData")));
             string output = ProfileArg(args, "--output", CharacterProfileCatalogPath);
-            if (ReadString(ReadJsonObject(output), "packVersion", "") == NarrativePack)
+            if (ReadString(Program.ReadJsonObject(output), "packVersion", "") == NarrativePack)
                 throw new InvalidOperationException("The legacy foundation generator cannot overwrite a complete narrative catalog. Generate foundations to a separate path and use the guarded narrative authoring workflow.");
             if (!Directory.Exists(sandbox)) throw new DirectoryNotFoundException("Sandbox ModuleData was not found: " + sandbox);
             if (!Directory.Exists(reign)) throw new DirectoryNotFoundException("Reign ModuleData was not found: " + reign);
@@ -853,7 +853,7 @@ namespace ReignBetaServer
                     .Where(node => !existingClanIds.Contains((string)node.Attribute("id"))).Select(node => new XElement(node)));
             }
             XDocument courtClans = XDocument.Load(Path.Combine(reign, "reign_court_clans.xml"), LoadOptions.PreserveWhitespace);
-            Dictionary<string, object> courtManifest = ReadJsonObject(courtManifestPath);
+            Dictionary<string, object> courtManifest = Program.ReadJsonObject(courtManifestPath);
             Dictionary<string, Dictionary<string, object>> courtRecords = ReadDictionaryList(courtManifest, "records").ToDictionary(x => ReadString(x, "id", ""), x => x, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, XElement> skillSets = skills.Descendants("SkillSet").Where(x => x.Attribute("id") != null).ToDictionary(x => (string)x.Attribute("id"), x => x, StringComparer.OrdinalIgnoreCase);
             string coreSkillsPath = Path.GetFullPath(Path.Combine(sandbox, "..", "..", "SandBoxCore", "ModuleData", "sandboxcore_skill_sets.xml"));
@@ -948,7 +948,7 @@ namespace ReignBetaServer
             foreach (XElement trait in npc.Descendants("Trait"))
             {
                 string key = ((string)trait.Attribute("id") ?? "").ToLowerInvariant();
-                if (nativeTraits.ContainsKey(key)) nativeTraits[key] = ClampTrait(ParseInt((string)trait.Attribute("value")));
+                if (nativeTraits.ContainsKey(key)) nativeTraits[key] = Program.ClampTrait(ParseInt((string)trait.Attribute("value")));
             }
             string templateId = RemoveObjectPrefix((string)npc.Attribute("skill_template"));
             Dictionary<string, object> nativeSkills = ResolveCatalogNativeSkills(npc, skillSets);
@@ -993,7 +993,7 @@ namespace ReignBetaServer
             return facts;
         }
 
-        private static Dictionary<string, object> ResolveCatalogNativeSkills(XElement npc, Dictionary<string, XElement> skillSets)
+        internal static Dictionary<string, object> ResolveCatalogNativeSkills(XElement npc, Dictionary<string, XElement> skillSets)
         {
             Dictionary<string, object> nativeSkills = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             string templateId = RemoveObjectPrefix((string)npc?.Attribute("skill_template"));
@@ -1016,9 +1016,9 @@ namespace ReignBetaServer
             ApplyCatalogTraitEvidence(traits, facts, courtRecord);
             EnsureTraitPercentageData(traits, id);
             CourtService.EnsureCourtCharacterData(traits, facts, id);
-            Dictionary<string, object> derivedMbti = DeriveMbtiAxes(traits);
+            Dictionary<string, object> derivedMbti = RelationshipsService.DeriveMbtiAxes(traits);
             string mbtiType = ReadString(derivedMbti, "type", "XXXX");
-            if (!MbtiDefinitions.TryGetValue(mbtiType, out MbtiDefinition mbtiDefinition))
+            if (!RelationshipsService.MbtiDefinitions.TryGetValue(mbtiType, out RelationshipsService.MbtiDefinition mbtiDefinition))
                 throw new InvalidOperationException("Pregenerated noble " + id + " did not produce a valid MBTI type.");
             Dictionary<string, object> mbtiProfile = new Dictionary<string, object>
             {
@@ -1026,7 +1026,7 @@ namespace ReignBetaServer
                 ["title"] = mbtiDefinition.Title,
                 ["description"] = mbtiDefinition.Description,
                 ["source"] = "pregenerated_noble_catalog",
-                ["templateVersion"] = NotableMbtiTemplateVersion,
+                ["templateVersion"] = RelationshipsService.NotableMbtiTemplateVersion,
                 ["assignedDay"] = -1d,
                 ["immutable"] = true
             };
@@ -1036,7 +1036,7 @@ namespace ReignBetaServer
             traits.Remove("assignmentSources");
             traits.Remove("assignmentProtocol");
             Dictionary<string, object> foundation = ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>();
-            string culture = HumanizeKey(ReadString(facts, "cultureId", "Calradian"));
+            string culture = Program.HumanizeKey(ReadString(facts, "cultureId", "Calradian"));
             string role = ReadString(facts, "roleLabel", "noble");
             string home = ReadString(facts, "homeSettlementName", "their clan's holdings");
             string house = ReadString(facts, "houseName", "their clan");
@@ -1054,11 +1054,11 @@ namespace ReignBetaServer
             Dictionary<string, object> background = new Dictionary<string, object>
             {
                 ["version"] = 2,
-                ["summary"] = !string.IsNullOrWhiteSpace(nativeText) ? summary : LimitText(summary, 1400),
+                ["summary"] = !string.IsNullOrWhiteSpace(nativeText) ? summary : Program.LimitText(summary, 1400),
                 ["centralWound"] = CatalogCentralWound(facts, foundation),
                 ["publicReputation"] = CatalogPublicReputation(foundation),
                 ["canonBuiltFrom"] = CatalogEvidenceList(facts),
-                ["encyclopediaText"] = !string.IsNullOrWhiteSpace(nativeText) ? nativeText : LimitText(publicText, 900),
+                ["encyclopediaText"] = !string.IsNullOrWhiteSpace(nativeText) ? nativeText : Program.LimitText(publicText, 900),
                 ["nativeEncyclopediaText"] = nativeText,
                 ["nativeTextPreserved"] = !string.IsNullOrWhiteSpace(nativeText)
             };
@@ -1105,8 +1105,8 @@ namespace ReignBetaServer
             Action<string, int, string> adjust = (key, delta, reason) =>
             {
                 if (!foundation.ContainsKey(key) || NativeLockedCoreTraits.Contains(key)) return;
-                int before = TraitInt(foundation, key);
-                int after = ClampTrait(before + delta);
+                int before = Program.TraitInt(foundation, key);
+                int after = Program.ClampTrait(before + delta);
                 if (after == before) return;
                 foundation[key] = after;
                 evidence.Add(new Dictionary<string, object> { ["trait"] = key, ["prior"] = before, ["value"] = after, ["evidence"] = reason });
@@ -1128,7 +1128,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> BuildCatalogVoice(Dictionary<string, object> facts, Dictionary<string, object> traits)
         {
             string nativeVoice = ReadString(facts, "voiceId", "earnest");
-            int tact = TraitInt(traits, "tact"), assertiveness = TraitInt(traits, "assertiveness"), stability = TraitInt(traits, "emotionalStability"), pride = TraitInt(traits, "pride");
+            int tact = Program.TraitInt(traits, "tact"), assertiveness = Program.TraitInt(traits, "assertiveness"), stability = Program.TraitInt(traits, "emotionalStability"), pride = Program.TraitInt(traits, "pride");
             string speech = nativeVoice == "curt" ? "Uses clipped, economical statements" : nativeVoice == "softspoken" ? "Speaks quietly and makes listeners lean in" : nativeVoice == "ironic" ? "Uses dry implication and carefully placed irony" : "Speaks earnestly and prefers clear declarations";
             speech += tact >= 1 ? ", cushioning dangerous points with courtly phrasing." : tact <= -1 ? ", often letting blunt truth land without protection." : ", balancing directness with the needs of the room.";
             return new Dictionary<string, object>
@@ -1137,13 +1137,13 @@ namespace ReignBetaServer
                 ["nativeVoice"] = nativeVoice,
                 ["speechStyle"] = speech,
                 ["socialMask"] = stability >= 1 ? "Maintains a controlled public composure." : pride >= 1 ? "Projects dignity even when composure is strained." : "Adapts their public manner to the immediate balance of power.",
-                ["tells"] = new List<object> { assertiveness >= 1 ? "Takes possession of pauses before answering." : "Waits to see who will press first.", TraitInt(traits, "irritability") >= 1 ? "Impatience appears in shortened replies." : "Frustration is usually kept behind small changes in posture." }
+                ["tells"] = new List<object> { assertiveness >= 1 ? "Takes possession of pauses before answering." : "Waits to see who will press first.", Program.TraitInt(traits, "irritability") >= 1 ? "Impatience appears in shortened replies." : "Frustration is usually kept behind small changes in posture." }
             };
         }
 
         private static Dictionary<string, object> BuildCatalogMotivations(Dictionary<string, object> facts, Dictionary<string, object> traits)
         {
-            List<string> motives = new[] { "wealthMotivation", "powerMotivation", "familyMotivation", "fameMotivation", "knowledgeMotivation", "religionMotivation", "revengeMotivation", "dutyMotivation", "survivalMotivation", "legacyMotivation" }.OrderByDescending(x => TraitInt(traits, x)).ThenBy(x => StableIndex(ReadString(facts, "heroStringId", "") + x, 1000)).Take(3).ToList();
+            List<string> motives = new[] { "wealthMotivation", "powerMotivation", "familyMotivation", "fameMotivation", "knowledgeMotivation", "religionMotivation", "revengeMotivation", "dutyMotivation", "survivalMotivation", "legacyMotivation" }.OrderByDescending(x => Program.TraitInt(traits, x)).ThenBy(x => StableIndex(ReadString(facts, "heroStringId", "") + x, 1000)).Take(3).ToList();
             Dictionary<string, string> dreams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["wealthMotivation"] = "Build enough wealth that neither creditors nor patrons can dictate the household's choices.", ["powerMotivation"] = "Gain durable influence over the decisions that shape their clan and realm.", ["familyMotivation"] = "Secure the safety and advancement of the people they recognize as family.", ["fameMotivation"] = "Earn a reputation that cannot be dismissed as inherited station.", ["knowledgeMotivation"] = "Understand the people, records, and systems others use as leverage.", ["religionMotivation"] = "Live in a way that gives sacred order practical force.", ["revengeMotivation"] = "Settle a grievance that still defines what justice means to them.", ["dutyMotivation"] = "Fulfill the obligations of station without becoming another noble remembered for neglect.", ["survivalMotivation"] = "Create enough security to survive the next reversal of war or politics.", ["legacyMotivation"] = "Leave heirs, works, or a reputation that outlasts immediate victories."
@@ -1162,7 +1162,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> BuildCatalogHookPools(Dictionary<string, object> facts, Dictionary<string, object> traits, Dictionary<string, string> names)
         {
             string role = ReadString(facts, "roleLabel", "noble"), home = ReadString(facts, "homeSettlementName", "the household's holding"), house = ReadString(facts, "houseName", "the clan"), spouse = ResolveCatalogName(names, ReadString(facts, "spouseId", ""), "their spouse"), father = ResolveCatalogName(names, ReadString(facts, "fatherId", ""), "their father"), mother = ResolveCatalogName(names, ReadString(facts, "motherId", ""), "their mother");
-            int basePressure = 20 + Math.Max(0, TraitInt(traits, "ambition")) * 12 + Math.Max(0, TraitInt(traits, "pride")) * 8;
+            int basePressure = 20 + Math.Max(0, Program.TraitInt(traits, "ambition")) * 12 + Math.Max(0, Program.TraitInt(traits, "pride")) * 8;
             return new Dictionary<string, object>
             {
                 ["secretInterests"] = new List<string> { "Private correspondence with someone outside the expected social circle.", "Collecting accounts of old disputes that powerful people would rather forget.", "Testing whether a commercial venture could create independence from clan money.", "A fascination with a rival culture's customs and political methods." },
@@ -1209,8 +1209,8 @@ namespace ReignBetaServer
             if (role == "child_1") return "They fear being prepared for responsibility yet still judged unworthy when succession matters.";
             if (role.StartsWith("child_", StringComparison.Ordinal)) return "They have learned that family affection and family usefulness are not always the same thing.";
             if (role == "father" || role == "mother") return "They carry the knowledge that protecting a household can require choices their children may never forgive.";
-            if (TraitInt(traits, "pride") >= 1) return "Humiliation and public dismissal cut more deeply than they admit.";
-            if (TraitInt(traits, "socialTrust") <= -1) return "Past disappointments taught them that dependence gives other people leverage.";
+            if (Program.TraitInt(traits, "pride") >= 1) return "Humiliation and public dismissal cut more deeply than they admit.";
+            if (Program.TraitInt(traits, "socialTrust") <= -1) return "Past disappointments taught them that dependence gives other people leverage.";
             return "They fear becoming useful to everyone while remaining truly known by no one.";
         }
 
@@ -1232,32 +1232,32 @@ namespace ReignBetaServer
                 "Their strongest choices emerge when personal attachment collides with the security of their station.",
                 "They prefer controlled bargains, but accumulated humiliation can make a dangerous risk feel necessary."
             };
-            return tensions[StableIndex(ReadString(facts, "heroStringId", "") + "|distinctive_tension|" + TraitInt(traits, "pride"), tensions.Length)];
+            return tensions[StableIndex(ReadString(facts, "heroStringId", "") + "|distinctive_tension|" + Program.TraitInt(traits, "pride"), tensions.Length)];
         }
 
         private static string CatalogPublicReputation(Dictionary<string, object> traits)
         {
-            if (TraitInt(traits, "tact") >= 1 && TraitInt(traits, "confidence") >= 1) return "Considered politically composed and difficult to corner in public.";
-            if (TraitInt(traits, "aggression") >= 1) return "Known for answering resistance directly and sometimes too forcefully.";
-            if (TraitInt(traits, "compassion") >= 1) return "Regarded as more attentive to dependents and casualties than many nobles.";
-            if (TraitInt(traits, "socialTrust") <= -1) return "Regarded as guarded, observant, and slow to accept assurances.";
+            if (Program.TraitInt(traits, "tact") >= 1 && Program.TraitInt(traits, "confidence") >= 1) return "Considered politically composed and difficult to corner in public.";
+            if (Program.TraitInt(traits, "aggression") >= 1) return "Known for answering resistance directly and sometimes too forcefully.";
+            if (Program.TraitInt(traits, "compassion") >= 1) return "Regarded as more attentive to dependents and casualties than many nobles.";
+            if (Program.TraitInt(traits, "socialTrust") <= -1) return "Regarded as guarded, observant, and slow to accept assurances.";
             return "Seen as a capable noble whose deeper priorities are not yet obvious.";
         }
 
         private static string CatalogFear(Dictionary<string, object> traits)
         {
-            if (TraitInt(traits, "fearfulness") >= 1) return "A sudden reversal that leaves them exposed before preparations are complete.";
-            if (TraitInt(traits, "shame") >= 1) return "Public disgrace that permanently changes how their family sees them.";
-            if (TraitInt(traits, "familyMotivation") >= 1) return "Watching family loyalty fracture under pressure they failed to anticipate.";
+            if (Program.TraitInt(traits, "fearfulness") >= 1) return "A sudden reversal that leaves them exposed before preparations are complete.";
+            if (Program.TraitInt(traits, "shame") >= 1) return "Public disgrace that permanently changes how their family sees them.";
+            if (Program.TraitInt(traits, "familyMotivation") >= 1) return "Watching family loyalty fracture under pressure they failed to anticipate.";
             return "Losing control of a consequential choice to someone who does not understand its cost.";
         }
 
         private static List<object> CatalogLimits(Dictionary<string, object> traits)
         {
             List<object> limits = new List<object>();
-            if (TraitInt(traits, "honesty") >= 1) limits.Add("Will not knowingly build a lasting agreement on a direct lie.");
-            if (TraitInt(traits, "compassion") >= 1 || TraitInt(traits, "mercy") >= 1) limits.Add("Will not casually punish helpless people for another person's offense.");
-            if (TraitInt(traits, "loyalty") >= 1) limits.Add("Will not abandon a chosen ally without warning when alternatives remain.");
+            if (Program.TraitInt(traits, "honesty") >= 1) limits.Add("Will not knowingly build a lasting agreement on a direct lie.");
+            if (Program.TraitInt(traits, "compassion") >= 1 || Program.TraitInt(traits, "mercy") >= 1) limits.Add("Will not casually punish helpless people for another person's offense.");
+            if (Program.TraitInt(traits, "loyalty") >= 1) limits.Add("Will not abandon a chosen ally without warning when alternatives remain.");
             if (limits.Count == 0) limits.Add("Will not accept a bargain that leaves them permanently powerless.");
             return limits;
         }
@@ -1281,7 +1281,7 @@ namespace ReignBetaServer
             return fallback;
         }
 
-        private static string CleanGameText(string value)
+        internal static string CleanGameText(string value)
         {
             string text = value ?? "";
             if (text.StartsWith("{=", StringComparison.Ordinal))
@@ -1292,7 +1292,7 @@ namespace ReignBetaServer
             return text.Trim();
         }
 
-        private static string RemoveObjectPrefix(string value)
+        internal static string RemoveObjectPrefix(string value)
         {
             string text = value ?? "";
             int dot = text.IndexOf('.');
@@ -1307,8 +1307,7 @@ namespace ReignBetaServer
             return key.Length == 0 ? "" : char.ToLowerInvariant(key[0]) + key.Substring(1);
         }
 
-        private static int ParseInt(string value) { return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : 0; }
-        private static double ParseDouble(string value) { return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : 0d; }
+        internal static double ParseDouble(string value) { return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : 0d; }
 
         private static string HashFiles(params string[] paths)
         {
@@ -1324,12 +1323,12 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> DeepCloneProfileDictionary(Dictionary<string, object> value)
+        internal static Dictionary<string, object> DeepCloneProfileDictionary(Dictionary<string, object> value)
         {
             return value == null ? new Dictionary<string, object>() : TryParseJsonObject(Json.Serialize(value)) ?? new Dictionary<string, object>();
         }
 
-        private static List<object> ReadObjectList(Dictionary<string, object> source, string key)
+        internal static List<object> ReadObjectList(Dictionary<string, object> source, string key)
         {
             if (source == null || !source.TryGetValue(key, out object value) || value == null) return new List<object>();
             if (value is ArrayList array) return array.Cast<object>().ToList();
@@ -1367,7 +1366,7 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunCharacterProfileLibrarySelfTests(bool includeCourt = true)
+        internal static List<Dictionary<string, object>> RunCharacterProfileLibrarySelfTests(bool includeCourt = true)
         {
             Dictionary<string, Dictionary<string, object>> profiles = LoadCharacterProfileLibrary();
             if (!includeCourt)
@@ -1414,7 +1413,7 @@ namespace ReignBetaServer
 
             Dictionary<string, object> hookProfile = profiles.Values.FirstOrDefault(x => ReadString(x, "source", "") == "native_sandbox") ?? new Dictionary<string, object>();
             if (ReadString(CharacterProfileLibraryRoot, "packVersion", "") == NarrativePack)
-                hookProfile = ReadDictionaryList(ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "profile_catalog_v4.json")), "profiles")
+                hookProfile = ReadDictionaryList(Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "profile_catalog_v4.json")), "profiles")
                     .FirstOrDefault(x => ReadString(x, "source", "") == "native_sandbox") ?? hookProfile;
             Dictionary<string, object> pools = ReadDictionary(hookProfile, "hookPools") ?? new Dictionary<string, object>();
             string heroId = FirstNonEmpty(ReadString(hookProfile, "heroStringId", ""), "missing");
@@ -1434,8 +1433,8 @@ namespace ReignBetaServer
                 ["skills"] = new Dictionary<string, object> { ["charm"] = 100, ["leadership"] = 120, ["steward"] = 100 }
             };
             Dictionary<string, object> baselineTraits = BuildTraitDocument(unknown);
-            Dictionary<string, object> baselineGenerated = DefaultGeneratedCharacter(unknown, baselineTraits);
-            bool baselineReady = TraitDocumentReady(baselineTraits)
+            Dictionary<string, object> baselineGenerated = Program.DefaultGeneratedCharacter(unknown, baselineTraits);
+            bool baselineReady = Program.TraitDocumentReady(baselineTraits)
                 && ReadObjectList(ReadDictionary(baselineGenerated, "motivations"), "dreams").Count > 0
                 && !string.IsNullOrWhiteSpace(ReadString(ReadDictionary(baselineGenerated, "hiddenHistory"), "privateBackstory", ""))
                 && PersonalityPortraitReady(baselineTraits);
@@ -1447,15 +1446,15 @@ namespace ReignBetaServer
                 string dynamicHeroId = "profile_self_test_dynamic";
                 unknown["heroStringId"] = dynamicHeroId;
                 Dictionary<string, object> passiveStack = LoadPassiveCharacterStack(policyCampaign, dynamicHeroId, unknown);
-                bool passiveDidNotMaterialize = !Directory.Exists(CharacterDirectory(policyCampaign, dynamicHeroId))
+                bool passiveDidNotMaterialize = !Directory.Exists(Program.CharacterDirectory(policyCampaign, dynamicHeroId))
                     && string.Equals(ReadString(passiveStack, "profileSource", ""), "live_runtime_unconstructed", StringComparison.OrdinalIgnoreCase)
                     && ReadBool(passiveStack, "constructionDeferredUntilFirstInteraction", false);
                 results.Add(ProfileSelfTest("passive_event_does_not_create_dynamic_profile", passiveDidNotMaterialize,
                     "Passive event planning uses live baseline facts without creating or constructing a dynamic character profile.", null));
 
                 MaterializeCharacterProfile(policyCampaign, dynamicHeroId, unknown, false, false);
-                Dictionary<string, object> dynamicConstructed = ReadJsonObject(CharacterFile(policyCampaign, dynamicHeroId, "constructed.json"));
-                Dictionary<string, object> dynamicEnrichment = ReadJsonObject(CharacterFile(policyCampaign, dynamicHeroId, "enrichment.json"));
+                Dictionary<string, object> dynamicConstructed = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, dynamicHeroId, "constructed.json"));
+                Dictionary<string, object> dynamicEnrichment = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, dynamicHeroId, "enrichment.json"));
                 bool dynamicDeferred = string.Equals(ReadString(dynamicConstructed, "status", ""), "first_contact_pending", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(dynamicEnrichment, "status", ""), "deferred_until_interaction", StringComparison.OrdinalIgnoreCase)
                     && RequiresFirstContactConstruction(policyCampaign, dynamicHeroId, dynamicConstructed);
@@ -1475,8 +1474,8 @@ namespace ReignBetaServer
                     ["isLord"] = true
                 };
                 MaterializeCharacterProfile(policyCampaign, canonicalHeroId, canonicalRuntime, false, false);
-                Dictionary<string, object> canonicalConstructed = ReadJsonObject(CharacterFile(policyCampaign, canonicalHeroId, "constructed.json"));
-                Dictionary<string, object> canonicalEnrichment = ReadJsonObject(CharacterFile(policyCampaign, canonicalHeroId, "enrichment.json"));
+                Dictionary<string, object> canonicalConstructed = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, canonicalHeroId, "constructed.json"));
+                Dictionary<string, object> canonicalEnrichment = Program.ReadJsonObject(Program.CharacterFile(policyCampaign, canonicalHeroId, "enrichment.json"));
                 bool canonicalReady = string.Equals(ReadString(canonicalConstructed, "status", ""), "canonical_ready", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(canonicalEnrichment, "status", ""), "not_required", StringComparison.OrdinalIgnoreCase)
                     && !RequiresFirstContactConstruction(policyCampaign, canonicalHeroId, canonicalConstructed);
@@ -1488,16 +1487,16 @@ namespace ReignBetaServer
                         ["enrichmentStatus"] = ReadString(canonicalEnrichment, "status", "")
                     }));
 
-                Dictionary<string, object> scaffold = ConstructCharacterFiles(policyCampaign, dynamicHeroId, unknown, true, false, "background_enrichment");
+                Dictionary<string, object> scaffold = Program.ConstructCharacterFiles(policyCampaign, dynamicHeroId, unknown, true, false, "background_enrichment");
                 results.Add(ProfileSelfTest("background_enrichment_fallback_safe",
-                    IsCharacterConstructionReady(scaffold) && !ReadBool(scaffold, "llmUsed", true),
+                    Program.IsCharacterConstructionReady(scaffold) && !ReadBool(scaffold, "llmUsed", true),
                     "Background enrichment retains a usable deterministic scaffold when no provider result is available.", scaffold));
             }
             finally
             {
                 try
                 {
-                    string policyCampaignDir = CampaignDirectory(policyCampaign);
+                    string policyCampaignDir = Program.CampaignDirectory(policyCampaign);
                     if (Directory.Exists(policyCampaignDir))
                     {
                         ReignPostgreSqlStorage.ClearAllPools();
@@ -1511,25 +1510,25 @@ namespace ReignBetaServer
             {
                 ["heroStringId"] = "profile_self_test_sparse", ["name"] = "Sparse Native Profile"
             });
-            results.Add(ProfileSelfTest("sparse_native_traits_readiness", TraitDocumentReady(sparseNativeTraits),
+            results.Add(ProfileSelfTest("sparse_native_traits_readiness", Program.TraitDocumentReady(sparseNativeTraits),
                 "Characters whose native trait payload is unavailable still become stable after their complete 43-trait foundation is built.", null));
 
-            Dictionary<string, object> settings = DefaultSettings();
+            Dictionary<string, object> settings = Program.DefaultSettings();
             settings["dialogueModel"] = "dialogue-test-model";
             settings["characterConstructionModel"] = "construction-test-model";
-            results.Add(ProfileSelfTest("dedicated_construction_model", ModelForRequest(settings, "character_construction") == "construction-test-model", "First-contact character construction routes through the dedicated construction model setting.", null));
-            bool adaptiveRetryBudget = CharacterConstructionMaxTokensForAttempt(3600, 1) == 3600
-                && CharacterConstructionMaxTokensForAttempt(3600, 2) == 7200
-                && CharacterConstructionMaxTokensForAttempt(30000, 2) == 50000
-                && CharacterConstructionMaxTokensForAttempt(50000, 1) == 50000
-                && CharacterConstructionMaxTokensForAttempt(int.MaxValue, 2) == 50000
-                && ReadInt(DefaultSettings(), "characterConstructionMaxTokens", 0) == 50000;
+            results.Add(ProfileSelfTest("dedicated_construction_model", Program.ModelForRequest(settings, "character_construction") == "construction-test-model", "First-contact character construction routes through the dedicated construction model setting.", null));
+            bool adaptiveRetryBudget = Program.CharacterConstructionMaxTokensForAttempt(3600, 1) == 3600
+                && Program.CharacterConstructionMaxTokensForAttempt(3600, 2) == 7200
+                && Program.CharacterConstructionMaxTokensForAttempt(30000, 2) == 50000
+                && Program.CharacterConstructionMaxTokensForAttempt(50000, 1) == 50000
+                && Program.CharacterConstructionMaxTokensForAttempt(int.MaxValue, 2) == 50000
+                && ReadInt(Program.DefaultSettings(), "characterConstructionMaxTokens", 0) == 50000;
             results.Add(ProfileSelfTest("adaptive_construction_token_retry", adaptiveRetryBudget,
                 "Construction defaults to a 50,000-token ceiling; a deliberately smaller setting can grow on retry but never exceeds 50,000.",
                 new Dictionary<string, object>
                 {
-                    ["firstAttemptTokens"] = CharacterConstructionMaxTokensForAttempt(3600, 1),
-                    ["retryTokens"] = CharacterConstructionMaxTokensForAttempt(3600, 2)
+                    ["firstAttemptTokens"] = Program.CharacterConstructionMaxTokensForAttempt(3600, 1),
+                    ["retryTokens"] = Program.CharacterConstructionMaxTokensForAttempt(3600, 2)
                 }));
 
             var oldBudget = new Dictionary<string, object> { ["characterConstructionMaxTokens"] = 3600, ["maxTokens"] = 1200 };
@@ -1545,7 +1544,7 @@ namespace ReignBetaServer
                 && ReadInt(oldBudget, "characterConstructionMaxTokens", 0) == 50000 && ReadInt(oldBudget, "maxTokens", 0) == 1200,
                 "Existing small construction budgets migrate once to 50,000; later explicit lower choices and unrelated dialogue limits are preserved, and larger values are capped.", null));
 
-            string compactRetryPrompt = BuildCharacterConstructionPromptForAttempt("campaign", "hero", unknown, baselineTraits, 2);
+            string compactRetryPrompt = Program.BuildCharacterConstructionPromptForAttempt("campaign", "hero", unknown, baselineTraits, 2);
             results.Add(ProfileSelfTest("compact_construction_retry_prompt",
                 compactRetryPrompt.Contains("no more than 12,000 characters total")
                     && compactRetryPrompt.Contains("Close every object and array"),
@@ -1561,7 +1560,7 @@ namespace ReignBetaServer
                 }
             };
             results.Add(ProfileSelfTest("construction_token_limit_diagnostic",
-                LikelyCharacterConstructionIssue("Character construction response hit the max token limit before valid JSON completed.", lengthAttempts)
+                Program.LikelyCharacterConstructionIssue("Character construction response hit the max token limit before valid JSON completed.", lengthAttempts)
                     .Contains("cut off by the character construction token limit"),
                 "A local output-budget cutoff is diagnosed as token truncation rather than provider rate limiting.", null));
 
@@ -1569,22 +1568,22 @@ namespace ReignBetaServer
             {
                 ["status"] = "failed",
                 ["failureKind"] = "parse",
-                ["constructionEngineVersion"] = CharacterConstructionEngineVersion - 1,
+                ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion - 1,
                 ["settingsRevision"] = ReadString(settings, "settingsRevision", ""),
-                ["settingsFingerprint"] = SettingsFingerprint(settings),
+                ["settingsFingerprint"] = Program.SettingsFingerprint(settings),
                 ["failedUtc"] = DateTime.UtcNow.AddMinutes(5).ToString("o")
             };
             results.Add(ProfileSelfTest("legacy_truncation_auto_retry",
-                ShouldRetryFailedConstruction(legacyParseFailure, settings),
+                Program.ShouldRetryFailedConstruction(legacyParseFailure, settings),
                 "A construction that failed under the pre-adaptive engine is retried once without requiring a settings edit.", null));
             var exhaustedBudget = DeepCloneProfileDictionary(legacyParseFailure);
             exhaustedBudget["failureKind"] = "output_limit";
-            exhaustedBudget["constructionEngineVersion"] = CharacterConstructionEngineVersion;
+            exhaustedBudget["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion;
             var changedBudgetSettings = DeepCloneProfileDictionary(settings);
             changedBudgetSettings["characterConstructionMaxTokens"] = 42000;
             results.Add(ProfileSelfTest("construction_output_limit_retry_policy",
-                !ShouldRetryFailedConstruction(exhaustedBudget, settings)
-                    && ShouldRetryFailedConstruction(exhaustedBudget, changedBudgetSettings),
+                !Program.ShouldRetryFailedConstruction(exhaustedBudget, settings)
+                    && Program.ShouldRetryFailedConstruction(exhaustedBudget, changedBudgetSettings),
                 "An exhausted current creation budget does not trigger another automatic charge; a deliberate configuration change permits retry.", null));
             results.Add(ProfileSelfTest("background_character_worker_disabled", !ReadBool(settings, "backgroundCharacterEnrichmentEnabled", true), "Automatic background character construction is disabled by default.", null));
             results.AddRange(RunTownNotableProfileSelfTests());
@@ -1592,7 +1591,7 @@ namespace ReignBetaServer
         }
 #endif
 
-        private static Dictionary<string, object> ProfileSelfTest(string caseId, bool passed, string summary, Dictionary<string, object> data)
+        internal static Dictionary<string, object> ProfileSelfTest(string caseId, bool passed, string summary, Dictionary<string, object> data)
         {
             return new Dictionary<string, object>
             {

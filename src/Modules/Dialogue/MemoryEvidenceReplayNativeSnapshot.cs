@@ -104,7 +104,7 @@ namespace ReignBetaServer
                     Sql(connection, "CREATE TABLE sentinel(value integer); INSERT INTO sentinel VALUES(99);");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "unselected_snapshot");
                 ReignPostgreSqlStorage.ExportCampaignArchive(campaign, archive);
-                string pin = FileSha256(archive);
+                string pin = PersistenceService.FileSha256(archive);
                 bool refused = false;
                 try { ReignPostgreSqlStorage.WithValidationCampaignArchive(campaign, archive, "short", _ => false); }
                 catch (InvalidDataException) { refused = true; }

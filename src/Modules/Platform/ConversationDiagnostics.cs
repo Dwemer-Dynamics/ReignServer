@@ -379,7 +379,7 @@ namespace ReignBetaServer
             catch (Exception ex) { DiagnosticFailure(ex); }
         }
 
-        private static void DiagnosticValidation(string title, bool accepted, IEnumerable<string> issues, object before = null, object after = null)
+        internal static void DiagnosticValidation(string title, bool accepted, IEnumerable<string> issues, object before = null, object after = null)
         {
             var trace = DiagnosticTrace.Value;
             if (trace == null) return;

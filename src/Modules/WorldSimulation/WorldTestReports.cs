@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private static readonly double[] WorldTestCheckpointGates =
             { 1d, 7d, 31.5d, 63d, 126d, 378d, 630d };
@@ -16,7 +16,7 @@ namespace ReignBetaServer
             string timelineId,
             double latestWorldDay)
         {
-            double firstWorldDay = ReadDouble(QuerySql(connection, @"
+            double firstWorldDay = ReadDouble(Program.QuerySql(connection, @"
 SELECT MIN(world_day) AS day FROM world_test_native_heartbeats
 WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                 new Dictionary<string, object>
@@ -26,7 +26,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
             double elapsed = Math.Max(0d, latestWorldDay - firstWorldDay);
             foreach (double gate in WorldTestCheckpointGates.Where(x => elapsed >= x))
             {
-                int exists = ReadInt(QuerySql(connection, @"
+                int exists = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_test_checkpoint_reports
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND checkpoint_day=$gate;",
                     new Dictionary<string, object>
@@ -34,7 +34,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND checkpoint_day=$gate;"
                         ["campaign"] = campaignId, ["timeline"] = timelineId, ["gate"] = gate
                     }).FirstOrDefault(), "count", 0);
                 if (exists > 0) continue;
-                Dictionary<string, object> selected = QuerySql(connection, @"
+                Dictionary<string, object> selected = Program.QuerySql(connection, @"
 SELECT day_key,world_day,overall_status,rollup_json,updated_ts
 FROM world_test_daily_rollups
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND world_day>=$target
@@ -45,7 +45,7 @@ ORDER BY world_day LIMIT 1;",
                         ["target"] = firstWorldDay + gate
                     }).FirstOrDefault();
                 if (selected == null) continue;
-                Dictionary<string, object> prior = QuerySql(connection, @"
+                Dictionary<string, object> prior = Program.QuerySql(connection, @"
 SELECT checkpoint_day,report_json FROM world_test_checkpoint_reports
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND checkpoint_day<$gate
 ORDER BY checkpoint_day DESC LIMIT 1;",
@@ -53,7 +53,7 @@ ORDER BY checkpoint_day DESC LIMIT 1;",
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId, ["gate"] = gate
                     }).FirstOrDefault();
-                Dictionary<string, object> manifestRow = QuerySql(connection, @"
+                Dictionary<string, object> manifestRow = Program.QuerySql(connection, @"
 SELECT manifest_json FROM world_test_manifests
 WHERE campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                     new Dictionary<string, object>
@@ -84,7 +84,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                     ["reconciliation"] = reconciliation,
                     ["manifest"] = TryParseJsonObject(ReadString(manifestRow, "manifest_json", "{}"))
                         ?? new Dictionary<string, object>(),
-                    ["evidenceCount"] = ReadInt(QuerySql(connection, @"
+                    ["evidenceCount"] = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_test_diagnostic_evidence
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<=$day;",
                         new Dictionary<string, object>
@@ -101,7 +101,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<=$day;",
                         "error", reconciliation);
                 }
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"INSERT INTO world_test_checkpoint_reports(
+                Program.ExecuteSql(connection, @"INSERT INTO world_test_checkpoint_reports(
 campaign_id,timeline_id,checkpoint_day,report_json,created_ts,updated_ts)
 VALUES($campaign,$timeline,$gate,$report,$ts,$ts);",
                     new Dictionary<string, object>
@@ -118,7 +118,7 @@ VALUES($campaign,$timeline,$gate,$report,$ts,$ts);",
             string timelineId)
         {
             string player = ReadFirstString(
-                ReadJsonObject(CampaignFile(campaignId, "campaign.json")),
+                Program.ReadJsonObject(Program.CampaignFile(campaignId, "campaign.json")),
                 "mainHeroStringId", "mainHeroId");
             Dictionary<string, object> parameters = new Dictionary<string, object>
             {
@@ -126,7 +126,7 @@ VALUES($campaign,$timeline,$gate,$report,$ts,$ts);",
                 ["timeline"] = timelineId,
                 ["player"] = player ?? string.Empty
             };
-            List<Dictionary<string, object>> source = QuerySql(connection, @"
+            List<Dictionary<string, object>> source = Program.QuerySql(connection, @"
 SELECT pair_key,hero_a_id,hero_b_id,
 affinity_a_to_b,
 affinity_b_to_a
@@ -188,25 +188,25 @@ WHERE $player='' OR (hero_a_id<>$player AND hero_b_id<>$player);", parameters);
             };
         }
 
-        private static Dictionary<string, object> WorldTestCheckpointsApi(
+        internal static Dictionary<string, object> WorldTestCheckpointsApi(
             Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
             string campaignId = query.TryGetValue("campaignId", out string campaign)
-                ? campaign : LatestCampaignId();
+                ? campaign : Program.LatestCampaignId();
             string timelineId = query.TryGetValue("timelineId", out string timeline)
                 ? timeline : "main";
-            if (!HasRealCampaignStorage(campaignId))
+            if (!Program.HasRealCampaignStorage(campaignId))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["campaignId"] = campaignId,
                     ["timelineId"] = timelineId, ["reports"] = new List<object>(),
                     ["error"] = "No observed real campaign matches this World Test selection."
                 };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldTestTelemetrySchema(connection);
-                List<Dictionary<string, object>> reports = QuerySql(connection, @"
+                List<Dictionary<string, object>> reports = Program.QuerySql(connection, @"
 SELECT checkpoint_day,report_json,updated_ts FROM world_test_checkpoint_reports
 WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY checkpoint_day;",
                     new Dictionary<string, object>
@@ -229,7 +229,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY checkpoint_day;",
             }
         }
 
-        private static Dictionary<string, object> WorldTestComparisonApi(
+        internal static Dictionary<string, object> WorldTestComparisonApi(
             Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
@@ -249,17 +249,17 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY checkpoint_day;",
             {
                 string campaignId = selection[0];
                 string timelineId = selection.Length > 1 ? selection[1] : "main";
-                if (!HasRealCampaignStorage(campaignId))
+                if (!Program.HasRealCampaignStorage(campaignId))
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["comparable"] = false,
                         ["error"] = "Campaign " + campaignId + " has no observed World Test storage."
                     };
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureWorldTestSchema(connection);
                     EnsureWorldTestTelemetrySchema(connection);
-                    Dictionary<string, object> checkpoint = QuerySql(connection, @"
+                    Dictionary<string, object> checkpoint = Program.QuerySql(connection, @"
 SELECT report_json FROM world_test_checkpoint_reports
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND checkpoint_day=126
 LIMIT 1;",
@@ -268,7 +268,7 @@ LIMIT 1;",
                             ["campaign"] = campaignId, ["timeline"] = timelineId
                         }).FirstOrDefault();
                     Dictionary<string, object> manifest = TryParseJsonObject(ReadString(
-                        QuerySql(connection, @"SELECT manifest_json FROM world_test_manifests
+                        Program.QuerySql(connection, @"SELECT manifest_json FROM world_test_manifests
 WHERE campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
                             new Dictionary<string, object>
                             {
@@ -413,17 +413,17 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline LIMIT 1;",
             string storageCampaign = "__world_test_rollup_"
                 + Guid.NewGuid().ToString("N").Substring(0, 12);
             using (ReignDbConnection connection =
-                OpenCampaignConnection(storageCampaign))
+                Program.OpenCampaignConnection(storageCampaign))
             {
                 EnsureWorldTestTelemetrySchema(connection);
                 EnqueueWorldTestRollup(connection, "campaign", "main", 31, "first");
                 EnqueueWorldTestRollup(connection, "campaign", "main", 31, "duplicate");
                 EnqueueWorldTestRollup(connection, "campaign", "branch", 31, "branch");
-                Dictionary<string, object> main = QuerySql(connection, @"
+                Dictionary<string, object> main = Program.QuerySql(connection, @"
 SELECT status,revision FROM world_test_rollup_queue
 WHERE campaign_id='campaign' AND timeline_id='main' AND day_key=31 LIMIT 1;")
                     .FirstOrDefault();
-                int branchCount = ReadInt(QuerySql(connection, @"
+                int branchCount = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM world_test_rollup_queue
 WHERE campaign_id='campaign' AND timeline_id='branch';").FirstOrDefault(), "count", 0);
                 add("world_test_rollup_queue_idempotency",
@@ -434,13 +434,13 @@ WHERE campaign_id='campaign' AND timeline_id='branch';").FirstOrDefault(), "coun
                     "Timeline branches retain independent rollup work.");
                 EnsureWorldTestTelemetrySchema(connection);
                 add("world_test_rollup_restart_recovery",
-                    ReadString(QuerySql(connection, @"
+                    ReadString(Program.QuerySql(connection, @"
 SELECT status FROM world_test_rollup_queue
 WHERE campaign_id='campaign' AND timeline_id='main' AND day_key=31;")
                         .FirstOrDefault(), "status", "") == "pending",
                     "Pending rollup work survives schema reinitialization.");
-                EnsureMemorySchema(connection);
-                int rebellionTableCount = ReadInt(QuerySql(connection, @"
+                Program.EnsureMemorySchema(connection);
+                int rebellionTableCount = ReadInt(Program.QuerySql(connection, @"
 SELECT COUNT(*) AS count FROM sqlite_master
 WHERE type='table' AND name IN (
 'rebellion_movements','rebellion_memberships','rebellion_transitions',
@@ -449,14 +449,14 @@ WHERE type='table' AND name IN (
                 add("world_test_fresh_campaign_rebellion_schema",
                     rebellionTableCount == 5,
                     "Core campaign initialization creates every rebellion table before World Test reads the subsystem.");
-                EnsureMbtiRelationshipSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
 effective_affinity_a_to_b,effective_affinity_b_to_a,first_day,last_day,updated_ts)
 VALUES('reconcile_a|reconcile_b','reconcile_a','reconcile_b',10,20,10,20,1,1,1);");
                 Dictionary<string, object> aligned =
                     BuildWorldTestRelationshipReconciliation(connection, "campaign", "main");
-                ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
+                Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry
 SET affinity_a_to_b=101 WHERE pair_key='reconcile_a|reconcile_b';");
                 Dictionary<string, object> contradicted =
                     BuildWorldTestRelationshipReconciliation(connection, "campaign", "main");

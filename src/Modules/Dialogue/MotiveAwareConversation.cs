@@ -13,7 +13,7 @@ namespace ReignBetaServer
         private const int MotiveLiveContextCap = 1800;
         private const string MotiveDecisionModel = "reign_motive_decision_v5";
 
-        private sealed class MotiveDomainDefinition
+        internal sealed class MotiveDomainDefinition
         {
             public string Id;
             public string[] Cues;
@@ -22,7 +22,7 @@ namespace ReignBetaServer
             public string Instruction;
         }
 
-        private static readonly MotiveDomainDefinition[] MotiveDomainDefinitions =
+        internal static readonly MotiveDomainDefinition[] MotiveDomainDefinitions =
         {
             MotiveDomain("romance", new[] { "flirt", "seduc", "kiss", "court me", "attract", "desire", "lover", "affair", "romance", "beautiful", "handsome", "intimat", "marry" }, new[] { "flirtatiousness", "sociability", "pragmatism", "tact", "confidence", "riskTolerance", "impulsiveness", "loyalty", "dutyMotivation", "discipline", "traditionalism", "shame", "religionMotivation", "familyMotivation" }, new[] { "nativeRelation", "directionalAffinity", "lifecycleTags" }, "Use current standing and explicit lifecycle tags. Do not invent hidden attraction or relationship facets."),
             MotiveDomain("wealth_patronage", new[] { "gold", "coin", "wealth", "rich", "bribe", "pay", "gift", "patron", "fund", "debt", "trade" }, new[] { "wealthMotivation", "greed", "pragmatism", "honesty", "honor" }, new[] { "nativeRelation", "directionalAffinity" }, "Judge patronage and material advantage from perceived wealth, conversation history, and current standing."),
@@ -50,8 +50,8 @@ namespace ReignBetaServer
             Dictionary<string, object> courtCharacter = ReadDictionary(traits, "courtCharacter") ?? new Dictionary<string, object>();
             Dictionary<string, object> compact = new Dictionary<string, object>
             {
-                ["t"] = CoreTraitKeys.ToDictionary(key => key, key => (object)Clamp(ReadInt(percentages, key, 50), 0, 100), StringComparer.OrdinalIgnoreCase),
-                ["g"] = CourtVirtueKeys.ToDictionary(key => key, key => (object)(virtues.ContainsKey(key) ? Clamp(ReadInt(virtues, key, 50), 0, 100) : -1), StringComparer.OrdinalIgnoreCase),
+                ["t"] = CharactersService.CoreTraitKeys.ToDictionary(key => key, key => (object)Clamp(ReadInt(percentages, key, 50), 0, 100), StringComparer.OrdinalIgnoreCase),
+                ["g"] = CharactersService.CourtVirtueKeys.ToDictionary(key => key, key => (object)(virtues.ContainsKey(key) ? Clamp(ReadInt(virtues, key, 50), 0, 100) : -1), StringComparer.OrdinalIgnoreCase),
                 ["cc"] = ReadBool(courtCharacter, "available", false) ? ReadString(courtCharacter, "cellId", "") : "unavailable"
             };
             string value = "PRIVATE MOTIVE VECTOR 0..100 (t=43 foundation traits,g=7 court groups,cc=fixed Court Character; -1=unavailable):" + CanonicalJson(compact);
@@ -62,7 +62,7 @@ namespace ReignBetaServer
         {
             Dictionary<string, object> percentages = ReadDictionary(traitDocument, "traitPercentages") ?? new Dictionary<string, object>();
             Dictionary<string, object> foundations = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? new Dictionary<string, object>();
-            return CoreTraitKeys.ToDictionary(key => key, key =>
+            return CharactersService.CoreTraitKeys.ToDictionary(key => key, key =>
             {
                 if (percentages.ContainsKey(key)) return (object)Clamp(ReadInt(percentages, key, 50), 0, 100);
                 int level = Clamp(TraitInt(foundations, key), -2, 2);
@@ -91,7 +91,7 @@ namespace ReignBetaServer
             Dictionary<string, object> relationship = suppliedRelationship;
             if ((relationship == null || !relationship.ContainsKey("relationshipModel")) && !string.IsNullOrWhiteSpace(subjectId) && !string.IsNullOrWhiteSpace(targetId))
             {
-                relationship = RelationshipContextApi(new Dictionary<string, object>
+                relationship = RelationshipsService.RelationshipContextApi(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["subjectId"] = subjectId,
@@ -106,7 +106,7 @@ namespace ReignBetaServer
             Dictionary<string, object> spouseRelationship = new Dictionary<string, object>();
             if (!string.IsNullOrWhiteSpace(spouseId) && !spouseId.Equals(targetId, StringComparison.OrdinalIgnoreCase))
             {
-                spouseRelationship = RelationshipContextApi(new Dictionary<string, object>
+                spouseRelationship = RelationshipsService.RelationshipContextApi(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["subjectId"] = subjectId,
@@ -293,8 +293,8 @@ namespace ReignBetaServer
                 if (string.IsNullOrWhiteSpace(value)) continue;
                 if (!string.IsNullOrWhiteSpace(usable)
                     && !string.IsNullOrWhiteSpace(claimed)
-                    && !NormalizeIdentityName(claimed).Equals(
-                        NormalizeIdentityName(usable),
+                    && !CharactersService.NormalizeIdentityName(claimed).Equals(
+                        CharactersService.NormalizeIdentityName(usable),
                         StringComparison.OrdinalIgnoreCase))
                 {
                     value = Regex.Replace(
@@ -356,7 +356,7 @@ namespace ReignBetaServer
                 || ReadDictionary(payload, "playerOpportunitySnapshot") != null) return;
             Dictionary<string, object> targetProfile = ReadJsonObject(CharacterFile(campaignId, targetId, "profile.json"));
             if (targetProfile.Count == 0
-                && LoadCharacterProfileLibrary().TryGetValue(targetId, out Dictionary<string, object> shipped))
+                && CharactersService.LoadCharacterProfileLibrary().TryGetValue(targetId, out Dictionary<string, object> shipped))
                 targetProfile = CloneDictionary(ReadDictionary(shipped, "sourceFacts") ?? shipped);
             Dictionary<string, object> targetCharacteristics = LoadCharacterStack(campaignId, targetId);
             Dictionary<string, object> observer = OpportunityProfileSnapshot(subjectProfile, subjectCharacteristics);
@@ -408,7 +408,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CalculatePerceivedOpportunity(Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> payload, Dictionary<string, object> identityView)
+        internal static Dictionary<string, object> CalculatePerceivedOpportunity(Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> payload, Dictionary<string, object> identityView)
         {
             Dictionary<string, object> snapshot = ReadDictionary(payload, "opportunitySnapshot") ?? ReadDictionary(payload, "playerOpportunitySnapshot") ?? new Dictionary<string, object>();
             Dictionary<string, object> target = ReadDictionary(snapshot, "target") ?? ReadDictionary(payload, "playerIdentity") ?? new Dictionary<string, object>();
@@ -493,7 +493,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static string RelativeClanTierBand(int delta)
+        internal static string RelativeClanTierBand(int delta)
         {
             if (delta <= -2) return "substantially_lower";
             if (delta == -1) return "lower";
@@ -688,7 +688,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CalculateRomanticPosture(string campaignId, string subjectId, string targetId, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> relationship, Dictionary<string, object> spouseRelationship, Dictionary<string, object> opportunity, Dictionary<string, object> payload, string mode, string playerText)
+        internal static Dictionary<string, object> CalculateRomanticPosture(string campaignId, string subjectId, string targetId, Dictionary<string, object> profile, Dictionary<string, object> characteristics, Dictionary<string, object> relationship, Dictionary<string, object> spouseRelationship, Dictionary<string, object> opportunity, Dictionary<string, object> payload, string mode, string playerText)
         {
             Dictionary<string, object> p = TraitPercentageSnapshot(ReadDictionary(characteristics, "traits") ?? new Dictionary<string, object>());
             Dictionary<string, object> snapshot = ReadDictionary(payload, "opportunitySnapshot") ?? ReadDictionary(payload, "playerOpportunitySnapshot") ?? new Dictionary<string, object>();
@@ -718,7 +718,7 @@ namespace ReignBetaServer
             strategic = ClampDouble(strategic + courtStrategicBoost, 0d, 100d);
 
             bool nativeMarried = !string.IsNullOrWhiteSpace(ReadString(profile, "spouseId", ""));
-            string householdStatus = nativeMarried ? "" : CommonerNarrativeMaritalStatus(profile);
+            string householdStatus = nativeMarried ? "" : CharactersService.CommonerNarrativeMaritalStatus(profile);
             bool married = nativeMarried || householdStatus == "married" || householdStatus == "separated";
             double spouseDirectional = ClampDouble(ReadDouble(spouseRelationship, "directionalAffinity",
                 ReadDouble(spouseRelationship, "nativeRelation", 0d)), -100d, 100d);
@@ -766,7 +766,7 @@ namespace ReignBetaServer
                 ? new Dictionary<string, object> { ["blocked"] = false, ["reason"] = "self_test" }
                 : ConversationMotiveCooldown(campaignId, subjectId, targetId, session, worldDay, mutualContinuity);
             bool eligible = adults && nativeSuitable && !closeKin && !coercive && Math.Max(genuine, strategic) >= 25d && !ReadBool(cooldown, "blocked", false);
-            double roll = StableUnit((campaignId ?? "") + "|" + subjectId + "|" + targetId + "|" + session + "|" + Math.Floor(worldDay));
+            double roll = RelationshipsService.StableUnit((campaignId ?? "") + "|" + subjectId + "|" + targetId + "|" + session + "|" + Math.Floor(worldDay));
             bool recommended = eligible && chance > 0d && roll < chance;
             return new Dictionary<string, object>
             {
@@ -814,7 +814,7 @@ namespace ReignBetaServer
             return new Dictionary<string, object> { ["private"] = privateScene, ["exposure"] = Math.Round(exposure, 2), ["witnessIds"] = witnesses, ["witnessCount"] = witnesses.Count, ["coercive"] = coercive };
         }
 
-        private static List<Dictionary<string, object>> SelectMotiveDomains(string playerText, string sceneContext, Dictionary<string, object> state, Dictionary<string, object> payload, Dictionary<string, object> romance, bool manipulationRecommended = false)
+        internal static List<Dictionary<string, object>> SelectMotiveDomains(string playerText, string sceneContext, Dictionary<string, object> state, Dictionary<string, object> payload, Dictionary<string, object> romance, bool manipulationRecommended = false)
         {
             string deterministic = string.Join(" ", new[] { playerText, sceneContext, ReadString(state, "currentPlan", ""), ReadString(state, "currentCrisis", ""), ReadString(state, "temptation", ""), ReadString(state, "pressure", ""), ReadString(payload, "eventType", ""), ReadString(payload, "phaseId", ""), ReadString(payload, "turnType", "") }.Where(x => !string.IsNullOrWhiteSpace(x))).ToLowerInvariant();
             List<string> helper = ReadStringList(ReadDictionary(payload, "contextSelection"), "topics")
@@ -1394,7 +1394,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void EnsureConversationMotiveSchema(ReignDbConnection connection)
+        internal static void EnsureConversationMotiveSchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_motive_cooldowns (
 cooldown_id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, target_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -1431,7 +1431,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             List<string> witnesses = ReadStringList(scene, "witnessIds");
             Dictionary<string, object> scores = ReadDictionary(context, "highlightedScores") ?? new Dictionary<string, object>();
             double exposureRisk = ClampDouble(ReadDouble(scene, "exposure", 0d) * (0.50d + 0.20d * (1d - ReadDouble(scores, "tact", 50d) / 100d) + 0.20d * (1d - ReadDouble(scores, "judgment", 50d) / 100d) + 0.20d * ReadDouble(scores, "impulsiveness", 50d) / 100d), 0d, 1d);
-            bool exposed = actedRomantically && witnesses.Count > 0 && StableUnit((decisionId ?? "") + "|exposure") < exposureRisk;
+            bool exposed = actedRomantically && witnesses.Count > 0 && RelationshipsService.StableUnit((decisionId ?? "") + "|exposure") < exposureRisk;
             if (exposed)
             {
                 StoreWorldMemoryEvent(new Dictionary<string, object> { ["campaignId"] = campaignId, ["eventId"] = "romance_exposure_" + decisionId, ["eventType"] = "romantic_attempt_witnessed", ["worldDay"] = day, ["summary"] = "Witnesses observed a potentially compromising romantic exchange.", ["participants"] = new List<string> { subjectId, targetId }, ["known_by"] = witnesses, ["visibility"] = "witnessed_private", ["importance"] = 0.65d, ["source"] = "motive_aware_conversation" }, "motive_aware_conversation");
@@ -1450,7 +1450,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             return ConversationReplyContainsRomanticAction(visibleReply);
         }
 
-        private static bool ConversationReplyContainsRomanticAction(string reply)
+        internal static bool ConversationReplyContainsRomanticAction(string reply)
         {
             string text = reply ?? "";
             if (Regex.IsMatch(text, @"\b(?:flirt(?:s|ed|ing)?|kiss(?:es|ed|ing)?|seduc(?:e|es|ed|ing|tion)|lover|affair|intima(?:te|cy))\b",
@@ -1786,7 +1786,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                     statement, opportunity));
         }
 
-        private static bool VerifiedIdentityGroundingContradiction(
+        internal static bool VerifiedIdentityGroundingContradiction(
             Dictionary<string, object> parsed,
             Dictionary<string, object> context)
         {
@@ -1801,8 +1801,8 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             string claimed = ReadString(identity, "claimedName", "");
             if (!string.IsNullOrWhiteSpace(claimed)
                 && !string.IsNullOrWhiteSpace(usable)
-                && !NormalizeIdentityName(claimed).Equals(
-                    NormalizeIdentityName(usable),
+                && !CharactersService.NormalizeIdentityName(claimed).Equals(
+                    CharactersService.NormalizeIdentityName(usable),
                     StringComparison.OrdinalIgnoreCase)
                 && !Regex.IsMatch(
                     ReadString(context, "latestPlayerText", ""),
@@ -1829,8 +1829,8 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 identity, "safeLabel", "");
             bool staleUnknownLabel =
                 !string.IsNullOrWhiteSpace(safeLabel)
-                && !NormalizeIdentityName(safeLabel).Equals(
-                    NormalizeIdentityName(usable),
+                && !CharactersService.NormalizeIdentityName(safeLabel).Equals(
+                    CharactersService.NormalizeIdentityName(usable),
                     StringComparison.OrdinalIgnoreCase)
                 && Regex.IsMatch(
                     visible ?? "",
@@ -1853,7 +1853,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 parsed, identity);
         }
 
-        private static bool VerifiedPoliticalAuthorityContradiction(
+        internal static bool VerifiedPoliticalAuthorityContradiction(
             Dictionary<string, object> parsed,
             Dictionary<string, object> identityView,
             bool checkSceneLocation = true)
@@ -2060,7 +2060,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             if (string.IsNullOrWhiteSpace(visibleReply)
                 || string.IsNullOrWhiteSpace(expectedSettlementName))
                 return false;
-            string expected = NormalizeIdentityName(
+            string expected = CharactersService.NormalizeIdentityName(
                 expectedSettlementName);
             if (string.IsNullOrWhiteSpace(expected))
                 return false;
@@ -2101,7 +2101,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 .Cast<Match>());
             foreach (Match claim in claims)
             {
-                string claimed = NormalizeIdentityName(
+                string claimed = CharactersService.NormalizeIdentityName(
                     claim.Groups["place"].Value);
                 if (string.IsNullOrWhiteSpace(claimed))
                     continue;
@@ -2119,7 +2119,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             return false;
         }
 
-        private static bool ContainsContradictoryCurrentWarCount(
+        internal static bool ContainsContradictoryCurrentWarCount(
             string text,
             int expected)
         {
@@ -2663,9 +2663,9 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             List<Dictionary<string, object>> cases = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, detail) => cases.Add(new Dictionary<string, object> { ["id"] = id, ["passed"] = passed, ["detail"] = detail });
             add("domain_registry", MotiveDomainDefinitions.Length == 11 && MotiveDomainDefinitions.Select(x => x.Id).Distinct().Count() == 11, "Eleven declarative motive domains, including court-intrigue manipulation, are registered.");
-            Dictionary<string, object> fakeTraits = new Dictionary<string, object> { ["traitPercentages"] = CoreTraitKeys.ToDictionary(x => x, x => (object)50), ["courtVirtues"] = CourtVirtueKeys.ToDictionary(x => x, x => (object)50) };
+            Dictionary<string, object> fakeTraits = new Dictionary<string, object> { ["traitPercentages"] = CharactersService.CoreTraitKeys.ToDictionary(x => x, x => (object)50), ["courtVirtues"] = CharactersService.CourtVirtueKeys.ToDictionary(x => x, x => (object)50) };
             string stable = BuildStableMotiveVector(new Dictionary<string, object> { ["traits"] = fakeTraits });
-            add("stable_cap", stable.Length <= MotiveStableCharacterCap && CoreTraitKeys.All(stable.Contains), "The stable vector contains all foundation keys inside the character-prefix cap.");
+            add("stable_cap", stable.Length <= MotiveStableCharacterCap && CharactersService.CoreTraitKeys.All(stable.Contains), "The stable vector contains all foundation keys inside the character-prefix cap.");
             List<Dictionary<string, object>> domains = SelectMotiveDomains("I offer gold if you betray your oath and kiss me.", "", new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>());
             add("three_domain_cap", domains.Count == 3 && domains.Any(x => ReadString(x, "id", "") == "romance") && domains.Any(x => ReadString(x, "id", "") == "wealth_patronage"), "Deterministic multi-motive wording is capped at three without helper dependence.");
             List<Dictionary<string, object>> intrigueDomains = SelectMotiveDomains("You know my clan rank. Use whatever leverage or flattery best serves your ambition.", "", new Dictionary<string, object>(), new Dictionary<string, object>(), new Dictionary<string, object>());
@@ -2744,7 +2744,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                         + 20d, 0d, 100d)) < 0.11d,
                 "A fitting audacious seduction cell adds exactly twenty strategic-interest and initiative points at full known opportunity.");
             Dictionary<string, object> legacyFacetOnly = MotiveTestRelationship(0d);
-            legacyFacetOnly["facets"] = RelationshipFacetKeys.ToDictionary(key => key,
+            legacyFacetOnly["facets"] = RelationshipsService.RelationshipFacetKeys.ToDictionary(key => key,
                 key => (object)(key == "attraction" || key == "affection" || key == "trust" ? 100d : 0d),
                 StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object> legacyFacetPosture = CalculateRomanticPosture("test", "npc", "target",
@@ -3603,7 +3603,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             Dictionary<string, object> capContext = new Dictionary<string, object>
             {
                 ["activeDomains"] = SelectMotiveDomains("I offer gold, rank, and an affair.", "", new Dictionary<string, object>(), new Dictionary<string, object>(), calculatedReady),
-                ["highlightedScores"] = CoreTraitKeys.ToDictionary(x => x, x => (object)100, StringComparer.OrdinalIgnoreCase),
+                ["highlightedScores"] = CharactersService.CoreTraitKeys.ToDictionary(x => x, x => (object)100, StringComparer.OrdinalIgnoreCase),
                 ["relationshipNpcToTarget"] = CompactRelationshipEvidence(neutralRelation), ["relationshipNpcToSpouse"] = CompactRelationshipEvidence(happySpouse),
                 ["opportunity"] = recognized, ["scene"] = new Dictionary<string, object> { ["private"] = false, ["exposure"] = .9d, ["witnessCount"] = 8, ["witnessIds"] = new List<string> { "a", "b", "c", "d", "e", "f", "g", "h" }, ["coercive"] = false },
                 ["romance"] = calculatedReady, ["manipulation"] = intriguePosture,
@@ -3756,9 +3756,9 @@ UNIQUE(subject_id,target_id,kind,session_id));");
 
         private static Dictionary<string, object> MotiveTestCharacteristics(Dictionary<string, int> overrides)
         {
-            Dictionary<string, object> percentages = CoreTraitKeys.ToDictionary(x => x, x => (object)50, StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> percentages = CharactersService.CoreTraitKeys.ToDictionary(x => x, x => (object)50, StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, int> pair in overrides ?? new Dictionary<string, int>()) percentages[pair.Key] = pair.Value;
-            Dictionary<string, object> groups = CourtVirtueKeys.ToDictionary(x => x, x => (object)50, StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> groups = CharactersService.CourtVirtueKeys.ToDictionary(x => x, x => (object)50, StringComparer.OrdinalIgnoreCase);
             groups["boldness"] = ReadInt(percentages, "confidence", 50); groups["loyalty"] = ReadInt(percentages, "loyalty", 50);
             groups["honor"] = 50; groups["judgment"] = ReadInt(percentages, "discipline", 50);
             return new Dictionary<string, object> { ["traits"] = new Dictionary<string, object> { ["traitPercentages"] = percentages, ["courtVirtues"] = groups } };
@@ -3880,10 +3880,10 @@ UNIQUE(subject_id,target_id,kind,session_id));");
             return new Dictionary<string, object>
             {
                 ["relationshipModel"] = "directional_mbti_native_relation",
-                ["nativeRelation"] = RoundAwayFromZero(directionalAffinity),
+                ["nativeRelation"] = RelationshipsService.RoundAwayFromZero(directionalAffinity),
                 ["directionalAffinity"] = directionalAffinity,
-                ["perceptionTag"] = DirectionalRelationshipTag("selftest", "npc|target",
-                    "observer_to_target", RoundAwayFromZero(directionalAffinity), 0),
+                ["perceptionTag"] = RelationshipsService.DirectionalRelationshipTag("selftest", "npc|target",
+                    "observer_to_target", RelationshipsService.RoundAwayFromZero(directionalAffinity), 0),
                 ["lifecycle"] = new Dictionary<string, object>
                 {
                     ["lovers"] = lovers,
@@ -3930,7 +3930,7 @@ UNIQUE(subject_id,target_id,kind,session_id));");
                 ["summary"] = ReadString(row, "detail", ""),
                 ["durationMs"] = 0
             }));
-            rows.AddRange(RunDialogueActionAuthorityAssertions().Select(row => new Dictionary<string, object>
+            rows.AddRange(WorldSimulationService.RunDialogueActionAuthorityAssertions().Select(row => new Dictionary<string, object>
             {
                 ["ok"] = true,
                 ["passed"] = ReadBool(row, "passed", false),
