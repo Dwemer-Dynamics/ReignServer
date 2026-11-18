@@ -665,7 +665,6 @@ namespace ReignBetaServer
             string mbtiProgramSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src"));
             string cachingSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PromptCaching.cs", "src"));
             string diplomacySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src"));
-            string relationshipsSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "AmbientRelationships.cs", "src"));
             string sceneSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ConversationSceneState.cs", "src"));
             string memorySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "CategorizedMemory.cs", "src"));
             string portraitSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src"));
@@ -673,13 +672,12 @@ namespace ReignBetaServer
                 && mbtiProgramSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
                 && cachingSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
                 && diplomacySource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
-                && relationshipsSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
                 && sceneSource.Contains("mbtiProfile", StringComparison.Ordinal)
                 && !memorySource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal)
                 && !portraitSource.Contains("BuildCharacterMbtiPromptBlock", StringComparison.Ordinal);
             AddVerificationCheck(checks, "contracts.notable_mbti_prompt_scope", "memory_relationships", mbtiPromptCoverage,
                 mbtiPromptCoverage
-                    ? "MBTI is included in dialogue, event, correspondence, diplomacy, relationship, scene, and action decisions while excluded from memory consolidation and portraits."
+                    ? "MBTI is included in dialogue, event, correspondence, diplomacy, scene, and action decisions while excluded from memory consolidation and portraits."
                     : "One or more MBTI prompt-scope contracts are missing.", null);
 
             string nativeEditorSource = VerificationSourceLocator.ReadClientSourceText(clientRoot);

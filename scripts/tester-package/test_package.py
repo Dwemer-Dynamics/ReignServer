@@ -54,12 +54,10 @@ class PackageContracts(unittest.TestCase):
             with self.subTest(extra=extra),self.assertRaises(ValueError):module.select_client_dlls(required+[extra],lock)
         with self.assertRaises(ValueError):module.select_client_dlls(required+['Bannerlord.ButterLib.dll'],dict(lock,artifacts=[]))
         with self.assertRaises(ValueError):module.select_client_dlls(required[1:]+['Bannerlord.ButterLib.dll'],lock)
-        with_core=module.CLIENT_DLLS|{'ReignBeta.Core.dll'}
-        self.assertEqual(module.select_client_dlls(required+['ReignBeta.Core.dll'],lock),with_core)
-        self.assertEqual(module.select_client_dlls(required+['ReignBeta.Core.dll','Bannerlord.ButterLib.dll'],lock),with_core)
+        self.assertIn('ReignBeta.Core.dll',module.CLIENT_DLLS)
+        with self.assertRaises(ValueError):module.select_client_dlls([n for n in required if n!='ReignBeta.Core.dll'],lock)
         for extra in ('reignbeta.core.dll','ReignBeta.Core2.dll'):
-            with self.subTest(extra=extra),self.assertRaises(ValueError):module.select_client_dlls(required+['ReignBeta.Core.dll',extra],lock)
-        with self.assertRaises(ValueError):module.select_client_dlls(required[1:]+['ReignBeta.Core.dll'],lock)
+            with self.subTest(extra=extra),self.assertRaises(ValueError):module.select_client_dlls(required+[extra],lock)
 
     def test_inventory_detects_missing_extra_and_pointer(self):
         with tempfile.TemporaryDirectory(prefix='reign-package-contract-') as raw:
