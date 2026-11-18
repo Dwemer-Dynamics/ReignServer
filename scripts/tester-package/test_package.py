@@ -58,6 +58,10 @@ class PackageContracts(unittest.TestCase):
         with self.assertRaises(ValueError):module.select_client_dlls([n for n in required if n!='ReignBeta.Core.dll'],lock)
         for extra in ('reignbeta.core.dll','ReignBeta.Core2.dll'):
             with self.subTest(extra=extra),self.assertRaises(ValueError):module.select_client_dlls(required+[extra],lock)
+        with_testing=module.CLIENT_DLLS|{'ReignBeta.Testing.dll'}
+        self.assertEqual(module.select_client_dlls(required+['ReignBeta.Testing.dll'],lock),with_testing)
+        with self.assertRaises(ValueError):module.select_client_dlls(required+['reignbeta.testing.dll'],lock)
+        with self.assertRaises(ValueError):module.select_client_dlls([n for n in required if n!='ReignBeta.dll']+['ReignBeta.Testing.dll'],lock)
 
     def test_inventory_detects_missing_extra_and_pointer(self):
         with tempfile.TemporaryDirectory(prefix='reign-package-contract-') as raw:
