@@ -11,6 +11,18 @@ conversation gauntlet qualification system. The main turn handlers (`/dialogue/r
 > StructuredActions, ConversationGrounding, DialogueClaimValidation, MemoryPrecision, SpecialistMemory,
 > FinalConversationGauntlet.
 
+## Service class
+
+Every file except `Program.DialogueRoutes.cs` that used to be a `Program` partial is now
+`internal static partial class DialogueService`, in its existing file. Types that were already separate
+(`CodexConversationContracts`, the `FinalConversationGauntlet*` classes and others) are unchanged apart from
+qualifiers. `DialogueService` calls `Program` members with an explicit `Program.` qualifier, and `Program` and the
+other modules call it as `DialogueService.X`; the members used across that boundary are `internal`.
+`Program.DialogueRoutes.cs` stays part of `Program` and registers the service handlers, and the main turn handlers
+in `Platform/Program.cs` call the service the same way. The module's static state (memory and semantic queues, prompt
+caches, the conversation turn dispatch gate, the capacity catalog and late-interaction recovery) lives in
+`DialogueService`.
+
 ## Main areas (204 files)
 
 - Conversation state: `Conversation*.cs`, `LogicalConversation.cs`, `SinglePassConversation.cs`,
