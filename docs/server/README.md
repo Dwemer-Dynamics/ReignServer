@@ -19,7 +19,8 @@ safety rules, and restart recovery contract are documented in
 
 - Platform and operations: [ControlCenter](ControlCenter.md), [GlobalApiKeys](GlobalApiKeys.md),
   [CODEX_APP_SERVER_PROVIDER](CODEX_APP_SERVER_PROVIDER.md), [ConversationDiagnostics](ConversationDiagnostics.md),
-  [HighMemoryMode](HighMemoryMode.md), [SAVE_SYNC](SAVE_SYNC.md).
+  [HighMemoryMode](HighMemoryMode.md), [SAVE_SYNC](SAVE_SYNC.md),
+  [TypedContracts](TypedContracts.md) (typed client route contracts in `shared/Reign.Core.Contracts`).
 - Verification: [VerificationLab](VerificationLab.md), [FinalConversationGauntlet](FinalConversationGauntlet.md),
   [CapitalAmbassadorTesting](CapitalAmbassadorTesting.md), [KingdomEventTesting](KingdomEventTesting.md),
   [RebellionTesting](RebellionTesting.md), [SpymasterTesting](SpymasterTesting.md),
