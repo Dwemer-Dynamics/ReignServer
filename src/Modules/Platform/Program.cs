@@ -26708,7 +26708,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             });
         }
 
-        private static void LogOperational(string eventType, Dictionary<string, object> data)
+        internal static void LogOperational(string eventType, Dictionary<string, object> data)
         {
             try
             {
@@ -28924,7 +28924,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 : Path.GetFullPath(overridden);
         }
 
-        private static bool IsInternalCampaignId(string campaignId)
+        internal static bool IsInternalCampaignId(string campaignId)
         {
             string value = (campaignId ?? "").Trim();
             if (value.Length == 0) return true;
@@ -28971,24 +28971,22 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
         {
             string root = CampaignsRoot();
             ReignPostgreSqlStorage.ClearAllPools();
-            foreach (Dictionary<string, object> registered
-                in ReignPostgreSqlStorage.ListCampaignMetadata())
-            {
-                string campaignId = ReadString(
-                    registered, "campaignId", "");
-                if (!IsInternalCampaignId(campaignId)) continue;
-                try
-                {
-                    ReignPostgreSqlStorage.DropCampaign(campaignId);
-                }
-                catch { }
-            }
+            // Internal campaigns still owned by another live server process (for example its
+            // running self-tests) are kept; orphans of exited processes are removed.
+            HashSet<string> liveOwned =
+                ReignPostgreSqlStorage.DropInternalCampaignsWithoutLiveOwner(
+                    ReignPostgreSqlStorage.ListCampaignMetadata()
+                        .Select(registered => ReadString(
+                            registered, "campaignId", ""))
+                        .Where(IsInternalCampaignId)
+                        .ToList());
             if (Directory.Exists(root))
             {
                 foreach (DirectoryInfo directory
                     in new DirectoryInfo(root).GetDirectories())
                 {
                     if (!IsInternalCampaignId(directory.Name)) continue;
+                    if (liveOwned.Contains(directory.Name)) continue;
                     try { directory.Delete(true); } catch { }
                 }
             }

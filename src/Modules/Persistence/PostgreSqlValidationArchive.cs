@@ -212,7 +212,7 @@ WHERE n.nspname=@schema AND c.relkind IN ('r','p','m') ORDER BY c.relname;", con
                         ExecuteNonQuery(connection, transaction, "DROP SCHEMA " + QuoteIdentifier(schema) + " CASCADE;");
                         ExecuteNonQuery(connection, transaction, "DELETE FROM reign_meta.campaign_registry WHERE campaign_id=@campaign AND schema_name=@schema AND migration_state=@owner;",
                             new Dictionary<string, object> { ["campaign"] = campaign, ["schema"] = schema, ["owner"] = registryOwner });
-                        transaction.Commit(); RegisteredCampaignSchemas.TryRemove(campaign, out _);
+                        transaction.Commit(); RegisteredCampaignSchemas.TryRemove(campaign, out _); ReleaseInternalCampaignOwnership(campaign);
                         if (!ValidationArchiveSchemas(connection).SetEquals(before))
                             throw new InvalidOperationException("Validation namespaces differ after native replay cleanup; foreign state was preserved.");
                     }
