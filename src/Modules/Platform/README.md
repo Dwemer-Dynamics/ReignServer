@@ -64,7 +64,9 @@ Characters and Portraits folders):
 - `VerificationLab.cs`: tiers, suites and the `--run-verification` / `--cancel-verification` CLI;
   `RunQuickVerificationChecks`, `RunOfflineVerificationChecks`, `RunProductionPipelineChecks`,
   `RunProviderFaultChecks`, `RunShadowWorldChecks`, `RunExtendedRebellionChecks`, `RunLongRunChecks`,
-  `RunLiveLlmVerificationChecks`, `RunBuildAndContractChecks`.
+  `RunLiveLlmVerificationChecks`, `RunBuildAndContractChecks`. Split verbatim into partial files:
+  `VerificationLab.Contracts.cs` (`RunBuildAndContractChecks`), `VerificationLab.Suites.cs` (the other suites,
+  coverage, status and discovery helpers) and `VerificationLab.Support.cs` (UI/XML contract helpers, shadow world).
 - `ArchitectureSelfTests.cs` (`RunInteractionArchitectureSelfTests`): architecture and source-text contracts.
 - Other suites: `RunCodex*SelfTests`, `RunConversationDiagnosticsSelfTests`,
   `RunConversationResponseParsingSelfTests`, `RunGlobalKeyBridgeContractTests`, `RunInitializationReadinessSelfTests`,

@@ -117,7 +117,9 @@ namespace ReignBetaServer
         private static readonly HashSet<string> VerificationOnlyServerSources =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "Modules/Platform/VerificationLab.cs", "Modules/Platform/VerificationSourceLocator.cs",
+                "Modules/Platform/VerificationLab.cs", "Modules/Platform/VerificationLab.Contracts.cs",
+                "Modules/Platform/VerificationLab.Suites.cs", "Modules/Platform/VerificationLab.Support.cs",
+                "Modules/Platform/VerificationSourceLocator.cs",
                 "Modules/Platform/CodexPerformanceVerification.cs", "Modules/Court/CapitalAmbassadorTestSystem.cs",
                 "Modules/Portraits/BackgroundPortraitContracts.cs", "Modules/Dialogue/PersonalGossipCompositionProbe.cs"
             };
