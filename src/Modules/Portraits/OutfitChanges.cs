@@ -142,7 +142,7 @@ namespace ReignBetaServer
                 try
                 {
                     CommitOutfit(op);
-                    Program.InvalidatePromptRuntimeCache();
+                    DialogueService.InvalidatePromptRuntimeCache();
                     op.Status = "committed";
                     op.Before = null;
                     return OutfitResponse(op, true);

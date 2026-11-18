@@ -102,7 +102,7 @@ namespace ReignBetaServer
                             string title = raw.Trim();
                             if (title.Length == 0) throw new InvalidOperationException("Empty narrative library concept.");
                             result.Add(new Dictionary<string, object> {
-                                ["id"] = category + "_" + Program.PromptHash(category + "|" + title).Substring(0, 16).ToLowerInvariant(),
+                                ["id"] = category + "_" + DialogueService.PromptHash(category + "|" + title).Substring(0, 16).ToLowerInvariant(),
                                 ["category"] = category, ["family"] = parts[0], ["title"] = title,
                                 ["minAge"] = parts[0].Contains("/child_") ? 0 : 12,
                                 ["maxAge"] = parts[0].Contains("/child_") ? 11 : 150
@@ -325,7 +325,7 @@ namespace ReignBetaServer
         {
             var narrative = ResolveEffectiveNarrative(characteristics);
             return new Dictionary<string, object> { ["schema"] = ReadString(narrative, "schema", "unavailable"),
-                ["definingIds"] = ReadStringList(narrative, "definingIds"), ["effectiveFingerprint"] = Program.PromptHash(Json.Serialize(narrative)),
+                ["definingIds"] = ReadStringList(narrative, "definingIds"), ["effectiveFingerprint"] = DialogueService.PromptHash(Json.Serialize(narrative)),
                 ["realismGuard"] = true, ["selection"] = "highest_influence_persisted_random_ties" };
         }
 
@@ -361,7 +361,7 @@ namespace ReignBetaServer
 
         private static string NarrativeItemFingerprint(Dictionary<string, object> item)
         {
-            return Program.PromptHash(string.Join("\n", new[] { "id", "category", "title", "description", "personalMeaning", "meaningKey", "influence", "visibility" }
+            return DialogueService.PromptHash(string.Join("\n", new[] { "id", "category", "title", "description", "personalMeaning", "meaningKey", "influence", "visibility" }
                 .Select(key => Convert.ToString(item != null && item.ContainsKey(key) ? item[key] : "", CultureInfo.InvariantCulture))));
         }
 
@@ -440,7 +440,7 @@ namespace ReignBetaServer
             foreach (var profile in profiles)
             {
                 string id = ReadString(profile, "heroStringId", "");
-                string file = Program.PromptHash(id).Substring(0, 24) + ".json";
+                string file = DialogueService.PromptHash(id).Substring(0, 24) + ".json";
                 if (ReadString(profile, "narrativeFile", "") != file) throw new InvalidDataException("Invalid shipped narrative reference: " + id);
                 var narrative = Program.ReadJsonObject(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "profiles", "narrative", "profiles", file));
                 if (ReadString(narrative, "heroStringId", "") != id || ReadString(narrative, "status", "") != "ready"

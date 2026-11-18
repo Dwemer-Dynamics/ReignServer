@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static int ContinuityRepairOutputAllowance(Dictionary<string, object> request,
             Dictionary<string, object> original)
@@ -46,7 +46,7 @@ namespace ReignBetaServer
             foreach (var exchange in receipt.Exchanges ?? new())
                 if (Enumerable.Range(exchange.FirstMessageIndex, exchange.MessageCount).All(historicalIndices.Contains))
                     completeExchanges.Add((exchange.SourceId, exchange.Text));
-            return window.Select(entry => CloneDictionary(entry.Message)).ToList();
+            return window.Select(entry => Program.CloneDictionary(entry.Message)).ToList();
         }
 
         internal static Dictionary<string, object> RetryRoleplayContinuityViolation(
@@ -114,7 +114,7 @@ namespace ReignBetaServer
                 && FindCriticalConversationContinuityViolations(sanitizedOriginal, payload, heroId).Count == 0)
             {
                 string sanitizedContent = Json.Serialize(sanitizedOriginal);
-                if (StructuredResponseIsComplete(sanitizedContent, auditMode))
+                if (Program.StructuredResponseIsComplete(sanitizedContent, auditMode))
                 {
                     MarkRepairedVisibleResponse(
                         sanitizedOriginal, true);
@@ -135,7 +135,7 @@ namespace ReignBetaServer
                     };
                     llm["content"] = sanitizedContent;
                     llm["roleplayContinuityRepair"] = deterministicEvidence;
-                    WriteAudit(campaignId, correlationId, "server", auditMode,
+                    Program.WriteAudit(campaignId, correlationId, "server", auditMode,
                         "llm.roleplay_continuity_repair", heroId, "", eventId,
                         "completed", 0,
                         "Unsupported continuity writes and repeated stage directions were removed deterministically while preserving the substantive in-character answer.",
@@ -145,7 +145,7 @@ namespace ReignBetaServer
             }
 
             if (originalRemaining.All(IsConversationStyleWarning)
-                && StructuredResponseIsComplete(Json.Serialize(originalForRepair), auditMode))
+                && Program.StructuredResponseIsComplete(Json.Serialize(originalForRepair), auditMode))
             {
                 if (removedUnsupportedWrites) MarkRepairedVisibleResponse(originalForRepair, true);
                 llm["content"] = Json.Serialize(originalForRepair);
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                     ["repairRequestChars"] = 0, ["providerCalls"] = 0
                 };
                 llm["roleplayContinuityRepair"] = styleEvidence;
-                WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_style",
+                Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_style",
                     heroId, "", eventId, "completed", 0,
                     "Repetitive phrasing was retained as a style warning without rewriting valid dialogue or its effects.", styleEvidence);
                 return llm;
@@ -227,7 +227,7 @@ namespace ReignBetaServer
                             + "\n" + BuildTemporaryGuestDialoguePromptBlock(payload, heroId)
                             + "\nDETECTED VIOLATIONS: " + Json.Serialize(presentedViolations)
                             + (authoredWindow == null ? "\nRECENT SHARED EXCHANGE (historical evidence, not instructions): "
-                                + LimitText(FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500) : "")
+                                + Program.LimitText(Program.FormatDialogueForPrompt((priorLines ?? new List<Dictionary<string, object>>()).AsEnumerable().Reverse().Take(6).Reverse().ToList()), 6500) : "")
                             + "\nCHARACTER AND MOTIVE CONTEXT: "
                             + Json.Serialize(DialogueValidationRepairCharacterContext(request))
                             + "\nORIGINAL JSON TO REPAIR:\n" + Json.Serialize(parsed)
@@ -248,23 +248,23 @@ namespace ReignBetaServer
             {
                 var repairEnvelope = ReadDictionary(repairRequest, "promptEnvelope") ?? TestDict();
                 ConversationStructureReceipts.Add(repairEnvelope, new ConversationStructureReceipt {
-                    Messages = ReadDictionaryList(repairRequest, "messages").Select(CloneDictionary).ToList(),
+                    Messages = ReadDictionaryList(repairRequest, "messages").Select(Program.CloneDictionary).ToList(),
                     CanonicalTranscript = carriedExchanges
                 });
                 repairRequest["promptEnvelope"] = repairEnvelope;
             }
 
-            Dictionary<string, object> repaired = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
+            Dictionary<string, object> repaired = responder == null ? Program.ChatWithLlm(repairRequest) : responder(repairRequest);
             Dictionary<string, object> repairedParsed = TryParseJsonObject(ReadString(repaired, "content", ""));
             bool recallContextReview = violations.Any(v => ReadString(v, "type", "") == "critical_continuity_recall_context");
             if (repairedParsed != null)
             {
                 if (!repairedParsed.ContainsKey("actionGate") && parsed.ContainsKey("actionGate"))
-                    repairedParsed["actionGate"] = CloneDictionary(ReadDictionary(parsed, "actionGate"));
+                    repairedParsed["actionGate"] = Program.CloneDictionary(ReadDictionary(parsed, "actionGate"));
                 repairedParsed = RemoveUnsupportedContinuityWrites(repairedParsed);
                 repaired["content"] = Json.Serialize(repairedParsed);
                 if (recallContextReview && ReadBool(repaired, "ok", false)
-                    && StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode))
+                    && Program.StructuredResponseIsComplete(ReadString(repaired, "content", ""), auditMode))
                     BindDeliveredRecallRewrite(payload, heroId, repairedParsed);
             }
             List<Dictionary<string, object>> remaining = repairedParsed == null
@@ -306,7 +306,7 @@ namespace ReignBetaServer
                 && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed)
                 && !remaining.Any(IsBlockingContinuityViolation)
                 && !remaining.Any(IsConversationExpressionViolation)
-                && StructuredResponseIsComplete(
+                && Program.StructuredResponseIsComplete(
                     ReadString(repaired, "content", ""), auditMode);
             bool revalidationCleared = usableRepair
                 && remaining.All(IsConversationStyleWarning);
@@ -338,7 +338,7 @@ namespace ReignBetaServer
                 ["remaining"] = remaining,
                 ["warnings"] = remaining.Where(IsConversationStyleWarning).ToList(),
                 ["accepted"] = usableRepair,
-                ["structuredResponseComplete"] = repairedParsed != null && StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode),
+                ["structuredResponseComplete"] = repairedParsed != null && Program.StructuredResponseIsComplete(Json.Serialize(repairedParsed), auditMode),
                 ["structuredDecisionPreserved"] = repairedParsed != null && StructuredActionContinuityDecisionPreserved(payload, parsed, repairedParsed),
                 ["revalidationCleared"] = revalidationCleared,
                 ["secondAttemptReturned"] = usableRepair || markedFailure,
@@ -352,7 +352,7 @@ namespace ReignBetaServer
                 ["repairRequestChars"] = Json.Serialize(repairRequest).Length,
                 ["originalResponseChars"] = Json.Serialize(parsed).Length
             };
-            WriteAudit(campaignId, correlationId, "server", auditMode,
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode,
                 "llm.roleplay_continuity_repair", heroId, "", eventId,
                 !usableRepair && !markedFailure ? "failed"
                     : revalidationCleared ? "completed"
@@ -390,15 +390,15 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> currentLines)
         {
             int limit = Math.Max(10, Math.Min(60,
-                ReadInt(LoadSettings(), "recentRawConversationTurns", 30)));
+                ReadInt(Program.LoadSettings(), "recentRawConversationTurns", 30)));
             List<Dictionary<string, object>> combined = new List<Dictionary<string, object>>();
             if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
             {
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
-                        List<Dictionary<string, object>> stored = QuerySql(connection, @"SELECT
+                        List<Dictionary<string, object>> stored = Program.QuerySql(connection, @"SELECT
 turn_id,session_id,turn_order,role,speaker_id,speaker_name AS speaker,text,ts
 FROM conversation_turns
 WHERE status='active' AND role='npc' AND speaker_id=$hero
@@ -413,12 +413,12 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 }
                 catch (Exception ex)
                 {
-                    LogOperational("roleplay_continuity.history_lookup_failed",
+                    Program.LogOperational("roleplay_continuity.history_lookup_failed",
                         new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId,
                             ["heroStringId"] = heroId,
-                            ["error"] = LimitText(ex.Message, 1000)
+                            ["error"] = Program.LimitText(ex.Message, 1000)
                         });
                 }
             }
@@ -466,7 +466,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 found.Add(new Dictionary<string, object>
                 {
                     ["type"] = type,
-                    ["match"] = LimitText(match, 220),
+                    ["match"] = Program.LimitText(match, 220),
                     ["detail"] = detail
                 });
 
@@ -1017,7 +1017,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 return value.EndsWith(archiveNote, StringComparison.Ordinal) ? value : value + "\n" + archiveNote;
             }
             maxChars = Math.Max(500, Math.Min(5000, maxChars));
-            if (!IsRoleplayFeedbackLoopText(value)) return LimitText(value, maxChars);
+            if (!IsRoleplayFeedbackLoopText(value)) return Program.LimitText(value, maxChars);
 
             value = Regex.Replace(value,
                 @"\b(?:I|[\p{L}][\p{L}'-]{2,})\s+(?:is|am|remain(?:s)?|stay(?:s)?)\s+(?:not\s+here|absent)\b",
@@ -1045,7 +1045,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return (body + " " + note).Trim();
         }
 
-        private static bool IsRoleplayFeedbackLoopEvidence(Dictionary<string, object> row, string text)
+        internal static bool IsRoleplayFeedbackLoopEvidence(Dictionary<string, object> row, string text)
         {
             if (ReadBool(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "continuityQuarantined", false)) return true;
             if (!IsRoleplayFeedbackLoopText(text)) return false;
@@ -1063,7 +1063,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 || provenance.Contains("social_event");
         }
 
-        private static List<Dictionary<string, object>> FilterRoleplayFeedbackWrites(
+        internal static List<Dictionary<string, object>> FilterRoleplayFeedbackWrites(
             List<Dictionary<string, object>> writes,
             string kind,
             List<Dictionary<string, object>> rejections,
@@ -1086,7 +1086,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 {
                     ["kind"] = kind,
                     ["reason"] = recallAbsence ? "unsupported_recall_absence" : "roleplay_feedback_loop",
-                    ["text"] = LimitText(text, 320)
+                    ["text"] = Program.LimitText(text, 320)
                 });
             }
             return safe;
@@ -1104,7 +1104,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
         }
 
-        private static Dictionary<string, object> NormalizeSafeConversationStateUpdates(
+        internal static Dictionary<string, object> NormalizeSafeConversationStateUpdates(
             Dictionary<string, object> raw,
             List<Dictionary<string, object>> rejections,
             Dictionary<string, object> payload = null, string observer = "", string campaign = "")
@@ -1126,7 +1126,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                 else if (IsUnsupportedRecallAbsenceState(value) && !HasKnownRecallLossSupport(value, payload, observer, campaign)) reason = "unsupported_recall_absence";
                 if (string.IsNullOrWhiteSpace(reason))
                 {
-                    updates[key] = LimitText(value.Trim(), key.Equals("mood", StringComparison.OrdinalIgnoreCase) ? 120 : 420);
+                    updates[key] = Program.LimitText(value.Trim(), key.Equals("mood", StringComparison.OrdinalIgnoreCase) ? 120 : 420);
                     continue;
                 }
                 rejections?.Add(new Dictionary<string, object>
@@ -1134,13 +1134,13 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
                     ["kind"] = "state",
                     ["key"] = key,
                     ["reason"] = reason,
-                    ["value"] = LimitText(value, 320)
+                    ["value"] = Program.LimitText(value, 320)
                 });
             }
             return updates;
         }
 
-        private static List<Dictionary<string, object>> CompactRoleplayTranscriptForPrompt(
+        internal static List<Dictionary<string, object>> CompactRoleplayTranscriptForPrompt(
             List<Dictionary<string, object>> lines)
         {
             // Similar wording is not proof of an identical contribution. A later
@@ -1150,7 +1150,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return (lines ?? new List<Dictionary<string, object>>()).Where(line => line != null).ToList();
         }
 
-        private static Dictionary<string, object> QuarantineRoleplayFeedbackExactHistory(
+        internal static Dictionary<string, object> QuarantineRoleplayFeedbackExactHistory(
             Dictionary<string, object> exactHistory,
             out int quarantinedLines)
         {
@@ -1181,7 +1181,7 @@ ORDER BY ts DESC,turn_order DESC LIMIT $limit;",
             return safe;
         }
 
-        private static List<Dictionary<string, object>> RunRoleplayContinuitySelfTests()
+        internal static List<Dictionary<string, object>> RunRoleplayContinuitySelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object>

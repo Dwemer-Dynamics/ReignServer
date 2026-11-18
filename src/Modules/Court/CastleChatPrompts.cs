@@ -64,7 +64,7 @@ namespace ReignBetaServer
                 Dictionary<string, string> defaults = CastleChatPromptDefaults();
                 File.WriteAllText(Program.PromptPath(imageName), defaults[imageName], Encoding.UTF8);
                 File.WriteAllText(Program.PromptPath(dialogueName), defaults[dialogueName], Encoding.UTF8);
-                Program.InvalidatePromptRuntimeCache();
+                DialogueService.InvalidatePromptRuntimeCache();
             }
             else if (payload.ContainsKey("imagePrompt") || payload.ContainsKey("dialoguePrompt"))
             {
@@ -74,7 +74,7 @@ namespace ReignBetaServer
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Both Castle Chat prompts are required." };
                 File.WriteAllText(Program.PromptPath(imageName), image, Encoding.UTF8);
                 File.WriteAllText(Program.PromptPath(dialogueName), dialogue, Encoding.UTF8);
-                Program.InvalidatePromptRuntimeCache();
+                DialogueService.InvalidatePromptRuntimeCache();
             }
 
             Program.EnsurePromptTemplates();

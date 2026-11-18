@@ -44,7 +44,7 @@ namespace ReignBetaServer
         {
             string session = ReadString(value, "conversationId", "");
             if (session.Length == 0) session = ReadString(value, "mode", "") + ":" + ReadString(value, "heroId", "");
-            return PromptContentHash(ReadString(value, "campaignId", "") + "|" + ReadString(value, "timelineId", "") + "|" + session).ToLowerInvariant().Substring(0, 32);
+            return DialogueService.PromptContentHash(ReadString(value, "campaignId", "") + "|" + ReadString(value, "timelineId", "") + "|" + session).ToLowerInvariant().Substring(0, 32);
         }
         private static List<Dictionary<string, object>> DiagnosticManifestIndex()
         {

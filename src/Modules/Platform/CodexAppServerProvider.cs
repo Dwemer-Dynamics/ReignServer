@@ -11,8 +11,8 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string OpenAiCompatibleProvider = "openai_compatible";
-        private const string CodexSubscriptionProvider = "codex_subscription";
+        internal const string OpenAiCompatibleProvider = "openai_compatible";
+        internal const string CodexSubscriptionProvider = "codex_subscription";
 
         private sealed class CodexRpcWaiter
         {
@@ -23,7 +23,7 @@ namespace ReignBetaServer
             public int ErrorCode;
         }
 
-        private sealed class CodexTurnWaiter
+        internal sealed class CodexTurnWaiter
         {
             public readonly string TurnId;
             public string ThreadId { get; private set; }
@@ -96,15 +96,15 @@ namespace ReignBetaServer
         private static DateTime CodexStartedUtc;
         // Offline contract tests inject a deterministic JSON-RPC transport here. Production
         // leaves this null and always uses the owned official app-server process.
-        private static Func<string, Dictionary<string, object>, int, Dictionary<string, object>> CodexRpcTransportOverride;
-        private static Action<Dictionary<string, object>> CodexWriteTransportOverride;
+        internal static Func<string, Dictionary<string, object>, int, Dictionary<string, object>> CodexRpcTransportOverride;
+        internal static Action<Dictionary<string, object>> CodexWriteTransportOverride;
         private static readonly Encoding CodexTransportUtf8 = new UTF8Encoding(false, true);
         private static Dictionary<string, object> CodexAccount = new Dictionary<string, object>();
         private static bool CodexAccountIdentityVerificationRequired;
         private static long CodexAccountNotificationGeneration;
         internal static List<Dictionary<string, object>> CodexModels = new List<Dictionary<string, object>>();
 
-        private static string NormalizeLlmProvider(string value)
+        internal static string NormalizeLlmProvider(string value)
         {
             string normalized = (value ?? "").Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
             if (normalized == "codex" || normalized == "chatgpt" || normalized == "chatgpt_codex" || normalized == CodexSubscriptionProvider)
@@ -356,12 +356,12 @@ namespace ReignBetaServer
             }
         }
 
-        private static string CodexChatCompletionJson(Dictionary<string, object> requestBody, Dictionary<string, object> settings, string model)
+        internal static string CodexChatCompletionJson(Dictionary<string, object> requestBody, Dictionary<string, object> settings, string model)
         {
             return CodexChatCompletionJson(requestBody, settings, model, null);
         }
 
-        private static string CodexChatCompletionJson(Dictionary<string, object> requestBody, Dictionary<string, object> settings, string model,
+        internal static string CodexChatCompletionJson(Dictionary<string, object> requestBody, Dictionary<string, object> settings, string model,
             Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
             if (canceled?.Invoke() == true) throw new OperationCanceledException("Banter was canceled before provider startup.");
@@ -371,7 +371,7 @@ namespace ReignBetaServer
                 ReadString(codexContext, "correlationId", ""), codexContext);
             List<Dictionary<string, object>> requestMessages = ReadDictionaryList(requestBody, "messages");
             string prompt = BuildCodexPrompt(requestMessages);
-            if (context.MemoryAccess != null) prompt = CodexDirectInstructions + "\n\n" + BuildCodexMessageBlocks(requestMessages);
+            if (context.MemoryAccess != null) prompt = DialogueService.CodexDirectInstructions + "\n\n" + DialogueService.BuildCodexMessageBlocks(requestMessages);
             string fullPrompt = prompt;
             context.PromptText = prompt;
             context.PromptHash = HashCodexText(prompt);
@@ -447,7 +447,7 @@ namespace ReignBetaServer
                     };
                     CodexFastMode.ApplyThreadScope(threadParameters, context.Fast, CodexRuntimeProtocol);
                     ApplyCodexPromptMapping(context, threadParameters);
-                    ConfigureCodexRoleplayThread(threadParameters, context);
+                    DialogueService.ConfigureCodexRoleplayThread(threadParameters, context);
                     try
                     {
                         thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
@@ -503,7 +503,7 @@ namespace ReignBetaServer
                         };
                         CodexFastMode.ApplyThreadScope(threadParameters, context.Fast, CodexRuntimeProtocol);
                         ApplyCodexPromptMapping(context, threadParameters);
-                        ConfigureCodexRoleplayThread(threadParameters, context);
+                        DialogueService.ConfigureCodexRoleplayThread(threadParameters, context);
                         try
                         {
                             thread = CodexRpc("thread/start", threadParameters, RemainingTimeout());
@@ -540,7 +540,7 @@ namespace ReignBetaServer
                     turnParameters["outputSchema"] = context.OutputSchema;
                 CodexFastMode.Apply(turnParameters, context.Fast);
                 BeginCodexTurnAttempt(threadId);
-                if (context.MemoryAccess != null) lock (CodexStateLock) CodexMemoryTurns[threadId] = context.MemoryAccess;
+                if (context.MemoryAccess != null) lock (CodexStateLock) DialogueService.CodexMemoryTurns[threadId] = context.MemoryAccess;
                 ReserveCodexPerformanceCall(context.ToDictionary());
                 timings.TurnStartUtc = DateTime.UtcNow;
                 Dictionary<string, object> turn;
@@ -618,7 +618,7 @@ namespace ReignBetaServer
                     InterruptCodexTurn(threadId, turnId, settings);
                 }
                 RetireCodexTurn(turnId);
-                lock (CodexStateLock) CodexMemoryTurns.Remove(threadId);
+                lock (CodexStateLock) DialogueService.CodexMemoryTurns.Remove(threadId);
                 if (string.IsNullOrWhiteSpace(turnId)) EndCodexTurnAttempt(threadId);
                 if (lease != null && !succeeded)
                 {
@@ -662,7 +662,7 @@ namespace ReignBetaServer
                 () => ProviderPostJson(apiUrl, apiKey, outboundJson, settings, cacheRouting, correlationId, requestType, model, contentDelta, canceled));
         }
 
-        private static string BuildCodexPrompt(List<Dictionary<string, object>> messages)
+        internal static string BuildCodexPrompt(List<Dictionary<string, object>> messages)
         {
             StringBuilder prompt = new StringBuilder();
             prompt.AppendLine("You are the text-generation provider inside Bannerlord Reign. Do not use tools, shell commands, files, or network access. Return only the response requested by the conversation below.");
@@ -676,7 +676,7 @@ namespace ReignBetaServer
             return prompt.ToString().Trim();
         }
 
-        private static void EnsureCodexAppServer(Dictionary<string, object> settings)
+        internal static void EnsureCodexAppServer(Dictionary<string, object> settings)
         {
             if (CodexRpcTransportOverride != null) return;
             lock (CodexLifecycleLock)
@@ -746,7 +746,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> CodexRpc(string method, Dictionary<string, object> parameters, int timeoutMs)
+        internal static Dictionary<string, object> CodexRpc(string method, Dictionary<string, object> parameters, int timeoutMs)
         {
             using var diagnosticRpc = BeginDiagnosticCodexRpc(method, parameters);
             Func<string, Dictionary<string, object>, int, Dictionary<string, object>> transport = CodexRpcTransportOverride;
@@ -784,7 +784,7 @@ namespace ReignBetaServer
             WriteCodexMessage(new Dictionary<string, object> { ["method"] = method, ["params"] = parameters ?? new Dictionary<string, object>() });
         }
 
-        private static void WriteCodexMessage(Dictionary<string, object> message)
+        internal static void WriteCodexMessage(Dictionary<string, object> message)
         {
             if (CodexWriteTransportOverride != null) { CodexWriteTransportOverride(message); return; }
             string frame = SerializeCodexTransportFrame(message);
@@ -867,7 +867,7 @@ namespace ReignBetaServer
             catch { }
         }
 
-        private static void HandleCodexMessage(Dictionary<string, object> message)
+        internal static void HandleCodexMessage(Dictionary<string, object> message)
         {
             long id = ReadLong(message, "id", 0);
             string method = ReadString(message, "method", "");
@@ -886,7 +886,7 @@ namespace ReignBetaServer
 
             if (message.ContainsKey("id") && !string.IsNullOrWhiteSpace(method))
             {
-                if (HandleCodexMemoryRequest(message)) return;
+                if (DialogueService.HandleCodexMemoryRequest(message)) return;
                 WriteCodexMessage(new Dictionary<string, object>
                 {
                     ["id"] = message["id"],
@@ -1053,7 +1053,7 @@ namespace ReignBetaServer
             try { return !CodexProcess.HasExited; } catch { return false; }
         }
 
-        private static int CodexRpcTimeout(Dictionary<string, object> settings)
+        internal static int CodexRpcTimeout(Dictionary<string, object> settings)
         {
             return Math.Max(5000, Math.Min(600000, ReadInt(settings, "providerRequestTimeoutMs", 120000)));
         }
@@ -1063,12 +1063,12 @@ namespace ReignBetaServer
             return Path.Combine(DataDir, "codex-provider");
         }
 
-        private static void SetCodexError(string error)
+        internal static void SetCodexError(string error)
         {
             lock (CodexStateLock) CodexLastError = LimitText(error, 1200);
         }
 
-        private static CodexTurnWaiter GetOrCreateCodexTurn(string turnId, string threadId = "")
+        internal static CodexTurnWaiter GetOrCreateCodexTurn(string turnId, string threadId = "")
         {
             lock (CodexStateLock)
             {

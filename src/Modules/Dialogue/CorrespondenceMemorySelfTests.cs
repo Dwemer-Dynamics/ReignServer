@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunCorrespondenceMemoryAssertions()
         {
@@ -18,13 +18,13 @@ namespace ReignBetaServer
                 "playerHeroStringId", "player", "playerText", "You wrote to me about the carved wooden horse.");
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     letterId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", body,
                         "npc_initiated", "gift", "", "a", "b", 10d, 13d, TestDict()), "letterId", "");
                     List<MemoryEvidence> Recall(string who, Dictionary<string, object> ctx = null) => LoadCorrespondenceMemory(connection,
                         who, who == "npc" ? "player" : "npc", "carved wooden horse", ctx ?? context,
-                        BuildKnowledgeAccessContext(who, who == "npc" ? "player" : "npc", "", ctx ?? context));
+                        Program.BuildKnowledgeAccessContext(who, who == "npc" ? "player" : "npc", "", ctx ?? context));
                     var sent = Recall("npc");
                     Check("author_knows_exact_accepted_letter_at_dispatch", sent.Count == 1 && sent[0].Text.Contains(body)
                         && sent[0].Text.Contains("You authored and sent") && sent[0].Required);
@@ -43,14 +43,14 @@ namespace ReignBetaServer
                     Check("disguise_does_not_reveal_matching_private_history", Recall("npc", new Dictionary<string, object>(context) {
                         ["identityView"] = TestDict("knowsIdentity", false) }).Count == 0);
                     Check("future_dispatch_excluded", Recall("npc", new Dictionary<string, object>(context) { ["worldDay"] = 9d }).Count == 0);
-                    var row = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).Single();
+                    var row = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", letterId)).Single();
                     Check("same_day_future_sequence_excluded", Recall("npc", new Dictionary<string, object>(context) {
                         ["memoryAsOfAcceptedSequence"] = ReadLong(row, "dispatch_sequence", 0) - 1 }).Count == 0);
                     Check("later_recording_excluded", Recall("npc", new Dictionary<string, object>(context) {
                         ["memoryAsOfTimestamp"] = ReadLong(row, "created_ts", 0) - 1 }).Count == 0);
-                    ExecuteSql(connection, "UPDATE letters SET status='delivered',delivered_day=11 WHERE letter_id=$id;", TestDict("id", letterId));
+                    Program.ExecuteSql(connection, "UPDATE letters SET status='delivered',delivered_day=11 WHERE letter_id=$id;", TestDict("id", letterId));
                     Check("unread_receipt_is_not_body_knowledge", Recall("player").Count == 0);
-                    ExecuteSql(connection, "UPDATE letters SET status='read',read_day=12,delivery_timeline_id='main' WHERE letter_id=$id;", TestDict("id", letterId));
+                    Program.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=12,delivery_timeline_id='main' WHERE letter_id=$id;", TestDict("id", letterId));
                     Check("recipient_knows_exact_read_body", Recall("player").Single().Text.Contains(body)
                         && Recall("player").Single().Text.Contains("received and read these words on day 12"));
                     Check("author_does_not_gain_read_receipt", Recall("npc").Single().Text == sent.Single().Text);
@@ -59,7 +59,7 @@ namespace ReignBetaServer
                     var source = ResolveLetterQuestionSource(connection, letterId, "Will you come through the western gate?", "npc", "npc", "player", context);
                     Check("letter_question_has_original_speaker_and_body_hash", source != null
                         && ReadString(source, "turnId", "") == letterId && ReadString(source, "sourceHash", "") == PromptHash(body)
-                        && QuestionOriginalStillVerified(connection, source, "npc", BuildKnowledgeAccessContext("npc", "player", "", context)));
+                        && QuestionOriginalStillVerified(connection, source, "npc", Program.BuildKnowledgeAccessContext("npc", "player", "", context)));
                     Check("wrong_letter_speaker_rejected", ResolveLetterQuestionSource(connection, letterId, "Will you come through the western gate?", "player", "npc", "player", context) == null);
                     var write = TestDict("id", "letter_question", "kind", "question", "subject", "Western gate visit", "status", "active",
                         "peerId", "player", "expectedRevision", 0, "evidenceQuote", "Will you come through the western gate?",
@@ -98,7 +98,7 @@ namespace ReignBetaServer
                 foreach (string mode in new[] { "legacy", "precision" })
                 {
                     var settings = TestDict("memoryPrecisionMode", mode, "enableSemanticMemory", false, "minimeEnabled", false);
-                    var packet = BuildNpcMemoryPacket(campaign, "npc", "player", "", "carved wooden horse", 2000, context, settings);
+                    var packet = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", "carved wooden horse", 2000, context, settings);
                     Check("shared_memory_packet_" + mode, ReadString(packet, "memoryPacket", "").Contains(body));
                 }
                 var profile = PromptParityProfile(); profile["heroStringId"] = "npc";
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                 precisionPayload["officialMemoryFirewall"] = false; precisionPayload["timelineId"] = "main";
                 precisionPayload["playerHeroStringId"] = "player"; precisionPayload["worldDay"] = 20d;
                 precisionPayload["playerText"] = "You wrote to me about the carved wooden horse.";
-                var precisePacket = BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(precisionPayload, "playerText", ""), 4000,
+                var precisePacket = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(precisionPayload, "playerText", ""), 4000,
                     precisionPayload, TestDict("memoryPrecisionMode", "precision", "enableSemanticMemory", false));
                 precisionPayload["memoryPrecisionEvidence"] = ReadDictionary(precisePacket, "precisionEvidence");
                 string priorReferenceMode = ConversationReferenceValidationMode.Value;
@@ -134,8 +134,8 @@ namespace ReignBetaServer
                     foreach (string referenceMode in new[] { "off", "enabled" })
                     {
                         ConversationReferenceValidationMode.Value = referenceMode;
-                        var modePayload = CloneDictionary(precisionPayload);
-                        var modePacket = BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(modePayload, "playerText", ""), 4000,
+                        var modePayload = Program.CloneDictionary(precisionPayload);
+                        var modePacket = Program.BuildNpcMemoryPacket(campaign, "npc", "player", "", ReadString(modePayload, "playerText", ""), 4000,
                             modePayload, TestDict("memoryPrecisionMode", "precision", "enableSemanticMemory", false));
                         modePayload["memoryPrecisionEvidence"] = ReadDictionary(modePacket, "precisionEvidence");
                         var preciseEnvelope = BuildDialoguePromptEnvelope(campaign, "npc", "Author", "Player", "Player",
@@ -157,17 +157,17 @@ namespace ReignBetaServer
                 var point = TestDict("savePointId", "letter_before", "timelineId", "restored_main", "campaignTimeDays", 20d,
                     "worldHistorySequence", 8L, "worldHistoryHeadEventId", "history_head");
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "letter_before");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     futureId = ReadString(RelationshipsService.InsertLetter(connection, "npc", "Author", "player", "Player", "Future secret after the save.", "npc_initiated", "future", "", "a", "b", 21d, 24d, TestDict()), "letterId", "");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "letter_before");
                 AdvanceMemoryRestoreGeneration(campaign, point);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     var restored = new Dictionary<string, object>(context) { ["timelineId"] = "restored_main" };
                     bool Knows(string who, Dictionary<string, object> ctx) => LoadCorrespondenceMemory(connection, who,
-                        who == "npc" ? "player" : "npc", "carved wooden horse", ctx, BuildKnowledgeAccessContext(who, "player", "", ctx)).Any(e => e.SourceId == letterId);
+                        who == "npc" ? "player" : "npc", "carved wooden horse", ctx, Program.BuildKnowledgeAccessContext(who, "player", "", ctx)).Any(e => e.SourceId == letterId);
                     Check("actual_snapshot_restores_inherited_authorship_and_receipt", Knows("npc", restored) && Knows("player", restored)
-                        && QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", futureId)).Count == 0);
+                        && Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", futureId)).Count == 0);
                     var sibling = new Dictionary<string, object>(restored) { ["timelineId"] = "other_branch" };
                     Check("restore_membership_cannot_leak_to_sibling", !Knows("npc", sibling));
                     BindRecoveredLetterSources(connection, "restored_main", "bad_recovery", 7L, "wrong_head");
@@ -176,19 +176,19 @@ namespace ReignBetaServer
                     BindRecoveredLetterSources(connection, "restored_main", "restored_recovered", 8L, "history_head");
                     var recovered = new Dictionary<string, object>(restored) { ["timelineId"] = "restored_recovered" };
                     Check("verified_recovery_rebinds_membership", Knows("npc", recovered) && !Knows("npc", restored));
-                    ExecuteSql(connection, "UPDATE letters SET body='Altered later account.' WHERE letter_id=$id;", TestDict("id", letterId));
+                    Program.ExecuteSql(connection, "UPDATE letters SET body='Altered later account.' WHERE letter_id=$id;", TestDict("id", letterId));
                     Check("changed_source_cannot_reuse_restored_membership", !Knows("npc", recovered));
-                    ExecuteSql(connection, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", letterId, "body", body));
+                    Program.ExecuteSql(connection, "UPDATE letters SET body=$body WHERE letter_id=$id;", TestDict("id", letterId, "body", body));
                 }
                 AdvanceMemoryRestoreGeneration(campaign);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     var recovered = new Dictionary<string, object>(context) { ["timelineId"] = "restored_recovered" };
                     Check("restore_generation_invalidates_old_membership", !LoadCorrespondenceMemory(connection, "npc", "player", "carved wooden horse", recovered,
-                        BuildKnowledgeAccessContext("npc", "player", "", recovered)).Any(e => e.SourceId == letterId));
+                        Program.BuildKnowledgeAccessContext("npc", "player", "", recovered)).Any(e => e.SourceId == letterId));
                 }
             }
-            catch (Exception ex) { Check("suite_exception", false, LimitText(ex.ToString(), 2400)); }
+            catch (Exception ex) { Check("suite_exception", false, Program.LimitText(ex.ToString(), 2400)); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

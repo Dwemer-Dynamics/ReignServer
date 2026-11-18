@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static string ReplayQuestionLinkInspectionError(Dictionary<string, object> writer)
         {
@@ -31,22 +31,22 @@ namespace ReignBetaServer
         {
             string error = ReplayQuestionLinkInspectionError(writer);
             if (error.Length > 0) throw new InvalidOperationException(error);
-            if (!ReignPostgreSqlStorage.Options.IsValidation || ActiveServerPort > 0
-                || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (!ReignPostgreSqlStorage.Options.IsValidation || Program.ActiveServerPort > 0
+                || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("question_link_inspection_requires_isolated_validation");
             var inspection = ReadDictionary(writer, "questionLinkInspection");
             string reply = ReadString(inspection, "reply", "");
             var rows = new List<Dictionary<string, object>>();
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction();
-            ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
-            if (ReadString(QuerySql(connection, "SELECT current_setting('transaction_read_only') AS mode;").Single(), "mode", "") != "on")
+            Program.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
+            if (ReadString(Program.QuerySql(connection, "SELECT current_setting('transaction_read_only') AS mode;").Single(), "mode", "") != "on")
                 throw new InvalidOperationException("question_link_inspection_read_only_required");
             int index = 0;
             foreach (var supplied in ReadDictionaryList(inspection, "writes"))
             {
-                var write = CloneDictionary(supplied);
-                string reason = PrepareQuestionContinuityWrite(connection, write, CloneDictionary(payload), observer, peer,
+                var write = Program.CloneDictionary(supplied);
+                string reason = PrepareQuestionContinuityWrite(connection, write, Program.CloneDictionary(payload), observer, peer,
                     observer + ":question_link_inspection", reply);
                 rows.Add(TestDict("index", index++, "status", reason.Length == 0 ? "source_link_verified" : "source_link_rejected",
                     "reason", reason, "suppliedWriteSha256", PromptHash(CanonicalJson(supplied)),

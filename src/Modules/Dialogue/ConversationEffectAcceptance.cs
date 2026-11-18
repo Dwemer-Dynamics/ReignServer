@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static bool SameAcceptedDrinkNarration(Dictionary<string, object> receipt, string reply)
         {
@@ -38,7 +38,7 @@ namespace ReignBetaServer
                 payload["conversationEffectAcceptance"] = silent;
                 return silent;
             }
-            var candidate = CloneDictionary(parsed);
+            var candidate = Program.CloneDictionary(parsed);
             candidate["reply"] = reply;
             if (candidate.ContainsKey("body")) candidate["body"] = reply;
             var drink = ReadDictionary(payload, "intoxicationReceipt");
@@ -73,14 +73,14 @@ namespace ReignBetaServer
             bool privateDrinkReplay = false;
             string acceptedHash = PromptHash(reply ?? "");
             lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
-            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaign) : null)
+            using (ReignDbConnection ownedConnection = existingConnection == null ? Program.OpenCampaignConnection(campaign) : null)
             {
                 var connection = existingConnection ?? ownedConnection;
                 if (hasAgency) EnsureConversationAgencySchema(connection);
                 if (hasDrink) EnsureIntoxicationSchema(connection);
                 using (var transaction = existingConnection == null ? connection.BeginTransaction() : null)
                 {
-                    string generation = ReadString(QuerySql(connection,
+                    string generation = ReadString(Program.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
                     if (generation != expectedGeneration)
                         throw new InvalidOperationException("The campaign changed before final conversation acceptance.");
@@ -91,9 +91,9 @@ namespace ReignBetaServer
                         // never request a new model decision or reject this reply.
                         privateDrinkArgs = TestDict("hero", hero, "turn", ReadString(payload, "timelineId", "main") + ":"
                             + ReadFirstString(payload, "turnId", "sceneTurnId", "correlationId"));
-                        ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", privateDrinkArgs);
-                        QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", privateDrinkArgs);
-                        var prior = QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", privateDrinkArgs).SingleOrDefault();
+                        Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", privateDrinkArgs);
+                        Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", privateDrinkArgs);
+                        var prior = Program.QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", privateDrinkArgs).SingleOrDefault();
                         privateDrinkReplay = prior != null;
                         acceptedDrink = privateDrinkReplay ? TryParseJsonObject(ReadString(prior, "receipt_json", "{}"))
                             : PreparePrivateDrinkReceipt(connection, hero, payload, profile, characteristics, candidate, reply, lockScene: true);
@@ -121,7 +121,7 @@ namespace ReignBetaServer
                                 "updates", new List<Dictionary<string, object>>(), "acceptedReplyHash", acceptedHash);
                         else if (ReadDictionaryList(evaluation, "updates").Count > 0)
                         {
-                            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload));
+                            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
                             agency = CommitConversationAgency(connection, candidate, context, turn, ownsTransaction: false);
                             if (!ReadBool(agency, "ok", false) || PromptHash(ReadString(agency, "reply", "")) != acceptedHash)
                                 throw new InvalidOperationException("The negotiation changed or this turn already has a different accepted response.");
@@ -136,17 +136,17 @@ namespace ReignBetaServer
                         privateDrinkArgs["state"] = Json.Serialize(ReadDictionary(acceptedDrink, "state"));
                         privateDrinkArgs["receipt"] = Json.Serialize(acceptedDrink);
                         CommitDrinkScene(connection, acceptedDrink);
-                        ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", privateDrinkArgs);
-                        ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", privateDrinkArgs);
+                        Program.ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", privateDrinkArgs);
+                        Program.ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", privateDrinkArgs);
                     }
                     else if (hasDrink && !privateDrink)
                     {
                         var args = TestDict("hero", hero, "turn", ReadString(drink, "turnKey", ""));
                         if (ReadString(drink, "heroStringId", "") != hero || ReadString(drink, "turnKey", "").Length == 0)
                             throw new InvalidOperationException("The prepared drink belongs to a different participant or turn.");
-                        ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
-                        var stateRow = QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args).Single();
-                        var prior = QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).SingleOrDefault();
+                        Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_intoxication(hero_id,state_json) VALUES($hero,'{}');", args);
+                        var stateRow = Program.QuerySql(connection, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero FOR UPDATE;", args).Single();
+                        var prior = Program.QuerySql(connection, "SELECT receipt_json FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;", args).SingleOrDefault();
                         if (prior != null)
                         {
                             acceptedDrink = TryParseJsonObject(ReadString(prior, "receipt_json", "{}"));
@@ -158,15 +158,15 @@ namespace ReignBetaServer
                             string currentState = PromptHash(CanonicalJson(TryParseJsonObject(ReadString(stateRow, "state_json", "{}"))));
                             if (ReadString(drink, "baseStateHash", "") != currentState)
                                 throw new InvalidOperationException("The drink state changed while the response was being prepared.");
-                            acceptedDrink = CloneDictionary(drink);
+                            acceptedDrink = Program.CloneDictionary(drink);
                             acceptedDrink["commitState"] = "committed";
                             acceptedDrink["acceptedReplyHash"] = acceptedHash;
                             acceptedDrink["reply"] = reply;
                             args["state"] = Json.Serialize(ReadDictionary(acceptedDrink, "state"));
                             args["receipt"] = Json.Serialize(acceptedDrink);
                             CommitDrinkScene(connection, acceptedDrink);
-                            ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
-                            ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
+                            Program.ExecuteSql(connection, "UPDATE conversation_intoxication SET state_json=$state WHERE hero_id=$hero;", args);
+                            Program.ExecuteSql(connection, "INSERT INTO conversation_drinking_turns(hero_id,turn_key,receipt_json) VALUES($hero,$turn,$receipt);", args);
                         }
                     }
                     boundary?.Invoke("before_commit");

@@ -42,11 +42,11 @@ namespace ReignBetaServer
                 var diagnostics = ReadDictionary(request, "promptEnvelope");
                 var continuity = ReadDictionary(ReadDictionary(diagnostics, "continuityPreflight"), "continuityEvidence");
                 var messages = ReadDictionaryList(request, "messages");
-                requiredEvidence = Program.MissingContinuityContent(Program.ConversationEvidenceText(diagnostics, messages), continuity).Count == 0;
+                requiredEvidence = DialogueService.MissingContinuityContent(DialogueService.ConversationEvidenceText(diagnostics, messages), continuity).Count == 0;
                 var altered = messages.Select(Program.CloneDictionary).ToList();
                 foreach (var message in altered) message["content"] = ReadString(message, "content", "")
                     .Replace("Explain the smaller commission.", "Explain a different commission.", StringComparison.Ordinal);
-                alteredEvidenceRejected = Program.MissingContinuityContent(Program.ConversationEvidenceText(diagnostics, altered), continuity).Count > 0;
+                alteredEvidenceRejected = DialogueService.MissingContinuityContent(DialogueService.ConversationEvidenceText(diagnostics, altered), continuity).Count > 0;
                 return TestDict("ok", true, "content", Json.Serialize(TestDict("reply", "I can compose a short piece for your household.")));
             }
             var settings = TestDict("highMemoryMode", false, "memoryPrecisionMode", "legacy", "enableSemanticMemory", false,
@@ -57,7 +57,7 @@ namespace ReignBetaServer
             Check("provider_preflight_retains_canonical_required_evidence", requiredEvidence);
             Check("provider_preflight_still_rejects_altered_evidence", alteredEvidenceRejected);
             Check("political_revision_is_persisted_in_exact_timeline", Program.ReadJsonObject(Program.CharacterFile(campaign, actor,
-                "politics", "revision-1-" + Program.SafeMemoryKey(timeline) + ".json")).Count > 0);
+                "politics", "revision-1-" + DialogueService.SafeMemoryKey(timeline) + ".json")).Count > 0);
             var replay = CourtLifeRespond(payload, settings, Writer);
             using (var connection = Program.OpenCampaignConnection(campaign))
             {

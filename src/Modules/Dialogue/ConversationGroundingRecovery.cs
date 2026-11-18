@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Historical author links live on the new private original, never on an
         // inherited accepted turn whose full-row hash proves restored visibility.
@@ -32,10 +32,10 @@ namespace ReignBetaServer
         {
             string campaign = ReadString(request, "campaignId", ""), timeline = ReadString(request, "timelineId", "");
             if (campaign.Length == 0 || timeline.Length == 0) throw new InvalidOperationException("Exact campaign and timeline are required.");
-            var rows = QuerySql(connection, @"SELECT t.*,s.player_id,s.npc_id,s.payload_json AS session_payload
+            var rows = Program.QuerySql(connection, @"SELECT t.*,s.player_id,s.npc_id,s.payload_json AS session_payload
 FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE t.status IN ('active','source_only') AND t.role IN ('player','player_source') ORDER BY t.ts,t.turn_order,t.turn_id;");
-            var access = new KnowledgeAccessContext { TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
+            var access = new Program.KnowledgeAccessContext { TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             var sources = rows.Where(r => ReadString(r, "status", "") == "source_only" && MemoryTimeVisible(r, access, connection))
                 .ToDictionary(r => ReadString(r, "turn_id", ""));
             var audit = new List<Dictionary<string, object>>(); var operations = new List<Dictionary<string, object>>();
@@ -44,7 +44,7 @@ WHERE t.status IN ('active','source_only') AND t.role IN ('player','player_sourc
             {
                 var meta = TryParseJsonObject(ReadString(turn, "payload_json", "{}"));
                 string rowTimeline = FirstNonEmpty(ReadString(meta, "timelineId", ""), ReadString(TryParseJsonObject(ReadString(turn, "session_payload", "{}")), "timelineId", ""));
-                var scoped = CloneDictionary(turn); scoped["timeline_id"] = rowTimeline;
+                var scoped = Program.CloneDictionary(turn); scoped["timeline_id"] = rowTimeline;
                 if (rowTimeline.Length > 0 && !MemoryTimeVisible(scoped, access, connection)) continue;
                 string id = ReadString(turn, "turn_id", ""), sourceId = ReadString(meta, "inputSourceId", "");
                 Dictionary<string, object> original = null;
@@ -86,14 +86,14 @@ WHERE t.status IN ('active','source_only') AND t.role IN ('player','player_sourc
                 "coverage", "all_player_turns_all_npcs_in_campaign_with_timeline_or_restore_proof", "turns", audit,
                 "missingOriginals", audit.Count(r => ReadString(r, "status", "") == "original_missing"),
                 "repairManifest", TestDict("schema", "reign-continuity-repair-v1", "campaignId", campaign, "timelineId", timeline,
-                    "expectedRestoreGeneration", ReadString(QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").Single(), "restore_generation", ""),
+                    "expectedRestoreGeneration", ReadString(Program.QuerySql(connection, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").Single(), "restore_generation", ""),
                     "operations", operations), "campaignChanged", false, "providerCalls", 0);
         }
 
         private static Dictionary<string, object> RestoreReviewedOriginalInput(ReignDbConnection connection, Dictionary<string, object> manifest, Dictionary<string, object> operation)
         {
             string id = ReadString(operation, "id", ""), timeline = ReadString(manifest, "timelineId", "");
-            var turn = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active' AND role='player';", TestDict("id", id)).SingleOrDefault();
+            var turn = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active' AND role='player';", TestDict("id", id)).SingleOrDefault();
             var expected = ReadDictionary(operation, "expected"); var capture = ReadDictionary(operation, "capture");
             if (turn == null || expected == null || !new[] { "text", "payload_json", "session_id", "speaker_id" }.All(expected.ContainsKey)
                 || expected.Any(pair => ReadString(turn, pair.Key, "") != Convert.ToString(pair.Value)))
@@ -101,7 +101,7 @@ WHERE t.status IN ('active','source_only') AND t.role IN ('player','player_sourc
             var metadata = TryParseJsonObject(ReadString(turn, "payload_json", "{}"));
             string original = ReadString(capture, "originalText", ""), player = ReadString(turn, "speaker_id", "");
             string sourceTimeline = ReadString(metadata, "timelineId", "");
-            var access = new KnowledgeAccessContext { NpcId = player, TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
+            var access = new Program.KnowledgeAccessContext { NpcId = player, TimelineId = timeline, WorldDay = double.MaxValue, AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             if (original.Length == 0 || ReadString(capture, "sourceHash", "") != ConversationExactTextHash(original)
                 || ReadString(capture, "campaignId", "") != ReadString(manifest, "campaignId", "") || ReadString(capture, "timelineId", "") != sourceTimeline
                 || ReadString(capture, "sessionId", "") != ReadString(turn, "session_id", "") || ReadString(capture, "playerId", "") != player
@@ -114,14 +114,14 @@ WHERE t.status IN ('active','source_only') AND t.role IN ('player','player_sourc
             PreservePlayerInputSource(connection, payload, ReadString(turn, "session_id", ""), ReadString(turn, "event_id", ""),
                 ReadString(turn, "exchange_id", ""), player, ReadString(turn, "speaker_name", "Player"), ReadDouble(turn, "world_day", 0),
                 ReadLong(turn, "ts", 0), ReadString(turn, "location_id", ""));
-            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='source_only';", TestDict("id", sourceId)).Single();
+            var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='source_only';", TestDict("id", sourceId)).Single();
             if (ReadString(source, "text", "") != original) throw new InvalidOperationException("Recovered original failed its exact-content check.");
             var sourceMetadata = TryParseJsonObject(ReadString(source, "payload_json", "{}"));
             sourceMetadata["originalRecovery"] = TestDict("acceptedTurnId", id, "acceptedSourceHash", MemorySpecialistSourceHash(turn),
                 "sourceTimelineId", sourceTimeline, "recoveryTimelineId", timeline,
                 "traceId", ReadString(capture, "traceId", ""), "captureFileSha256", ReadString(capture, "captureFileSha256", ""),
                 "sourceHash", ConversationExactTextHash(original), "npcObserverProjectionChanged", false);
-            ExecuteSql(connection, "UPDATE conversation_turns SET payload_json=$payload WHERE turn_id=$id AND status='source_only';",
+            Program.ExecuteSql(connection, "UPDATE conversation_turns SET payload_json=$payload WHERE turn_id=$id AND status='source_only';",
                 TestDict("id", sourceId, "payload", Json.Serialize(sourceMetadata)));
             return TestDict("kind", "restore_original_input", "turnId", id, "originalSourceId", sourceId,
                 "sourceHash", ConversationExactTextHash(original), "acceptedTextChanged", false, "acceptedMetadataChanged", false,

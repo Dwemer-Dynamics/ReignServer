@@ -50,7 +50,7 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "petitionId and petitionerHeroId are required." };
             string turnId = FirstNonEmpty(ReadString(payload, "turnId", ""),
                 transcriptId + "_" + phase + "_" + Guid.NewGuid().ToString("N"));
-            var memory = Program.PrepareRouteConversationMemory(payload, petitionerHeroId, "ruler_petition", transcriptId, turnId,
+            var memory = DialogueService.PrepareRouteConversationMemory(payload, petitionerHeroId, "ruler_petition", transcriptId, turnId,
                 new[] { petitionerHeroId }, settingsOverride: settingsOverride);
             payload = memory.Payload;
             playerText = phase == "conversation" ? ReadString(payload, "playerText", "") : "";
@@ -80,11 +80,11 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             {
                 ["requestType"] = "ruler_petition_reaction", ["campaignId"] = campaignId,
                 ["correlationId"] = Program.EnsureCorrelationId(payload),
-                ["messages"] = Program.BuildSimplePromptEnvelope("ruler_petition_reaction", phase,
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope("ruler_petition_reaction", phase,
                     "Write the petitioner's bounded visible line and return valid JSON.", prompt.ToString()).Messages,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            Dictionary<string, object> llm = Program.GenerateRouteConversation(memory, request,
+            Dictionary<string, object> llm = DialogueService.GenerateRouteConversation(memory, request,
                 "Private petition: one or two concise sentences, supplied facts and snapshotted terms control. Do not decide for the ruler, execute actions or reopen a completed decision. Current authoritative facts: " + Json.Serialize(facts), 600, responder);
             if (!ReadBool(llm, "ok", false)) return new Dictionary<string, object>
             { ["ok"] = false, ["error"] = ReadString(llm, "error", "Petitioner reaction failed."),
@@ -96,7 +96,7 @@ outcome TEXT NOT NULL DEFAULT '',player_text TEXT NOT NULL DEFAULT '',reply_text
             { ["ok"] = false, ["error"] = "The petitioner returned no visible reaction.",
                 ["transcriptId"] = transcriptId, ["providerCallCount"] = 1 };
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Program.PublishRouteConversation(memory, reply, petitionerName, connection =>
+            DialogueService.PublishRouteConversation(memory, reply, petitionerName, connection =>
             {
                 EnsureRulerPetitionDialogueSchema(connection);
                 Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO ruler_petition_turns(
@@ -108,7 +108,7 @@ VALUES($turn,$campaign,$timeline,$transcript,$petition,$phase,$hero,$name,$kind,
                         ["kind"] = kind, ["severity"] = severity, ["outcome"] = outcome,
                         ["player"] = playerText, ["reply"] = reply, ["ts"] = ts });
             });
-            return Program.CompleteRouteConversationDelivery(memory, new Dictionary<string, object> { ["ok"] = true, ["reply"] = reply,
+            return DialogueService.CompleteRouteConversationDelivery(memory, new Dictionary<string, object> { ["ok"] = true, ["reply"] = reply,
                 ["transcriptId"] = transcriptId, ["turnId"] = turnId, ["phase"] = phase,
                 ["providerCallCount"] = memory.ProviderCalls, ["nativeActions"] = new ArrayList(),
                 ["relationshipAssessments"] = new ArrayList(), ["reputationChanges"] = new ArrayList() });

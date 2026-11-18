@@ -218,7 +218,7 @@ namespace ReignBetaServer
         private static string NarrativeAuthoringFingerprint(Dictionary<string, object> hero,
             Dictionary<string, object> traits, string seed, Dictionary<string, object> blueprint = null)
         {
-            return Program.PromptHash(Json.Serialize(hero) + Json.Serialize(traits) + seed + NarrativeAuthorPolicy
+            return DialogueService.PromptHash(Json.Serialize(hero) + Json.Serialize(traits) + seed + NarrativeAuthorPolicy
                 + Json.Serialize(LoadNarrativeLibrary()) + Json.Serialize(blueprint ?? BuildNarrativeBlueprint(hero, seed, traits)));
         }
 
@@ -275,7 +275,7 @@ namespace ReignBetaServer
                         ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion, ["narrativeSchema"] = NarrativeSchema,
                         ["source"] = source ?? "character_construction", ["constructedUtc"] = DateTime.UtcNow.ToString("o") };
                     Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), ready);
-                    Program.InvalidatePromptRuntimeCache();
+                    DialogueService.InvalidatePromptRuntimeCache();
                     return ready;
                 }
             }

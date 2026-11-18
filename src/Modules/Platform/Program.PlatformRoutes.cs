@@ -143,7 +143,7 @@ namespace ReignBetaServer
             routes.Post("/memory/event", request => MemoryEventApi(request.JsonBody));
             routes.Post("/memory/conversation_finished", request => string.IsNullOrWhiteSpace(ReadFirstString(request.JsonBody, "sessionId", "conversationSessionId", "conversationId"))
                 ? MemoryConversationFinishedApi(request.JsonBody)
-                : ConversationFinishApi(request.JsonBody));
+                : DialogueService.ConversationFinishApi(request.JsonBody));
             routes.Post("/memory/action_result", request => MemoryActionResultApi(request.JsonBody));
             routes.Post("/memory/build_context", request => MemoryBuildContextApi(request.JsonBody));
             routes.Post("/memory/consolidate", request => MemoryConsolidateApi(request.JsonBody));

@@ -38,7 +38,7 @@ namespace ReignBetaServer
         {
             ChatViewOnlyKeys(span, "turnId", "quote", "occurrence", "kind", "start", "length");
             string quote = ReadString(span, "quote", ""), text = ReadString(source, "text", "");
-            if (source.ContainsKey("sourceHash") && ReadString(source, "sourceHash", "") != Program.PromptHash(text))
+            if (source.ContainsKey("sourceHash") && ReadString(source, "sourceHash", "") != DialogueService.PromptHash(text))
                 throw new InvalidDataException("The frozen clothing source digest does not match its words.");
             if (quote.Length < 3 || quote.Length > (moment ? 4000 : 2000)) throw new InvalidDataException("The clothing or moment quotation has an invalid length.");
             int occurrence = ChatViewSpanInteger(span, "occurrence", -1), start = text.IndexOf(quote, StringComparison.Ordinal);
@@ -56,7 +56,7 @@ namespace ReignBetaServer
             if (ChatViewSpanInteger(span, "start", start) != start || ChatViewSpanInteger(span, "length", quote.Length) != quote.Length)
                 throw new InvalidDataException("The supplied quotation offsets do not match its source.");
             return TestDict("turnId", ReadString(source, "turnId", ""), "speakerId", ReadString(source, "speakerId", ""),
-                "start", start, "length", quote.Length, "quote", quote, "sourceHash", Program.PromptHash(text), "kind", ReadString(span, "kind", ""));
+                "start", start, "length", quote.Length, "quote", quote, "sourceHash", DialogueService.PromptHash(text), "kind", ReadString(span, "kind", ""));
         }
 
         internal static List<Dictionary<string, object>> ValidateChatViewWardrobe(Dictionary<string, object> scene,

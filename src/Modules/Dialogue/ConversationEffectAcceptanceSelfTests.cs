@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunConversationEffectAcceptanceSelfTests()
         {
@@ -18,7 +18,7 @@ namespace ReignBetaServer
                 var motive = TestDict("conversationAgency", context);
                 var profile = TestDict("name", "Mira", "isFemale", true, "attributes", TestDict("endurance", 2));
                 string generation;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     EnsureConversationAgencySchema(connection);
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
@@ -38,14 +38,14 @@ namespace ReignBetaServer
                     payload, campaign, "atomic_effect_turn", "dialogue", "npc", request => { providerCalls++; throw new InvalidOperationException("No provider expected."); }, persist: false);
                 var prepared = TryParseJsonObject(ReadString(llm, "content", ""));
                 string reply = ApplyLegacyConversationDrinking(campaign, "npc", payload, profile, null, prepared, ReadString(prepared, "reply", ""), persist: false);
-                int Negotiations() { using var c = OpenCampaignConnection(campaign); return QuerySql(c, "SELECT * FROM conversation_negotiation_turns;").Count; }
-                int Drinks() { using var c = OpenCampaignConnection(campaign); return QuerySql(c, "SELECT * FROM conversation_drinking_turns;").Count; }
-                double Amount() { using var c = OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(QuerySql(c,
+                int Negotiations() { using var c = Program.OpenCampaignConnection(campaign); return Program.QuerySql(c, "SELECT * FROM conversation_negotiation_turns;").Count; }
+                int Drinks() { using var c = Program.OpenCampaignConnection(campaign); return Program.QuerySql(c, "SELECT * FROM conversation_drinking_turns;").Count; }
+                double Amount() { using var c = Program.OpenCampaignConnection(campaign); return ReadDouble(TryParseJsonObject(ReadString(Program.QuerySql(c,
                     "SELECT state_json FROM conversation_intoxication WHERE hero_id='npc';").SingleOrDefault(), "state_json", "{}")), "drinks", 0); }
                 Check("prepare_has_no_negotiation_or_drink_effect", Negotiations() == 0 && Drinks() == 0 && Amount() == 0
                     && ReadString(ReadDictionary(payload, "conversationAgencyReceipt"), "commitState", "") == "prepared");
-                var quietPayload = CloneDictionary(payload);
-                var quietDraft = CloneDictionary(prepared);
+                var quietPayload = Program.CloneDictionary(payload);
+                var quietDraft = Program.CloneDictionary(prepared);
                 quietDraft["beliefWrites"] = new List<Dictionary<string, object>> { TestDict("content", "The player asked about travel.") };
                 var quiet = CommitFinalConversationEffects(campaign, "npc", quietPayload, motive, profile, null, quietDraft, "", generation);
                 Check("quiet_discards_unspoken_effects_preserves_observations", ReadBool(quiet, "ok", false)
@@ -55,8 +55,8 @@ namespace ReignBetaServer
                     && ReadDictionaryList(quietDraft, "beliefWrites").Count == 1 && Negotiations() == 0 && Drinks() == 0);
                 foreach (string earlyReturn in new[] { "quiet", "malformed", "isolated", "missing_turn" })
                 {
-                    var reused = CloneDictionary(payload);
-                    var reusedDraft = CloneDictionary(prepared);
+                    var reused = Program.CloneDictionary(payload);
+                    var reusedDraft = Program.CloneDictionary(prepared);
                     if (earlyReturn == "isolated") reused["governmentCertificationMemoryIsolation"] = true;
                     if (earlyReturn == "missing_turn") { reused.Remove("turnId"); reused.Remove("sceneTurnId"); reused.Remove("correlationId"); }
                     ApplyLegacyConversationDrinking(campaign, "npc", reused, profile, null,
@@ -76,7 +76,7 @@ namespace ReignBetaServer
                     "My household does not matter to me. *She takes a sip of wine.*", generation); }
                 catch (InvalidOperationException) { changedQuoteRejected = true; }
                 Check("final_prose_invalidates_old_negotiation_quote", changedQuoteRejected && Negotiations() == 0 && Drinks() == 0);
-                var replayPayload = CloneDictionary(payload);
+                var replayPayload = Program.CloneDictionary(payload);
                 string finalReply = reply + "\n\n[Reign: Action pending native confirmation.]";
                 var accepted = CommitFinalConversationEffects(campaign, "npc", payload, motive, profile, null, prepared, finalReply, generation);
                 var replay = CommitFinalConversationEffects(campaign, "npc", replayPayload, motive, profile, null, prepared, finalReply, generation);
@@ -84,7 +84,7 @@ namespace ReignBetaServer
                     && Negotiations() == 1 && Drinks() == 1 && Amount() == .25
                     && ReadString(ReadDictionary(accepted, "agency"), "acceptedReplyHash", "") == PromptHash(finalReply)
                     && ReadString(ReadDictionary(accepted, "drinking"), "acceptedReplyHash", "") == PromptHash(finalReply), accepted);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     context["records"] = ReadConversationNegotiations(connection, "agency_timeline", "npc", "player");
                 var stalePayload = Payload("stale_drink_decision");
                 var staleDraft = Draft();
@@ -116,7 +116,7 @@ namespace ReignBetaServer
                 var unpublished = RunPlayerActionTurn(authorityPayload, () => {
                     plannerAllowed = BindConversationAgencyAuthority(authorityPayload, "accept_temporary_party_guest",
                         TestDict("durationDays", 1d), TestDict(), new List<string>());
-                    var row = QueueAction(campaign, TestDict("campaignId", campaign, "source", "dialogue_auto_commit",
+                    var row = Program.QueueAction(campaign, TestDict("campaignId", campaign, "source", "dialogue_auto_commit",
                         "command", "accept_temporary_party_guest", "actorHeroStringId", "npc", "targetHeroStringId", "player",
                         "termsHash", "uncommitted_terms", "termsJson", "{}"));
                     unpublishedId = ReadString(row, "id", "");
@@ -159,7 +159,7 @@ namespace ReignBetaServer
                 structuredDrinkDraft.Remove("proposalDecisions");
                 string structuredDrinkReply = ApplyLegacyConversationDrinking(campaign, "structured_npc", structuredDrinkPayload,
                     profile, null, structuredDrinkDraft, ReadString(structuredDrinkDraft, "reply", ""), persist: false);
-                var structuredDrinkReplayPayload = CloneDictionary(structuredDrinkPayload);
+                var structuredDrinkReplayPayload = Program.CloneDictionary(structuredDrinkPayload);
                 var structuredDrinkAccepted = CommitFinalConversationEffects(campaign, "structured_npc", structuredDrinkPayload,
                     motive, profile, null, structuredDrinkDraft, structuredDrinkReply, generation);
                 var structuredDrinkReplay = CommitFinalConversationEffects(campaign, "structured_npc", structuredDrinkReplayPayload,

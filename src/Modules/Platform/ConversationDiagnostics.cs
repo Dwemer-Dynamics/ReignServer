@@ -169,7 +169,7 @@ namespace ReignBetaServer
                 using (var writer = new StreamWriter(gzip, new UTF8Encoding(false))) writer.Write(text);
                 DiagnosticWriteJson(System.IO.Path.Combine(directory, id + ".json"), new Dictionary<string, object> {
                     ["characters"] = text.Length, ["originalCharacters"] = original.Length,
-                    ["sha256"] = PromptContentHash(text), ["credentialRedacted"] = text != original,
+                    ["sha256"] = DialogueService.PromptContentHash(text), ["credentialRedacted"] = text != original,
                     ["hashScope"] = "retained credential-redacted UTF-8 text", ["complete"] = true
                 });
                 return id;
@@ -388,13 +388,13 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["issues"] = reasons, ["received"] = before, ["result"] = after }, DiagnosticStep.Value?.Id ?? "");
         }
 
-        private static List<string> DiagnosticStructuredIssues(string content, string mode, Dictionary<string, object> request)
+        internal static List<string> DiagnosticStructuredIssues(string content, string mode, Dictionary<string, object> request)
         {
             var issues = new List<string>();
             var parsed = TryParseJsonObject(content);
             if (parsed == null) { issues.Add("The response is not a parseable JSON object."); return issues; }
             if (parsed.Count == 0) { issues.Add("The response is an empty JSON object ({}). It has no dialogue or required decision fields."); return issues; }
-            if (!StructuredActionResponseHasDecision(content, request))
+            if (!DialogueService.StructuredActionResponseHasDecision(content, request))
                 issues.Add("Missing or invalid required structuredActionDecision; a generic dialogue shape does not authorize actions.");
             if (IsConversationStructuredMode(NormalizeLookup(mode).Replace(' ', '_')))
             {

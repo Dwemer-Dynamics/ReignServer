@@ -127,8 +127,8 @@ namespace ReignBetaServer
         internal static bool ShouldRouteCampaignCommandDraft(string campaignId,
             Dictionary<string, object> payload, Dictionary<string, object> hero, string playerText)
         {
-            if (SpeakerInPlayerParty(payload, hero)) return false;
-            if (HasDirectCampaignOrderRequest(playerText)) return true;
+            if (DialogueService.SpeakerInPlayerParty(payload, hero)) return false;
+            if (DialogueService.HasDirectCampaignOrderRequest(playerText)) return true;
             string commanderId = FirstNonEmpty(
                 ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"),
                 ReadFirstString(hero, "heroStringId", "stringId", "id"));

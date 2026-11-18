@@ -2,15 +2,15 @@ using System.Collections.Generic;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static readonly string[] PromptWealthKeys = {
+        internal static readonly string[] PromptWealthKeys = {
             "gold", "goldSemantics", "personalWealthTier", "clanGold", "clanWealthTier",
             "clanTier", "clanRenown", "clanFiefCount", "clanSocialCredit", "canLeanOnClanReputation",
             "partyInventoryValue", "partyInventoryState", "wealthEvidenceBasis", "interpretation"
         };
 
-        private static Dictionary<string, object> PromptWealthFacts(Dictionary<string, object> wealth)
+        internal static Dictionary<string, object> PromptWealthFacts(Dictionary<string, object> wealth)
         {
             var facts = new Dictionary<string, object>(wealth ?? new Dictionary<string, object>());
             // v1/v2 visibleWealthTier was derived from cargo, with absent cargo
@@ -21,7 +21,7 @@ namespace ReignBetaServer
                 facts.Remove("personalWealthTier");
                 if (facts.TryGetValue("gold", out object gold) && gold != null && ReadBool(facts, "economicCapacityKnown", true)
                     && ReadString(facts, "dataState", "") != "unknown")
-                    facts["personalWealthTier"] = WealthTier(ReadInt(facts, "gold", 0));
+                    facts["personalWealthTier"] = Program.WealthTier(ReadInt(facts, "gold", 0));
                 facts["partyInventoryState"] = "unknown_legacy_observation";
                 // Historical nonzero cargo remains a historical fact. An old zero
                 // cannot distinguish no party, observation failure or an empty roster.

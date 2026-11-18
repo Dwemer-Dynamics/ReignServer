@@ -5,13 +5,13 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static Dictionary<string, object> BuildMemoryStagingManifest(ReignDbConnection connection, Dictionary<string, object> request)
         {
             string campaign = ReadString(request, "campaignId", ""), timeline = ReadString(request, "timelineId", "");
             if (campaign.Length == 0 || timeline.Length == 0) throw new InvalidOperationException("Memory staging requires an exact campaign and timeline.");
-            var sessions = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE campaign_id=$campaign AND status IN ('closed','interrupted') ORDER BY session_id;",
+            var sessions = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE campaign_id=$campaign AND status IN ('closed','interrupted') ORDER BY session_id;",
                 new Dictionary<string, object> { ["campaign"] = campaign });
             var requested = ReadStringList(request, "sessionIds");
             if (requested.Count > 0 && requested.Any(id => !sessions.Any(s => ReadString(s, "session_id", "") == id)))
@@ -21,7 +21,7 @@ namespace ReignBetaServer
             foreach (var session in sessions.Where(s => requested.Count == 0 || requested.Contains(ReadString(s, "session_id", ""))))
             {
                 string id = ReadString(session, "session_id", "");
-                var turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;",
+                var turns = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order;",
                     new Dictionary<string, object> { ["id"] = id });
                 if (turns.Count == 0) { unresolved.Add(new Dictionary<string, object> { ["sessionId"] = id, ["reason"] = "empty_source" }); continue; }
                 if (turns.Any(t => { var p = TryParseJsonObject(ReadString(t, "payload_json", "{}")); string recorded = ReadString(p, "timelineId", ""); return recorded.Length > 0 && recorded != timeline; }))
@@ -41,7 +41,7 @@ namespace ReignBetaServer
             {
                 if (!WorldSimulationService.TableExists(connection,table)) continue;
                 string key = table=="summaries" ? "summary_id" : table=="temporal_knowledge_assertions" ? "assertion_id" : table=="beliefs" ? "belief_id" : table=="comprehension" ? "comprehension_id" : "record_id";
-                foreach (var row in QuerySql(connection,"SELECT * FROM "+table+" ORDER BY "+key+";"))
+                foreach (var row in Program.QuerySql(connection,"SELECT * FROM "+table+" ORDER BY "+key+";"))
                 {
                     string id=ReadString(row,key,"");
                     var body=TryParseJsonObject(ReadString(row,"payload_json","{}"));
@@ -78,7 +78,7 @@ namespace ReignBetaServer
             // Topic hints use the same public observation as new scene summaries.
             // IDs and private narration must not become searchable topic words.
             var topics = BuildMemorySummaryTopics(views.Select(view => TestDict("summary", view)), 8);
-            var tags = MergeStringLists(topics, new[] { "scene", "conversation", "reported_speech", "claim_attribution", "interpersonal_history" });
+            var tags = Program.MergeStringLists(topics, new[] { "scene", "conversation", "reported_speech", "claim_attribution", "interpersonal_history" });
             return new Dictionary<string, object> { ["summary"] = summary, ["ownerId"] = owner, ["timelineId"] = timeline,
                 ["stagingVersion"] = "source-linked-scene-v2", ["tags"] = tags,
                 ["sourceHash"] = MemorySourceHash(turns), ["sourceTurnIds"] = turns.Select(t => ReadString(t, "turn_id", "")).ToList(),
@@ -94,9 +94,9 @@ namespace ReignBetaServer
             Dictionary<string, object> manifest, Dictionary<string, object> operation)
         {
             string id = ReadString(operation, "id", ""), timeline = ReadString(manifest, "timelineId", "");
-            var session = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id FOR UPDATE;",
+            var session = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id FOR UPDATE;",
                 new Dictionary<string, object> { ["id"] = id }).SingleOrDefault();
-            var turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order FOR UPDATE;",
+            var turns = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id AND status='active' ORDER BY turn_order FOR UPDATE;",
                 new Dictionary<string, object> { ["id"] = id });
             if (session == null || ReadString(session, "campaign_id", "") != ReadString(manifest, "campaignId", "")
                 || MemorySourceHash(new[] { session }) != ReadString(operation, "expectedSessionHash", "")
@@ -108,15 +108,15 @@ namespace ReignBetaServer
             string summaryId = "precision_scene_" + PromptHash(id + "|" + MemorySourceHash(turns) + "|" + ReadString(prepared, "stagingVersion", "")).Substring(0, 32);
             string summary = ReadString(prepared, "summary", "");
             var tags = ReadStringList(prepared, "tags");
-            var known = turns.SelectMany(t => TextListFromJson(ReadString(t, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var known = turns.SelectMany(t => Program.TextListFromJson(ReadString(t, "participants_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             // A session can contain whispers. A shared summary can be used only
             // by observers present for every source record. Exact turn retrieval
             // continues to expose each narrower audience separately.
             known = known.Where(observer => turns.All(t => ReadString(t, "speaker_id", "") == observer
-                || TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(observer, StringComparer.OrdinalIgnoreCase))).ToList();
+                || Program.TextListFromJson(ReadString(t, "participants_json", "[]")).Contains(observer, StringComparer.OrdinalIgnoreCase))).ToList();
             string owner = ReadString(session, "npc_id", "");
             if (!known.Contains(owner, StringComparer.OrdinalIgnoreCase)) owner = "";
-            ExecuteSql(connection, @"INSERT INTO summaries(summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,
+            Program.ExecuteSql(connection, @"INSERT INTO summaries(summary_id,scope,owner_id,summary_type,summary,source_events_json,start_ts,end_ts,event_count,
 location_id,participants_json,about_entities_json,known_by_json,hidden_from_json,visibility,importance,confidence,tags_json,status,source,vector_id,embedding_status,updated_ts,payload_json,memory_lane)
 VALUES($id,$scope,$owner,'scene',$summary,$events,$start,$end,$count,$location,$known,'[]',$known,'[]','private',0.65,1.0,$tags,'active','precision_staging','','not_indexed',$ts,$payload,'interpersonal_history')
 ON CONFLICT(summary_id) DO NOTHING;", new Dictionary<string, object> {
@@ -125,16 +125,16 @@ ON CONFLICT(summary_id) DO NOTHING;", new Dictionary<string, object> {
                 ["start"] = turns.Min(t => ReadLong(t, "ts", 0)), ["end"] = turns.Max(t => ReadLong(t, "ts", 0)), ["count"] = turns.Count,
                 ["location"] = ReadString(session, "location_id", ""), ["known"] = Json.Serialize(known), ["tags"] = Json.Serialize(tags),
                 ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["payload"] = Json.Serialize(prepared) });
-            InsertSummaryFts(connection, summaryId, summary, tags, known);
+            Program.InsertSummaryFts(connection, summaryId, summary, tags, known);
             int ordinal = 0;
             foreach (var turn in turns) LinkMemorySource(connection, "summary", summaryId, "turn", ReadString(turn, "turn_id", ""), ordinal++);
             LinkMemorySource(connection, "summary", summaryId, "session", id, 0);
             string previous = ReadString(session, "scene_summary_id", "");
             if (previous.Length > 0 && previous != summaryId)
-                ExecuteSql(connection, "UPDATE summaries SET status='superseded' WHERE summary_id=$id;", new Dictionary<string, object> { ["id"] = previous });
-            ExecuteSql(connection, "UPDATE conversation_sessions SET scene_summary_id=$summary WHERE session_id=$id;",
+                Program.ExecuteSql(connection, "UPDATE summaries SET status='superseded' WHERE summary_id=$id;", new Dictionary<string, object> { ["id"] = previous });
+            Program.ExecuteSql(connection, "UPDATE conversation_sessions SET scene_summary_id=$summary WHERE session_id=$id;",
                 new Dictionary<string, object> { ["summary"] = summaryId, ["id"] = id });
-            ExecuteSql(connection, "DELETE FROM memory_projections;");
+            Program.ExecuteSql(connection, "DELETE FROM memory_projections;");
             return new Dictionary<string, object> { ["kind"] = "rebuild_scene_memory", ["sourceId"] = id, ["beforeSummaryId"] = previous,
                 ["afterSummaryId"] = summaryId, ["sourceHash"] = ReadString(prepared, "sourceHash", ""), ["sourceRecords"] = turns.Count,
                 ["sourceRecordsComplete"] = true, ["nativeActionsReplayed"] = false };

@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static Dictionary<string, object> CurrentSpeakerGuest(Dictionary<string, object> payload, Dictionary<string, object> hero)
             => TemporaryGuestDialogueContext(payload, FirstNonEmpty(
@@ -16,14 +16,14 @@ namespace ReignBetaServer
             => ReadBool(guest, "inMainParty", false)
                 && new[] { "Active", "ReviewDue" }.Contains(ReadString(guest, "phase", ""));
 
-        private static string ContextualTemporaryGuestCommand(string command, Dictionary<string, object> gate,
+        internal static string ContextualTemporaryGuestCommand(string command, Dictionary<string, object> gate,
             string playerText, Dictionary<string, object> payload, Dictionary<string, object> hero)
         {
             if (!string.Equals(ReadString(gate, "commitment", ""), "accepted", StringComparison.OrdinalIgnoreCase)) return "";
             var guest = CurrentSpeakerGuest(payload, hero);
             if (command == "end_temporary_party_guest" || command == "acknowledge_own_faction_combat_risk") return command;
-            string intent = NormalizeLookup(ReadString(gate, "intent", ""));
-            string exchange = intent + " " + NormalizeLookup(playerText);
+            string intent = Program.NormalizeLookup(ReadString(gate, "intent", ""));
+            string exchange = intent + " " + Program.NormalizeLookup(playerText);
             // Native identity decides join versus renewal; broad role labels must not erase a renewal.
             // These signals classify an already accepted gate, never manufacture consent from player speech.
             bool guestIntent = command == "accept_temporary_party_guest" || command == "renew_temporary_party_guest"
@@ -38,7 +38,7 @@ namespace ReignBetaServer
             return command == "renew_temporary_party_guest" ? "" : command;
         }
 
-        private static void BindTemporaryGuestActionTerms(string command, Dictionary<string, object> terms,
+        internal static void BindTemporaryGuestActionTerms(string command, Dictionary<string, object> terms,
             Dictionary<string, object> payload, Dictionary<string, object> hero)
         {
             if (command != "renew_temporary_party_guest" && command != "end_temporary_party_guest") return;
@@ -52,7 +52,7 @@ namespace ReignBetaServer
 
         // This is a read-time projection of native saved state, scoped to this speaker and turn.
         // It never changes a guest record or treats the player's narration as NPC consent.
-        private static Dictionary<string, object> TemporaryGuestDialogueContext(Dictionary<string, object> payload, string heroId)
+        internal static Dictionary<string, object> TemporaryGuestDialogueContext(Dictionary<string, object> payload, string heroId)
         {
             var context = ReadDictionary(payload, "temporaryPartyGuest");
             double day = ReadDouble(payload, "worldDay", 0d);
@@ -70,7 +70,7 @@ namespace ReignBetaServer
                 return null;
             var projected = new Dictionary<string, object>();
             foreach (string key in new[] { "heroId", "agreementId", "purpose", "termKind", "phase", "returnSettlementId", "wageRecipientHeroId", "reviewActionStatus", "reviewActionMessage" })
-                projected[key] = LimitText(ReadString(context, key, ""), key == "purpose" ? 400 : 160);
+                projected[key] = Program.LimitText(ReadString(context, key, ""), key == "purpose" ? 400 : 160);
             foreach (string key in new[] { "inMainParty", "temporarilyExcludedFromBattle", "departureDeferredForChat" })
                 projected[key] = ReadBool(context, key, false);
             foreach (string key in new[] { "startedDay", "reviewDueDay", "agreementRevision", "returnDueDay", "observedWorldDay", "wageGold", "wagePeriodDays", "wageNextDueDay", "wageArrearsGold" })
@@ -112,8 +112,8 @@ namespace ReignBetaServer
             string reply = ReadString(parsed, "reply", "").Replace('’', '\'');
             string player = ReadFirstString(payload, "playerText", "text", "message");
             var gate = ReadDictionary(parsed, "actionGate");
-            bool endAccepted = ActionGateShouldPlan(gate)
-                && TemporaryPartyGuestCandidateToPreserve(gate, player) == "end_temporary_party_guest";
+            bool endAccepted = Program.ActionGateShouldPlan(gate)
+                && Program.TemporaryPartyGuestCandidateToPreserve(gate, player) == "end_temporary_party_guest";
             Action<string, string> add = (code, explanation) => result.Add(new Dictionary<string, object>
             { ["type"] = "temporary_guest_" + code, ["instruction"] = explanation });
 

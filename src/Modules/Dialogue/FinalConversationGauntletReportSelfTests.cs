@@ -4,9 +4,9 @@ using System.IO;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             RunFinalConversationGauntletReportSelfTests()
         {
             List<Dictionary<string, object>> checks =
@@ -59,7 +59,7 @@ namespace ReignBetaServer
                     connection, runId, "ADV-001",
                     FinalGauntletCaseState.Running,
                     FinalGauntletCaseState.ProviderExhausted);
-                ExecuteSql(
+                Program.ExecuteSql(
                     connection,
                     @"INSERT INTO final_gauntlet_assertions(
 run_id,case_instance_id,assertion_id,passed,payload_json,created_ts)
@@ -69,7 +69,7 @@ VALUES($run,'ADV-001','secret_leak',0,'{}',$ts);",
                         ["run"] = runId,
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
-                ExecuteSql(
+                Program.ExecuteSql(
                     connection,
                     @"INSERT INTO final_gauntlet_evidence(
 run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
@@ -81,7 +81,7 @@ VALUES($run,'ADV-001','complete',3,$payload,$ts);",
                             "{\"sourceAuditEntries\":[{\"role\":\"player\",\"speaker\":\"Tester\",\"text\":\"Remember the bronze coffer.\"},{\"role\":\"npc\",\"speaker\":\"Witness\",\"text\":\"I heard you mention the bronze coffer.\"}]}",
                         ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                     });
-                ExecuteSql(
+                Program.ExecuteSql(
                     connection,
                     @"INSERT INTO final_gauntlet_provider_calls(
 run_id,provider_call_id,case_instance_id,correlation_id,request_type,
@@ -121,7 +121,7 @@ VALUES($run,'pc-1','ADV-001','corr-1','dialogue','model-a',1,1,
                         && Directory.Exists(Path.Combine(root, "evidence"))
                         && Directory.Exists(Path.Combine(root, "replays")),
                     "The campaign test-data export contains every required report artifact.");
-                List<Dictionary<string, object>> reviewRows = QuerySql(
+                List<Dictionary<string, object>> reviewRows = Program.QuerySql(
                     connection,
                     "SELECT review_id FROM final_gauntlet_review_items WHERE run_id=$run;",
                     new Dictionary<string, object> { ["run"] = runId });
@@ -136,7 +136,7 @@ VALUES($run,'pc-1','ADV-001','corr-1','dialogue','model-a',1,1,
                             root, "review-answer-key.private.json")),
                     "Repeated exports retain stable blinded IDs and keep the answer key separate.");
                 Dictionary<string, object> reviewPack =
-                    ReadJsonObject(Path.Combine(root, "review-pack.json"));
+                    Program.ReadJsonObject(Path.Combine(root, "review-pack.json"));
                 List<Dictionary<string, object>> reviewItems =
                     ReadDictionaryList(reviewPack, "items");
                 add(
@@ -146,7 +146,7 @@ VALUES($run,'pc-1','ADV-001','corr-1','dialogue','model-a',1,1,
                             reviewItems[0], "transcript").Count == 2,
                     "Review selections contain actual dialogue and never empty placeholder transcripts.");
                 Dictionary<string, object> exported =
-                    ReadJsonObject(Path.Combine(root, "report.json"));
+                    Program.ReadJsonObject(Path.Combine(root, "report.json"));
                 Dictionary<string, object> budget =
                     ReadDictionary(exported, "providerBudget");
                 add(

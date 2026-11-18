@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // These legacy producer phases synchronously publish a crier article.
         // major_world alone never establishes publicity for another producer.
@@ -21,15 +21,15 @@ namespace ReignBetaServer
         private static void EnsurePublicWorldNewsKnowledge(ReignDbConnection connection)
         {
             const string marker = "public_world_news_legacy_rules_v2";
-            if (ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
+            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
             // Derived access only, never rewriting a source, deadline or article.
-            foreach (var row in QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE e.is_complete=1 AND " + PublicWorldHistorySql)
+            foreach (var row in Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE e.is_complete=1 AND " + PublicWorldHistorySql)
                 .Where(ValidPublicWorldHistory))
-                ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
+                Program.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
 (rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
 VALUES($rule,$event,'global','all',$day,'public_world_news',1) ON CONFLICT(rule_id) DO NOTHING;",
                     TestDict("rule", ReadString(row, "event_id", "") + ":public_world_news", "event", ReadString(row, "event_id", ""), "day", ReadDouble(row, "world_day", 0)));
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
 
         internal static bool ValidPublicWorldHistory(Dictionary<string, object> row)
@@ -59,7 +59,7 @@ VALUES($rule,$event,'global','all',$day,'public_world_news',1) ON CONFLICT(rule_
         }
 
         private static List<Dictionary<string, object>> LoadPublicWorldNews(ReignDbConnection connection,
-            string timeline, double day, KnowledgeAccessContext observer, string topic)
+            string timeline, double day, Program.KnowledgeAccessContext observer, string topic)
         {
             var args = TestDict("timeline", timeline, "day", day, "topic", topic ?? "");
             string visible = PublicWorldHistoryTimelineScope(connection, timeline, observer.AsOfWorldHistorySequence, args)
@@ -78,11 +78,11 @@ VALUES($rule,$event,'global','all',$day,'public_world_news',1) ON CONFLICT(rule_
             }
             // Public announcements have their own ambient budget; tournament
             // traffic cannot displace the latest sentence or other public news.
-            Add(DistinctPublicWorldHistory(QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
+            Add(DistinctPublicWorldHistory(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
                 + " ORDER BY CASE WHEN e.event_type LIKE 'tournament_%' THEN 1 ELSE 0 END,e.world_day DESC,e.sequence DESC LIMIT 24;", args)).Take(6), false);
             // Resolve named subjects against the full eligible public archive,
             // before any ambient limit. Word boundaries prevent Ira/Tirana aliasing.
-            var subjects = QuerySql(connection, @"SELECT DISTINCT n.entity_id,n.name_snapshot FROM world_history_entities n
+            var subjects = Program.QuerySql(connection, @"SELECT DISTINCT n.entity_id,n.name_snapshot FROM world_history_entities n
 JOIN world_history_events e ON e.event_id=n.event_id WHERE " + visible + @"
 AND LENGTH(n.name_snapshot)>=3 AND LOWER($topic) LIKE '%' || LOWER(n.name_snapshot) || '%';", args)
                 .Where(n => Regex.IsMatch(topic ?? "", @"(?<![\p{L}\p{Nd}])" + Regex.Escape(ReadString(n, "name_snapshot", ""))
@@ -91,17 +91,17 @@ AND LENGTH(n.name_snapshot)>=3 AND LOWER($topic) LIKE '%' || LOWER(n.name_snapsh
             if (subjects.Count > 0)
             {
                 args["subjects"] = Json.Serialize(subjects);
-                Add(QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible + @"
+                Add(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible + @"
 AND EXISTS(SELECT 1 FROM world_history_entities n JOIN jsonb_array_elements_text(CAST($subjects AS jsonb)) s
 ON s.value=n.entity_id WHERE n.event_id=e.event_id) ORDER BY e.world_day DESC,e.sequence DESC;", args), true);
             }
             // Topic recall also searches every public category without depending
             // on a world-affairs routing decision or vector availability.
-            string fts = BuildFtsQuery(MemoryQueryTerms(topic));
+            string fts = Program.BuildFtsQuery(Program.MemoryQueryTerms(topic));
             if (fts.Length > 0)
             {
                 args["query"] = fts;
-                Add(QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
+                Add(Program.QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
 WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DESC,e.sequence DESC LIMIT 24;", args), true);
             }
             return DistinctPublicWorldHistory(rows.Values).Where(row => !observer.PlayerIdentityUnknown || !WorldSimulationService.QueryWorldHistoryEntities(connection,
@@ -166,7 +166,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
             long ceiling = sequence;
             for (int depth = 0; depth < 32; depth++)
             {
-                var branch = QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$branch;", TestDict("branch", timeline)).SingleOrDefault();
+                var branch = Program.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$branch;", TestDict("branch", timeline)).SingleOrDefault();
                 string parent = ReadString(branch, "parent_timeline_id", "");
                 if (parent.Length == 0) break;
                 if (!seen.Add(parent)) return "(" + current + ")";
@@ -205,29 +205,29 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
         internal static void EnsureImmediateTournamentKnowledge(ReignDbConnection connection)
         {
             const string marker = "world_history_immediate_tournament_news_v1";
-            if (ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;",
+            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;",
                 new Dictionary<string, object> { ["key"] = marker }).FirstOrDefault(), "value", "") == "1") return;
 
             // Add derived access rules to the existing events. Never rewrite an
             // outcome, duplicate an event, or publish a participant-only event.
-            ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
+            Program.ExecuteSql(connection, @"INSERT INTO world_history_knowledge_rules
 (rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
 SELECT event_id || ':public_tournament_news',event_id,'global','all',world_day,'public_tournament_news',1
 FROM world_history_events WHERE event_type IN ('tournament_started','tournament_finished')
 AND dissemination_class IN ('ordinary','major_world')
 ON CONFLICT(rule_id) DO UPDATE SET available_day=excluded.available_day;");
-            ExecuteSql(connection, @"UPDATE world_history_knowledge_rules SET available_day=
+            Program.ExecuteSql(connection, @"UPDATE world_history_knowledge_rules SET available_day=
 (SELECT e.world_day FROM world_history_events e WHERE e.event_id=world_history_knowledge_rules.event_id)
 WHERE acquisition_mode IN ('realm_news','major_world_news') AND event_id IN
 (SELECT event_id FROM world_history_events WHERE event_type IN ('tournament_started','tournament_finished')
 AND dissemination_class IN ('ordinary','major_world'));");
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');",
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');",
                 new Dictionary<string, object> { ["key"] = marker });
         }
 
-        private static List<Dictionary<string, object>> LoadKnownWorldHistoryForDialogue(
+        internal static List<Dictionary<string, object>> LoadKnownWorldHistoryForDialogue(
             ReignDbConnection connection, string timelineId, double worldDay,
-            KnowledgeAccessContext knowledge, string topic, Dictionary<string, object> route,
+            Program.KnowledgeAccessContext knowledge, string topic, Dictionary<string, object> route,
             Dictionary<string, object> semanticSearch, bool verifiedInterlocutor)
         {
             var result = new List<Dictionary<string, object>>();
@@ -273,12 +273,12 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom) OR k.audience_type='gl
 
             if (recognize)
             {
-                documentedPlayerTournamentWins = ReadInt(QuerySql(connection,
+                documentedPlayerTournamentWins = ReadInt(Program.QuerySql(connection,
                     "SELECT COUNT(DISTINCT e.event_id) AS count FROM world_history_events e WHERE " + visible + @"
 AND e.event_type='tournament_finished'
 AND EXISTS(SELECT 1 FROM world_history_entities n WHERE n.event_id=e.event_id
 AND n.entity_id=$player AND n.role LIKE '%winner%');", parameters).FirstOrDefault(), "count", 0);
-                var achievements = QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE " + visible + @"
+                var achievements = Program.QuerySql(connection, @"SELECT e.* FROM world_history_events e WHERE " + visible + @"
 AND e.event_type='tournament_finished'
 AND EXISTS(SELECT 1 FROM world_history_entities n WHERE n.event_id=e.event_id
 AND n.entity_id=$player AND n.role LIKE '%winner%')
@@ -287,20 +287,20 @@ ORDER BY CASE WHEN e.location_id=$location THEN 0 ELSE 1 END,e.sequence DESC LIM
                 foreach (var row in achievements) recognitionIds.Add(ReadString(row, "event_id", ""));
             }
 
-            List<string> terms = MemoryQueryTerms(topic);
-            bool tournamentQuestion = ContainsAny((topic ?? "").ToLowerInvariant(), "tournament", "champion", "arena");
+            List<string> terms = Program.MemoryQueryTerms(topic);
+            bool tournamentQuestion = Program.ContainsAny((topic ?? "").ToLowerInvariant(), "tournament", "champion", "arena");
             if (worldQuestion)
             {
                 if (tournamentQuestion)
-                    add(QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
+                    add(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
                         + @" AND e.event_type IN ('tournament_started','tournament_finished')
 ORDER BY CASE WHEN e.location_id=$location THEN 0 ELSE 1 END,e.sequence DESC LIMIT 24;", parameters));
 
-                string ftsQuery = BuildFtsQuery(terms);
+                string ftsQuery = Program.BuildFtsQuery(terms);
                 if (!string.IsNullOrWhiteSpace(ftsQuery))
                 {
                     parameters["query"] = ftsQuery;
-                    add(QuerySql(connection, @"SELECT e.* FROM world_history_fts
+                    add(Program.QuerySql(connection, @"SELECT e.* FROM world_history_fts
 JOIN world_history_events e ON e.event_id=world_history_fts.event_id
 WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                         + " ORDER BY e.sequence DESC LIMIT 48;", parameters));
@@ -324,7 +324,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                 }
                 if (ids.Count > 0)
                 {
-                    add(QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
+                    add(Program.QuerySql(connection, "SELECT e.* FROM world_history_events e WHERE " + visible
                         + " AND " + eligible + " AND e.event_id IN (" + string.Join(",", ids) + ");", parameters));
                     foreach (var pair in scores)
                         if (candidates.TryGetValue(pair.Key, out var row)) row["vectorSemanticScore"] = pair.Value;
@@ -351,7 +351,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                 bool aboutPlayer = entities.Any(e => ReadString(e, "entity_id", "").Equals(knowledge.PlayerId, StringComparison.OrdinalIgnoreCase));
                 if (knowledge.PlayerIdentityUnknown && (aboutPlayer || entities.Any(e =>
                     ReadString(e, "entity_id", "") == "main_hero" || ReadString(e, "entity_id", "") == "player_hero"))) continue;
-                if (!UnknownIdentityMemoryEvidenceAllowed(row, knowledge, ReadString(row, "summary", ""))) continue;
+                if (!Program.UnknownIdentityMemoryEvidenceAllowed(row, knowledge, ReadString(row, "summary", ""))) continue;
                 double accessDay = ReadString(row, "event_type", "") == "tournament_finished"
                     && ReadString(row, "source", "") == "bannerlord_native"
                     ? Math.Max(worldDay, Math.Min(worldDay + 0.005d, ReadDouble(row, "world_day", worldDay))) : worldDay;
@@ -389,7 +389,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
 
         private const string KnownWorldHistoryRules = "These recorded game events are known to this NPC. Public news establishes the reported result, not personal attendance; allegations remain allegations. Later dated outcomes supersede earlier schedules without erasing history. The current briefing is a selection, never proof that no other public news exists. A firsthand participant competed in that event and must not describe it as merely heard news. A named winning teammate won with the champion; do not say that teammate lost, was eliminated, or failed to finish. When relevant to a verified introduction, connect the supplied achievement to that person; do not treat it as an unsupported boast. Do not invent additional feats or witnesses.";
 
-        private static string FormatKnownWorldHistoryForDialogue(List<Dictionary<string, object>> events, int maxChars, bool includeRules = true)
+        internal static string FormatKnownWorldHistoryForDialogue(List<Dictionary<string, object>> events, int maxChars, bool includeRules = true)
         {
             if (events == null || events.Count == 0) return "";
             // A direct archive answer is not constrained by the ambient briefing
@@ -413,8 +413,8 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                 string line = "- [" + basis + "; day " + ReadDouble(row, "world_day", 0d).ToString("0.###", CultureInfo.InvariantCulture)
                     + "; event " + ReadString(row, "event_id", "") + "] "
                     + (ReadBool(row, "publicWorldNews", false) ? "Public announcement: "
-                        + (ReadBool(row, "publicDirectRecall", false) ? ReadString(row, "summary", "") : LimitText(ReadString(row, "summary", ""), 800))
-                        : LimitText(ReadString(row, "summary", ""), 450)) + teamFact;
+                        + (ReadBool(row, "publicDirectRecall", false) ? ReadString(row, "summary", "") : Program.LimitText(ReadString(row, "summary", ""), 800))
+                        : Program.LimitText(ReadString(row, "summary", ""), 450)) + teamFact;
                 if (text.Length + line.Length + 2 > maxChars) continue;
                 text.AppendLine(line);
             }

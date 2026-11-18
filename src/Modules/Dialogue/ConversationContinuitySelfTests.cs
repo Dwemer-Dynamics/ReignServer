@@ -5,13 +5,13 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
 
         private static void RunConversationCapacitySelfTests(Action<string, bool, object> add)
         {
             RunCodexConversationCapacitySelfTests(add);
-            add("capacity_lab_metadata_io_disabled", !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+            add("capacity_lab_metadata_io_disabled", !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                 && FetchConversationModelCatalog() == null, null);
             const string model = "z-ai/glm-5.2";
             string metadata = Json.Serialize(TestDict("data", new[] {
@@ -20,7 +20,7 @@ namespace ReignBetaServer
             int fetches = 0;
             bool outage = false;
             var catalog = new ConversationCapacityCatalog(() => { fetches++; if (outage) throw new System.Net.Http.HttpRequestException("fixture outage"); return metadata; }, () => clock);
-            var settings = TestDict("llmProvider", NanoGptProvider, "dialogueModel", model, "eventsModel", model);
+            var settings = TestDict("llmProvider", Program.NanoGptProvider, "dialogueModel", model, "eventsModel", model);
             var messages = new List<Dictionary<string, object>> { TestDict("role", "user", "content", "required_latest") };
             var body = TestDict("model", model, "messages", messages, "max_tokens", 8000, "response_format", TestDict("type", "json_object"));
             var payload = TestDict("promptEnvelope", TestDict("continuityPreflight", TestDict("requiredSourceIds", new[] { "required_latest" })));
@@ -204,20 +204,20 @@ namespace ReignBetaServer
             clock = clock.AddSeconds(31);
             outage = false;
             add("capacity_recovers_after_metadata_outage", catalog.Read(model) != null && fetches == 3, fetches);
-            var explicitSettings = TestDict("llmProvider", NanoGptProvider, "verifiedConversationContextWindows",
+            var explicitSettings = TestDict("llmProvider", Program.NanoGptProvider, "verifiedConversationContextWindows",
                 TestDict(ReadString(discovered, "routeKey", ""), TestDict("endpoint", PortraitsService.NanoGptChatCompletionsUrl, "model", model,
                 "contextTokens", 1048576, "source", "fixture", "validUntilUtc", DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o"))));
             add("capacity_expired_explicit_certificate_not_overridden", !ReadBool(BuildContinuityProviderPreflight(explicitSettings, payload,
                 body, PortraitsService.NanoGptChatCompletionsUrl, model, catalog), "capacityVerified", true), null);
         }
 
-        private static void RunCodexConversationCapacitySelfTests(Action<string, bool, object> add)
+        internal static void RunCodexConversationCapacitySelfTests(Action<string, bool, object> add)
         {
             var previous = CodexCapacityMetadataOverride.Value;
             string Catalog(int context, int percent = 95) => Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"),
                 "client_version", "0.162.0", "models", new[] { TestDict("slug", "gpt-capacity-fixture", "context_window", context,
                     "effective_context_window_percent", percent) }));
-            var settings = TestDict("llmProvider", CodexSubscriptionProvider, "dialogueModel", "gpt-capacity-fixture", "eventsModel", "gpt-capacity-fixture");
+            var settings = TestDict("llmProvider", Program.CodexSubscriptionProvider, "dialogueModel", "gpt-capacity-fixture", "eventsModel", "gpt-capacity-fixture");
             const string endpoint = "codex-app-server://local";
             try
             {
@@ -243,7 +243,7 @@ namespace ReignBetaServer
                         endpoint, "gpt-capacity-fixture"), "fits", true), null);
                     add("codex_capacity_assembly_matches_provider_" + context,
                         CanonicalJson(ResolveConversationPromptCapacity(TestDict(), "dialogue", settings)) ==
-                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
+                        CanonicalJson(ResolveConversationCapacity(settings, TestDict("max_tokens", Program.StructuredDialogueResponseMaxTokens(settings)), endpoint, "gpt-capacity-fixture")), null);
                 }
                 var smallBody = TestDict("messages", new[] { TestDict("role", "user", "content", new string('x', 300000)) }, "max_tokens", 8000);
                 foreach (string metadata in new[] { "{", "null", Catalog(0), Catalog(500000, 101), Catalog(500000, 0),
@@ -275,19 +275,19 @@ namespace ReignBetaServer
             results.AddRange(RunPromptEvidenceAllocationAssertions());
             Action<string, bool, object> add = (id, pass, data) => results.Add(TestDict(
                 "caseId", "continuity_" + id, "passed", pass, "summary", id, "data", data));
-            var observer = new KnowledgeAccessContext { NpcId = "npc_b" };
+            var observer = new Program.KnowledgeAccessContext { NpcId = "npc_b" };
             var legacyBelief = TestDict("believer_id", "npc_a", "known_by_json", "[\"npc_a\",\"npc_b\"]", "visibility", "public");
-            add("foreign_private_belief_stays_private", !KnowledgeRowVisibleToNpc("beliefs", legacyBelief, observer), null);
+            add("foreign_private_belief_stays_private", !Program.KnowledgeRowVisibleToNpc("beliefs", legacyBelief, observer), null);
             var legacyThought = TestDict("owner_id", "npc_a", "known_by_json", "[\"npc_a\",\"npc_b\"]");
-            add("foreign_comprehension_stays_private", !KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
+            add("foreign_comprehension_stays_private", !Program.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
             legacyThought["owner_id"] = "npc_b";
-            add("own_comprehension_retained", KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
+            add("own_comprehension_retained", Program.KnowledgeRowVisibleToNpc("comprehension", legacyThought, observer), null);
             add("legacy_interpretation_is_private_mental_state", IsPrivateMentalLayer("interpretation"), null);
             var naturalIdentity = TestDict("canonicalNameAllowed", true, "authorityView", TestDict("currentSettlementName", "Akkalat"));
             var meaningfulState = TestDict("currentCrisis", "A father's silence — acknowledged aloud but not resolved");
             var preservedState = SanitizeConversationStateForVerifiedIdentity(meaningfulState, naturalIdentity, TestDict());
             add("crisis_dash_is_not_a_scene_heading", ReadString(preservedState, "currentCrisis", "") == ReadString(meaningfulState, "currentCrisis", ""), preservedState);
-            var authored = PrepareStructuredWrites(new List<Dictionary<string, object>> { TestDict("claim", "I am worried.",
+            var authored = Program.PrepareStructuredWrites(new List<Dictionary<string, object>> { TestDict("claim", "I am worried.",
                 "believer", "npc_b", "known_by", new[] { "npc_b", "player" }, "visibility", "public") },
                 "npc_a", "player", "town", "dialogue", "belief", new List<string> { "npc_b" }).Single();
             add("speaker_owns_hidden_metadata", ReadString(authored, "believer", "") == "npc_a"
@@ -311,29 +311,29 @@ namespace ReignBetaServer
                 "status", "open", "meaning", "Their relationship matters to her.", "nextStep", "Ask him when they meet.",
                 "completionCriterion", "Understand his silence", "triggerPeople", new[] { "father" }, "triggerPlaces", new[] { "town_a" },
                 "importance", 0.9d, "evidenceQuote", quote, "expectedRevision", 0);
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 // Older/new campaigns initialize these legacy stores lazily. A
                 // read projection must work without creating any of them.
-                ExecuteSql(connection, "BEGIN;");
+                Program.ExecuteSql(connection, "BEGIN;");
                 try
                 {
                     foreach (string table in new[] { "court_social_signal_evidence", "relationship_milestones",
                         "conversation_relationship_receipts", "memories", "conversation_turns", "conversation_sessions" })
-                        if (WorldSimulationService.TableExists(connection, table)) ExecuteSql(connection, "ALTER TABLE " + table + " RENAME TO continuity_absent_" + table + ";");
+                        if (WorldSimulationService.TableExists(connection, table)) Program.ExecuteSql(connection, "ALTER TABLE " + table + " RENAME TO continuity_absent_" + table + ";");
                     var missingSources = new List<string>();
                     string emptyFoundation = BuildEstablishedRelationshipContinuity(connection, campaign, "timeline_a", "npc_a", "player", missingSources, 20d);
                     add("optional_legacy_stores_may_all_be_absent", emptyFoundation.Length == 0 && missingSources.Count == 0
                         && !WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"), null);
                 }
-                finally { ExecuteSql(connection, "ROLLBACK;"); }
+                finally { Program.ExecuteSql(connection, "ROLLBACK;"); }
                 var first = StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "event_1", quote,
                     new List<Dictionary<string, object>> { concern }, 1);
                 string id = ReadStringList(first, "applied").Single();
                 var retry = StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "event_1", quote,
                     new List<Dictionary<string, object>> { concern }, 1);
                 add("accepted_turn_retry_idempotent", ReadStringList(retry, "applied").Count == 1
-                    && QuerySql(connection, "SELECT * FROM conversation_continuity_versions;").Count == 1, retry);
+                    && Program.QuerySql(connection, "SELECT * FROM conversation_continuity_versions;").Count == 1, retry);
                 StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "horse_event", "I will prepare the horse.",
                     new List<Dictionary<string, object>>(), 2);
                 string prompt = BuildProtectedConversationContinuity(campaign, "npc_a", payload, TestDict());
@@ -356,8 +356,8 @@ namespace ReignBetaServer
                 add("server_binds_read_revision_despite_model_increment", ReadStringList(correction, "applied").Contains(id)
                     && ReadString(ReadDictionaryList(correction, "writeReceipts").FirstOrDefault(), "revisionBinding", "") == "server_read_snapshot", correction);
                 add("resolution_keeps_history_leaves_active_prompt", !BuildProtectedConversationContinuity(campaign, "npc_a", payload, TestDict()).Contains(quote)
-                    && QuerySql(connection, "SELECT * FROM conversation_continuity_versions;").Count == 2, null);
-                var correctedRow = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", id)).Single();
+                    && Program.QuerySql(connection, "SELECT * FROM conversation_continuity_versions;").Count == 2, null);
+                var correctedRow = Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", id)).Single();
                 add("accepted_source_never_uses_previous_scene_turn", ReadString(correctedRow, "source_event_id", "") == "event_5"
                     && ReadString(correctedRow, "source_turn_id", "") != "accepted_turn_1", correctedRow);
 
@@ -373,7 +373,7 @@ namespace ReignBetaServer
                     "He explained it and I understand now.", new List<Dictionary<string, object>> { stale }, 7);
                 add("genuine_intervening_revision_is_not_rebased", ReadStringList(interveningReceipt, "applied").Contains(id)
                     && ReadDictionaryList(concurrent, "rejected").Any(r => ReadString(r, "reason", "") == "concurrent_revision_changed")
-                    && ReadInt(QuerySql(connection, "SELECT revision FROM conversation_continuity WHERE record_id=$id;", TestDict("id", id)).Single(), "revision", 0) == 3, concurrent);
+                    && ReadInt(Program.QuerySql(connection, "SELECT revision FROM conversation_continuity WHERE record_id=$id;", TestDict("id", id)).Single(), "revision", 0) == 3, concurrent);
 
                 string splitReply = "I understand your answer. *She sets down the cup without drinking.* That question is answered.";
                 var splitWrite = new Dictionary<string, object>(concern) { ["id"] = "split_evidence_episode", ["kind"] = "episode",
@@ -409,7 +409,7 @@ namespace ReignBetaServer
                 // known-by list. Filtering must happen before recent-row limits.
                 EnsureTemporalKnowledgeGraphSchema(connection);
                 for (int i = 0; i < 105; i++)
-                    ExecuteSql(connection, @"INSERT INTO temporal_knowledge_assertions(assertion_id,campaign_id,fact_key,claim,perspective_owner_id,assertion_kind,truth_status,valid_from_ts,observed_ts,known_by_json,visibility,source_event_id)
+                    Program.ExecuteSql(connection, @"INSERT INTO temporal_knowledge_assertions(assertion_id,campaign_id,fact_key,claim,perspective_owner_id,assertion_kind,truth_status,valid_from_ts,observed_ts,known_by_json,visibility,source_event_id)
 VALUES($id,$campaign,$id,$claim,$owner,'interpretation','asserted',1,$ts,'[""npc_a"",""npc_b""]','public','legacy_source');",
                         TestDict("id", "legacy_" + i, "campaign", campaign, "claim", i == 0 ? "Own concern about the journey." : "Foreign concern about the journey.",
                             "owner", i == 0 ? "npc_b" : "npc_a", "ts", i + 1));
@@ -417,7 +417,7 @@ VALUES($id,$campaign,$id,$claim,$owner,'interpretation','asserted',1,$ts,'[""npc
                 add("legacy_private_filter_precedes_candidate_limit", mental.Count == 1 && ReadString(mental[0], "assertion_id", "") == "legacy_0", mental);
                 add("legacy_interpretation_keeps_epistemic_label", FormatTemporalKnowledgeForPrompt(mental).Contains("interpretation, owner=npc_b"), null);
 
-                ExecuteSql(connection, @"INSERT INTO court_social_signal_evidence(campaign_id,timeline_id,exchange_id,signal_id,signal_type,speaker_id,target_id,supporting_quote,accepted,created_ts)
+                Program.ExecuteSql(connection, @"INSERT INTO court_social_signal_evidence(campaign_id,timeline_id,exchange_id,signal_id,signal_type,speaker_id,target_id,supporting_quote,accepted,created_ts)
 VALUES($campaign,'timeline_a','shared_night','pair_intimacy','sexual_intimacy_completed','npc_a','player','Accepted private shared intimacy between this pair.',1,1);", TestDict("campaign", campaign));
                 string foundation = BuildProtectedConversationContinuity(campaign, "npc_a", payload, TestDict());
                 add("existing_pair_intimacy_dominates_unrelated_topic", foundation.Contains("pair_intimacy") && foundation.Contains("FOUNDATIONAL SHARED INTIMACY"), null);
@@ -430,7 +430,7 @@ VALUES($campaign,'timeline_a','shared_night','pair_intimacy','sexual_intimacy_co
                 StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "parent_event", quote, new List<Dictionary<string, object>> { parent }, 6);
                 var step = new Dictionary<string, object>(concern) { ["id"] = "child_step", ["parentId"] = "parent_concern", ["subject"] = "Reach the family town", ["status"] = "resolved", ["transitionReason"] = "We arrived." };
                 StoreAcceptedConversationContinuity(connection, payload, "npc_a", "player", "step_event", quote, new List<Dictionary<string, object>> { step }, 7);
-                add("completed_step_does_not_resolve_parent", QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='parent_concern' AND status='open';").Count == 1, null);
+                add("completed_step_does_not_resolve_parent", Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='parent_concern' AND status='open';").Count == 1, null);
                 add("arrival_is_opportunity_not_completion", ContinuityAgendaOpportunity(parent, payload).Contains("opportunity is not completion"), null);
                 var deferred = new Dictionary<string, object>(parent) { ["status"] = "deferred", ["expectedRevision"] = 1, ["nextStep"] = "Wait for reliable news." };
                 // This update belongs to a later provider request. Capture what
@@ -447,7 +447,7 @@ VALUES($campaign,'timeline_a','shared_night','pair_intimacy','sexual_intimacy_co
                 UpsertConversationSceneOverride(connection, "npc_a", "inside the private tent", "travel", "travel clothes", "tent_turn", "dialogue", 480, 1);
                 SaveSceneContinuityHandoffs(connection, payload, participants, "tent_turn", "npc_a", "We finished our sober discussion this morning.", "Yes, that discussion is settled.");
                 var hoursLater = new Dictionary<string, object>(payload) { ["worldDay"] = 20.25d, ["sessionId"] = "new_session_after_reload" };
-                ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE hero_id='npc_a';");
+                Program.ExecuteSql(connection, "DELETE FROM conversation_scene_state WHERE hero_id='npc_a';");
                 add("scene_survives_hourly_expiry_and_reload", ReadString(LoadSceneContinuityHandoff(connection, hoursLater, participant), "location_override", "").Contains("tent"), null);
                 SaveSceneContinuityHandoffs(connection, hoursLater, participants, "next_turn", "npc_a", "How is the horse?", "She is ready.");
                 add("second_handoff_keeps_expired_legacy_override", ReadString(LoadSceneContinuityHandoff(connection, hoursLater, participant), "location_override", "").Contains("tent"), null);
@@ -457,49 +457,49 @@ VALUES($campaign,'timeline_a','shared_night','pair_intimacy','sexual_intimacy_co
                 var rewind = new Dictionary<string, object>(payload) { ["worldDay"] = 19d };
                 add("rewind_rejects_future_handoff", !BuildProtectedConversationContinuity(campaign, "npc_a", rewind, TestDict()).Contains("discussion is settled"), null);
 
-                ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json)
 VALUES('old_tournament',$campaign,'npc_a','player','closed',1,2,'[""npc_a"",""player""]');", TestDict("campaign", campaign));
                 InsertConversationTurn(connection, "victory_turn", "old_tournament", "victory_event", 0, "victory_exchange", "player", "player", "Traveler",
                     "I defeated the Khan in the last tournament and shared drinks with him afterward.", "in_person", 19d, 1, "town_a", new List<string> { "npc_a", "player" }, TestDict());
                 InsertConversationTurn(connection, "victory_answer", "old_tournament", "victory_event", 1, "victory_exchange", "npc", "npc_a", "Speaker",
                     "You already told me that you won. I heard the story; I was not there.", "in_person", 19d, 2, "town_a", new List<string> { "npc_a", "player" }, TestDict());
-                var retrieved = SearchExactConversationHistory(connection, "npc_a", "I fought a Khan.", TestDict(), 24000, null, "current_session", 30, new KnowledgeAccessContext { NpcId = "npc_a" });
+                var retrieved = SearchExactConversationHistory(connection, "npc_a", "I fought a Khan.", TestDict(), 24000, null, "current_session", 30, new Program.KnowledgeAccessContext { NpcId = "npc_a" });
                 add("ordinary_khan_reference_retrieves_full_outcome_and_reply", ReadString(retrieved, "text", "").Contains("shared drinks with him afterward")
                     && ReadString(retrieved, "text", "").Contains("I was not there") && ReadStringList(retrieved, "expandedTurnIds").Count == 2, retrieved);
                 var longWords=Enumerable.Range(0,90).Select(i=>"roadword"+i).ToList();
                 foreach(int position in new[] {0,45,90}) {
                     var words=new List<string>(longWords); words.Insert(position,"khan");
                     string longInput=string.Join(" ",words);
-                    var longRecall=SearchExactConversationHistory(connection,"npc_a",longInput,TestDict(),24000,null,"current_session",30,new KnowledgeAccessContext {NpcId="npc_a"});
-                    add("lowercase_title_survives_long_input_position_"+position,MemoryQueryTerms(longInput).Contains("khan")
+                    var longRecall=SearchExactConversationHistory(connection,"npc_a",longInput,TestDict(),24000,null,"current_session",30,new Program.KnowledgeAccessContext {NpcId="npc_a"});
+                    add("lowercase_title_survives_long_input_position_"+position,Program.MemoryQueryTerms(longInput).Contains("khan")
                         && ReadString(longRecall,"text","").Contains("shared drinks with him afterward") && ReadString(longRecall,"text","").Contains("I was not there"),null);
                 }
                 InsertConversationTurn(connection, "father_source", "old_tournament", "father_event", 2, "father_exchange", "npc", "npc_a", "Speaker", quote,
                     "in_person", 19d, 3, "town_a", new List<string> { "npc_a", "player" }, TestDict());
-                var legacyRow = QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE assertion_id='legacy_1';").Single();
+                var legacyRow = Program.QuerySql(connection, "SELECT * FROM temporal_knowledge_assertions WHERE assertion_id='legacy_1';").Single();
                 var repairManifest = TestDict("schema", "reign-continuity-repair-v1", "campaignId", campaign, "timelineId", "timeline_a", "operations", new List<Dictionary<string, object>> {
                     TestDict("kind", "scope_private_assertion", "id", "legacy_1", "reviewReason", "Legacy interpretation wrongly shared its audience.",
                         "expected", TestDict("claim", ReadString(legacyRow,"claim",""), "perspective_owner_id", "npc_a", "assertion_kind", "interpretation")),
                     TestDict("kind", "recover_agenda", "id", "father_source", "ownerId", "npc_a", "peerId", "player", "expectedOwnerLatestTurnId", "father_source", "reviewReason", "Accepted unresolved personal intent.",
                         "expected", TestDict("text", quote, "speaker_id", "npc_a", "role", "npc"),
                         "write", new Dictionary<string, object>(concern) { ["id"] = "recovered_father_concern", ["subject"] = "Recovered father concern" }) });
-                ExecuteSql(connection, "BEGIN;");
+                Program.ExecuteSql(connection, "BEGIN;");
                 var preview = RepairConversationContinuity(connection, repairManifest);
-                ExecuteSql(connection, "ROLLBACK;");
-                add("repair_preview_rolls_back_all_derived_mutation", QuerySql(connection,"SELECT * FROM conversation_continuity WHERE record_id='recovered_father_concern';").Count == 0
-                    && ReadString(QuerySql(connection,"SELECT * FROM temporal_knowledge_assertions WHERE assertion_id='legacy_1';").Single(),"visibility","") == "public", preview);
-                ExecuteSql(connection, "BEGIN;");
+                Program.ExecuteSql(connection, "ROLLBACK;");
+                add("repair_preview_rolls_back_all_derived_mutation", Program.QuerySql(connection,"SELECT * FROM conversation_continuity WHERE record_id='recovered_father_concern';").Count == 0
+                    && ReadString(Program.QuerySql(connection,"SELECT * FROM temporal_knowledge_assertions WHERE assertion_id='legacy_1';").Single(),"visibility","") == "public", preview);
+                Program.ExecuteSql(connection, "BEGIN;");
                 var appliedRepair = RepairConversationContinuity(connection, repairManifest);
-                ExecuteSql(connection, "COMMIT;");
-                add("reviewed_repair_preserves_original_transcript", ReadString(QuerySql(connection,"SELECT * FROM conversation_turns WHERE turn_id='father_source';").Single(),"text","") == quote
-                    && QuerySql(connection,"SELECT * FROM conversation_continuity WHERE record_id='recovered_father_concern';").Count == 1, appliedRepair);
+                Program.ExecuteSql(connection, "COMMIT;");
+                add("reviewed_repair_preserves_original_transcript", ReadString(Program.QuerySql(connection,"SELECT * FROM conversation_turns WHERE turn_id='father_source';").Single(),"text","") == quote
+                    && Program.QuerySql(connection,"SELECT * FROM conversation_continuity WHERE record_id='recovered_father_concern';").Count == 1, appliedRepair);
                 add("reviewed_repair_is_idempotent", ReadBool(RepairConversationContinuity(connection, repairManifest),"idempotent",false), null);
                 var conflictManifest = TryParseJsonObject(Json.Serialize(repairManifest));
                 ReadDictionary(ReadDictionaryList(conflictManifest,"operations")[0],"expected")["claim"] = "Changed source";
                 bool rejectedRepair = false;
-                ExecuteSql(connection,"BEGIN;");
+                Program.ExecuteSql(connection,"BEGIN;");
                 try { RepairConversationContinuity(connection, conflictManifest); } catch (InvalidOperationException) { rejectedRepair = true; }
-                ExecuteSql(connection,"ROLLBACK;");
+                Program.ExecuteSql(connection,"ROLLBACK;");
                 add("repair_stale_source_fails_without_partial_apply", rejectedRepair, null);
 
                 InsertConversationTurn(connection, "legacy_affection", "old_tournament", "affection_event", 3, "affection_exchange", "npc", "npc_a", "Speaker",
@@ -510,22 +510,22 @@ VALUES('old_tournament',$campaign,'npc_a','player','closed',1,2,'[""npc_a"",""pl
                     TestDict("sourceRetained", legacyFoundation.Contains("legacy_affection"), "affectionRetained", legacyFoundation.Contains("kiss we shared"),
                         "boundaryRetained", legacyFoundation.Contains("does not mean I agree")));
                 add("legacy_pair_history_is_not_shared_with_other_npc", !BuildProtectedConversationContinuity(campaign, "npc_b", payload, TestDict()).Contains("legacy_affection"), null);
-                ExecuteSql(connection,@"INSERT INTO memories(memory_id,event_id,owner_id,memory_type,ts,world_day,location_id,summary,participants_json,known_by_json,visibility,importance,tags_json,status,payload_json)
+                Program.ExecuteSql(connection,@"INSERT INTO memories(memory_id,event_id,owner_id,memory_type,ts,world_day,location_id,summary,participants_json,known_by_json,visibility,importance,tags_json,status,payload_json)
 VALUES('consolidated_closeness','affection_event','npc_a','episodic',4,0,'town_a','She accepted his cloak, leaned against him, and asked him to stay.','[""npc_a"",""player""]','[""npc_a"",""player""]','private',1,'[""intimacy"",""vulnerability""]','consolidated','{}');");
                 add("consolidation_does_not_erase_shared_closeness",BuildProtectedConversationContinuity(campaign,"npc_a",payload,TestDict()).Contains("accepted his cloak"),null);
-                ExecuteSql(connection,@"INSERT INTO memories(memory_id,event_id,owner_id,memory_type,ts,world_day,location_id,summary,participants_json,known_by_json,visibility,importance,tags_json,status,payload_json)
+                Program.ExecuteSql(connection,@"INSERT INTO memories(memory_id,event_id,owner_id,memory_type,ts,world_day,location_id,summary,participants_json,known_by_json,visibility,importance,tags_json,status,payload_json)
 VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_a','The player described a private night with another participant.','[""npc_a"",""player"",""npc_other""]','[""npc_a"",""player"",""npc_other""]','private',1,'[""intimacy""]','consolidated','{}');");
                 add("group_audience_is_not_pair_intimacy",!BuildProtectedConversationContinuity(campaign,"npc_a",payload,TestDict()).Contains("group_reported_intimacy"),null);
 
-                int lettersBefore = QuerySql(connection,"SELECT letter_id FROM letters;").Count;
-                ExecuteSql(connection,"INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts) VALUES('atomic_letter_1','atomic_letter','test_collision',1,'{}',1);");
+                int lettersBefore = Program.QuerySql(connection,"SELECT letter_id FROM letters;").Count;
+                Program.ExecuteSql(connection,"INSERT INTO conversation_continuity_versions(version_id,record_id,source_event_id,revision,payload_json,created_ts) VALUES('atomic_letter_1','atomic_letter','test_collision',1,'{}',1);");
                 var letterWrite = new Dictionary<string, object>(concern) { ["id"] = "atomic_letter" };
                 bool letterRolledBack = false;
                 try { RelationshipsService.InsertLetter(connection,"npc_a","Speaker","player","Traveler",quote,"npc_reply","fixture","","","",20,21,
                     TestDict("timelineId","timeline_a","continuityWrites",new List<Dictionary<string,object>> {letterWrite})); }
                 catch { letterRolledBack = true; }
-                add("letter_and_author_continuity_commit_atomically", letterRolledBack && QuerySql(connection,"SELECT letter_id FROM letters;").Count == lettersBefore
-                    && QuerySql(connection,"SELECT record_id FROM conversation_continuity WHERE record_id='atomic_letter';").Count == 0,null);
+                add("letter_and_author_continuity_commit_atomically", letterRolledBack && Program.QuerySql(connection,"SELECT letter_id FROM letters;").Count == lettersBefore
+                    && Program.QuerySql(connection,"SELECT record_id FROM conversation_continuity WHERE record_id='atomic_letter';").Count == 0,null);
                 RunPendingContinuityPromptTests(campaign, connection, id, add);
             }
             RunContinuityPromptAndPresenceTests(campaign, add);
@@ -545,7 +545,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             const string settled = "We have finished discussing the route to the market.";
             const string derived = "The fortification is independently confirmed";
             var context = TestDict("timelineId", "episode_timeline", "worldDay", 20d, "playerHeroStringId", peer);
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             void Save(string id, string reply)
             {
                 string eventId = id + "_event";
@@ -562,7 +562,7 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
             Save("episode_narrated", narrated);
             Save("episode_settled", settled);
             context.Remove("conversationSessionId");
-            var access = BuildKnowledgeAccessContext(owner, peer, "", context);
+            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", context);
             List<MemoryEvidence> Precision(Dictionary<string, object> request) =>
                 LoadPrecisionFoundation(connection, campaign, PlanMemoryQuery(owner, peer, "Earlier preparations", request),
                     request, access).Where(item => item.Kind == "episode").ToList();
@@ -577,23 +577,23 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
                 compact.All(item => !item.Text.Contains(derived) && !item.Text.Contains("episode resolved"))
                 && !legacy.Contains(derived) && !legacy.Contains("ESTABLISHED IMPORTANT EPISODES"), null);
 
-            var source = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='episode_report_event_npc';").Single();
-            var recent = CloneDictionary(context);
+            var source = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id='episode_report_event_npc';").Single();
+            var recent = Program.CloneDictionary(context);
             SetMemoryTranscriptContext(recent, new() { source });
             add("episode_excerpt_deduplicates_only_identical_protected_turn",
                 Precision(recent).Count == 2 && Precision(recent).All(item => item.SourceId != "episode_report"), null);
-            var changed = CloneDictionary(source);
+            var changed = Program.CloneDictionary(source);
             changed["speaker_id"] = "someone_else";
             SetMemoryTranscriptContext(recent, new() { changed });
             add("episode_excerpt_survives_wrong_speaker_in_supplied_window",
                 Precision(recent).Any(item => item.SourceId == "episode_report" && item.Text.Contains(report)), null);
 
-            var row = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='episode_report';").Single();
+            var row = Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id='episode_report';").Single();
             var episode = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
-            var altered = CloneDictionary(episode);
+            var altered = Program.CloneDictionary(episode);
             ReadDictionary(altered, "sourceEvidence")["sourceHash"] = "changed";
-            var foreign = BuildKnowledgeAccessContext("someone_else", peer, "", context);
-            var earlier = BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
+            var foreign = Program.BuildKnowledgeAccessContext("someone_else", peer, "", context);
+            var earlier = Program.BuildKnowledgeAccessContext(owner, peer, "", TestDict("timelineId", "episode_timeline", "worldDay", 19d));
             add("episode_excerpt_rejects_stale_foreign_and_future_source",
                 RenderContinuityEpisodeEvidence(connection, row, altered, source, access).Length == 0
                 && RenderContinuityEpisodeEvidence(connection, row, episode, source, foreign).Length == 0
@@ -608,10 +608,10 @@ VALUES('group_reported_intimacy','affection_event','npc_a','episodic',4,0,'town_
         {
             const string quote = "I carried Traveler's spare blanket through the rain.";
             const string receipt = "recent_conduct_receipt", summary = "The player offered practical help.";
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 RelationshipsService.EnsureConversationRelationshipSchema(connection);
-                ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts
 (receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,act_kind,severity_tier,summary,current_conduct_quote,created_ts)
 VALUES($receipt,$campaign,'timeline_a','conduct_exchange','conduct_turn','npc_a','player','help','meaningful',$summary,$quote,1);",
                     TestDict("receipt", receipt, "campaign", campaign, "summary", summary, "quote", quote));
@@ -662,13 +662,13 @@ VALUES($receipt,$campaign,'timeline_a','conduct_exchange','conduct_turn','npc_a'
             var native = TestDict("conversationSessionId", session, "sceneTurnId", sceneTurn, "timelineId", "timeline_a",
                 "playerHeroStringId", "player", "playerText", nativeQuote, "worldDay", 20d);
             string exchange = AcceptedConversationEventId(campaign, "npc_a", native);
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
-                ExecuteSql(connection, @"INSERT INTO conversation_sessions
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,'npc_a','player','in_person','open',2,2,20,20,'town_a','[""npc_a"",""player""]','{}');",
                     TestDict("session", session, "campaign", campaign));
-                ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_relationship_receipts
 (receipt_id,campaign_id,timeline_id,exchange_id,source_turn_id,observer_id,target_id,mode,act_kind,severity_tier,summary,current_conduct_quote,created_ts)
 VALUES('native_conduct_receipt',$campaign,'timeline_a',$exchange,$turn,'npc_a','player','in_person_conversation','care','meaningful',$summary,$quote,2);",
                     TestDict("campaign", campaign, "exchange", exchange, "turn", sceneTurn, "summary", summary, "quote", nativeQuote));
@@ -680,8 +680,8 @@ VALUES('native_conduct_receipt',$campaign,'timeline_a',$exchange,$turn,'npc_a','
             add("relationship_quote_once_for_native_scene_turn_link", delivered.Covered && delivered.Text.Contains("native_conduct_receipt")
                 && !delivered.Text.Contains("; accepted conduct quote: " + nativeQuote)
                 && Regex.Matches(delivered.Text, Regex.Escape(nativeQuote)).Count == 1, null);
-            using (var connection = OpenCampaignConnection(campaign))
-                ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET timeline_id='' WHERE receipt_id='native_conduct_receipt';");
+            using (var connection = Program.OpenCampaignConnection(campaign))
+                Program.ExecuteSql(connection, "UPDATE conversation_relationship_receipts SET timeline_id='' WHERE receipt_id='native_conduct_receipt';");
             var legacy = Build(nativeHistory, PromptParityIdentity());
             add("legacy_relationship_quote_once_when_native_scene_turn_verifies", legacy.Covered && legacy.Text.Contains("native_conduct_receipt")
                 && !legacy.Text.Contains("; accepted conduct quote: " + nativeQuote)
@@ -696,8 +696,8 @@ VALUES('native_conduct_receipt',$campaign,'timeline_a',$exchange,$turn,'npc_a','
         {
             const string session = "pair_scope_session", observer = "scope_npc", peer = "scope_player";
             const string timeline = "pair_scope_timeline", parent = "pair_scope_parent", abandoned = "pair_scope_abandoned";
-            using var connection = OpenCampaignConnection(campaign);
-            ExecuteSql(connection, @"INSERT INTO conversation_sessions
+            using var connection = Program.OpenCampaignConnection(campaign);
+            Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,location_id,participants_json,payload_json)
 VALUES($session,$campaign,$observer,$peer,'in_person','closed',1,9,19,19,'town_a','[""scope_npc"",""scope_player""]','{}');",
                 TestDict("session", session, "campaign", campaign, "observer", observer, "peer", peer));
@@ -720,13 +720,13 @@ VALUES($session,$campaign,$observer,$peer,'in_person','closed',1,9,19,19,'town_a
             AddTurn("scope_restored", parent, 5, "scope_restored_exchange", "I trust you with the saved orchard ledger.", 5);
             AddTurn("scope_future_time", timeline, 6, "scope_exchange", "I trust you with tomorrow's ledger.", 21);
             AddTurn("scope_future_sequence", timeline, 7, "scope_exchange", "I trust you with the later numbered ledger.", 7);
-            ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=201 WHERE turn_id='scope_future_sequence';");
+            Program.ExecuteSql(connection, "UPDATE conversation_turns SET accepted_sequence=201 WHERE turn_id='scope_future_sequence';");
             AddTurn("scope_observer_only", timeline, 8, "scope_exchange", "I trust you with a ledger the traveler never heard about.", 8,
                 peerHeard: false);
 
             void AddMemory(string id, string turn, string branch, long timestamp)
             {
-                ExecuteSql(connection, @"INSERT INTO memories
+                Program.ExecuteSql(connection, @"INSERT INTO memories
 (memory_id,event_id,owner_id,ts,world_day,summary,participants_json,visibility,tags_json,status,payload_json)
 VALUES($id,$event,$observer,$timestamp,19,$summary,'[""scope_npc"",""scope_player""]','private','[""trust""]','consolidated',$payload);",
                     TestDict("id", id, "event", turn + "_event", "observer", observer, "timestamp", timestamp,
@@ -742,10 +742,10 @@ VALUES($id,$event,$observer,$timestamp,19,$summary,'[""scope_npc"",""scope_playe
             AddMemory("pair_memory_foreign_row", "scope_current", abandoned, 2);
             AddMemory("pair_memory_restored", "scope_restored", parent, 5);
             AddMemory("pair_memory_private_lineage", "scope_current", timeline, 8);
-            ExecuteSql(connection, @"INSERT INTO memory_sources(document_type,document_id,source_type,source_id)
+            Program.ExecuteSql(connection, @"INSERT INTO memory_sources(document_type,document_id,source_type,source_id)
 VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
 
-            var access = new KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = 20d,
+            var access = new Program.KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = 20d,
                 AsOfAcceptedSequence = 200, AsOfTimestamp = 10 };
             (string Text, List<string> Ids) Build()
             {
@@ -781,7 +781,7 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             add("foundation_verified_restored_source_retained", restored.Ids.Contains("scope_restored")
                 && restored.Text.Contains("saved orchard ledger") && !restored.Text.Contains("abandoned red ledger")
                 && restored.Ids.Contains("pair_memory_restored"), null);
-            ExecuteSql(connection, "UPDATE conversation_turns SET text='I trust you with an altered ledger.' WHERE turn_id='scope_restored';");
+            Program.ExecuteSql(connection, "UPDATE conversation_turns SET text='I trust you with an altered ledger.' WHERE turn_id='scope_restored';");
             var altered = Build();
             add("foundation_changed_restored_source_excluded", !altered.Ids.Contains("scope_restored")
                 && !altered.Text.Contains("altered ledger") && !altered.Ids.Contains("pair_memory_restored"), null);
@@ -804,9 +804,9 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             var retained = RetainPendingContinuityWrite(connection, payload, "npc_a", "player", sourceEvent,
                 quote, recordId, write, AcceptedContinuityEvidenceSpans(write, quote), 1, 3, 9);
             string pendingId = ReadString(retained, "pendingId", "");
-            var before = QuerySql(connection, "SELECT * FROM conversation_continuity_pending WHERE pending_id=$id;", TestDict("id", pendingId)).Single();
-            var sourceBefore = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceTurn)).Single();
-            var recordBefore = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", recordId)).Single();
+            var before = Program.QuerySql(connection, "SELECT * FROM conversation_continuity_pending WHERE pending_id=$id;", TestDict("id", pendingId)).Single();
+            var sourceBefore = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceTurn)).Single();
+            var recordBefore = Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", recordId)).Single();
             CaptureContinuityReadSnapshot(connection, payload, "npc_a");
             var ids = new List<string>();
             string pending = BuildPendingContinuityPrompt(connection, payload, "npc_a", "player", ids);
@@ -821,7 +821,7 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             const string latest = "Good morning. How are you?";
             foreach (string mode in new[] { "in_person", "party_chat" })
             {
-                var turn = CloneDictionary(payload); turn["mode"] = mode;
+                var turn = Program.CloneDictionary(payload); turn["mode"] = mode;
                 PromptEnvelope envelope = mode == "in_person"
                     ? BuildDialoguePromptEnvelope(campaign, "npc_a", "Speaker", "Traveler", "Traveler", latest,
                         "A quiet market street.", profile, PromptParityCharacteristics(), empty, empty, empty,
@@ -855,12 +855,12 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             }
             foreach (string exclusion in new[] { "hash", "span", "inactive", "branch", "observer", "future" })
             {
-                var current = CloneDictionary(payload);
+                var current = Program.CloneDictionary(payload);
                 try
                 {
-                    if (exclusion == "hash") ExecuteSql(connection, "UPDATE conversation_continuity_pending SET source_hash='invalid' WHERE pending_id=$id;", TestDict("id", pendingId));
-                    if (exclusion == "span") ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id=$id;", TestDict("id", sourceTurn, "text", "Unrelated altered speech."));
-                    if (exclusion == "inactive") ExecuteSql(connection, "UPDATE conversation_turns SET status='superseded' WHERE turn_id=$id;", TestDict("id", sourceTurn));
+                    if (exclusion == "hash") Program.ExecuteSql(connection, "UPDATE conversation_continuity_pending SET source_hash='invalid' WHERE pending_id=$id;", TestDict("id", pendingId));
+                    if (exclusion == "span") Program.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text WHERE turn_id=$id;", TestDict("id", sourceTurn, "text", "Unrelated altered speech."));
+                    if (exclusion == "inactive") Program.ExecuteSql(connection, "UPDATE conversation_turns SET status='superseded' WHERE turn_id=$id;", TestDict("id", sourceTurn));
                     if (exclusion == "branch") current["timelineId"] = "unrelated_timeline";
                     if (exclusion == "future") current["worldDay"] = 19d;
                     string observer = exclusion == "observer" ? "npc_b" : "npc_a";
@@ -871,15 +871,15 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
                 }
                 finally
                 {
-                    ExecuteSql(connection, "UPDATE conversation_continuity_pending SET source_hash=$hash WHERE pending_id=$id;", TestDict("id", pendingId, "hash", ReadString(before, "source_hash", "")));
-                    ExecuteSql(connection, "UPDATE conversation_turns SET text=$text,status=$status WHERE turn_id=$id;",
+                    Program.ExecuteSql(connection, "UPDATE conversation_continuity_pending SET source_hash=$hash WHERE pending_id=$id;", TestDict("id", pendingId, "hash", ReadString(before, "source_hash", "")));
+                    Program.ExecuteSql(connection, "UPDATE conversation_turns SET text=$text,status=$status WHERE turn_id=$id;",
                         TestDict("id", sourceTurn, "text", quote, "status", ReadString(sourceBefore, "status", "")));
                 }
             }
-            add("pending_recovery_does_not_apply_or_rewrite_state", Json.Serialize(before) == Json.Serialize(QuerySql(connection,
+            add("pending_recovery_does_not_apply_or_rewrite_state", Json.Serialize(before) == Json.Serialize(Program.QuerySql(connection,
                 "SELECT * FROM conversation_continuity_pending WHERE pending_id=$id;", TestDict("id", pendingId)).Single())
-                && Json.Serialize(sourceBefore) == Json.Serialize(QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceTurn)).Single())
-                && Json.Serialize(recordBefore) == Json.Serialize(QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", recordId)).Single()), null);
+                && Json.Serialize(sourceBefore) == Json.Serialize(Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", sourceTurn)).Single())
+                && Json.Serialize(recordBefore) == Json.Serialize(Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id;", TestDict("id", recordId)).Single()), null);
         }
 
         private static void RunContinuityProductionEnvelopeTests(string campaign, Action<string, bool, object> add)
@@ -947,7 +947,7 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             add("opening_historical_tent_sentence_preserved",!flagged("I remember the tent by the road.\n\nWe can talk about it here."),null);
             var gate = TestDict("needed",true,"commitment","accepted","intent","accept_temporary_party_guest");
             var membership = TestDict("playerClanId","own_clan","speakerClanId","own_clan");
-            add("already_member_gate_is_not_failure",NormalizeAlreadySatisfiedContinuityGate(gate,membership,TestDict("clanId","own_clan")) && !ActionGateShouldPlan(gate),gate);
+            add("already_member_gate_is_not_failure",NormalizeAlreadySatisfiedContinuityGate(gate,membership,TestDict("clanId","own_clan")) && !Program.ActionGateShouldPlan(gate),gate);
             foreach(string intent in new[] { "She renews her traveling companion commitment for 20 more days", "extend_temporary_party_guest", "end_temporary_party_guest" })
                 add("real_guest_action_survives_"+intent,!NormalizeAlreadySatisfiedContinuityGate(TestDict("intent",intent),membership,TestDict("clanId","own_clan")),null);
 
@@ -956,13 +956,13 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
                 var lines = new List<Dictionary<string,object>>();
                 for(int i=0;i<count;i++) { lines.Add(TestDict("id","p"+i,"exchangeId","e"+i,"role","player","speaker","Traveler","text","Question "+i));
                     lines.Add(TestDict("id","n"+i,"exchangeId","e"+i,"role","npc","speaker","Speaker","text","Answer "+i+"\n\nComplete second paragraph.")); }
-                string transcript=FormatContinuityTranscript(lines,FormatDialogueForPrompt);
+                string transcript=FormatContinuityTranscript(lines,Program.FormatDialogueForPrompt);
                 var decisions=new List<object>();
                 string selected=SelectWholeContinuityRecords(transcript,1200,true,decisions,"test_transcript");
                 add("whole_recent_exchange_survives_"+count,selected.Contains("Question "+(count-1)) && selected.Contains("Answer "+(count-1))
                     && selected.Contains("Complete second paragraph.") && decisions.OfType<Dictionary<string,object>>().Any(d=>ReadBool(d,"required",false)&&ReadBool(d,"retained",false)),decisions);
                 add("latest_thirty_messages_survive_compaction_"+count, lines.TakeLast(30).All(line =>
-                    selected.Contains(FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
+                    selected.Contains(Program.FormatDialogueForPrompt(new List<Dictionary<string, object>> { line })))
                     && ContinuityPromptRecords(transcript, true).Count(record => record.Required) == Math.Min(count, 15), decisions);
                 var transcriptContext = TestDict();
                 SetMemoryTranscriptContext(transcriptContext, lines);
@@ -975,7 +975,7 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             var boundaryLines = Enumerable.Range(0, 35).Select(i => TestDict("id", "boundary_"+i,
                 "exchangeId", "boundary_exchange_"+(i/2), "role", i%2==0 ? "player" : "npc",
                 "speaker", i%2==0 ? "Traveler" : "Speaker", "text", "Complete boundary message " + i + ".")).ToList();
-            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, FormatDialogueForPrompt);
+            string boundaryTranscript = FormatContinuityTranscript(boundaryLines, Program.FormatDialogueForPrompt);
             var boundaryRecords = ContinuityPromptRecords(boundaryTranscript, true).Where(record => record.Required).ToList();
             add("recent_window_keeps_whole_exchange_at_thirtieth_message", boundaryRecords.Count == 16
                 && boundaryRecords.First().SourceId == "boundary_4,boundary_5"
@@ -1037,9 +1037,9 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             add("production_repair_marks_unresolved_presence_without_effects",ReadBool(unresolved,"ok",false)
                 && ReadBool(unresolved,"visibleRepairFailure",false)
                 && ReadString(unresolvedVisible,"reply","").EndsWith(".,",StringComparison.Ordinal)
-                && SanitizeVisibleReply(ReadString(unresolvedVisible,"reply","")).EndsWith(".,",StringComparison.Ordinal)
+                && Program.SanitizeVisibleReply(ReadString(unresolvedVisible,"reply","")).EndsWith(".,",StringComparison.Ordinal)
                 && ReadDictionaryList(unresolvedVisible,"continuityWrites").Count==0
-                && !ActionGateShouldPlan(ReadDictionary(unresolvedVisible,"actionGate")),unresolved);
+                && !Program.ActionGateShouldPlan(ReadDictionary(unresolvedVisible,"actionGate")),unresolved);
             var repaired=RetryRoleplayContinuityViolation(TestDict("ok",true,"content",Json.Serialize(response("My father is here."))),TestDict("requestType","dialogue","maxTokens",3000),payload,
                 PromptParityIdentity(),noLines,campaign,"continuity-corrected","dialogue","npc_a","Speaker","Traveler","",request=>TestDict("ok",true,"content",Json.Serialize(response("I need reliable news before deciding where to ride."))));
             add("production_repair_accepts_grounded_correction",ReadBool(repaired,"ok",false),repaired);
@@ -1052,7 +1052,7 @@ VALUES('memory','pair_memory_private_lineage','turn','scope_hidden');");
             var restoredGateObject = TryParseJsonObject(ReadString(restoredGate,"content",""));
             add("prose_repair_preserves_required_action_gate",ReadBool(restoredGate,"ok",false)
                 && ReadDictionary(restoredGateObject,"actionGate") != null
-                && StructuredResponseIsComplete(ReadString(restoredGate,"content",""),"dialogue")
+                && Program.StructuredResponseIsComplete(ReadString(restoredGate,"content",""),"dialogue")
                 && ReadBool(ReadDictionary(restoredGate,"roleplayContinuityRepair"),"revalidationCleared",false),restoredGate);
             var unsupportedWrite = response("We found him. The tournament is behind us, and the road is ours again.");
             unsupportedWrite["continuityWrites"] = new List<Dictionary<string,object>> {

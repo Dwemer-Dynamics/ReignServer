@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static readonly string[] FinalGauntletReviewHarnessPhrases =
         {
@@ -89,7 +89,7 @@ namespace ReignBetaServer
                     .Where(candidate => !selected.Contains(candidate))
                     .Take(10 - selected.Count));
 
-            ExecuteSql(
+            Program.ExecuteSql(
                 connection,
                 "DELETE FROM final_gauntlet_review_items WHERE run_id=$run;",
                 new Dictionary<string, object> { ["run"] = runId });
@@ -141,7 +141,7 @@ namespace ReignBetaServer
                     };
                 blinded.Add(reviewer);
                 answerKey.Add(key);
-                ExecuteSql(
+                Program.ExecuteSql(
                     connection,
                     @"INSERT INTO final_gauntlet_review_items(
 run_id,review_id,case_instance_id,blinded_payload_json,answer_key_json,created_ts)
@@ -169,12 +169,12 @@ VALUES($run,$review,$case,$blind,$key,$ts);",
                     ["instructions"] =
                         "Score each dimension 0-4 without viewing the private answer key."
                 };
-            WriteJsonObject(Path.Combine(root, "review-pack.json"), pack);
+            Program.WriteJsonObject(Path.Combine(root, "review-pack.json"), pack);
             File.WriteAllText(
                 Path.Combine(root, "review-pack.md"),
                 RenderFinalGauntletReviewMarkdown(blinded),
                 System.Text.Encoding.UTF8);
-            WriteJsonObject(
+            Program.WriteJsonObject(
                 Path.Combine(root, "review-answer-key.private.json"),
                 new Dictionary<string, object>
                 {

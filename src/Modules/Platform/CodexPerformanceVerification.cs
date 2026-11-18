@@ -131,7 +131,7 @@ namespace ReignBetaServer
                             foreach (var line in ReadDictionaryList(snapshot, "priorLines"))
                             {
                                 ordinal++;
-                                InsertConversationTurn(connection, "fixture_" + ordinal, "comparison_session", "", ordinal, "fixture_exchange",
+                                DialogueService.InsertConversationTurn(connection, "fixture_" + ordinal, "comparison_session", "", ordinal, "fixture_exchange",
                                     ReadString(line, "role", "assistant"), ReadString(line, "speakerId", heroId), ReadString(line, "speaker", heroId),
                                     ReadString(line, "text", ""), ReadString(line, "channel", "in_person"), ReadDouble(line, "worldDay", 0),
                                     ReadLong(line, "ts", ordinal), ReadString(line, "locationId", ""), new List<string> { heroId }, line);
@@ -156,8 +156,8 @@ namespace ReignBetaServer
                         var sample = new Dictionary<string, object> {
                             ["caseId"] = ReadString(source, "caseId", ""), ["variant"] = variant, ["model"] = model,
                             ["turnIndex"] = turnIndex,
-                            ["settingsFingerprint"] = PromptHash(Json.Serialize(ReadDictionary(settings, "codexOptions"))),
-                            ["fixtureFingerprint"] = PromptHash(Json.Serialize(snapshot) + Json.Serialize(input)),
+                            ["settingsFingerprint"] = DialogueService.PromptHash(Json.Serialize(ReadDictionary(settings, "codexOptions"))),
+                            ["fixtureFingerprint"] = DialogueService.PromptHash(Json.Serialize(snapshot) + Json.Serialize(input)),
                             ["durationMs"] = timer.ElapsedMilliseconds, ["providerCalls"] = budget.Used - callsBefore,
                             ["outcome"] = ReadString(diagnostics, "outcome", "unusable_response"),
                             ["stages"] = ReadDictionary(diagnostics, "stages") ?? new Dictionary<string, object>(),
@@ -175,9 +175,9 @@ namespace ReignBetaServer
             var actualCalls = samples.SelectMany(sample => ReadDictionaryList(ReadDictionary(sample, "diagnostics"), "calls")).ToList();
             var runtimeVersions = actualCalls.Select(call => ReadString(ReadDictionary(ReadDictionary(call, "runtime"), "protocol"), "runtimeVersion", "unknown")).Distinct().ToList();
             plan["runtimeVersion"] = runtimeVersions.Count == 1 ? runtimeVersions[0] : runtimeVersions.Count == 0 ? "unknown" : "mixed";
-            plan["settingsFingerprint"] = PromptHash(Json.Serialize(new[] { ReadDictionary(plan, "baselineOptions"), ReadDictionary(plan, "variantOptions") }));
-            plan["schemaFingerprint"] = actualCalls.Count == 0 ? "unknown" : PromptHash(Json.Serialize(actualCalls.Select(call => ReadString(call, "schemaFingerprint", "unknown")).ToList()));
-            plan["promptFingerprint"] = actualCalls.Count == 0 ? "unknown" : PromptHash(Json.Serialize(actualCalls.Select(call => ReadDictionaryList(call, "promptSegments")).ToList()));
+            plan["settingsFingerprint"] = DialogueService.PromptHash(Json.Serialize(new[] { ReadDictionary(plan, "baselineOptions"), ReadDictionary(plan, "variantOptions") }));
+            plan["schemaFingerprint"] = actualCalls.Count == 0 ? "unknown" : DialogueService.PromptHash(Json.Serialize(actualCalls.Select(call => ReadString(call, "schemaFingerprint", "unknown")).ToList()));
+            plan["promptFingerprint"] = actualCalls.Count == 0 ? "unknown" : DialogueService.PromptHash(Json.Serialize(actualCalls.Select(call => ReadDictionaryList(call, "promptSegments")).ToList()));
             var report = BuildCodexPerformanceReport(plan, samples, budget.Used);
             report["samples"] = samples;
             report["runtimeExecutableFingerprint"] = plan["runtimeExecutableFingerprint"];
@@ -225,7 +225,7 @@ namespace ReignBetaServer
             var previousSettings = CodexPerformanceSettings.Value;
             var previousTransport = CodexRpcTransportOverride;
             var previousProtocol = CodexRuntimeProtocol;
-            var previousCapacityMetadata = CodexCapacityMetadataOverride.Value;
+            var previousCapacityMetadata = DialogueService.CodexCapacityMetadataOverride.Value;
             var previousFailureStatus = CodexFailureStatus();
             var previousAccount = CharactersService.DeepCloneProfileDictionary(CodexAccount);
             bool previousAccountRequired = CodexAccountIdentityVerificationRequired;
@@ -274,7 +274,7 @@ namespace ReignBetaServer
             {
                 CodexRuntimeProtocol = new CodexProtocolState { SupportsOutputSchema = true, SupportsFastMode = true,
                     SupportsThreadResume = true, FastModeField = "serviceTierForTurn", ThreadServiceTierField = "serviceTier", InspectionState = "offline_fixture" };
-                CodexCapacityMetadataOverride.Value = Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"), "client_version", "fixture",
+                DialogueService.CodexCapacityMetadataOverride.Value = Json.Serialize(TestDict("fetched_at", DateTimeOffset.UtcNow.ToString("o"), "client_version", "fixture",
                     "models", new[] { TestDict("slug", "gpt-offline-contract", "context_window", 500000, "effective_context_window_percent", 95) }));
                 CodexRpcTransportOverride = (method, parameters, timeout) =>
                 {
@@ -532,8 +532,8 @@ namespace ReignBetaServer
                     var messageList = new List<Dictionary<string, object>> { new Dictionary<string, object> { ["role"] = "user", ["content"] = "Same unchanged request." } };
                     Func<string> build = () => {
                         var body = BuildChatRequestBody(settings, request, messageList, "unchanged-model");
-                        ConfigurePromptCacheRouting(settings, request, body, url, "unchanged-model", "dialogue");
-                        ConfigureReasoningRouting(settings, request, body, url, "unchanged-model", "dialogue");
+                        DialogueService.ConfigurePromptCacheRouting(settings, request, body, url, "unchanged-model", "dialogue");
+                        DialogueService.ConfigureReasoningRouting(settings, request, body, url, "unchanged-model", "dialogue");
                         return Json.Serialize(body);
                     };
                     settings.Remove("codexOptions"); string original = build();
@@ -548,7 +548,7 @@ namespace ReignBetaServer
                 CodexPerformanceSettings.Value = previousSettings;
                 CodexRpcTransportOverride = previousTransport;
                 CodexRuntimeProtocol = previousProtocol;
-                CodexCapacityMetadataOverride.Value = previousCapacityMetadata;
+                DialogueService.CodexCapacityMetadataOverride.Value = previousCapacityMetadata;
                 CodexAccount = previousAccount;
                 CodexAccountIdentityVerificationRequired = previousAccountRequired;
                 CodexAccountNotificationGeneration = previousAccountGeneration;

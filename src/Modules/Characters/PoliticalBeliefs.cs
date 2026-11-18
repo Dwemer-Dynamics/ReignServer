@@ -19,7 +19,7 @@ namespace ReignBetaServer
                 string timeline = ReadString(profile, "politicalTimelineId", "main");
                 // Absence of a client revision means first synchronization, not permission
                 // to read an evolved future snapshot after an older save was restored.
-                var stored = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "politics", "revision-1-" + Program.SafeMemoryKey(timeline) + ".json"));
+                var stored = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "politics", "revision-1-" + DialogueService.SafeMemoryKey(timeline) + ".json"));
                 GovernmentPoliticalProfile beliefs = stored.Count == 0 ? null : JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(stored));
                 if (beliefs != null && !GovernmentPoliticalBeliefs.Valid(beliefs)) throw new InvalidOperationException("Invalid persisted political profile: " + heroId);
                 // An applied campaign snapshot is accepted only if it is one of this character's
@@ -28,7 +28,7 @@ namespace ReignBetaServer
                 if (applied != null)
                 {
                     var requested = JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(applied));
-                    var revision = requested == null ? null : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "politics", "revision-" + requested.Revision + "-" + Program.SafeMemoryKey(requested.TimelineId) + ".json"));
+                    var revision = requested == null ? null : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "politics", "revision-" + requested.Revision + "-" + DialogueService.SafeMemoryKey(requested.TimelineId) + ".json"));
                     if (requested == null || !GovernmentPoliticalBeliefs.Valid(requested) || requested.CampaignId != campaignId || requested.HeroId != heroId
                         || revision == null || CanonicalJson(revision) != CanonicalJson(applied))
                         throw new InvalidOperationException("The applied political revision has not been issued for this character.");
@@ -60,13 +60,13 @@ namespace ReignBetaServer
                 // A divergent branch receives a new identity and cannot overwrite one.
                 while (true)
                 {
-                    string path = Program.CharacterFile(campaignId, heroId, "politics", "revision-" + beliefs.Revision + "-" + Program.SafeMemoryKey(beliefs.TimelineId) + ".json");
+                    string path = Program.CharacterFile(campaignId, heroId, "politics", "revision-" + beliefs.Revision + "-" + DialogueService.SafeMemoryKey(beliefs.TimelineId) + ".json");
                     var document = TryParseJsonObject(JsonSerializer.Serialize(beliefs));
                     var existing = Program.ReadJsonObject(path);
                     if (existing.Count == 0)
                     {
                         Program.WriteJsonObject(path, document);
-                        Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "politics", Program.SafeMemoryKey(beliefs.TimelineId) + ".json"), document);
+                        Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "politics", DialogueService.SafeMemoryKey(beliefs.TimelineId) + ".json"), document);
                         return;
                     }
                     if (CanonicalJson(existing) == CanonicalJson(document)) return;
@@ -190,8 +190,8 @@ namespace ReignBetaServer
                 string block = RequiredPoliticalPrompt(id, profile, TestDict("politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(beliefs))));
                 // Use the same framing normalization as foundation assembly. Match
                 // the complete current author/revision block, never a partial quote.
-                string canonical = Program.NormalizePromptSegment(block);
-                if (messages.Any(x => Program.NormalizePromptSegment(ReadString(x, "content", "")).Contains(canonical, StringComparison.Ordinal))) continue;
+                string canonical = DialogueService.NormalizePromptSegment(block);
+                if (messages.Any(x => DialogueService.NormalizePromptSegment(ReadString(x, "content", "")).Contains(canonical, StringComparison.Ordinal))) continue;
                 // Append complete required context. Never truncate history/personality to
                 // make room or treat another author's private values as observer knowledge.
                 messages.Add(TestDict("role", "user", "content", block));

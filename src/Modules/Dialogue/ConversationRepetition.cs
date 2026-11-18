@@ -6,7 +6,7 @@ using ReignBeta.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Request-local evidence, never a character trait or a replacement for history.
         private const int ExpressionHistoryLimit = 10;
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                 if (!used.Add(signature)) continue;
                 entries.Add(TestDict("recurringTerms", pair.Key, "evidence", indices.Select(i => TestDict(
                     "turnId", ReadString(rows[i].Row, "turn_id", ""),
-                    "quote", LimitText(ConversationSpeech(ReadString(rows[i].Row, "text", "")).Trim(), 220))).ToList()));
+                    "quote", Program.LimitText(ConversationSpeech(ReadString(rows[i].Row, "text", "")).Trim(), 220))).ToList()));
                 if (entries.Count == 3) break;
             }
             if (entries.Count == 0) return "";
@@ -312,13 +312,13 @@ namespace ReignBetaServer
             string failureClass = "";
             if (bounded)
             {
-                try { repaired = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest); }
+                try { repaired = responder == null ? Program.ChatWithLlm(repairRequest) : responder(repairRequest); }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is TimeoutException || ex is System.IO.IOException)
                 { failureClass = ex.GetType().Name; }
             }
             var delta = TryParseJsonObject(ReadString(repaired, "content", ""));
             string reply = ReadString(delta, "reply", "");
-            var candidate = CloneDictionary(original);
+            var candidate = Program.CloneDictionary(original);
             foreach (string key in new[] { "reply", "body", "response", "text", "content" })
                 if (key == "reply" || (candidate.TryGetValue(key, out object old) && old is string s && s == oldReply)) candidate[key] = reply;
             bool preserved = delta != null && delta.Count == 1 && ReadBool(repaired, "ok", false)
@@ -330,7 +330,7 @@ namespace ReignBetaServer
                 remaining.AddRange(FindTemporaryGuestDepartureViolations(candidate, payload, heroId));
                 remaining.AddRange(FindCriticalConversationContinuityViolations(candidate, payload, heroId));
             }
-            bool accepted = preserved && remaining.Count == 0 && StructuredResponseIsComplete(Json.Serialize(candidate), auditMode);
+            bool accepted = preserved && remaining.Count == 0 && Program.StructuredResponseIsComplete(Json.Serialize(candidate), auditMode);
             if (accepted) { CarryConversationRepairState(original, candidate); MarkRepairedVisibleResponse(candidate, true); }
             // Style repair cannot cancel an otherwise valid bargain, emotion or physical event.
             // A failed attempt is visible in audit evidence, never mislabeled as a cleared repair.
@@ -343,7 +343,7 @@ namespace ReignBetaServer
                 "expressionSourceIds", expressionHistory.Select(row => ReadString(row, "turn_id", "")).ToList(),
                 "repairRequestChars", Json.Serialize(repairRequest).Length);
             llm["roleplayContinuityRepair"] = evidence;
-            WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_expression",
+            Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.roleplay_continuity_expression",
                 heroId, "", eventId, accepted ? "completed" : "warning", ReadLong(repaired, "durationMs", 0),
                 accepted ? "Recurring expression was corrected with gameplay metadata preserved."
                     : "The bounded expression rewrite did not clear its checks; the original reply and gameplay metadata were retained.", evidence);

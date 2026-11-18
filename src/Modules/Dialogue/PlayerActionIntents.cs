@@ -7,11 +7,11 @@ using TerminalActionReportProtocol = Reign.Core.Contracts.Actions.TerminalAction
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        [ThreadStatic] private static Dictionary<string, object> _playerActionTurn;
+        [ThreadStatic] internal static Dictionary<string, object> _playerActionTurn;
         [ThreadStatic] internal static List<Dictionary<string, object>> _stagedTurnActions;
-        [ThreadStatic] private static string _playerActionGeneration;
+        [ThreadStatic] internal static string _playerActionGeneration;
         private const string PlayerActionPrompt = "PLAYER ACTIONS AND RECEIPTS: Current player-authored handovers, including *stage directions*, are independent of your employment or travel decision. Never invent the player's action or treat an earlier claim as a new handover. Gold/item transfers are attempts until native execution confirms them. Do not narrate taking/counting/pocketing coins or owning an item without an applied nativePaymentReceipts entry. A recruitment advance does not move you out of town or make you a companion. Discuss a delayed departure explicitly; permanent companion consent is allegiance, temporary travel is travel. Quote exact fact keys, without '=value'.\n";
 
         private static bool SinglePlayerTransferRecipient(Dictionary<string, object> payload)
@@ -20,7 +20,7 @@ namespace ReignBetaServer
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string key in new[] { "attendees", "participants", "sceneParticipants", "activeHeroIds" })
             {
-                foreach (var row in ReadDictionaryList(payload, key)) ids.Add(CharacterIdFrom(row));
+                foreach (var row in ReadDictionaryList(payload, key)) ids.Add(Program.CharacterIdFrom(row));
                 if (payload.TryGetValue(key, out object raw) && raw is System.Collections.IEnumerable items && !(raw is string))
                     foreach (object item in items) if (item is string id) ids.Add(id);
             }
@@ -62,10 +62,10 @@ namespace ReignBetaServer
             else payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + context;
         }
 
-        private static Dictionary<string, object> RunPlayerActionTurn(Dictionary<string, object> payload, Func<Dictionary<string, object>> respond)
+        internal static Dictionary<string, object> RunPlayerActionTurn(Dictionary<string, object> payload, Func<Dictionary<string, object>> respond)
         {
             string key = ReadString(payload, "campaignId", "default") + "|" + ContinuityTimeline(payload) + "|"
-                + FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId"), EnsureCorrelationId(payload)) + "|"
+                + FirstNonEmpty(ReadFirstString(payload, "contributionId", "sceneTurnId", "turnId"), Program.EnsureCorrelationId(payload)) + "|"
                 + ReadFirstString(payload, "speakerHeroStringId", "heroStringId");
             lock (ConversationInputDispatchLocks[(uint)StringComparer.Ordinal.GetHashCode(key) % ConversationInputDispatchLocks.Length])
                 return RunPlayerActionTurnCore(payload, respond);
@@ -81,10 +81,10 @@ namespace ReignBetaServer
             PreparePlayerActionPrompt(payload);
             string campaign = ReadString(payload, "campaignId", "default");
             string publicationGeneration;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
                 publicationGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             string inputObserver = FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"),
-                CharacterIdFrom(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? TestDict()));
+                Program.CharacterIdFrom(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? TestDict()));
             AdmitConversationInput(campaign, payload, publicationGeneration, inputObserver);
             var inputReplay = ReadConversationInputReplay(campaign, payload, inputObserver);
             if (inputReplay != null) return inputReplay;
@@ -111,7 +111,7 @@ namespace ReignBetaServer
                     }
                 }
                 catch (Exception ex) when (intents.Count > 0 && !(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
-                { LogOperational("dialogue.player_action_reply_failed", TestDict("correlationId", EnsureCorrelationId(payload), "error", ex.GetType().Name));
+                { Program.LogOperational("dialogue.player_action_reply_failed", TestDict("correlationId", Program.EnsureCorrelationId(payload), "error", ex.GetType().Name));
                     response = TestDict("ok", false, "error", "The NPC response failed. Your explicit handover is evaluated separately."); }
             }
             finally { _playerActionTurn = null; _stagedTurnActions = null; _playerActionGeneration = null; }
@@ -153,8 +153,8 @@ namespace ReignBetaServer
             }
             catch (Exception ex) when (!(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
             {
-                LogOperational("dialogue.action_publication_failed", TestDict("campaignId", campaign,
-                    "correlationId", EnsureCorrelationId(payload), "error", ex.GetType().Name));
+                Program.LogOperational("dialogue.action_publication_failed", TestDict("campaignId", campaign,
+                    "correlationId", Program.EnsureCorrelationId(payload), "error", ex.GetType().Name));
                 if (!IsSinglePassConversation(payload) || string.IsNullOrWhiteSpace(ReadString(response, "reply", "")))
                     response["ok"] = false;
                 response["stage"] = "action_publication";
@@ -176,7 +176,7 @@ namespace ReignBetaServer
             var merged = playerRows.Concat(ordinary).GroupBy(r => ReadString(r, "id", "")).Select(g => g.First()).ToList();
             response["queuedDialogueActions"] = merged;
             response["playerActionOutcomes"] = outcomes;
-            response["correlationId"] = EnsureCorrelationId(payload);
+            response["correlationId"] = Program.EnsureCorrelationId(payload);
             if (!IsSinglePassConversation(payload) && intents.Count > 0 && !ReadBool(response, "ok", false))
             {
                 response["dialogueSucceeded"] = false;
@@ -197,7 +197,7 @@ namespace ReignBetaServer
             var hero = ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker") ?? new Dictionary<string, object>();
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             string recipient = FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), ReadString(hero, "heroStringId", ""));
-            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload));
+            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
             for (int slot = 0; slot < intents.Count; slot++)
             {
                 var intent = intents[slot];
@@ -222,7 +222,7 @@ namespace ReignBetaServer
                 }
                 var candidate = TestDict("command", intent.Command, "actionId", id, "source", "dialogue_player_action",
                     "FromHero", player, "ToHero", recipient, "terms", terms, "requiresAcceptance", false,
-                    "reason", "Player initiated a current handover: " + LimitText(intent.Quote, 400));
+                    "reason", "Player initiated a current handover: " + Program.LimitText(intent.Quote, 400));
                 if (intent.Command == "transfer_item")
                 {
                     var copies = MentionedActionItems(ReadDictionary(payload, "actionResolutionIndex"), intent.Asset)
@@ -233,19 +233,19 @@ namespace ReignBetaServer
                     if (ReadString(terms, "itemId", "").Length == 0 || ReadInt(terms, "amount", 0) <= 0)
                     { result["message"] = "Specify one exact owned item, variant and quantity."; continue; }
                 }
-                var normalized = NormalizeActionCommand(candidate, campaign, out var errors, payload, intent.Quote);
+                var normalized = Program.NormalizeActionCommand(candidate, campaign, out var errors, payload, intent.Quote);
                 if (normalized == null || errors.Count > 0) { result["message"] = string.Join(" ", errors); continue; }
                 try
                 {
-                    var row = QueueAction(campaign, normalized);
+                    var row = Program.QueueAction(campaign, normalized);
                     string status = ReadString(row, "status", "queued");
-                    if (!IsTerminalActionReportStatus(status) || status == "completed") rows.Add(row);
-                    result["status"] = IsTerminalActionReportStatus(status) && status != "completed" ? "unresolved" : status;
+                    if (!Program.IsTerminalActionReportStatus(status) || status == "completed") rows.Add(row);
+                    result["status"] = Program.IsTerminalActionReportStatus(status) && status != "completed" ? "unresolved" : status;
                     result["message"] = ReadString(ReadDictionary(row, "report"), "message", "Awaiting native handover result.");
                 }
                 catch (InvalidOperationException ex) { result["message"] = ex.Message; }
             }
-            if (intents.Count > 0) WriteAudit(campaign, EnsureCorrelationId(payload), "server", "dialogue", "action.player_intents", recipient, "", "", "completed", 0,
+            if (intents.Count > 0) Program.WriteAudit(campaign, Program.EnsureCorrelationId(payload), "server", "dialogue", "action.player_intents", recipient, "", "", "completed", 0,
                 "Player handovers evaluated independently of NPC negotiation.", TestDict("outcomes", outcomes));
             return rows;
         }
@@ -259,7 +259,7 @@ namespace ReignBetaServer
             string recipient = FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId"), ReadString(ReadDictionary(payload, "hero"), "heroStringId", ""));
             var intents = CurrentPlayerTransfers(payload);
             int slot = ReadInt(grant, "slot", -1);
-            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload));
+            string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
             if (ReadString(grant, "schema", "") != PlayerActionRules.Schema || ReadString(grant, "turnId", "") != turn
                 || ReadString(grant, "campaignId", "") != ReadString(payload, "campaignId", "default")
                 || ReadString(grant, "timelineId", "") != ContinuityTimeline(payload)
@@ -277,14 +277,14 @@ namespace ReignBetaServer
             record["negotiationId"] = ReadString(grant, "turnId", "");
             terms["authorityReceipt"] = TestDict("policy", PlayerActionRules.Policy, "acceptedByHeroStringId", player,
                 "actorHeroStringId", player, "targetHeroStringId", recipient, "command", command);
-            record["termsJson"] = Json.Serialize(terms); record["termsHash"] = ComputeActionTermsHash(command, terms);
+            record["termsJson"] = Json.Serialize(terms); record["termsHash"] = Program.ComputeActionTermsHash(command, terms);
             return true;
         }
 
-        private static void BindPaymentRefund(Dictionary<string, object> record, Dictionary<string, object> terms,
+        internal static void BindPaymentRefund(Dictionary<string, object> record, Dictionary<string, object> terms,
             Dictionary<string, object> payload, string command, List<string> errors)
         {
-            if ((command != "transfer_gold" && command != "give_gold_to_player") || !IsDialogueActionSource(ReadString(record, "source", ""))) return;
+            if ((command != "transfer_gold" && command != "give_gold_to_player") || !Program.IsDialogueActionSource(ReadString(record, "source", ""))) return;
             string playerText = ReadFirstString(payload, "playerText", "text", "message");
             if (!Regex.IsMatch(playerText, @"\b(?:refund|return (?:my|the) (?:gold|coins|money|advance|payment))\b", RegexOptions.IgnoreCase)) return;
             string from = FirstNonEmpty(ReadString(terms, "fromHeroStringId", ""), ReadString(record, "actorHeroStringId", ""));
@@ -298,9 +298,9 @@ namespace ReignBetaServer
             terms["paymentPurpose"] = "refund"; terms["refundOfReceiptId"] = ReadString(receipts[0], "actionId", "");
         }
 
-        private static bool IsCurrentPlayerTransferAlternative(Dictionary<string, object> action, Dictionary<string, object> payload)
+        internal static bool IsCurrentPlayerTransferAlternative(Dictionary<string, object> action, Dictionary<string, object> payload)
         {
-            string command = CanonicalCommand(ReadString(action, "command", ""));
+            string command = Program.CanonicalCommand(ReadString(action, "command", ""));
             if (command != "transfer_gold" && command != "transfer_item") return false;
             var terms = ReadDictionary(action, "terms");
             string from = FirstNonEmpty(ReadFirstString(action, "FromHero", "actorHeroStringId"), ReadString(terms, "fromHeroStringId", ""));
@@ -308,18 +308,18 @@ namespace ReignBetaServer
         }
 
         private static void EnsureConversationActionOutbox(ReignDbConnection connection)
-            => ExecuteSql(connection, "CREATE TABLE IF NOT EXISTS conversation_action_outbox (action_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,fingerprint TEXT NOT NULL,payload_json TEXT NOT NULL);");
-        private static bool DurableConversationAction(string id) => id.StartsWith("pa_", StringComparison.Ordinal) || id.StartsWith("da_", StringComparison.Ordinal);
+            => Program.ExecuteSql(connection, "CREATE TABLE IF NOT EXISTS conversation_action_outbox (action_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,fingerprint TEXT NOT NULL,payload_json TEXT NOT NULL);");
+        internal static bool DurableConversationAction(string id) => id.StartsWith("pa_", StringComparison.Ordinal) || id.StartsWith("da_", StringComparison.Ordinal);
 
         // ---- Bounded redelivery of durable actions that never receive a terminal report. ----
         // Durable work is never expired, dropped or auto-resolved: a row stays deliverable and a
         // terminal report is accepted at any time. Only the redelivery cadence backs off.
         private const long ActionRedeliveryBaseSeconds = 30;
-        private const long ActionRedeliveryFreeDeliveries = 4;
+        internal const long ActionRedeliveryFreeDeliveries = 4;
         private const long ActionRedeliveryCapSeconds = 30 * 60;
 
         // Delay before the next redelivery after deliveryCount deliveries without a terminal report.
-        private static long ActionRedeliveryDelaySeconds(long deliveryCount)
+        internal static long ActionRedeliveryDelaySeconds(long deliveryCount)
         {
             if (deliveryCount <= ActionRedeliveryFreeDeliveries) return ActionRedeliveryBaseSeconds;
             int shift = (int)Math.Min(6, deliveryCount - ActionRedeliveryFreeDeliveries);
@@ -331,19 +331,19 @@ namespace ReignBetaServer
         // load (including a no-op or non-rollback load) binds load_session_id, and archive imports
         // stamp "imported:". A row last delivered under another key is due again immediately and
         // restarts at the base cadence, so a reloaded client receives it promptly.
-        private static string ActionDeliveryGeneration(string campaign)
+        internal static string ActionDeliveryGeneration(string campaign)
         {
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     string generation = "";
                     if (WorldSimulationService.TableExists(connection, "memory_precision_state"))
-                        generation = ReadString(QuerySql(connection,
+                        generation = ReadString(Program.QuerySql(connection,
                             "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
                     string session = "";
                     if (WorldSimulationService.TableExists(connection, "memory_restored_source_context"))
-                        session = ReadString(QuerySql(connection,
+                        session = ReadString(Program.QuerySql(connection,
                             "SELECT to_jsonb(c)->>'load_session_id' AS load_session_id FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault(),
                             "load_session_id", "");
                     return generation + "|" + session;
@@ -352,7 +352,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 if (System.Threading.Interlocked.Exchange(ref _actionDeliveryGenerationFailureLogged, 1) == 0)
-                    LogOperational("action.redelivery_generation_unavailable", TestDict("campaignId", campaign ?? "", "error", ex.GetType().Name));
+                    Program.LogOperational("action.redelivery_generation_unavailable", TestDict("campaignId", campaign ?? "", "error", ex.GetType().Name));
                 return "";
             }
         }
@@ -368,7 +368,7 @@ namespace ReignBetaServer
             catch { return DateTimeOffset.UtcNow.ToUnixTimeSeconds(); }
         }
 
-        private static bool DurableRedeliveryDue(Dictionary<string, object> row, long nowTs, Func<string> generation)
+        internal static bool DurableRedeliveryDue(Dictionary<string, object> row, long nowTs, Func<string> generation)
         {
             long deliveredTs = ReadLong(row, "deliveredTs", 0);
             long elapsed = nowTs - deliveredTs;
@@ -380,7 +380,7 @@ namespace ReignBetaServer
 
         // Bounded, non-sensitive view of durable actions that were delivered and still await a
         // terminal report. The server knows only each row's last reported status, not client hold reasons.
-        private static Dictionary<string, object> UnresolvedActionDeliverySummary(string campaign, int sampleLimit = 5)
+        internal static Dictionary<string, object> UnresolvedActionDeliverySummary(string campaign, int sampleLimit = 5)
         {
             var summary = TestDict("schema", "reign-action-redelivery-holds-v1", "campaignId", campaign ?? "",
                 "baseDelaySeconds", ActionRedeliveryBaseSeconds, "capDelaySeconds", ActionRedeliveryCapSeconds,
@@ -389,7 +389,7 @@ namespace ReignBetaServer
             {
                 // Never creates a campaign directory; an existing campaign is read through
                 // OpenCampaignConnection exactly as an action poll would.
-                if (string.IsNullOrWhiteSpace(campaign) || !System.IO.Directory.Exists(CampaignDirectory(campaign)))
+                if (string.IsNullOrWhiteSpace(campaign) || !System.IO.Directory.Exists(Program.CampaignDirectory(campaign)))
                 {
                     summary["ok"] = true; summary["unresolvedCount"] = 0; summary["backedOffCount"] = 0;
                     return summary;
@@ -397,7 +397,7 @@ namespace ReignBetaServer
                 long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 var unresolved = ReadDurableConversationActions(campaign)
                     .Where(r => DurableConversationAction(ReadString(r, "id", ""))
-                        && !IsTerminalActionReportStatus(ReadString(r, "status", ""))
+                        && !Program.IsTerminalActionReportStatus(ReadString(r, "status", ""))
                         && ReadLong(r, "deliveredTs", 0) > 0)
                     .OrderBy(r => ReadLong(r, "ts", 0)).ThenBy(r => ReadString(r, "id", ""), StringComparer.Ordinal).ToList();
                 var backedOff = unresolved.Where(r => ReadLong(r, "deliveryCount", 0) > ActionRedeliveryFreeDeliveries).ToList();
@@ -425,7 +425,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex)
             {
-                LogOperational("action.redelivery_summary_failed", TestDict("campaignId", campaign, "error", ex.GetType().Name));
+                Program.LogOperational("action.redelivery_summary_failed", TestDict("campaignId", campaign, "error", ex.GetType().Name));
                 summary["ok"] = false; summary["error"] = "Unresolved action deliveries are unavailable.";
             }
             return summary;
@@ -445,11 +445,11 @@ namespace ReignBetaServer
             {
                 if (rows.Any(row => DurableConversationAction(ReadString(row, "id", ""))))
                     throw new InvalidOperationException("A dialogue publication cannot mix durable actions and legacy directives.");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     if (ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "") != expectedGeneration)
                         throw new InvalidOperationException("The campaign was restored while the directive was being prepared.");
-                lock (FileLock)
-                    foreach (var row in rows) QueueAction(campaign, ReadDictionary(row, "record"));
+                lock (Program.FileLock)
+                    foreach (var row in rows) Program.QueueAction(campaign, ReadDictionary(row, "record"));
                 return TestDict("schema", "reign-conversation-action-publication-v1", "status", "legacy_directive_path",
                     "committed", true, "atomic", false, "actionIds", rows.Select(r => ReadString(r, "id", "")).ToList());
             }
@@ -465,13 +465,13 @@ namespace ReignBetaServer
                 + ReadFirstString(payload, "sceneTurnId", "turnId", "requestId", "correlationId") + "|"
                 + string.Join("|", rows.Select(r => ReadString(r, "id", "")).OrderBy(id => id, StringComparer.Ordinal)));
             var created = new List<Dictionary<string, object>>();
-            lock (FileLock)
-            using (var connection = OpenCampaignConnection(campaign))
+            lock (Program.FileLock)
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureConversationActionOutbox(connection);
                 using (var transaction = connection.BeginTransaction())
                 {
-                    string currentGeneration = ReadString(QuerySql(connection,
+                    string currentGeneration = ReadString(Program.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;").Single(), "restore_generation", "");
                     if (currentGeneration != expectedGeneration)
                         throw new InvalidOperationException("The campaign was restored while the conversation was being prepared.");
@@ -483,7 +483,7 @@ namespace ReignBetaServer
                         if (ReadString(row, "campaignId", "") != campaign || ReadString(record, "campaignId", "") != campaign
                             || ReadString(record, "termsHash", "").Length == 0)
                             throw new InvalidOperationException("The staged action is missing its immutable campaign or terms binding.");
-                        bool existing = QuerySql(connection, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).Count > 0;
+                        bool existing = Program.QuerySql(connection, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).Count > 0;
                         row["publicationId"] = publicationId;
                         row["publicationGeneration"] = expectedGeneration;
                         row["publicationEvidence"] = id.StartsWith("pa_", StringComparison.Ordinal)
@@ -504,7 +504,7 @@ namespace ReignBetaServer
                 try
                 {
                     if (auditWriter != null) auditWriter(row);
-                    else WriteAudit(campaign, ReadString(row, "correlationId", EnsureCorrelationId(payload)), "server", "action", "action.queued",
+                    else Program.WriteAudit(campaign, ReadString(row, "correlationId", Program.EnsureCorrelationId(payload)), "server", "action", "action.queued",
                         ReadFirstString(ReadDictionary(row, "record"), "actorHeroStringId", "targetHeroStringId"),
                         ReadString(row, "id", ""), "", "queued", 0, "Accepted conversation action batch committed to the durable outbox.",
                         TestDict("publicationId", publicationId, "row", row));
@@ -515,21 +515,21 @@ namespace ReignBetaServer
                 "actionIds", rows.Select(r => ReadString(r, "id", "")).Distinct().ToList(),
                 "createdCount", created.Count, "auditProjectionPending", auditPending);
         }
-        private static Dictionary<string, object> ReadDurableConversationAction(string campaign, string id)
+        internal static Dictionary<string, object> ReadDurableConversationAction(string campaign, string id)
         {
             if (!DurableConversationAction(id)) return null;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureConversationActionOutbox(connection);
-                var row = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).FirstOrDefault();
+                var row = Program.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).FirstOrDefault();
                 return row == null ? null : TryParseJsonObject(ReadString(row, "payload_json", "{}"));
             }
         }
-        private static void SaveDurableConversationAction(string campaign, Dictionary<string, object> row)
+        internal static void SaveDurableConversationAction(string campaign, Dictionary<string, object> row)
         {
             string id = ReadString(row, "id", ""); if (!DurableConversationAction(id)) return;
-            lock (FileLock)
-            using (var connection = OpenCampaignConnection(campaign))
+            lock (Program.FileLock)
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureConversationActionOutbox(connection);
                 using (var transaction = connection.BeginTransaction())
@@ -539,12 +539,12 @@ namespace ReignBetaServer
                 }
             }
         }
-        private static void SaveDurableConversationAction(ReignDbConnection connection, Dictionary<string, object> row)
+        internal static void SaveDurableConversationAction(ReignDbConnection connection, Dictionary<string, object> row)
         {
             string id = ReadString(row, "id", "");
             var record = ReadDictionary(row, "record"); var terms = TryParseJsonObject(ReadString(record, "termsJson", "{}"));
             string fingerprint = ReadString(record, "termsHash", "");
-            var previous = QuerySql(connection, "SELECT fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", id)).FirstOrDefault();
+            var previous = Program.QuerySql(connection, "SELECT fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", id)).FirstOrDefault();
             if (previous != null)
             {
                 if (ReadString(previous, "fingerprint", "") != fingerprint) throw new InvalidOperationException("This action ID already has different immutable terms.");
@@ -559,28 +559,28 @@ namespace ReignBetaServer
                 // Status acknowledgments must retain the original publication evidence.
                 foreach (string key in new[] { "publicationId", "publicationGeneration", "publicationEvidence", "acceptedResponseHash" })
                     if (original.ContainsKey(key)) row[key] = original[key];
-                if (!ShouldAcceptActionStatusTransition(ReadString(original, "status", ""), ReadString(row, "status", "")))
+                if (!Program.ShouldAcceptActionStatusTransition(ReadString(original, "status", ""), ReadString(row, "status", "")))
                 { row.Clear(); foreach (var pair in original) row[pair.Key] = pair.Value; return; }
             }
-            ExecuteSql(connection, @"INSERT INTO conversation_action_outbox(action_id,timeline_id,fingerprint,payload_json) VALUES($id,$timeline,$fingerprint,$payload)
+            Program.ExecuteSql(connection, @"INSERT INTO conversation_action_outbox(action_id,timeline_id,fingerprint,payload_json) VALUES($id,$timeline,$fingerprint,$payload)
 ON CONFLICT(action_id) DO UPDATE SET payload_json=excluded.payload_json
 WHERE conversation_action_outbox.fingerprint=excluded.fingerprint
 AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponseHash','')=''
  OR COALESCE(excluded.payload_json::jsonb->>'acceptedResponseHash','')=''
  OR conversation_action_outbox.payload_json::jsonb->>'acceptedResponseHash'=excluded.payload_json::jsonb->>'acceptedResponseHash');",
                 TestDict("id", id, "timeline", ReadString(terms, "timelineId", ReadString(ReadDictionary(terms, "playerAction"), "timelineId", "main")), "fingerprint", fingerprint, "payload", Json.Serialize(row)));
-            var saved = QuerySql(connection, "SELECT fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).First();
+            var saved = Program.QuerySql(connection, "SELECT fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", id)).First();
             if (ReadString(saved, "fingerprint", "") != fingerprint) throw new InvalidOperationException("This action ID already has different immutable terms.");
             string expectedHash = ReadString(row, "acceptedResponseHash", "");
             if (expectedHash.Length > 0 && ReadString(TryParseJsonObject(ReadString(saved, "payload_json", "{}")), "acceptedResponseHash", "") != expectedHash)
                 throw new InvalidOperationException("This action already belongs to a different accepted response.");
         }
-        private static List<Dictionary<string, object>> ReadDurableConversationActions(string campaign)
+        internal static List<Dictionary<string, object>> ReadDurableConversationActions(string campaign)
         {
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 if (!WorldSimulationService.TableExists(connection, "conversation_action_outbox")) return new List<Dictionary<string, object>>();
-                return QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox;").Select(r => TryParseJsonObject(ReadString(r, "payload_json", "{}"))).Where(r => r != null).ToList();
+                return Program.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox;").Select(r => TryParseJsonObject(ReadString(r, "payload_json", "{}"))).Where(r => r != null).ToList();
             }
         }
 
@@ -588,12 +588,12 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
         private static readonly HashSet<string> TerminalReportStatuses = new HashSet<string>(StringComparer.Ordinal)
             { "completed", "failed", "rejected", "cancelled", "canceled", "blocked", "invalid", "obsolete" };
 
-        private static bool IsProtocolOwnedTerminalAction(Dictionary<string, object> row) => ReadDictionary(row, "terminalReport") != null;
+        internal static bool IsProtocolOwnedTerminalAction(Dictionary<string, object> row) => ReadDictionary(row, "terminalReport") != null;
 
         // beforeCommit is a self-test seam; it receives the connection that owns the open transaction.
         // First acceptance invokes it with 0 (row locks held, before evaluation), 1 (after evaluation)
         // and 2 (immediately before commit).
-        private static Dictionary<string, object> TerminalActionReportApi(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> TerminalActionReportApi(Dictionary<string, object> payload,
             Action<int, ReignDbConnection> beforeCommit = null)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -665,7 +665,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                 liveGeneration, actionId, termsHash, report);
             // Lock order: campaign relationship writer, then database. Never FileLock here.
             using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 EnsureConversationActionOutbox(connection);
                 RelationshipsService.EnsureConversationRelationshipSchema(connection);
@@ -678,7 +678,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                     // The receipt/memory triggers later UPDATE this row; a shared lock here could be held
                     // by a second writer queued on the outbox row and deadlock that upgrade. Take it once,
                     // still before the outbox row, in the mode the trigger needs.
-                    string current = ReadString(QuerySql(connection,
+                    string current = ReadString(Program.QuerySql(connection,
                         "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
                     // Under the generation lock, before the outbox row: a proof that no longer names the
                     // campaign's current verified load mutates nothing. Recovery's proof is its own
@@ -690,7 +690,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                     if (recovery && ReadString(restoreContext, "timeline_id", "") != timeline)
                         return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "timeline");
                     string sourceGeneration = recovery ? ReadString(restoreContext, "source_generation", "") : "";
-                    var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
+                    var stored = Program.QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                         TestDict("id", actionId)).FirstOrDefault();
                     var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                     if (row == null) return Reply(TerminalActionReportProtocol.Unknown, "unknown_action");
@@ -729,7 +729,7 @@ AND (COALESCE(conversation_action_outbox.payload_json::jsonb->>'acceptedResponse
                             if (admits)
                             {
                                 var admission = TerminalReportAdmission(liveGeneration, recoveryPoint, recoverySession, now);
-                                ExecuteSql(connection, @"UPDATE conversation_action_outbox
+                                Program.ExecuteSql(connection, @"UPDATE conversation_action_outbox
 SET payload_json=jsonb_set(payload_json::jsonb,'{terminalReport,admission}',CAST($admission AS jsonb))::text
 WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                                     TestDict("id", actionId, "sha", sha, "admission", Json.Serialize(admission)));
@@ -756,7 +756,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                     else
                     {
                         // A legacy terminal row may already carry a legacy delta; never upgrade it.
-                        if (IsTerminalActionReportStatus(ReadString(row, "status", "")))
+                        if (Program.IsTerminalActionReportStatus(ReadString(row, "status", "")))
                             return Reply(TerminalActionReportProtocol.Conflict, "legacy_terminal_status");
                         // Recovery never answers Stale: the generation authority is the verified context.
                         if (!recovery && (current.Length == 0 || current != generation))
@@ -772,10 +772,10 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                         // report's own generation (exact locked row identity is already proven above).
                         if (recovery && sourceGeneration != generation)
                             return Reply(TerminalActionReportProtocol.Unknown, TerminalActionReportProtocol.RecoveryUnprovenPrefix + "source_generation");
-                        string authoritative = NormalizeActionReportStatus(record, report, status);
+                        string authoritative = Program.NormalizeActionReportStatus(record, report, status);
                         var directions = RelationshipsService.CompletedActionRelationshipDirections(report, timeline);
                         string evidence = directions.Count == 0 ? "not_applicable" : "evaluated";
-                        if (directions.Any(d => QuerySql(connection,
+                        if (directions.Any(d => Program.QuerySql(connection,
                             "SELECT event_id FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
                             TestDict("event", ReadString(d, "eventId", ""), "subject", ReadString(d, "subjectId", ""), "target", ReadString(d, "targetId", ""))).Count > 0))
                         { evidence = "pre_protocol"; directions.Clear(); }
@@ -825,15 +825,15 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                 {
                     // Best-effort diagnostic, first acceptance only. Nothing retries it:
                     // exact replays never append, and the response does not certify it.
-                    lock (FileLock) AppendJsonLineToPath(CampaignFile(campaign, "actions", "actions.jsonl"), TestDict("id", actionId,
+                    lock (Program.FileLock) Program.AppendJsonLineToPath(Program.CampaignFile(campaign, "actions", "actions.jsonl"), TestDict("id", actionId,
                         "ts", now, "campaignId", campaign, "status", ReadString(marker, "authoritativeStatus", ""), "report", report, "protocol", TerminalActionReportProtocol.RequestSchema));
-                    WriteAudit(campaign, ReadString(record, "correlationId", ""), "game_client", "action", "action.execution_report", player, actionId, "",
+                    Program.WriteAudit(campaign, ReadString(record, "correlationId", ""), "game_client", "action", "action.execution_report", player, actionId, "",
                         ReadString(marker, "authoritativeStatus", ""), 0, "Game client filed a durable terminal action report.",
                         TestDict("record", record, "report", report, "reportSha256", sha, "receiptId", ReadString(marker, "receiptId", "")));
                 }
                 catch (Exception ex) when (!(ex is PersistenceService.CampaignRequestReplacedException) && !(ex is OperationCanceledException))
                 {
-                    LogOperational("action.terminal_report_audit_incomplete", TestDict("campaignId", campaign, "actionId", actionId,
+                    Program.LogOperational("action.terminal_report_audit_incomplete", TestDict("campaignId", campaign, "actionId", actionId,
                         "error", ex.GetType().Name, "bestEffort", true, "retry", "none"));
                 }
             // Shared activity and action memory only; independently retryable by exact replay.
@@ -861,7 +861,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         private static Dictionary<string, object> TerminalReportRestoreContext(ReignDbConnection connection)
         {
             if (!WorldSimulationService.TableExists(connection, "memory_restored_source_context")) return null;
-            var row = QuerySql(connection, "SELECT to_jsonb(c)::text AS context FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault();
+            var row = Program.QuerySql(connection, "SELECT to_jsonb(c)::text AS context FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault();
             return row == null ? null : TryParseJsonObject(ReadString(row, "context", "{}"));
         }
 
@@ -896,7 +896,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             if (!TerminalActionReportProtocol.IsTrustedIdentifier(savePointId) || !TerminalActionReportProtocol.IsTrustedIdentifier(loadSessionId)) return "";
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     if (!WorldSimulationService.TableExists(connection, "memory_precision_state")) return "";
                     string current = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
@@ -912,7 +912,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         internal static Dictionary<string, object> TerminalReportMarkerAdmission(ReignDbConnection connection, string actionId, string sha)
         {
             if (string.IsNullOrEmpty(actionId) || !WorldSimulationService.TableExists(connection, "conversation_action_outbox")) return null;
-            var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", actionId)).FirstOrDefault();
+            var stored = Program.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", actionId)).FirstOrDefault();
             var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
             return marker != null && ReadString(marker, "sha256", "") == sha ? ReadDictionary(marker, TerminalActionReportProtocol.AdmissionField) : null;
         }
@@ -936,12 +936,12 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             var directions = RelationshipsService.CompletedActionRelationshipDirections(report, timeline);
             if (directions.Count == 0) return null;
             string target;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
                 if (!WorldSimulationService.TableExists(connection, "conversation_action_outbox") || !WorldSimulationService.TableExists(connection, "memory_precision_state")) return null;
-                string current = ReadString(QuerySql(connection,
+                string current = ReadString(Program.QuerySql(connection,
                     "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
-                var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
+                var stored = Program.QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
                     TestDict("id", actionId)).FirstOrDefault();
                 var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                 var record = ReadDictionary(row, "record");
@@ -950,7 +950,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                 if (row == null || !TerminalReportScopeMatches(stored, row, record, campaign, actionId, timeline, player, termsHash)
                     || ReadString(report, "actorHeroStringId", "") != player || ReadString(report, "targetHeroStringId", "") != target
                     || ReadString(directions[0], "subjectId", "") != player || ReadString(directions[0], "targetId", "") != target
-                    || ReadDictionary(row, "terminalReport") != null || IsTerminalActionReportStatus(ReadString(row, "status", ""))
+                    || ReadDictionary(row, "terminalReport") != null || Program.IsTerminalActionReportStatus(ReadString(row, "status", ""))
                     || current.Length == 0 || current != generation
                     || TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", "")).Length > 0
                     || expectedType.Length == 0 || ReadString(report, "type", "") != expectedType)
@@ -973,7 +973,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         {
             string command = ReadString(record, "command", "");
             if (record == null || record.ContainsKey("typeValue") || (command != "transfer_gold" && command != "transfer_item")) return "";
-            string expected = MapCommandToActionType(command);
+            string expected = Program.MapCommandToActionType(command);
             return !record.TryGetValue("type", out object stored) || (stored is string type && type == expected) ? expected : "";
         }
 
@@ -984,7 +984,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         // registry, and the campaign schema is read through a metadata connection inside a
         // REPEATABLE READ READ ONLY transaction with a transaction-local search_path, so
         // PostgreSQL itself refuses any write. Unknown and stale are never legacy proofs.
-        private static Dictionary<string, object> TerminalActionReportPreflightApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> TerminalActionReportPreflightApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
             Func<string, string> exact = key => query.TryGetValue(key, out string value) ? value ?? "" : "";
@@ -1007,12 +1007,12 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             using (connection.BeginTransaction(System.Data.IsolationLevel.RepeatableRead))
             {
                 // First statement of the transaction; disposal rolls back and restores search_path.
-                ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
-                QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
+                Program.ExecuteSql(connection, "SET TRANSACTION READ ONLY;");
+                Program.QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
                 if (!WorldSimulationService.TableExists(connection, "conversation_action_outbox")) return Reply(TerminalActionReportProtocol.Unknown, "unknown_action");
-                string current = !WorldSimulationService.TableExists(connection, "memory_precision_state") ? "" : ReadString(QuerySql(connection,
+                string current = !WorldSimulationService.TableExists(connection, "memory_precision_state") ? "" : ReadString(Program.QuerySql(connection,
                     "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
-                var stored = QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
+                var stored = Program.QuerySql(connection, "SELECT timeline_id,fingerprint,payload_json FROM conversation_action_outbox WHERE action_id=$id;",
                     TestDict("id", actionId)).FirstOrDefault();
                 var row = stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}"));
                 if (row == null) return Reply(TerminalActionReportProtocol.Unknown, "unknown_action");
@@ -1034,7 +1034,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                         return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch");
                     return Reply(TerminalActionReportProtocol.Accepted, "protocol_owned", ReadString(marker, "authoritativeStatus", ""), reportType);
                 }
-                if (IsTerminalActionReportStatus(ReadString(row, "status", "")))
+                if (Program.IsTerminalActionReportStatus(ReadString(row, "status", "")))
                     return Reply(TerminalActionReportProtocol.Conflict, "legacy_terminal_status", ReadString(row, "status", ""));
                 if (current.Length == 0 || current != generation) return Reply(TerminalActionReportProtocol.Stale, "generation_mismatch");
                 string ineligible = TerminalReportIneligibility(connection, row, campaign, actionId, ReadString(stored, "timeline_id", ""));
@@ -1056,7 +1056,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             var record = ReadDictionary(row, "record");
             var terms = TryParseJsonObject(ReadString(record, "termsJson", "{}")) ?? new Dictionary<string, object>();
             var grant = ReadDictionary(terms, "playerAction");
-            string command = CanonicalCommand(ReadString(record, "command", ""));
+            string command = Program.CanonicalCommand(ReadString(record, "command", ""));
             string actor = ReadString(record, "actorHeroStringId", ""), target = ReadString(record, "targetHeroStringId", "");
             if (record == null || grant == null || ReadString(row, "id", "") != actionId || ReadString(row, "campaignId", "") != campaign
                 || ReadString(record, "serverActionId", "") != actionId || ReadString(record, "campaignId", "") != campaign
@@ -1073,7 +1073,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             foreach (var probe in new[] { "negotiated_action_drafts|queued_action_id", "rebellion_backing_requests|action_id" })
             {
                 string[] part = probe.Split('|');
-                if (WorldSimulationService.TableExists(connection, part[0]) && QuerySql(connection, "SELECT 1 AS hit FROM " + part[0] + " WHERE " + part[1] + "=$id LIMIT 1;",
+                if (WorldSimulationService.TableExists(connection, part[0]) && Program.QuerySql(connection, "SELECT 1 AS hit FROM " + part[0] + " WHERE " + part[1] + "=$id LIMIT 1;",
                     TestDict("id", actionId)).Count > 0) return "foreign_projection_owner";
             }
             return "";
@@ -1097,7 +1097,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
         {
             Func<string, bool> pending = error =>
             {
-                LogOperational("action.terminal_report_projection_pending", TestDict("campaignId", campaign, "actionId", actionId, "error", error));
+                Program.LogOperational("action.terminal_report_projection_pending", TestDict("campaignId", campaign, "actionId", actionId, "error", error));
                 return false;
             };
             // LogOperational takes FileLock, and legacy ReportAction can hold FileLock while
@@ -1106,16 +1106,16 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
             string deferredPending = null;
             try
             {
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     // Schema (and any one-time migration) stays outside the projection transaction.
                     EnsureSharedActivityMemorySchema(connection);
                     using (var transaction = connection.BeginTransaction())
                     {
                         // Same order and mode as acceptance: the memory trigger updates this row.
-                        string current = ReadString(QuerySql(connection,
+                        string current = ReadString(Program.QuerySql(connection,
                             "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR NO KEY UPDATE;").FirstOrDefault(), "restore_generation", "");
-                        var stored = QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
+                        var stored = Program.QuerySql(connection, "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;",
                             TestDict("id", actionId)).FirstOrDefault();
                         var marker = ReadDictionary(stored == null ? null : TryParseJsonObject(ReadString(stored, "payload_json", "{}")), "terminalReport");
                         // Reread under the lock: the accepted marker must still be this exact report, and
@@ -1139,7 +1139,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                         if (!memoryProjected)
                         {
                             // A refused memory write returns ok=false without throwing; disposal rolls back.
-                            var memory = StoreActionResultMemory(report, "actions_report", connection);
+                            var memory = Program.StoreActionResultMemory(report, "actions_report", connection);
                             if (!ReadBool(memory, "ok", false))
                             {
                                 deferredPending = "memory_store_refused";
@@ -1147,7 +1147,7 @@ WHERE action_id=$id AND payload_json::jsonb->'terminalReport'->>'sha256'=$sha;",
                             }
                         }
                         beforeMarker?.Invoke(connection);
-                        ExecuteSql(connection, @"UPDATE conversation_action_outbox
+                        Program.ExecuteSql(connection, @"UPDATE conversation_action_outbox
 SET payload_json=jsonb_set(jsonb_set(payload_json::jsonb,'{terminalReport,projectedTs}',
  COALESCE(payload_json::jsonb->'terminalReport'->'projectedTs',to_jsonb(CAST($ts AS bigint)))),
  '{terminalReport,projectedShared}',to_jsonb(CAST($ts AS bigint)))::text

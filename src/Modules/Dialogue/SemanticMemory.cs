@@ -12,18 +12,18 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal const string SemanticModelVersion = "bge-small-en-v1.5-384-precision-v2";
         internal const string SemanticCollection = "reign_memory_bge_small_en_v1_5_v1";
         private const string WorldHistoryEmbeddingFilterVersion = "2";
         private const string ConversationEmbeddingPolicyVersion = "2";
-        private static readonly object SemanticWorkerLock = new object();
+        internal static readonly object SemanticWorkerLock = new object();
         private static readonly object SemanticJobProcessingLock = new object();
         private static readonly object SemanticDiagnosticLock = new object();
         private static Process SemanticWorkerProcess;
         private static CancellationTokenSource SemanticPumpCancellation;
-        private static Task SemanticPumpTask;
+        internal static Task SemanticPumpTask;
         private static DateTime SemanticDiagnosticCooldownUntilUtc = DateTime.MinValue;
         private static DateTime SemanticWorkerLastHealthyUtc = DateTime.MinValue;
         private static DateTime SemanticWorkerUnavailableUntilUtc = DateTime.MinValue;
@@ -52,9 +52,9 @@ namespace ReignBetaServer
 
         internal static void EnsureSemanticMemorySchema(ReignDbConnection connection)
         {
-            if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
+            if (Monitor.IsEntered(Program.CampaignSchemaLock) && !Monitor.IsEntered(Program.FileLock))
                 throw new InvalidOperationException("Semantic schema settings require FileLock before CampaignSchemaLock.");
-            string generation = ReadString(LoadSettings(), "vectorProvider", "local")
+            string generation = ReadString(Program.LoadSettings(), "vectorProvider", "local")
                 .ToLowerInvariant() + "|" + SemanticModelVersion;
             EnsureSemanticMemorySchema(connection, generation);
         }
@@ -64,18 +64,18 @@ namespace ReignBetaServer
             string providerGeneration)
         {
             if (providerGeneration == null) throw new ArgumentNullException(nameof(providerGeneration));
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_documents (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_documents (
 source_type TEXT NOT NULL,source_id TEXT NOT NULL,model_version TEXT NOT NULL,provider TEXT NOT NULL,
 campaign_id TEXT NOT NULL DEFAULT '',timeline_id TEXT NOT NULL DEFAULT '',content_hash TEXT NOT NULL DEFAULT '',
 vector_id TEXT NOT NULL DEFAULT '',dimensions INTEGER NOT NULL DEFAULT 384,status TEXT NOT NULL DEFAULT 'pending',
 attempt_count INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL DEFAULT 0,
 payload_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(source_type,source_id,model_version,provider));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_embedding_documents_status ON embedding_documents(status,updated_ts);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_jobs (
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_embedding_documents_status ON embedding_documents(status,updated_ts);");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS embedding_jobs (
 source_type TEXT NOT NULL,source_id TEXT NOT NULL,operation TEXT NOT NULL DEFAULT 'upsert',status TEXT NOT NULL DEFAULT 'pending',
 attempt_count INTEGER NOT NULL DEFAULT 0,next_attempt_ts INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',
 enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type,source_id));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_embedding_jobs_ready ON embedding_jobs(status,next_attempt_ts,enqueued_ts);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_embedding_jobs_ready ON embedding_jobs(status,next_attempt_ts,enqueued_ts);");
 
             CreateEventEmbeddingTriggers(connection);
             CreateEmbeddingTrigger(connection, "memories", "memory", "memory_id", "summary,memory_type,memory_domain,tags_json,participants_json,about_entities_json,location_id,visibility,status", true);
@@ -88,26 +88,26 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             EnsureWorldHistoryEmbeddingFilter(connection);
             EnsureConversationEmbeddingPolicy(connection);
             // Only the derivative index is backfilled. Original transcripts and campaign effects are untouched.
-            if (ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_original_dialogue_v1' LIMIT 1;").FirstOrDefault(), "value", "") != "complete")
+            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_original_dialogue_v1' LIMIT 1;").FirstOrDefault(), "value", "") != "complete")
             {
                 SeedEmbeddingJobs(connection, "conversation_turns", "conversation_turn", "turn_id");
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_original_dialogue_v1','complete');");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_original_dialogue_v1','complete');");
             }
 
-            Dictionary<string, object> seeded = QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_v1_seeded' LIMIT 1;").FirstOrDefault();
+            Dictionary<string, object> seeded = Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_v1_seeded' LIMIT 1;").FirstOrDefault();
             if (!string.Equals(ReadString(seeded, "value", ""), "complete", StringComparison.OrdinalIgnoreCase))
             {
                 QueueAllEmbeddingJobs(connection, false);
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_v1_seeded','complete');");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_v1_seeded','complete');");
             }
-            string activeGeneration = ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation' LIMIT 1;").FirstOrDefault(), "value", "");
+            string activeGeneration = ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation' LIMIT 1;").FirstOrDefault(), "value", "");
             if (!string.Equals(providerGeneration, activeGeneration, StringComparison.OrdinalIgnoreCase))
             {
                 QueueAllEmbeddingJobs(connection, true);
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_provider_generation',$value);",
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_provider_generation',$value);",
                     new Dictionary<string, object> { ["value"] = providerGeneration });
             }
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_version','1');");
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_memory_version','1');");
         }
 
         private static void CreateEmbeddingTrigger(ReignDbConnection connection, string table, string sourceType, string idColumn, string updateColumns, bool hasStatus)
@@ -121,9 +121,9 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             string upsert = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "VALUES('" + sourceType + "',NEW." + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='upsert',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
-            ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_insert AFTER INSERT ON " + table + " BEGIN " + upsert + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table + " BEGIN " + upsert + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
+            Program.ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_insert AFTER INSERT ON " + table + " BEGIN " + upsert + " END;");
+            Program.ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table + " BEGIN " + upsert + " END;");
+            Program.ExecuteSql(connection, "CREATE TRIGGER IF NOT EXISTS trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
                 + "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "VALUES('" + sourceType + "',OLD." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now'); END;");
@@ -134,20 +134,20 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             string safe = "semantic_" + table;
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert ON " + table + ";");
-                ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update ON " + table + ";");
-                ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible ON " + table + ";");
-                ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete ON " + table + ";");
+                Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert ON " + table + ";");
+                Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update ON " + table + ";");
+                Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible ON " + table + ";");
+                Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete ON " + table + ";");
                 // Interrupted schema upgrades can leave a trigger with an older
                 // name attached to this table. CASCADE makes function recreation
                 // idempotent by removing every stale dependent trigger as well.
-                ExecuteSql(connection, "DROP FUNCTION IF EXISTS fn_" + safe + "_queue() CASCADE;");
+                Program.ExecuteSql(connection, "DROP FUNCTION IF EXISTS fn_" + safe + "_queue() CASCADE;");
                 return;
             }
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert;");
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update;");
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible;");
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete;");
         }
 
         private static string EventEmbeddingEligibilitySql(string prefix)
@@ -162,8 +162,8 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
             if (row == null) return false;
             string embeddingStatus = ReadString(row, "embedding_status", "");
             string category = ReadString(row, "event_category", "");
-            return !ContainsAny(embeddingStatus.ToLowerInvariant(), "skipped", "deleted", "inactive")
-                && !ContainsAny(category.ToLowerInvariant(), "conversation", "correspondence");
+            return !Program.ContainsAny(embeddingStatus.ToLowerInvariant(), "skipped", "deleted", "inactive")
+                && !Program.ContainsAny(category.ToLowerInvariant(), "conversation", "correspondence");
         }
 
         private static void CreateEventEmbeddingTriggers(ReignDbConnection connection)
@@ -187,13 +187,13 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
                 + "VALUES('" + sourceType + "',NEW." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
             string eligible = EventEmbeddingEligibilitySql("NEW.");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_insert AFTER INSERT ON " + table
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_insert AFTER INSERT ON " + table
                 + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table
                 + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update_ineligible AFTER UPDATE OF " + updateColumns + " ON " + table
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update_ineligible AFTER UPDATE OF " + updateColumns + " ON " + table
                 + " WHEN NOT " + eligible + " BEGIN " + remove + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
                 + "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "VALUES('" + sourceType + "',OLD." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now'); END;");
@@ -201,26 +201,26 @@ enqueued_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL,PRIMARY KEY(source_type
 
         private static void EnsureConversationEmbeddingPolicy(ReignDbConnection connection)
         {
-            Dictionary<string, object> applied = QuerySql(connection,
+            Dictionary<string, object> applied = Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='semantic_conversation_embedding_policy' LIMIT 1;").FirstOrDefault();
             if (!string.Equals(ReadString(applied, "value", ""), ConversationEmbeddingPolicyVersion, StringComparison.OrdinalIgnoreCase))
             {
                 // Raw turns remain canonical and FTS-searchable for the configured recent/exact
                 // history window. Durable memories and summaries are the semantic layer.
-                ExecuteSql(connection, @"UPDATE events SET embedding_status='skipped'
+                Program.ExecuteSql(connection, @"UPDATE events SET embedding_status='skipped'
 WHERE LOWER(COALESCE(event_category,'')) IN ('conversation','correspondence');");
 
                 // Before this policy, each ordinary conversation event projected one generic
                 // interpersonal memory per participant. Retain explicit episodic/model writes,
                 // but retire the mechanically duplicated projections.
-                ExecuteSql(connection, @"DELETE FROM memory_fts WHERE memory_id IN
+                Program.ExecuteSql(connection, @"DELETE FROM memory_fts WHERE memory_id IN
 (SELECT memory_id FROM memories WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
  AND LOWER(COALESCE(source,'')) IN ('dialogue_turn','party_chat_turn','social_event_turn'));" );
-                ExecuteSql(connection, @"DELETE FROM memories
+                Program.ExecuteSql(connection, @"DELETE FROM memories
 WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
  AND LOWER(COALESCE(source,'')) IN ('dialogue_turn','party_chat_turn','social_event_turn');");
 
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_conversation_embedding_policy',$value);",
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_conversation_embedding_policy',$value);",
                     new Dictionary<string, object> { ["value"] = ConversationEmbeddingPolicyVersion });
             }
             QueueRetiredEmbeddingDeletes(connection);
@@ -230,14 +230,14 @@ WHERE LOWER(COALESCE(memory_type,''))='interpersonal_experience'
         {
             // Original attributed turns are active semantic sources again; deletion is driven by their own status/trigger.
             string ineligibleEvent = "NOT " + EventEmbeddingEligibilitySql("e.");
-            ExecuteSql(connection, @"DELETE FROM embedding_jobs WHERE source_type='event' AND source_id IN
+            Program.ExecuteSql(connection, @"DELETE FROM embedding_jobs WHERE source_type='event' AND source_id IN
 (SELECT e.event_id FROM events e WHERE " + ineligibleEvent + ");");
-            ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
+            Program.ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
 SELECT 'event',d.source_id,'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')
 FROM embedding_documents d JOIN events e ON e.event_id=d.source_id
 WHERE d.source_type='event' AND d.status='indexed' AND " + ineligibleEvent + @"
 ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');");
-            ExecuteSql(connection, @"DELETE FROM embedding_documents WHERE source_type='event' AND status<>'indexed' AND source_id IN
+            Program.ExecuteSql(connection, @"DELETE FROM embedding_documents WHERE source_type='event' AND status<>'indexed' AND source_id IN
 (SELECT e.event_id FROM events e WHERE " + ineligibleEvent + ");");
         }
 
@@ -271,10 +271,10 @@ ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pend
                     connection, table, sourceType, idColumn, WorldHistoryEmbeddingEligibilitySql("NEW."));
                 return;
             }
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert;");
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update;");
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible;");
-            ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_insert;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_update_ineligible;");
+            Program.ExecuteSql(connection, "DROP TRIGGER IF EXISTS trg_" + safe + "_delete;");
             string upsert = "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "VALUES('" + sourceType + "',NEW." + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='upsert',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
@@ -282,13 +282,13 @@ ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pend
                 + "VALUES('" + sourceType + "',NEW." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');";
             string eligible = WorldHistoryEmbeddingEligibilitySql("NEW.");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_insert AFTER INSERT ON " + table
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_insert AFTER INSERT ON " + table
                 + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update AFTER UPDATE OF " + updateColumns + " ON " + table
                 + " WHEN " + eligible + " BEGIN " + upsert + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update_ineligible AFTER UPDATE OF " + updateColumns + " ON " + table
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_update_ineligible AFTER UPDATE OF " + updateColumns + " ON " + table
                 + " WHEN NOT " + eligible + " BEGIN " + remove + " END;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe + "_delete AFTER DELETE ON " + table + " BEGIN "
                 + "INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "VALUES('" + sourceType + "',OLD." + idColumn + ",'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')) "
                 + "ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now'); END;");
@@ -306,7 +306,7 @@ ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pend
             string function = "fn_" + safe + "_queue";
             string source = sourceType.Replace("'", "''");
             string eligibility = string.IsNullOrWhiteSpace(eligibleSql) ? "TRUE" : eligibleSql;
-            ExecuteSql(connection, @"
+            Program.ExecuteSql(connection, @"
 CREATE OR REPLACE FUNCTION " + function + @"() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -345,35 +345,35 @@ BEGIN
     RETURN NEW;
 END
 $$;");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
                 + "_insert AFTER INSERT ON " + table
                 + " FOR EACH ROW EXECUTE FUNCTION " + function + "();");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
                 + "_update AFTER UPDATE ON " + table
                 + " FOR EACH ROW EXECUTE FUNCTION " + function + "();");
-            ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
+            Program.ExecuteSql(connection, "CREATE TRIGGER trg_" + safe
                 + "_delete AFTER DELETE ON " + table
                 + " FOR EACH ROW EXECUTE FUNCTION " + function + "();");
         }
 
         private static void EnsureWorldHistoryEmbeddingFilter(ReignDbConnection connection)
         {
-            Dictionary<string, object> applied = QuerySql(connection,
+            Dictionary<string, object> applied = Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='semantic_world_history_filter' LIMIT 1;").FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), WorldHistoryEmbeddingFilterVersion, StringComparison.OrdinalIgnoreCase)) return;
             string eligible = WorldHistoryEmbeddingEligibilitySql("w.");
-            ExecuteSql(connection, @"DELETE FROM embedding_jobs
+            Program.ExecuteSql(connection, @"DELETE FROM embedding_jobs
 WHERE source_type='world_history_event' AND source_id IN
 (SELECT w.event_id FROM world_history_events w WHERE NOT " + eligible + ");");
-            ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
+            Program.ExecuteSql(connection, @"INSERT INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts)
 SELECT 'world_history_event',d.source_id,'delete','pending',0,0,'',strftime('%s','now'),strftime('%s','now')
 FROM embedding_documents d JOIN world_history_events w ON w.event_id=d.source_id
 WHERE d.source_type='world_history_event' AND d.status='indexed' AND NOT " + eligible + @"
 ON CONFLICT(source_type,source_id) DO UPDATE SET operation='delete',status='pending',attempt_count=0,next_attempt_ts=0,last_error='',enqueued_ts=strftime('%s','now'),updated_ts=strftime('%s','now');");
-            ExecuteSql(connection, @"DELETE FROM embedding_documents
+            Program.ExecuteSql(connection, @"DELETE FROM embedding_documents
 WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
 (SELECT w.event_id FROM world_history_events w WHERE NOT " + eligible + ");");
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_world_history_filter',$value);",
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('semantic_world_history_filter',$value);",
                 new Dictionary<string, object> { ["value"] = WorldHistoryEmbeddingFilterVersion });
         }
 
@@ -385,13 +385,13 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                     ? " WHERE " + EventEmbeddingEligibilitySql("")
                     : string.Equals(sourceType, "conversation_turn", StringComparison.OrdinalIgnoreCase)
                         ? " WHERE LOWER(COALESCE(status,'active'))='active'" : "";
-            ExecuteSql(connection, "INSERT OR IGNORE INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
+            Program.ExecuteSql(connection, "INSERT OR IGNORE INTO embedding_jobs(source_type,source_id,operation,status,attempt_count,next_attempt_ts,last_error,enqueued_ts,updated_ts) "
                 + "SELECT '" + sourceType + "'," + idColumn + ",'upsert','pending',0,0,'',strftime('%s','now'),strftime('%s','now') FROM " + table + where + ";");
         }
 
         private static void QueueAllEmbeddingJobs(ReignDbConnection connection, bool resetExisting)
         {
-            if (resetExisting) ExecuteSql(connection, "DELETE FROM embedding_jobs;");
+            if (resetExisting) Program.ExecuteSql(connection, "DELETE FROM embedding_jobs;");
             SeedEmbeddingJobs(connection, "events", "event", "event_id");
             SeedEmbeddingJobs(connection, "memories", "memory", "memory_id");
             SeedEmbeddingJobs(connection, "summaries", "summary", "summary_id");
@@ -402,7 +402,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
             QueueRetiredEmbeddingDeletes(connection);
         }
 
-        private static void StartSemanticMemorySubsystem(Dictionary<string, object> settings)
+        internal static void StartSemanticMemorySubsystem(Dictionary<string, object> settings)
         {
             if (!ReadBool(settings, "enableSemanticMemory", true)) return;
             StartManagedSemanticWorker(settings);
@@ -433,12 +433,12 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                     {
                         string baseUrl = ReadString(capturedSettings, "vectorWorkerUrl", "http://127.0.0.1:8082").TrimEnd('/');
                         DateTime deadline = DateTime.UtcNow.AddSeconds(45);
-                        while (DateTime.UtcNow < deadline && !ShutdownRequested)
+                        while (DateTime.UtcNow < deadline && !Program.ShutdownRequested)
                         {
                             try
                             {
                                 Dictionary<string, object> health =
-                                    TryParseJsonObject(GetTextFromUrl(baseUrl + "/health", 750)) ?? new Dictionary<string, object>();
+                                    TryParseJsonObject(Program.GetTextFromUrl(baseUrl + "/health", 750)) ?? new Dictionary<string, object>();
                                 if (ReadBool(health, "modelLoaded", false))
                                 {
                                     SemanticWarmupState = "ready";
@@ -461,7 +461,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                                         ["top_k"] = 1
                                     };
                                     Dictionary<string, object> response =
-                                        TryParseJsonObject(PostJsonToUrl(baseUrl + "/rerank", Json.Serialize(request), 30000))
+                                        TryParseJsonObject(Program.PostJsonToUrl(baseUrl + "/rerank", Json.Serialize(request), 30000))
                                         ?? new Dictionary<string, object>();
                                     if (!ReadBool(response, "ok", false))
                                         throw new InvalidOperationException(ReadString(response, "error", "Vector worker warmup failed."));
@@ -475,7 +475,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                                         ["status"] = "active"
                                     };
                                     Dictionary<string, object> searchResponse =
-                                        TryParseJsonObject(PostJsonToUrl(baseUrl + "/vectors/search", Json.Serialize(searchRequest), 30000))
+                                        TryParseJsonObject(Program.PostJsonToUrl(baseUrl + "/vectors/search", Json.Serialize(searchRequest), 30000))
                                         ?? new Dictionary<string, object>();
                                     if (!ReadBool(searchResponse, "ok", false))
                                         throw new InvalidOperationException(ReadString(searchResponse, "error", "Vector search warmup failed."));
@@ -490,7 +490,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                             Thread.Sleep(250);
                         }
                         if (SemanticWarmupState != "ready")
-                            SemanticWarmupState = ShutdownRequested ? "stopped" : "timed_out";
+                            SemanticWarmupState = Program.ShutdownRequested ? "stopped" : "timed_out";
                     }
                     catch (Exception ex)
                     {
@@ -520,7 +520,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
 
         // Returns true only when the worker owned when this stop began is proven exited (or none was
         // owned) and no newer worker is tracked. Ordinary callers ignore the result; it never throws.
-        private static bool StopSemanticMemorySubsystem(int processExitTimeoutMs = 1500)
+        internal static bool StopSemanticMemorySubsystem(int processExitTimeoutMs = 1500)
         {
             Task pump;
             CancellationTokenSource cancellation;
@@ -582,7 +582,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
             string baseUrl = ReadString(settings, "vectorWorkerUrl", "http://127.0.0.1:8082").TrimEnd('/');
             try
             {
-                string healthy = GetTextFromUrl(baseUrl + "/health", 300);
+                string healthy = Program.GetTextFromUrl(baseUrl + "/health", 300);
                 if (healthy.IndexOf("ReignVectorWorker", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     SemanticWorkerLastHealthyUtc = DateTime.UtcNow;
@@ -608,7 +608,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 {
                     start = new ProcessStartInfo(python);
                     foreach (string argument in new[] { sourcePath, "--host", "127.0.0.1", "--port",
-                        workerPort.ToString(CultureInfo.InvariantCulture), "--data-dir", DataDir })
+                        workerPort.ToString(CultureInfo.InvariantCulture), "--data-dir", Program.DataDir })
                         start.ArgumentList.Add(argument);
                 }
                 if (start == null)
@@ -624,7 +624,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 try
                 {
                     SemanticWorkerProcess = Process.Start(start);
-                    LogOperational("semantic.worker_started", new Dictionary<string, object> { ["file"] = start.FileName, ["dataDir"] = DataDir });
+                    Program.LogOperational("semantic.worker_started", new Dictionary<string, object> { ["file"] = start.FileName, ["dataDir"] = Program.DataDir });
                 }
                 catch (Exception ex)
                 {
@@ -643,7 +643,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
         {
             // A replaced (disable/re-enable) or shut-down pump may still be running; it must not
             // enumerate, open a campaign DB or spawn a worker once stopped.
-            Func<bool> stopRequested = () => token.IsCancellationRequested || ShutdownRequested;
+            Func<bool> stopRequested = () => token.IsCancellationRequested || Program.ShutdownRequested;
             while (!stopRequested())
             {
                 if (SemanticIndexShouldYield())
@@ -656,18 +656,18 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 try
                 {
                     SemanticPumpLastCycleUtc = DateTime.UtcNow;
-                    Dictionary<string, object> settings = LoadSettings();
+                    Dictionary<string, object> settings = Program.LoadSettings();
                     if (ReadBool(settings, "enableSemanticMemory", true) && !stopRequested())
                     {
                         StartManagedSemanticWorker(settings, stopRequested);
                         // ListCampaignMetadata runs EnsureInfrastructure: short read lease around enumeration only.
                         List<Dictionary<string, object>> campaigns = null;
-                        CampaignDataGate.EnterReadLock();
+                        Program.CampaignDataGate.EnterReadLock();
                         try
                         {
                             if (!stopRequested()) campaigns = ReignPostgreSqlStorage.ListCampaignMetadata();
                         }
-                        finally { CampaignDataGate.ExitReadLock(); }
+                        finally { Program.CampaignDataGate.ExitReadLock(); }
                         if (campaigns != null)
                         foreach (Dictionary<string, object> campaign in campaigns)
                         {
@@ -675,9 +675,9 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                             if (SemanticIndexShouldYield()) break;
                             string campaignId =
                                 ReadString(campaign, "campaignId", "");
-                            if (HasLocalCampaignMetadata(campaignId))
+                            if (Program.HasLocalCampaignMetadata(campaignId))
                             {
-                                CampaignDataGate.EnterReadLock();
+                                Program.CampaignDataGate.EnterReadLock();
                                 try
                                 {
                                     lock (SemanticJobProcessingLock)
@@ -689,7 +689,7 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                                         processed += ProcessSemanticJobs(campaignId, settings);
                                     }
                                 }
-                                finally { CampaignDataGate.ExitReadLock(); }
+                                finally { Program.CampaignDataGate.ExitReadLock(); }
                             }
                         }
                     }
@@ -706,11 +706,11 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
                 }
                 if (token.WaitHandle.WaitOne(processed > 0 ? 150 : 3000)) break;
             }
-            LogOperational("semantic.index_pump_stopped", new Dictionary<string, object>
+            Program.LogOperational("semantic.index_pump_stopped", new Dictionary<string, object>
             {
                 ["generation"] = generation,
                 ["cancelled"] = token.IsCancellationRequested,
-                ["shutdown"] = ShutdownRequested
+                ["shutdown"] = Program.ShutdownRequested
             });
         }
 
@@ -721,18 +721,18 @@ WHERE source_type='world_history_event' AND status<>'indexed' AND source_id IN
             // Keep the vector worker free across that handoff; the generic two-second
             // quiet period was short enough for an embedding batch to start in the
             // middle and make the next foreground semantic search wait several seconds.
-            return InteractiveRequestActiveOrRecent(10000)
-                || PriorityBackgroundWorkShouldYield();
+            return Program.InteractiveRequestActiveOrRecent(10000)
+                || Program.PriorityBackgroundWorkShouldYield();
         }
 
         private static int ProcessSemanticJobs(string campaignId, Dictionary<string, object> settings)
         {
             int batchSize = Math.Max(1, Math.Min(128, ReadInt(settings, "embeddingBatchSize", 32)));
             List<Dictionary<string, object>> jobs;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                jobs = QuerySql(connection, @"SELECT * FROM embedding_jobs
+                jobs = Program.QuerySql(connection, @"SELECT * FROM embedding_jobs
 WHERE status='pending' AND next_attempt_ts<=$now
 ORDER BY CASE WHEN operation='delete' THEN 0 ELSE 1 END,
 CASE source_type
@@ -753,7 +753,7 @@ LIMIT $limit;",
             int completedJobs = 0;
             List<EmbeddingSourceDocument> documents = new List<EmbeddingSourceDocument>();
             List<Dictionary<string, object>> deletes = new List<Dictionary<string, object>>();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 foreach (Dictionary<string, object> job in jobs)
                 {
@@ -774,12 +774,12 @@ LIMIT $limit;",
                     }
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, sourceType, sourceId, row, text, settings);
                     document.Payload["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
-                    var restoredContext = QuerySql(connection, "SELECT timeline_id FROM memory_restored_source_context WHERE state_id='current';").SingleOrDefault();
+                    var restoredContext = Program.QuerySql(connection, "SELECT timeline_id FROM memory_restored_source_context WHERE state_id='current';").SingleOrDefault();
                     string restoredTimeline = ReadString(restoredContext, "timeline_id", "");
                     if (IsVerifiedRestoredMemorySource(connection, row, restoredTimeline))
                         document.Payload["restoredSavePointId"] = ReadString(RestoredMemorySourceContext(connection, restoredTimeline), "save_point_id", "");
                     document.ContentHash = SemanticSha256Hex(document.Text + CanonicalJson(document.Payload));
-                    Dictionary<string, object> indexed = QuerySql(connection, @"SELECT content_hash,status FROM embedding_documents
+                    Dictionary<string, object> indexed = Program.QuerySql(connection, @"SELECT content_hash,status FROM embedding_documents
 WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=$provider LIMIT 1;",
                         new Dictionary<string, object> { ["type"] = sourceType, ["id"] = sourceId, ["model"] = SemanticModelVersion, ["provider"] = document.Provider }).FirstOrDefault();
                     if (indexed != null && string.Equals(ReadString(indexed, "content_hash", ""), document.ContentHash, StringComparison.OrdinalIgnoreCase)
@@ -829,12 +829,12 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                             ["payload"] = document.Payload
                         }).ToList();
                         Dictionary<string, object> response = TryParseJsonObject(
-                            PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/upsert"),
+                            Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/upsert"),
                                 Json.Serialize(request), 60000));
                         if (!ReadBool(response, "ok", false))
                             throw new InvalidOperationException(
                                 ReadString(response, "error", "Vector upsert failed."));
-                        using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                        using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                         using (var publication = connection.BeginTransaction())
                         {
                             AcquirePostgreSqlTransactionMutationLock(connection);
@@ -854,9 +854,9 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 if (!yieldedForInteractive && deletes.Count > 0)
                 {
                     List<string> ids;
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
-                        ids = deletes.SelectMany(job => QuerySql(connection, "SELECT vector_id FROM embedding_documents WHERE source_type=$type AND source_id=$id AND status<>'deleted';",
+                        ids = deletes.SelectMany(job => Program.QuerySql(connection, "SELECT vector_id FROM embedding_documents WHERE source_type=$type AND source_id=$id AND status<>'deleted';",
                             new Dictionary<string, object> { ["type"] = ReadString(job, "source_type", ""), ["id"] = ReadString(job, "source_id", "") }))
                             .Select(row => ReadString(row, "vector_id", "")).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
                     }
@@ -865,9 +865,9 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                         Dictionary<string, object> request = SemanticProviderRequest(settings);
                         request["collection"] = SemanticCollection;
                         request["ids"] = ids;
-                        PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000);
+                        Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/delete"), Json.Serialize(request), 15000);
                     }
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     using (var deletion = connection.BeginTransaction())
                     {
                         AcquirePostgreSqlTransactionMutationLock(connection);
@@ -876,7 +876,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                             string type = ReadString(job, "source_type", ""), id = ReadString(job, "source_id", "");
                             var latest = LoadEmbeddingSourceRow(connection,type,id);
                             if (latest != null && EmbeddingRowActive(type,latest)) continue;
-                            ExecuteSql(connection, "UPDATE embedding_documents SET status='deleted',updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
+                            Program.ExecuteSql(connection, "UPDATE embedding_documents SET status='deleted',updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
                                 new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["type"] = type, ["id"] = id });
                             CompleteEmbeddingJob(connection, type, id, "deleted", "");
                             completedJobs++;
@@ -890,7 +890,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
             }
             catch (Exception ex)
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     foreach (Dictionary<string, object> job in jobs) FailEmbeddingJob(connection, job, ex.Message);
                 }
@@ -914,7 +914,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 case "world_history_event": table = "world_history_events"; id = "event_id"; break;
                 default: return null;
             }
-            return QuerySql(connection, "SELECT * FROM " + table + " WHERE " + id + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
+            return Program.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + id + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = sourceId }).FirstOrDefault();
         }
 
         private static bool EmbeddingRowActive(string sourceType, Dictionary<string, object> row)
@@ -960,13 +960,13 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
             Dictionary<string, object> row, string text, Dictionary<string, object> settings)
         {
             string provider = ReadString(settings, "vectorProvider", "local").ToLowerInvariant();
-            var sourcePayload = KnowledgePayload(row);
+            var sourcePayload = Program.KnowledgePayload(row);
             string timeline = FirstNonEmpty(ReadString(row, "timeline_id", ""), ReadString(sourcePayload, "timelineId", ""));
             bool mental = sourceType == "belief" || sourceType == "comprehension";
-            var knownBy = TextListFromJson(ReadString(row, "known_by_json", "[]"));
-            if (!mental) knownBy = knownBy.Concat(TextListFromJson(ReadString(row, "participants_json", "[]")))
-                .Concat(TextListFromJson(ReadString(row, "witnesses_json", "[]")))
-                .Concat(TextListFromJson(ReadString(row, "heard_as_rumor_by_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var knownBy = Program.TextListFromJson(ReadString(row, "known_by_json", "[]"));
+            if (!mental) knownBy = knownBy.Concat(Program.TextListFromJson(ReadString(row, "participants_json", "[]")))
+                .Concat(Program.TextListFromJson(ReadString(row, "witnesses_json", "[]")))
+                .Concat(Program.TextListFromJson(ReadString(row, "heard_as_rumor_by_json", "[]"))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             string vectorId = DeterministicSemanticGuid(campaignId + "|" + ReadString(row, "timeline_id", "") + "|" + sourceType + "|" + sourceId + "|" + SemanticModelVersion);
             Dictionary<string, object> payload = new Dictionary<string, object>
             {
@@ -977,9 +977,9 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
                 ["memoryLane"] = FirstNonEmpty(ReadFirstString(row, "memory_lane", "memory_domain"), InferEmbeddingLane(sourceType, row)),
                 ["ownerId"] = sourceType == "conversation_turn" ? ReadString(row, "speaker_id", "") : ReadFirstString(row, "owner_id", "believer_id"),
                 ["knownBy"] = mental ? new List<string>() : knownBy,
-                ["hiddenFrom"] = TextListFromJson(ReadString(row, "hidden_from_json", "[]")),
+                ["hiddenFrom"] = Program.TextListFromJson(ReadString(row, "hidden_from_json", "[]")),
                 ["privateMental"] = mental, ["eligibilityVersion"] = 2,
-                ["publicUnscoped"] = !mental && !KnowledgeHasExplicitScope(row, sourcePayload)
+                ["publicUnscoped"] = !mental && !Program.KnowledgeHasExplicitScope(row, sourcePayload)
                     && new[] { "public", "world", "global", "common" }.Contains(ReadString(row, "visibility", "private")),
                 ["sourceHash"] = MemorySourceHash(new[] { row }),
                 ["visibility"] = ReadString(row, "visibility", "private"),
@@ -1025,7 +1025,7 @@ WHERE source_type=$type AND source_id=$id AND model_version=$model AND provider=
         private static void MarkEmbeddingIndexed(ReignDbConnection connection, EmbeddingSourceDocument document, Dictionary<string, object> settings)
         {
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO embedding_documents(source_type,source_id,model_version,provider,campaign_id,timeline_id,content_hash,vector_id,dimensions,status,attempt_count,last_error,updated_ts,payload_json)
+            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO embedding_documents(source_type,source_id,model_version,provider,campaign_id,timeline_id,content_hash,vector_id,dimensions,status,attempt_count,last_error,updated_ts,payload_json)
 VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed',0,'',$ts,$payload);",
                 new Dictionary<string, object>
                 {
@@ -1033,26 +1033,26 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                     ["provider"] = document.Provider, ["campaign"] = document.CampaignId, ["timeline"] = document.TimelineId,
                     ["hash"] = document.ContentHash, ["vector"] = document.VectorId, ["ts"] = now, ["payload"] = Json.Serialize(document.Payload)
                 });
-            if (document.SourceType == "event") ExecuteSql(connection, "UPDATE events SET vector_id=$vector,embedding_status='indexed' WHERE event_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
-            if (document.SourceType == "memory") ExecuteSql(connection, "UPDATE memories SET vector_id=$vector,embedding_status='indexed' WHERE memory_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
-            if (document.SourceType == "summary") ExecuteSql(connection, "UPDATE summaries SET vector_id=$vector,embedding_status='indexed' WHERE summary_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
+            if (document.SourceType == "event") Program.ExecuteSql(connection, "UPDATE events SET vector_id=$vector,embedding_status='indexed' WHERE event_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
+            if (document.SourceType == "memory") Program.ExecuteSql(connection, "UPDATE memories SET vector_id=$vector,embedding_status='indexed' WHERE memory_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
+            if (document.SourceType == "summary") Program.ExecuteSql(connection, "UPDATE summaries SET vector_id=$vector,embedding_status='indexed' WHERE summary_id=$id;", new Dictionary<string, object> { ["vector"] = document.VectorId, ["id"] = document.SourceId });
             CompleteEmbeddingJob(connection, document.SourceType, document.SourceId, "completed", "");
         }
 
         private static void CompleteEmbeddingJob(ReignDbConnection connection, string type, string id, string status, string message)
         {
-            ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type=$type AND source_id=$id;", new Dictionary<string, object> { ["type"] = type, ["id"] = id });
+            Program.ExecuteSql(connection, "DELETE FROM embedding_jobs WHERE source_type=$type AND source_id=$id;", new Dictionary<string, object> { ["type"] = type, ["id"] = id });
         }
 
         private static void FailEmbeddingJob(ReignDbConnection connection, Dictionary<string, object> job, string error)
         {
             int attempts = ReadInt(job, "attempt_count", 0) + 1;
             long delay = Math.Min(300, Math.Max(5, 5 * (1L << Math.Min(6, attempts - 1))));
-            ExecuteSql(connection, "UPDATE embedding_jobs SET attempt_count=$attempts,next_attempt_ts=$next,last_error=$error,updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
+            Program.ExecuteSql(connection, "UPDATE embedding_jobs SET attempt_count=$attempts,next_attempt_ts=$next,last_error=$error,updated_ts=$ts WHERE source_type=$type AND source_id=$id;",
                 new Dictionary<string, object>
                 {
                     ["attempts"] = attempts, ["next"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + delay,
-                    ["error"] = LimitText(error, 500), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    ["error"] = Program.LimitText(error, 500), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     ["type"] = ReadString(job, "source_type", ""), ["id"] = ReadString(job, "source_id", "")
                 });
         }
@@ -1098,7 +1098,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 List<string> types = (sourceTypes ?? SemanticSourceTypesForRoute(retrievalRoute)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 Dictionary<string, object> request = SemanticProviderRequest(settings);
                 request["collection"] = SemanticCollection;
-                request["query"] = LimitText(query, 4000);
+                request["query"] = Program.LimitText(query, 4000);
                 request["priority"] = "interactive";
                 request["limit"] = Math.Min(512, Math.Max(8, ReadInt(settings, "vectorSearchTopK", 96) * 3));
                 Dictionary<string, object> filters = new Dictionary<string, object>
@@ -1122,7 +1122,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 {
                     filters["observerId"] = observerId;
                     if (asOfWorldDay < double.MaxValue) filters["asOfWorldDay"] = asOfWorldDay;
-                    using (var connection = OpenCampaignConnection(campaignId))
+                    using (var connection = Program.OpenCampaignConnection(campaignId))
                     {
                         filters["restoreGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                         string point = ReadString(RestoredMemorySourceContext(connection, timelineId), "save_point_id", "");
@@ -1130,7 +1130,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                     }
                 }
                 request["filters"] = filters;
-                Dictionary<string, object> response = TryParseJsonObject(PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/search"), Json.Serialize(request),
+                Dictionary<string, object> response = TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/vectors/search"), Json.Serialize(request),
                     Math.Max(8000, Math.Min(30000, ReadInt(settings, "vectorQueryTimeoutMs", 10000))))) ?? new Dictionary<string, object>();
                 if (!ReadBool(response, "ok", false)) throw new InvalidOperationException(ReadString(response, "error", "Semantic search failed."));
                 if (!string.IsNullOrWhiteSpace(observerId) && !ReadBool(response, "eligibilityApplied", false))
@@ -1164,7 +1164,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 SemanticWorkerLastError = ex.Message;
                 SemanticWorkerUnavailableUntilUtc = DateTime.UtcNow.AddSeconds(Math.Max(1, Math.Min(600, ReadInt(settings, "minimeRetryCooldownSeconds", 30))));
                 status["reason"] = "fts_fallback";
-                status["error"] = LimitText(ex.Message, 500);
+                status["error"] = Program.LimitText(ex.Message, 500);
                 status["durationMs"] = timer.ElapsedMilliseconds;
                 LogSemanticFailureOnce("semantic.search_failed", ex.Message);
                 return status;
@@ -1189,8 +1189,8 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
             return ReadDictionaryList(search, "results").Where(hit => string.Equals(ReadString(ReadDictionary(hit, "payload"), "sourceType", ""), sourceType, StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
-        private static List<Dictionary<string, object>> LoadSemanticRows(ReignDbConnection connection, string table, string idColumn,
-            string sourceType, Dictionary<string, object> search, KnowledgeAccessContext knowledge)
+        internal static List<Dictionary<string, object>> LoadSemanticRows(ReignDbConnection connection, string table, string idColumn,
+            string sourceType, Dictionary<string, object> search, Program.KnowledgeAccessContext knowledge)
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> hit in SemanticHits(search, sourceType))
@@ -1198,16 +1198,16 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 Dictionary<string, object> payload = ReadDictionary(hit, "payload") ?? new Dictionary<string, object>();
                 string id = ReadString(payload, "sourceId", "");
                 if (string.IsNullOrWhiteSpace(id)) continue;
-                Dictionary<string, object> row = QuerySql(connection, "SELECT * FROM " + table + " WHERE " + idColumn + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
-                if (row == null || !EmbeddingRowActive(sourceType, row) || !KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
+                Dictionary<string, object> row = Program.QuerySql(connection, "SELECT * FROM " + table + " WHERE " + idColumn + "=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+                if (row == null || !EmbeddingRowActive(sourceType, row) || !Program.KnowledgeRowVisibleToNpc(table, row, knowledge, connection)) continue;
                 if (ReadString(payload, "sourceHash", "") != MemorySourceHash(new[] { row })) continue;
-                row["vectorSemanticScore"] = ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
+                row["vectorSemanticScore"] = Program.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d);
                 rows.Add(row);
             }
             return rows;
         }
 
-        private static List<Dictionary<string, object>> MergeSemanticRows(IEnumerable<Dictionary<string, object>> primary,
+        internal static List<Dictionary<string, object>> MergeSemanticRows(IEnumerable<Dictionary<string, object>> primary,
             IEnumerable<Dictionary<string, object>> semantic, string idColumn)
         {
             Dictionary<string, Dictionary<string, object>> rows = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
@@ -1222,10 +1222,10 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
             return rows.Values.ToList();
         }
 
-        private static double AddSemanticScore(Dictionary<string, object> row, double deterministic, Dictionary<string, object> settings)
+        internal static double AddSemanticScore(Dictionary<string, object> row, double deterministic, Dictionary<string, object> settings)
         {
-            double semantic = ClampDouble(ReadDouble(row, "vectorSemanticScore", 0d), -1d, 1d);
-            return deterministic + Math.Max(0d, semantic) * ClampDouble(ReadDouble(settings, "vectorScoreWeight", 30d), 0d, 100d);
+            double semantic = Program.ClampDouble(ReadDouble(row, "vectorSemanticScore", 0d), -1d, 1d);
+            return deterministic + Math.Max(0d, semantic) * Program.ClampDouble(ReadDouble(settings, "vectorScoreWeight", 30d), 0d, 100d);
         }
 
         internal static List<Dictionary<string, object>> MergeSemanticWorldHistoryCandidates(ReignDbConnection connection,
@@ -1245,7 +1245,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                     byId[candidateId] = candidate;
                 }
             }
-            List<string> terms = SimpleTags(claim).Concat(WorldSimulationService.FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(18).ToList();
+            List<string> terms = Program.SimpleTags(claim).Concat(WorldSimulationService.FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(18).ToList();
             foreach (Dictionary<string, object> hit in SemanticHits(semanticSearch, "world_history_event"))
             {
                 Dictionary<string, object> payload = ReadDictionary(hit, "payload") ?? new Dictionary<string, object>();
@@ -1254,7 +1254,7 @@ VALUES($type,$id,$model,$provider,$campaign,$timeline,$hash,$vector,384,'indexed
                 Dictionary<string, object> row;
                 if (!byId.TryGetValue(eventId, out row))
                 {
-                    row = QuerySql(connection, @"SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline
+                    row = Program.QuerySql(connection, @"SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline
 AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AND world_day<=$to LIMIT 1;",
                         new Dictionary<string, object>
                         {
@@ -1273,7 +1273,7 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
                     byId[eventId] = row;
                 }
                 if (!WorldHistoryEventEmbeddingEligible(row)) continue;
-                row["vectorSemanticScore"] = Math.Max(ReadDouble(row, "vectorSemanticScore", -1d), ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d));
+                row["vectorSemanticScore"] = Math.Max(ReadDouble(row, "vectorSemanticScore", -1d), Program.ClampDouble(ReadDouble(hit, "score", 0d), -1d, 1d));
                 row["combinedScore"] = AddSemanticScore(row, ReadDouble(row, "deterministicScore", 0d), settings);
             }
             foreach (Dictionary<string, object> row in byId.Values)
@@ -1281,22 +1281,22 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
             return byId.Values.OrderByDescending(row => ReadDouble(row, "combinedScore", 0d)).Take(256).ToList();
         }
 
-        private static Dictionary<string, object> SemanticMemoryStatusApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> SemanticMemoryStatusApi(Dictionary<string, string> query)
         {
-            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : LatestCampaignId();
-            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = LatestCampaignId();
-            Dictionary<string, object> settings = LoadSettings();
+            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
+            Dictionary<string, object> settings = Program.LoadSettings();
             Dictionary<string, object> worker = new Dictionary<string, object>();
-            try { worker = TryParseJsonObject(GetTextFromUrl(SemanticWorkerUrl(settings, "/vectors/status"), 750)) ?? new Dictionary<string, object>(); }
+            try { worker = TryParseJsonObject(Program.GetTextFromUrl(SemanticWorkerUrl(settings, "/vectors/status"), 750)) ?? new Dictionary<string, object>(); }
             catch (Exception ex) { worker = new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message }; }
             Dictionary<string, object> counts = new Dictionary<string, object>();
-            if (HasCampaignPostgreSqlStorage(campaignId))
+            if (Program.HasCampaignPostgreSqlStorage(campaignId))
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    counts["documents"] = QuerySql(connection, "SELECT status,COUNT(*) count FROM embedding_documents GROUP BY status;");
-                    counts["jobs"] = QuerySql(connection, "SELECT status,COUNT(*) count FROM embedding_jobs GROUP BY status;");
-                    counts["failures"] = QuerySql(connection, "SELECT source_type,source_id,attempt_count,last_error,next_attempt_ts FROM embedding_jobs WHERE last_error<>'' ORDER BY updated_ts DESC LIMIT 25;");
+                    counts["documents"] = Program.QuerySql(connection, "SELECT status,COUNT(*) count FROM embedding_documents GROUP BY status;");
+                    counts["jobs"] = Program.QuerySql(connection, "SELECT status,COUNT(*) count FROM embedding_jobs GROUP BY status;");
+                    counts["failures"] = Program.QuerySql(connection, "SELECT source_type,source_id,attempt_count,last_error,next_attempt_ts FROM embedding_jobs WHERE last_error<>'' ORDER BY updated_ts DESC LIMIT 25;");
                 }
             }
             Dictionary<string, object> pump;
@@ -1310,7 +1310,7 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
                     ["lastCycleUtc"] = SemanticPumpLastCycleUtc == DateTime.MinValue ? "" : SemanticPumpLastCycleUtc.ToString("o"),
                     ["lastBatchUtc"] = SemanticPumpLastBatchUtc == DateTime.MinValue ? "" : SemanticPumpLastBatchUtc.ToString("o"),
                     ["lastBatchSize"] = SemanticPumpLastBatchSize,
-                    ["pausedForInteractive"] = InteractiveRequestActiveOrRecent()
+                    ["pausedForInteractive"] = Program.InteractiveRequestActiveOrRecent()
                 };
             }
             return new Dictionary<string, object>
@@ -1330,39 +1330,39 @@ AND ($location='' OR location_id=$location) AND ($from<0 OR world_day>=$from) AN
             };
         }
 
-        private static Dictionary<string, object> SemanticMemoryReindexApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SemanticMemoryReindexApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
-            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = LatestCampaignId();
-            if (!HasCampaignPostgreSqlStorage(campaignId))
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
+            if (!Program.HasCampaignPostgreSqlStorage(campaignId))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
                     ["error"] = "Campaign PostgreSQL schema was not found."
                 };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 string eligible = WorldHistoryEmbeddingEligibilitySql("w.");
-                ExecuteSql(connection, @"UPDATE embedding_documents SET status='stale',updated_ts=$ts
+                Program.ExecuteSql(connection, @"UPDATE embedding_documents SET status='stale',updated_ts=$ts
 WHERE source_type<>'world_history_event' OR source_id IN
 (SELECT w.event_id FROM world_history_events w WHERE " + eligible + ");",
                     new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 QueueAllEmbeddingJobs(connection, true);
-                int queued = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs;").FirstOrDefault(), "count", 0);
+                int queued = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs;").FirstOrDefault(), "count", 0);
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["queued"] = queued };
             }
         }
 
-        private static Dictionary<string, object> SemanticMemoryRetryFailedApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SemanticMemoryRetryFailedApi(Dictionary<string, object> payload)
         {
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
-            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = LatestCampaignId();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
+            if (string.IsNullOrWhiteSpace(campaignId)) campaignId = Program.LatestCampaignId();
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, "UPDATE embedding_jobs SET status='pending',attempt_count=0,next_attempt_ts=0,last_error='',updated_ts=$ts WHERE last_error<>'';",
+                Program.ExecuteSql(connection, "UPDATE embedding_jobs SET status='pending',attempt_count=0,next_attempt_ts=0,last_error='',updated_ts=$ts WHERE last_error<>'';",
                     new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId,
-                    ["queued"] = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE status='pending';").FirstOrDefault(), "count", 0) };
+                    ["queued"] = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE status='pending';").FirstOrDefault(), "count", 0) };
             }
         }
 
@@ -1373,10 +1373,10 @@ WHERE source_type<>'world_history_event' OR source_id IN
                 if (DateTime.UtcNow < SemanticDiagnosticCooldownUntilUtc) return;
                 SemanticDiagnosticCooldownUntilUtc = DateTime.UtcNow.AddSeconds(30);
             }
-            LogOperational(eventName, new Dictionary<string, object> { ["error"] = LimitText(error, 500), ["fallback"] = "sqlite_fts5" });
+            Program.LogOperational(eventName, new Dictionary<string, object> { ["error"] = Program.LimitText(error, 500), ["fallback"] = "sqlite_fts5" });
         }
 
-        private static List<Dictionary<string, object>> RunSemanticMemorySelfTests()
+        internal static List<Dictionary<string, object>> RunSemanticMemorySelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => rows.Add(new Dictionary<string, object>
@@ -1386,27 +1386,27 @@ WHERE source_type<>'world_history_event' OR source_id IN
             add("canonical_text", BuildCanonicalEmbeddingText("belief", new Dictionary<string, object> { ["claim"] = "A lord abandoned his ally.", ["stance"] = "distrust" }).Contains("abandoned"), "Canonical text includes source prose and stance.");
             Dictionary<string, object> scored = new Dictionary<string, object> { ["vectorSemanticScore"] = 0.8d };
             add("score_blend", Math.Abs(AddSemanticScore(scored, 10d, new Dictionary<string, object> { ["vectorScoreWeight"] = 30d }) - 34d) < 0.001d, "Semantic score augments deterministic relevance without replacing it.");
-            int savedInteractiveCount = Volatile.Read(ref InteractiveRequestCount);
-            long savedInteractiveTicks = Interlocked.Read(ref LastInteractiveRequestCompletedUtcTicks);
+            int savedInteractiveCount = Volatile.Read(ref Program.InteractiveRequestCount);
+            long savedInteractiveTicks = Interlocked.Read(ref Program.LastInteractiveRequestCompletedUtcTicks);
             try
             {
-                Interlocked.Exchange(ref InteractiveRequestCount, 1);
-                bool activeYields = InteractiveRequestActiveOrRecent();
-                Interlocked.Exchange(ref InteractiveRequestCount, 0);
-                Interlocked.Exchange(ref LastInteractiveRequestCompletedUtcTicks, DateTime.UtcNow.Ticks);
-                bool recentYields = InteractiveRequestActiveOrRecent();
-                Interlocked.Exchange(ref LastInteractiveRequestCompletedUtcTicks, DateTime.UtcNow.AddSeconds(-5).Ticks);
-                bool handoffProtected = !InteractiveRequestActiveOrRecent()
+                Interlocked.Exchange(ref Program.InteractiveRequestCount, 1);
+                bool activeYields = Program.InteractiveRequestActiveOrRecent();
+                Interlocked.Exchange(ref Program.InteractiveRequestCount, 0);
+                Interlocked.Exchange(ref Program.LastInteractiveRequestCompletedUtcTicks, DateTime.UtcNow.Ticks);
+                bool recentYields = Program.InteractiveRequestActiveOrRecent();
+                Interlocked.Exchange(ref Program.LastInteractiveRequestCompletedUtcTicks, DateTime.UtcNow.AddSeconds(-5).Ticks);
+                bool handoffProtected = !Program.InteractiveRequestActiveOrRecent()
                     && SemanticIndexShouldYield();
-                Interlocked.Exchange(ref LastInteractiveRequestCompletedUtcTicks, DateTime.UtcNow.AddSeconds(-11).Ticks);
+                Interlocked.Exchange(ref Program.LastInteractiveRequestCompletedUtcTicks, DateTime.UtcNow.AddSeconds(-11).Ticks);
                 bool quietResumes = !SemanticIndexShouldYield();
                 add("foreground_priority", activeYields && recentYields && handoffProtected && quietResumes,
                     "Background embedding chunks yield throughout the response-to-next-turn handoff and resume after the extended quiet period.");
             }
             finally
             {
-                Interlocked.Exchange(ref InteractiveRequestCount, savedInteractiveCount);
-                Interlocked.Exchange(ref LastInteractiveRequestCompletedUtcTicks, savedInteractiveTicks);
+                Interlocked.Exchange(ref Program.InteractiveRequestCount, savedInteractiveCount);
+                Interlocked.Exchange(ref Program.LastInteractiveRequestCompletedUtcTicks, savedInteractiveTicks);
             }
             List<Dictionary<string, object>> duplicateCandidates = new List<Dictionary<string, object>>
             {
@@ -1419,7 +1419,7 @@ WHERE source_type<>'world_history_event' OR source_id IN
             add("world_history_candidate_dedupe",
                 deduplicatedCandidates.Count == 1 && Math.Abs(ReadDouble(deduplicatedCandidates[0], "deterministicScore", 0d) - 7d) < 0.001d,
                 "Duplicate deterministic world-history candidates merge safely before semantic scoring.");
-            add("privacy_contract", typeof(KnowledgeAccessContext) != null, "Semantic rows still pass through the canonical knowledge-access context.");
+            add("privacy_contract", typeof(Program.KnowledgeAccessContext) != null, "Semantic rows still pass through the canonical knowledge-access context.");
             add("world_history_significance_filter",
                 !WorldHistoryEventEmbeddingEligible(new Dictionary<string, object> { ["event_type"] = "settlement_entered", ["dissemination_class"] = "ordinary" })
                 && WorldHistoryEventEmbeddingEligible(new Dictionary<string, object> { ["event_type"] = "siege_completed", ["dissemination_class"] = "ordinary" })
@@ -1470,24 +1470,24 @@ WHERE source_type<>'world_history_event' OR source_id IN
             string campaignId = "semantic_memory_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                StoreWorldMemoryEvent(new Dictionary<string, object>
+                Program.StoreWorldMemoryEvent(new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId, ["eventId"] = "semantic_private_event", ["eventType"] = "personal_revelation",
                     ["summary"] = "Aldric abandoned his ally and broke his promise.", ["participants"] = new List<string> { "npc_owner" },
                     ["known_by"] = new List<string> { "npc_owner" }, ["visibility"] = "private", ["importance"] = 0.8d,
                     ["worldDay"] = 10d, ["ts"] = 1000L
                 }, "semantic_self_test");
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    int triggerCount = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_semantic_%';").FirstOrDefault(), "count", 0);
-                    int queued = ReadInt(QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type IN ('event','memory');").FirstOrDefault(), "count", 0);
-                    Dictionary<string, object> memory = QuerySql(connection, "SELECT * FROM memories WHERE summary LIKE '%abandoned his ally%' LIMIT 1;").FirstOrDefault();
-                    bool ownerAllowed = KnowledgeRowVisibleToNpc("memories", memory, new KnowledgeAccessContext { NpcId = "npc_owner" });
-                    bool strangerDenied = !KnowledgeRowVisibleToNpc("memories", memory, new KnowledgeAccessContext { NpcId = "npc_stranger" });
+                    int triggerCount = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_semantic_%';").FirstOrDefault(), "count", 0);
+                    int queued = ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type IN ('event','memory');").FirstOrDefault(), "count", 0);
+                    Dictionary<string, object> memory = Program.QuerySql(connection, "SELECT * FROM memories WHERE summary LIKE '%abandoned his ally%' LIMIT 1;").FirstOrDefault();
+                    bool ownerAllowed = Program.KnowledgeRowVisibleToNpc("memories", memory, new Program.KnowledgeAccessContext { NpcId = "npc_owner" });
+                    bool strangerDenied = !Program.KnowledgeRowVisibleToNpc("memories", memory, new Program.KnowledgeAccessContext { NpcId = "npc_stranger" });
                     EmbeddingSourceDocument document = BuildEmbeddingDocument(campaignId, "memory", ReadString(memory, "memory_id", ""), memory,
                         BuildCanonicalEmbeddingText("memory", memory), new Dictionary<string, object> { ["vectorProvider"] = "local" });
                     string payload = Json.Serialize(document.Payload);
-                    int rawConversationTriggerCount = ReadInt(QuerySql(connection,
+                    int rawConversationTriggerCount = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_semantic_conversation_turns_%';")
                         .FirstOrDefault(), "count", 0);
                     int expectedTriggerCount =
@@ -1498,23 +1498,23 @@ WHERE source_type<>'world_history_event' OR source_id IN
                     add("knowledge_filter", ownerAllowed && strangerDenied, "Private semantic candidates remain visible to their owner and hidden from strangers.");
                     add("external_payload_privacy", payload.IndexOf("abandoned", StringComparison.OrdinalIgnoreCase) < 0 && payload.IndexOf("promise", StringComparison.OrdinalIgnoreCase) < 0,
                         "Vector payload metadata contains no raw memory prose.");
-                    ExecuteSql(connection, @"INSERT INTO world_history_events
+                    Program.ExecuteSql(connection, @"INSERT INTO world_history_events
 (event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,dissemination_class,summary,semantic_text,created_utc)
 VALUES('semantic_routine_history',$campaign,'timeline',1,10,'settlement_entered','settlement','completed','ordinary','Routine entry','Routine entry',$utc);",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["utc"] = DateTime.UtcNow.ToString("o") });
-                    ExecuteSql(connection, @"INSERT INTO world_history_events
+                    Program.ExecuteSql(connection, @"INSERT INTO world_history_events
 (event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,dissemination_class,summary,semantic_text,created_utc)
 VALUES('semantic_significant_history',$campaign,'timeline',2,10,'siege_completed','warfare','completed','ordinary','Siege completed','Siege completed',$utc);",
                         new Dictionary<string, object> { ["campaign"] = campaignId, ["utc"] = DateTime.UtcNow.ToString("o") });
-                    Dictionary<string, object> routineJob = QuerySql(connection,
+                    Dictionary<string, object> routineJob = Program.QuerySql(connection,
                         "SELECT * FROM embedding_jobs WHERE source_type='world_history_event' AND source_id='semantic_routine_history' LIMIT 1;").FirstOrDefault();
-                    Dictionary<string, object> significantJob = QuerySql(connection,
+                    Dictionary<string, object> significantJob = Program.QuerySql(connection,
                         "SELECT * FROM embedding_jobs WHERE source_type='world_history_event' AND source_id='semantic_significant_history' LIMIT 1;").FirstOrDefault();
                     add("world_history_queue_filter", routineJob == null && ReadString(significantJob, "operation", "") == "upsert",
                         "Embedding triggers enqueue significant world history without queuing routine settlement traffic.");
-                    Dictionary<string, object> job = QuerySql(connection, "SELECT * FROM embedding_jobs LIMIT 1;").FirstOrDefault();
+                    Dictionary<string, object> job = Program.QuerySql(connection, "SELECT * FROM embedding_jobs LIMIT 1;").FirstOrDefault();
                     FailEmbeddingJob(connection, job, "temporary worker failure");
-                    Dictionary<string, object> retried = QuerySql(connection, "SELECT * FROM embedding_jobs WHERE source_type=$type AND source_id=$id LIMIT 1;",
+                    Dictionary<string, object> retried = Program.QuerySql(connection, "SELECT * FROM embedding_jobs WHERE source_type=$type AND source_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["type"] = ReadString(job, "source_type", ""), ["id"] = ReadString(job, "source_id", "") }).FirstOrDefault();
                     add("retry_backoff", ReadInt(retried, "attempt_count", 0) == 1 && ReadLong(retried, "next_attempt_ts", 0) > DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         "Failed indexing jobs persist with bounded retry backoff.");
@@ -1522,7 +1522,7 @@ VALUES('semantic_significant_history',$campaign,'timeline',2,10,'siege_completed
             }
             finally
             {
-                string directory = CampaignDirectory(campaignId);
+                string directory = Program.CampaignDirectory(campaignId);
                 try
                 {
                     ReignPostgreSqlStorage.ClearAllPools();

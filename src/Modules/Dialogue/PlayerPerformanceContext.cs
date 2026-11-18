@@ -6,23 +6,23 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static void EnsurePlayerPerformanceSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_performance_events (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS character_performance_events (
 receipt_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,timeline_id TEXT NOT NULL,subject_id TEXT NOT NULL,world_day REAL NOT NULL,sequence INTEGER NOT NULL,
 kind TEXT NOT NULL,outcome TEXT NOT NULL,battle_type TEXT NOT NULL DEFAULT '',competition_id TEXT NOT NULL,
 source TEXT NOT NULL,source_hash TEXT NOT NULL,knowledge_rules_json TEXT NOT NULL DEFAULT '[]',
 UNIQUE(event_id,subject_id));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_performance_subject_day ON character_performance_events(timeline_id,subject_id,world_day);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_performance_subject_day ON character_performance_events(timeline_id,subject_id,world_day);");
             // A compact native receipt survives lossy world-history retention.
             // Save Sync snapshots the whole campaign schema, including this ledger.
             const string marker = "character_performance_backfill_v1";
-            if (ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
-            foreach (var row in QuerySql(connection, "SELECT * FROM world_history_events WHERE is_complete=1 AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));"))
+            if (ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;", TestDict("key", marker)).FirstOrDefault(), "value", "") == "1") return;
+            foreach (var row in Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE is_complete=1 AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));"))
                 ProjectPlayerPerformanceEvent(connection, row);
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
 
         private static string NativePerformanceOutcome(string kind, Dictionary<string, object> facts, Dictionary<string, object> entity)
@@ -56,9 +56,9 @@ UNIQUE(event_id,subject_id));");
         internal static void ProjectPlayerPerformanceEvent(ReignDbConnection connection, Dictionary<string, object> row)
         {
             string id = ReadString(row, "event_id", "");
-            var rules = QuerySql(connection, "SELECT audience_type,audience_id,available_day,acquisition_mode FROM world_history_knowledge_rules WHERE event_id=$id;", TestDict("id", id));
+            var rules = Program.QuerySql(connection, "SELECT audience_type,audience_id,available_day,acquisition_mode FROM world_history_knowledge_rules WHERE event_id=$id;", TestDict("id", id));
             foreach (var receipt in BuildPlayerPerformanceReceipts(row, WorldSimulationService.QueryWorldHistoryEntities(connection, id), rules))
-                ExecuteSql(connection, @"INSERT OR IGNORE INTO character_performance_events
+                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO character_performance_events
 (receipt_id,event_id,timeline_id,subject_id,world_day,sequence,kind,outcome,battle_type,competition_id,source,source_hash,knowledge_rules_json)
 VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind,$outcome,$battle_type,$competition_id,$source,$source_hash,$knowledge_rules_json);", receipt);
         }
@@ -103,7 +103,7 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
             return receipts;
         }
 
-        private static bool PerformanceKnownToObserver(Dictionary<string, object> row, KnowledgeAccessContext access, bool publicOnly = false)
+        private static bool PerformanceKnownToObserver(Dictionary<string, object> row, Program.KnowledgeAccessContext access, bool publicOnly = false)
         {
             if (access == null) return true; // Engine metadata, never an NPC prompt.
             var rules = ReadDictionaryList(TestDict("rules", Json.DeserializeObject(ReadString(row, "knowledge_rules_json", "[]"))), "rules");
@@ -114,14 +114,14 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
         }
 
         private static Dictionary<string, object> ReadPlayerPerformanceCounts(ReignDbConnection connection, string timeline, string player,
-            double day, KnowledgeAccessContext access = null, IEnumerable<KnowledgeAccessContext> additionalObservers = null, bool publicOnly = false)
+            double day, Program.KnowledgeAccessContext access = null, IEnumerable<Program.KnowledgeAccessContext> additionalObservers = null, bool publicOnly = false)
         {
-            var rows = WorldSimulationService.TableExists(connection, "character_performance_events") ? QuerySql(connection,
+            var rows = WorldSimulationService.TableExists(connection, "character_performance_events") ? Program.QuerySql(connection,
                 "SELECT * FROM character_performance_events WHERE " + MemorySourceTimelineSql("character_performance_events")
                     + " AND subject_id=$player AND world_day<=$day ORDER BY world_day,sequence;",
                 TestDict("timeline", timeline, "player", player, "day", day)) : new List<Dictionary<string, object>>();
             var unique = rows.Where(r => PerformanceKnownToObserver(r, access, publicOnly)
-                    && (additionalObservers ?? Enumerable.Empty<KnowledgeAccessContext>()).All(other => PerformanceKnownToObserver(r, other, publicOnly)))
+                    && (additionalObservers ?? Enumerable.Empty<Program.KnowledgeAccessContext>()).All(other => PerformanceKnownToObserver(r, other, publicOnly)))
                 .GroupBy(r => ReadString(r, "kind", "") + ":" + ReadString(r, "competition_id", ""))
                 .Select(g => g.First()).ToList();
             return TestDict("battleWins", unique.Count(r => ReadString(r, "kind", "") == "battle_completed" && ReadString(r, "outcome", "") == "win"),
@@ -150,7 +150,7 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
         private static string BuildPlayerPerformancePrompt(ReignDbConnection connection, string observer, Dictionary<string, object> payload, List<string> sources,
             IEnumerable<string> additionalObservers = null)
         {
-            string player = WorldSimulationService.TableExists(connection, "identity_roster") ? ReadString(QuerySql(connection,
+            string player = WorldSimulationService.TableExists(connection, "identity_roster") ? ReadString(Program.QuerySql(connection,
                 "SELECT hero_id FROM identity_roster WHERE is_player=1 ORDER BY hero_id LIMIT 1;").FirstOrDefault(), "hero_id", "") : "";
             player = FirstNonEmpty(player, ReadFirstString(payload, "mainHeroStringId", "playerHeroStringId", "playerId"));
             if (player.Length == 0 || observer == player) return "";
@@ -162,9 +162,9 @@ VALUES($receipt_id,$event_id,$timeline_id,$subject_id,$world_day,$sequence,$kind
             var others = (additionalObservers ?? Enumerable.Empty<string>()).ToList();
             if (others.Any(other => !WorldSimulationService.TableExists(connection, "acquaintances") || !WorldSimulationService.TableExists(connection, "identity_roster")
                 || !CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, other, player)))) return "";
-            var access = BuildKnowledgeAccessContext(observer, player, "", payload);
+            var access = Program.BuildKnowledgeAccessContext(observer, player, "", payload);
             var counts = ReadPlayerPerformanceCounts(connection, ContinuityTimeline(payload), player, ReadDouble(payload, "worldDay", 0d), access,
-                others.Select(other => BuildKnowledgeAccessContext(other, player, "", payload)), ReadBool(payload, "officialMemoryFirewall", false));
+                others.Select(other => Program.BuildKnowledgeAccessContext(other, player, "", payload)), ReadBool(payload, "officialMemoryFirewall", false));
             payload["playerPerformanceMetadata"] = TestDict("subjectId", player, "knownOutcomes", counts,
                 "nativeOutcomes", ReadPlayerPerformanceCounts(connection, ContinuityTimeline(payload), player, ReadDouble(payload, "worldDay", 0d)));
             var phrases = new List<string>();

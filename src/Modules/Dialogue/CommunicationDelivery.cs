@@ -10,7 +10,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static readonly ConcurrentDictionary<string, byte> CommunicationWorkers = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, (string Generation, string Hero)> CommunicationPlayers = new(StringComparer.OrdinalIgnoreCase);
@@ -23,10 +23,10 @@ namespace ReignBetaServer
             private readonly bool _owns;
             internal CommunicationDataReadLease()
             {
-                _owns = !CampaignDataGate.IsReadLockHeld && !CampaignDataGate.IsWriteLockHeld;
-                if (_owns) CampaignDataGate.EnterReadLock();
+                _owns = !Program.CampaignDataGate.IsReadLockHeld && !Program.CampaignDataGate.IsWriteLockHeld;
+                if (_owns) Program.CampaignDataGate.EnterReadLock();
             }
-            public void Dispose() { if (_owns) CampaignDataGate.ExitReadLock(); }
+            public void Dispose() { if (_owns) Program.CampaignDataGate.ExitReadLock(); }
         }
 
         private static double CommunicationBaseTransit(Dictionary<string, object> sender, Dictionary<string, object> recipient)
@@ -67,21 +67,21 @@ namespace ReignBetaServer
         private static void CommunicationHistory(ReignDbConnection c, Dictionary<string, object> row, string owner, string peer, double day, string body)
         {
             string id = ReadString(row, "message_id", "");
-            ExecuteSql(c, @"INSERT INTO communication_history(receipt_id,message_id,timeline_id,owner_id,peer_id,acquired_day,acquired_ts,payload_json)
+            Program.ExecuteSql(c, @"INSERT INTO communication_history(receipt_id,message_id,timeline_id,owner_id,peer_id,acquired_day,acquired_ts,payload_json)
 VALUES($receipt,$id,$timeline,$owner,$peer,$day,$ts,$json) ON CONFLICT(message_id,owner_id) DO NOTHING;",
                 TestDict("receipt", id + "_" + PromptHash(owner).Substring(0, 12).ToLowerInvariant(), "id", id,
                     "timeline", ReadString(row, "timeline_id", "main"), "owner", owner, "peer", peer, "day", day, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     "json", Json.Serialize(TestDict("body", body, "speakerId", ReadString(row, "speaker_id", ""),
                         "recipientId", ReadString(row, "recipient_id", ""), "kind", ReadString(row, "kind", ""), "evidenceType", "attributed_message"))));
             string receipt = id + "_" + PromptHash(owner).Substring(0, 12).ToLowerInvariant(), session = receipt + "_session";
-            var sourceSession = QuerySql(c, "SELECT campaign_id FROM conversation_sessions WHERE session_id=$id;", TestDict("id", ReadString(row, "session_id", ""))).FirstOrDefault();
+            var sourceSession = Program.QuerySql(c, "SELECT campaign_id FROM conversation_sessions WHERE session_id=$id;", TestDict("id", ReadString(row, "session_id", ""))).FirstOrDefault();
             var visible = TestDict("body", body, "timelineId", ReadString(row, "timeline_id", "main"), "messageId", id,
                 "ownerId", owner, "peerId", peer, "evidenceType", "attributed_message", "visibility", "npc_private");
-            ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,participants_json,payload_json)
+            Program.ExecuteSql(c, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,channel,status,start_ts,end_ts,start_world_day,end_world_day,participants_json,payload_json)
 VALUES($id,$campaign,$owner,'','npc_correspondence','closed',$ts,$ts,$day,$day,$participants,$json) ON CONFLICT(session_id) DO NOTHING;",
                 TestDict("id", session, "campaign", ReadString(sourceSession, "campaign_id", ""), "owner", owner,
                     "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "day", day, "participants", Json.Serialize(new[] { owner }), "json", Json.Serialize(visible)));
-            if (QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", receipt)).Count == 0)
+            if (Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", receipt)).Count == 0)
                 InsertConversationTurn(c, receipt, session, receipt, 0, receipt, "npc", ReadString(row, "speaker_id", ""),
                     ReadString(GossipJson(row), "speakerName", ReadString(row, "speaker_id", "")),
                     "[Private correspondence; " + (owner == ReadString(row, "speaker_id", "") ? "you sent" : "you received")
@@ -93,7 +93,7 @@ VALUES($id,$campaign,$owner,'','npc_correspondence','closed',$ts,$ts,$day,$day,$
         private static void AdvanceCommunications(ReignDbConnection c, string campaign, string timeline, double day,
             List<Dictionary<string, object>> people)
         {
-            foreach (var row in QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline
+            foreach (var row in Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline
 AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORDER BY created_day,message_id LIMIT 128;", TestDict("timeline", timeline)))
             {
                 var data = GossipJson(row);
@@ -109,11 +109,11 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
                     { data["failure"] = "The recipient is no longer living or present in the native roster."; SetCommunicationStatus(c, row, "undeliverable", data); continue; }
                     double baseTransit = CommunicationBaseTransit(sender, recipient);
                     double transit = baseTransit == 0 ? 0 : CorrespondenceTransitPolicy.NewTransitDays(baseTransit, false,
-                        CorrespondenceOption(LoadSettings(), "correspondenceTravelTimeMultiplier"));
+                        Program.CorrespondenceOption(Program.LoadSettings(), "correspondenceTravelTimeMultiplier"));
                     data["baseTransitDays"] = baseTransit; data["transitDays"] = transit;
                     data["dispatchPresence"] = TestDict("speaker", sender, "recipient", recipient);
                     data["body"] = CommunicationBody(row, data, ReadString(row, "kind", "") == "summon_then_inform");
-                    ExecuteSql(c, "UPDATE communication_messages SET status='in_transit',dispatch_day=$day,due_day=$due,payload_json=$json WHERE message_id=$id;",
+                    Program.ExecuteSql(c, "UPDATE communication_messages SET status='in_transit',dispatch_day=$day,due_day=$due,payload_json=$json WHERE message_id=$id;",
                         TestDict("id", ReadString(row, "message_id", ""), "day", day, "due", day + transit, "json", Json.Serialize(data)));
                     row["status"] = "in_transit"; row["due_day"] = day + transit;
                     CommunicationHistory(c, row, ReadString(row, "speaker_id", ""), ReadString(row, "recipient_id", ""), day, ReadString(data, "body", ""));
@@ -124,20 +124,20 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
                 CommunicationHistory(c, row, ReadString(row, "recipient_id", ""), ReadString(row, "speaker_id", ""), day, body);
                 bool original = ReadString(row, "parent_id", "").Length == 0;
                 string status = original && ReadString(row, "recipient_id", "") != ReadString(row, "player_id", "") ? "reply_pending" : "delivered";
-                ExecuteSql(c, "UPDATE communication_messages SET status=$status,acquired_day=$day WHERE message_id=$id;",
+                Program.ExecuteSql(c, "UPDATE communication_messages SET status=$status,acquired_day=$day WHERE message_id=$id;",
                     TestDict("id", ReadString(row, "message_id", ""), "status", status, "day", day));
                 if (!original)
-                    ExecuteSql(c, "UPDATE communication_messages SET status=CASE WHEN status='awaiting_reply' THEN 'replied' ELSE status END WHERE message_id=$id;",
+                    Program.ExecuteSql(c, "UPDATE communication_messages SET status=CASE WHEN status='awaiting_reply' THEN 'replied' ELSE status END WHERE message_id=$id;",
                         TestDict("id", ReadString(row, "parent_id", "")));
             }
         }
 
-        private static Dictionary<string, object> CommunicationApi(string operation, Dictionary<string, object> p)
+        internal static Dictionary<string, object> CommunicationApi(string operation, Dictionary<string, object> p)
         {
             string campaign = ReadString(p, "campaignId", ""), timeline = ContinuityTimeline(p);
             if (campaign.Length == 0) return TestDict("ok", false, "error", "An exact campaign is required.");
             using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
-            using var c = OpenCampaignConnection(campaign);
+            using var c = Program.OpenCampaignConnection(campaign);
             if (operation == "status")
             {
                 if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) return CommunicationStatusProtocol.Failure(CommunicationStatusProtocol.TimelineNotActiveError);
@@ -160,7 +160,7 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
                 AdvanceCommunications(c, campaign, timeline, day, ReadDictionaryList(ReadDictionary(p, "gossipPresence"), "people"));
                 transaction.Commit();
             }
-            var ready = QuerySql(c, "SELECT * FROM communication_messages WHERE timeline_id=$timeline AND status='summons_ready' ORDER BY created_day LIMIT 8;", TestDict("timeline", timeline))
+            var ready = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE timeline_id=$timeline AND status='summons_ready' ORDER BY created_day LIMIT 8;", TestDict("timeline", timeline))
                 .Select(row => TestDict("id", ReadString(row, "message_id", ""), "revision", ReadInt(row, "revision", 1),
                     "speakerId", ReadString(row, "speaker_id", ""), "recipientId", ReadString(row, "recipient_id", ""),
                     "destinationId", ReadString(GossipJson(row), "destinationId", ""), "stayDays", ReadDouble(GossipJson(row), "stayDays", 0),
@@ -175,7 +175,7 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
             "reply_pending", "reply_generating", "summons_ready", "awaiting_reply" };
 
         private static List<Dictionary<string, object>> CommunicationHostWork(ReignDbConnection c, string timeline) =>
-            QuerySql(c, "SELECT * FROM communication_messages WHERE timeline_id=$timeline AND parent_id='' AND kind IN ('summon','summon_then_inform') ORDER BY created_day,message_id;",
+            Program.QuerySql(c, "SELECT * FROM communication_messages WHERE timeline_id=$timeline AND parent_id='' AND kind IN ('summon','summon_then_inform') ORDER BY created_day,message_id;",
                 TestDict("timeline", timeline)).Where(r => CommunicationHostWaitingStatuses.Contains(ReadString(r, "status", "")))
             .Where(r => ReadString(GossipJson(r), "hostReservationHash", "").Length > 0)
             .Select(r => { var d = GossipJson(r); return TestDict("id", ReadString(r, "message_id", ""), "speakerId", ReadString(r, "speaker_id", ""),
@@ -186,7 +186,7 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
         {
             foreach (var work in CommunicationHostWork(c, timeline).Where(w => day >= ReadDouble(w, "expiresDay", 0)))
             {
-                var row = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", ReadString(work, "id", ""))).Single();
+                var row = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", ReadString(work, "id", ""))).Single();
                 var data = GossipJson(row); data["failure"] = "The host's fourteen-day invitation wait expired before an accepted journey began.";
                 SetCommunicationStatus(c, row, "expired", data);
             }
@@ -198,7 +198,7 @@ AND status IN ('queued','awaiting_sender','in_transit','awaiting_recipient') ORD
             var args = TestDict("timeline", timeline, "hero", hero, "offset", Math.Clamp(offset, 0, 1000000), "limit", Math.Clamp(limit, 1, 100));
             string messages = " FROM communication_messages WHERE timeline_id=$timeline AND ($hero='' OR speaker_id=$hero OR recipient_id=$hero)";
             string history = " FROM communication_history WHERE timeline_id=$timeline AND ($hero='' OR owner_id=$hero)";
-            var admissions = WorldSimulationService.TableExists(c, "conversation_accepted_units") ? QuerySql(c, @"SELECT a.unit_id,a.created_ts,
+            var admissions = WorldSimulationService.TableExists(c, "conversation_accepted_units") ? Program.QuerySql(c, @"SELECT a.unit_id,a.created_ts,
 (a.receipt_json::jsonb->'communications')::text AS admission_json FROM conversation_accepted_units a
 WHERE a.receipt_json::jsonb ? 'communications' AND EXISTS(SELECT 1 FROM conversation_turns t
 JOIN conversation_sessions s ON s.session_id=t.session_id WHERE t.exchange_id=a.unit_id AND t.role='npc'
@@ -207,16 +207,16 @@ AND COALESCE(t.payload_json::jsonb->>'timelineId',s.payload_json::jsonb->>'timel
 ORDER BY a.created_ts DESC,a.unit_id LIMIT $limit OFFSET $offset;", args) : new List<Dictionary<string, object>>();
             return CommunicationStatusResponse.Snapshot(CharactersService.NpcLivesGeneration(c), timeline,
                 admissions,
-                QuerySql(c, "SELECT *" + messages + " ORDER BY created_day,message_id LIMIT $limit OFFSET $offset;", args),
-                QuerySql(c, "SELECT *" + history + " ORDER BY acquired_day,receipt_id LIMIT $limit OFFSET $offset;", args),
-                ReadLong(QuerySql(c, "SELECT COUNT(*) AS n" + messages + ";", args).Single(), "n", 0),
-                ReadLong(QuerySql(c, "SELECT COUNT(*) AS n" + history + ";", args).Single(), "n", 0)).ToDictionary();
+                Program.QuerySql(c, "SELECT *" + messages + " ORDER BY created_day,message_id LIMIT $limit OFFSET $offset;", args),
+                Program.QuerySql(c, "SELECT *" + history + " ORDER BY acquired_day,receipt_id LIMIT $limit OFFSET $offset;", args),
+                ReadLong(Program.QuerySql(c, "SELECT COUNT(*) AS n" + messages + ";", args).Single(), "n", 0),
+                ReadLong(Program.QuerySql(c, "SELECT COUNT(*) AS n" + history + ";", args).Single(), "n", 0)).ToDictionary();
         }
 
         private static Dictionary<string, object> CommunicationReadiness(ReignDbConnection c, string timeline, double day)
         {
             if (!WorldSimulationService.TableExists(c, "communication_messages")) return TestDict("active", false, "pending", 0L, "due", 0L, "failed", 0L);
-            var counts = QuerySql(c, @"SELECT
+            var counts = Program.QuerySql(c, @"SELECT
 COUNT(*) FILTER (WHERE status IN ('awaiting_host','reply_pending','reply_generating','summons_ready')) AS pending,
 COUNT(*) FILTER (WHERE status='in_transit' AND due_day<=$day OR status='queued' AND COALESCE((payload_json::jsonb->>'dispatchNotBefore')::double precision,created_day)<=$day) AS due,
 COUNT(*) FILTER (WHERE status='reply_failed') AS failed,
@@ -244,7 +244,7 @@ COUNT(*) AS total FROM communication_messages WHERE timeline_id=$timeline;", Tes
                 string generation, lease;
                 using (new CommunicationDataReadLease())
                 using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = Program.OpenCampaignConnection(campaign))
                 {
                     EnsureCommunicationSchema(c); EnsureMemoryPrecisionSchema(c);
                     generation = CharactersService.NpcLivesGeneration(c);
@@ -252,10 +252,10 @@ COUNT(*) AS total FROM communication_messages WHERE timeline_id=$timeline;", Tes
                     lease = leasePrefix + Guid.NewGuid().ToString("N");
                     string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(c);
                     long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ExecuteSql(c, @"UPDATE communication_messages SET status='reply_failed' WHERE timeline_id=$timeline
+                    Program.ExecuteSql(c, @"UPDATE communication_messages SET status='reply_failed' WHERE timeline_id=$timeline
 AND status='reply_generating' AND attempts>=3 AND (lease_until<$now OR lease_token NOT LIKE $prefix);",
                         TestDict("timeline", timeline, "now", now, "prefix", leasePrefix + "%"));
-                    row = QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND attempts<3
+                    row = Program.QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND attempts<3
 AND (status='reply_pending' OR status='reply_generating' AND (lease_until<$now OR lease_token NOT LIKE $prefix)) ORDER BY acquired_day,message_id LIMIT 1;",
                         TestDict("timeline", timeline, "now", now, "prefix", leasePrefix + "%")).FirstOrDefault();
                     if (row == null) return;
@@ -267,18 +267,18 @@ AND (status='reply_pending' OR status='reply_generating' AND (lease_until<$now O
                         "currentDay", ReadDouble(row, "acquired_day", 0), "memoryAsOfTimestamp", now,
                         "memoryAsOfAcceptedSequence", ReadAcceptedMemorySourceWatermark(c));
                     PrepareCommunicationReply(c, campaign, row, replyContext);
-                    ExecuteSql(c, "UPDATE communication_messages SET status='reply_generating',attempts=attempts+1,lease_token=$lease,lease_until=$until WHERE message_id=$id;",
+                    Program.ExecuteSql(c, "UPDATE communication_messages SET status='reply_generating',attempts=attempts+1,lease_token=$lease,lease_until=$until WHERE message_id=$id;",
                         TestDict("id", ReadString(row, "message_id", ""), "lease", lease, "until", now + 600));
                 }
                 Dictionary<string, object> result;
-                try { result = ComposeCommunicationReply(campaign, row, data, replyContext, respond ?? ChatWithLlm); }
+                try { result = ComposeCommunicationReply(campaign, row, data, replyContext, respond ?? Program.ChatWithLlm); }
                 catch (Exception ex) { result = TestDict("ok", false, "error", "Reply generation failed: " + ex.GetType().Name); }
                 using (new CommunicationDataReadLease())
                 using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = Program.OpenCampaignConnection(campaign))
                 {
                     if (generation != CharactersService.NpcLivesGeneration(c)) return;
-                    var current = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND lease_token=$lease AND status='reply_generating';",
+                    var current = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND lease_token=$lease AND status='reply_generating';",
                         TestDict("id", ReadString(row, "message_id", ""), "lease", lease)).FirstOrDefault();
                     if (current == null) continue;
                     if (CommunicationPlayerControlled(campaign, generation, ReadString(row, "recipient_id", ""), ReadString(row, "player_id", "")))
@@ -305,7 +305,7 @@ AND (status='reply_pending' OR status='reply_generating' AND (lease_until<$now O
                     using var transaction = c.BeginTransaction();
                     var reply = TestDict("body", ReadString(result, "body", ""), "speakerName", ReadString(ReadDictionary(data, "recipient"), "name", ""),
                         "dispatchNotBefore", day, "answerKind", answer);
-                    ExecuteSql(c, @"INSERT INTO communication_messages(message_id,root_id,parent_id,timeline_id,logical_id,session_id,speaker_id,recipient_id,player_id,
+                    Program.ExecuteSql(c, @"INSERT INTO communication_messages(message_id,root_id,parent_id,timeline_id,logical_id,session_id,speaker_id,recipient_id,player_id,
 topic_key,kind,status,created_day,payload_json) VALUES($id,$root,$root,$timeline,$logical,$session,$speaker,$recipient,$player,'reply','reply','queued',$day,$json)
 ON CONFLICT(message_id) DO NOTHING;", TestDict("id", replyId, "root", ReadString(row, "message_id", ""), "timeline", ReadString(row, "timeline_id", ""),
                         "logical", ReadString(row, "logical_id", ""), "session", ReadString(row, "session_id", ""), "speaker", ReadString(row, "recipient_id", ""),
@@ -320,11 +320,11 @@ ON CONFLICT(message_id) DO NOTHING;", TestDict("id", replyId, "root", ReadString
         {
             PreparePersonalGossipReply(c, campaign, row, context);
             string owner = ReadString(context, "speakerId", ""), peer = ReadString(row, "speaker_id", "");
-            var scope = CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
-            var access = BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
+            var scope = Program.CloneDictionary(context); scope["worldDay"] = ReadDouble(context, "currentDay", 0);
+            var access = Program.BuildKnowledgeAccessContext(owner, ReadString(context, "playerId", ""), "", scope);
             // Only correspondence already exchanged with this addressee belongs
             // in this reply. Another NPC's private letters grant no disclosure.
-            var acquired = QuerySql(c, @"SELECT * FROM communication_history WHERE owner_id=$owner AND peer_id=$peer AND timeline_id=$timeline
+            var acquired = Program.QuerySql(c, @"SELECT * FROM communication_history WHERE owner_id=$owner AND peer_id=$peer AND timeline_id=$timeline
 AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORDER BY acquired_day DESC,receipt_id LIMIT 30;",
                 TestDict("owner", owner, "peer", peer, "timeline", ReadString(context, "timelineId", "main"), "day", ReadDouble(context, "currentDay", 0),
                     "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence))
@@ -334,7 +334,7 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
             var selected = new List<Dictionary<string, object>>(); var memory = new System.Text.StringBuilder();
             var conversation = ReadDictionaryList(context, "replyEvidence").Where(e =>
             {
-                var source = QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", ReadString(e, "sourceId", ""))).FirstOrDefault();
+                var source = Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", ReadString(e, "sourceId", ""))).FirstOrDefault();
                 return source != null && PrecisionTurnVisible(source, owner, access, c);
             });
             foreach (var evidence in acquired.Concat(conversation))
@@ -388,8 +388,8 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
             foreach (var evidence in ReadDictionaryList(context, "replyEvidence").Where(e => ReadString(e, "text", "").Contains(quote, StringComparison.Ordinal)))
             {
                 string session = ReadString(evidence, "sourceRootId", "").Replace("conversation:", "");
-                var sources = QuerySql(c, "SELECT text,participants_json,speaker_id FROM conversation_turns WHERE session_id=$id AND status='active';", TestDict("id", session));
-                if (sources.Any(s => TextListFromJson(ReadString(s, "participants_json", "[]")).Contains(receiver, StringComparer.OrdinalIgnoreCase))) continue;
+                var sources = Program.QuerySql(c, "SELECT text,participants_json,speaker_id FROM conversation_turns WHERE session_id=$id AND status='active';", TestDict("id", session));
+                if (sources.Any(s => Program.TextListFromJson(ReadString(s, "participants_json", "[]")).Contains(receiver, StringComparer.OrdinalIgnoreCase))) continue;
                 if (sources.Any(s => System.Text.RegularExpressions.Regex.IsMatch(ReadString(s, "text", ""),
                     @"\b(?:keep\s+(?:this|that|it)\s+between\s+us|(?:do\s+not|don't)\s+tell|keep\s+.{0,40}\bsecret|promise\s+.{0,30}\bnot\s+to\s+tell)\b",
                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))) return false;
@@ -401,7 +401,7 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
         {
             EnsureCommunicationSchema(c);
             string id = ReadString(p, "communicationId", ""), kind = ReadString(p, "kind", "");
-            var row = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND timeline_id=$timeline;", TestDict("id", id, "timeline", state.TimelineId)).FirstOrDefault();
+            var row = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND timeline_id=$timeline;", TestDict("id", id, "timeline", state.TimelineId)).FirstOrDefault();
             var data = GossipJson(row); var meeting = ReadDictionary(p, "meeting");
             if (kind.StartsWith("host_", StringComparison.Ordinal))
             {

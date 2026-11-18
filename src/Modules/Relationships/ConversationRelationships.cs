@@ -18,7 +18,7 @@ namespace ReignBetaServer
         internal static void EnsureConversationRelationshipSchema(ReignDbConnection connection)
         {
             EnsureMbtiRelationshipSchema(connection);
-            Program.EnsureWorldHistoryLieDetectionSchema(connection);
+            DialogueService.EnsureWorldHistoryLieDetectionSchema(connection);
             Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_relationship_receipts (
 receipt_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL DEFAULT '',exchange_id TEXT NOT NULL,
 source_turn_id TEXT NOT NULL DEFAULT '',observer_id TEXT NOT NULL,target_id TEXT NOT NULL,mode TEXT NOT NULL DEFAULT '',
@@ -190,7 +190,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
                     ["observerHeroStringId"] = observerId,
                     ["targetHeroStringId"] = fallbackTarget,
                     ["valence"] = "neutral",
-                    ["assessmentIssue"] = Program.ConversationAssessmentAbsenceReason(parsed),
+                    ["assessmentIssue"] = DialogueService.ConversationAssessmentAbsenceReason(parsed),
                     ["actKind"] = "routine_conversation",
                     ["severityTier"] = "routine",
                     ["confidence"] = 0d,
@@ -244,13 +244,13 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             string settlementId = ReadString(payload, "locationId", "");
             if (string.IsNullOrWhiteSpace(playerId) || string.IsNullOrWhiteSpace(observerId)
                 || string.IsNullOrWhiteSpace(settlementId) || string.IsNullOrWhiteSpace(settlementName)
-                || !Program.ContradictsNativeCurrentSettlement(playerText, settlementName)
-                || !Program.ContainsConversationDeceptiveIntentEvidence(playerText))
+                || !DialogueService.ContradictsNativeCurrentSettlement(playerText, settlementName)
+                || !DialogueService.ContainsConversationDeceptiveIntentEvidence(playerText))
             {
                 return new Dictionary<string, object>();
             }
 
-            Dictionary<string, object> direct = Program.WorldHistoryLieCheckApi(new Dictionary<string, object>
+            Dictionary<string, object> direct = DialogueService.WorldHistoryLieCheckApi(new Dictionary<string, object>
             {
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
                 ["timelineId"] = ReadString(payload, "timelineId", "main"),
@@ -324,7 +324,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             string quote = ReadFirstString(assessment, "currentConductQuote", "current_conduct_quote", "evidenceQuote");
             return ReadDouble(assessment, "confidence", 0d) >= 0.6d
                 && !string.IsNullOrWhiteSpace(ReadFirstString(assessment, "summary", "reason"))
-                && Program.AgencyContainsExactQuote(currentContribution, quote);
+                && DialogueService.AgencyContainsExactQuote(currentContribution, quote);
         }
 
         private static List<Dictionary<string, object>> LoadPriorPartyConversationContributions(
@@ -346,7 +346,7 @@ source_evidence_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAU
             {
                 using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    Program.EnsureCategorizedMemorySchema(connection);
+                    DialogueService.EnsureCategorizedMemorySchema(connection);
                     return Program.QuerySql(connection, @"SELECT speaker_id,speaker_name,text,turn_order,exchange_id
 FROM conversation_turns
 WHERE session_id=$session AND exchange_id<>$exchange AND role='npc' AND status='active'
@@ -561,7 +561,7 @@ ORDER BY turn_order ASC;", new Dictionary<string, object>
                         {
                             continue;
                         }
-                        string receiptId = "conversation_relation_" + Program.PromptHash(exchangeId + "|" + observerId + "|" + targetId).Substring(0, 24).ToLowerInvariant();
+                        string receiptId = "conversation_relation_" + DialogueService.PromptHash(exchangeId + "|" + observerId + "|" + targetId).Substring(0, 24).ToLowerInvariant();
                         Dictionary<string, object> existing = Program.QuerySql(connection,
                             "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                             new Dictionary<string, object> { ["id"] = receiptId }).FirstOrDefault();
@@ -807,7 +807,7 @@ WHERE receipt_id=$id;", new Dictionary<string, object>
             Program.WriteAudit(campaignId, ReadString(payload, "correlationId", ""), "server", mode,
                 "relationship.conversation", "", "", exchangeId, "completed", 0,
                 "Conversation relationship consequences adjudicated.", response);
-            Program.PersonalGossipRelationshipApplied(campaignId, payload);
+            DialogueService.PersonalGossipRelationshipApplied(campaignId, payload);
             return response;
         }
 
@@ -1060,9 +1060,9 @@ $delta,0,$delta,$delta,$evidence,$summary,$status,'pending',$ts);", new Dictiona
             }
             catch (ArgumentException) { bound = false; }
             if (!bound) return "The native acknowledgment does not match its action report binding.";
-            string proofError = Program.TerminalReportLoadProofError(connection, current, loadProof, out _);
+            string proofError = DialogueService.TerminalReportLoadProofError(connection, current, loadProof, out _);
             if (proofError.Length > 0) return proofError;
-            var admission = Program.TerminalReportMarkerAdmission(connection, actionId, sha);
+            var admission = DialogueService.TerminalReportMarkerAdmission(connection, actionId, sha);
             if (admission != null)
             {
                 var echoed = ReadDictionary(nativeReceipt, TerminalActionReportProtocol.AdmissionField);
@@ -1960,7 +1960,7 @@ LIMIT 50;",
                     ? FirstNonEmpty(
                         benefitId,
                         "benefit_"
-                        + Program.PromptHash(receiptId).Substring(0, 24)
+                        + DialogueService.PromptHash(receiptId).Substring(0, 24)
                             .ToLowerInvariant())
                     : ReadString(existing, "benefit_id", "");
                 adjudicated["benefitEventId"] = benefitId;
@@ -2666,7 +2666,7 @@ objective_verdict,knowledge_basis,formula_version,outcome,evidence_event_ids_jso
 mismatched_json,prompt_packet_json,created_ts,updated_ts)
 VALUES('caught_lie','caught_lie_episode',$campaign,'main',10,'player','npc_c','false claim','false claim',
 'contradicted','firsthand',$formula,'detected_firsthand','[""evidence_1""]','[""evidence_1""]','[]','[]','{}',$ts,$ts);",
-                        new Dictionary<string, object> { ["campaign"] = campaign, ["formula"] = Program.LieFormulaVersion, ["ts"] = lieTs });
+                        new Dictionary<string, object> { ["campaign"] = campaign, ["formula"] = DialogueService.LieFormulaVersion, ["ts"] = lieTs });
                 }
                 foreach (var invalidLie in new[] {
                     TestDict("id", "unknown_verdict", "verdict", "unknown", "basis", "firsthand", "outcome", "detected_firsthand", "claimant", "player", "observer", "npc_c"),
@@ -2952,7 +2952,7 @@ mismatched_json,prompt_packet_json,created_ts,updated_ts FROM world_history_lie_
                 const string priorSessionId = "party_prior_session";
                 using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
                 {
-                    Program.EnsureCategorizedMemorySchema(connection);
+                    DialogueService.EnsureCategorizedMemorySchema(connection);
                     Program.ExecuteSql(connection, @"INSERT INTO conversation_turns(
 turn_id,session_id,event_id,turn_order,exchange_id,role,speaker_id,speaker_name,text,channel,world_day,ts,
 location_id,participants_json,status,payload_json)

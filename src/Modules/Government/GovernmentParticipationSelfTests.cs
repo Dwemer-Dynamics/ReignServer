@@ -123,7 +123,7 @@ namespace ReignBetaServer
             add("government.participation_docket_aliases_do_not_identify_options", new[] { 0, 25, 26, 27, 701, 702 }.Select(GovernmentParticipationRules.DocketAlias).SequenceEqual(new[] { "A", "Z", "AA", "AB", "ZZ", "AAA" }),
                 "I choose docket AA, then choose its separate voting option. The sentence renderer names the actual proposal.", null);
             var stack = TestDict("traits", CharactersService.BuildTraitDocument(TestDict("heroStringId", "test_character")), "politicalProfile", TryParseJsonObject(JsonSerializer.Serialize(profile)));
-            string prompt = Program.BuildStableCharacterPrompt("merchant_a", "A merchant", TestDict("name", "A merchant"), stack);
+            string prompt = DialogueService.BuildStableCharacterPrompt("merchant_a", "A merchant", TestDict("name", "A merchant"), stack);
             add("government.participation_required_prompt_is_complete_outside_motive_cap", prompt.Contains("REQUIRED PRIVATE POLITICAL BELIEFS")
                 && Enum.GetValues(typeof(ReignGovernmentPlank)).Cast<ReignGovernmentPlank>().All(x => prompt.Contains(x + ":"))
                 && prompt.Contains("PRIVATE NUMERIC MOTIVE EVIDENCE") && prompt.Contains("BASE PERSONALITY"),
@@ -220,7 +220,7 @@ namespace ReignBetaServer
                     && ReadString(combined[3], "content", "").Contains("— companion —")
                     && combined.Skip(2).All(x => ReadString(x, "content", "").Contains("only to this character")),
                     "Two people converse; each authored character has their own complete private foundation, without treating either profile as the other's knowledge.", null);
-                var unit = new Program.AcceptedConversationUnit { Hero = "local_notable", EventId = "accepted_fixture",
+                var unit = new DialogueService.AcceptedConversationUnit { Hero = "local_notable", EventId = "accepted_fixture",
                     Profile = TestDict("politicalInterval", 2), Payload = TestDict("timelineId", "original", "worldDay", 20d),
                     PlayerText = "The public granary kept our families alive through winter.",
                     Reply = "That winter has convinced me to care more about public welfare.",

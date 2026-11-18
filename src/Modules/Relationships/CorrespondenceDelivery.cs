@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_correspondence_delivery_work ON correspondence_de
             {
                 var due = Program.QuerySql(connection, @"SELECT * FROM letters WHERE status='in_transit' AND delivery_day<=$day
 ORDER BY delivery_day,letter_id LIMIT 100 FOR UPDATE SKIP LOCKED;", TestDict("day", day));
-                string generation = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 foreach (var letter in due)
                 {
@@ -57,7 +57,7 @@ delivery_timeline_id=$timeline,updated_ts=$ts WHERE letter_id=$id AND status='in
 (letter_id,player_id,timeline_id,restore_generation,source_hash,status,result_json,created_ts,updated_ts)
 VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now) ON CONFLICT(letter_id) DO NOTHING;",
                         TestDict("id", id, "player", player, "timeline", timeline, "generation", generation,
-                            "hash", Program.LetterContentHash(letter), "status", toPlayer || marriage ? "completed" : "pending",
+                            "hash", DialogueService.LetterContentHash(letter), "status", toPlayer || marriage ? "completed" : "pending",
                             "result", Json.Serialize(result), "now", now));
                 }
                 transaction.Commit();
@@ -74,13 +74,13 @@ VALUES($id,$player,$timeline,$generation,$hash,$status,$result,$now,$now) ON CON
 
         private static bool CorrespondenceDispatchOnTimeline(ReignDbConnection connection, Dictionary<string, object> letter, string timeline)
         {
-            if (Program.LetterSourceTimeline(letter) == timeline) return true;
-            var restored = Program.RestoredLetterContext(connection, timeline);
+            if (DialogueService.LetterSourceTimeline(letter) == timeline) return true;
+            var restored = DialogueService.RestoredLetterContext(connection, timeline);
             if (restored == null) return false;
             var member = Program.QuerySql(connection, @"SELECT content_hash FROM memory_restored_letters
 WHERE letter_id=$id AND restore_generation=$generation;", TestDict("id", ReadString(letter, "letter_id", ""),
                 "generation", ReadString(restored, "restore_generation", ""))).SingleOrDefault();
-            return member != null && ReadString(member, "content_hash", "") == Program.LetterContentHash(letter);
+            return member != null && ReadString(member, "content_hash", "") == DialogueService.LetterContentHash(letter);
         }
 
         private static bool CorrespondenceDeliveryFence(ReignDbConnection connection, Dictionary<string, object> job, string token)
@@ -90,10 +90,10 @@ WHERE letter_id=$id AND restore_generation=$generation;", TestDict("id", ReadStr
             var source = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;",
                 TestDict("id", ReadString(job, "letter_id", ""))).SingleOrDefault();
             return current != null && ReadString(current, "status", "") == "running"
-                && source != null && Program.LetterContentHash(source) == ReadString(job, "source_hash", "")
+                && source != null && DialogueService.LetterContentHash(source) == ReadString(job, "source_hash", "")
                 && ReadString(current, "lease_token", "") == token
                 && ReadLong(current, "lease_until", 0) > DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                && ReadString(current, "restore_generation", "") == ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", "")
+                && ReadString(current, "restore_generation", "") == ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "")
                 && ReadString(current, "restore_generation", "") == ReadString(job, "restore_generation", "")
                 && ReadString(current, "timeline_id", "") == WorldSimulationService.ActiveWorldHistoryTimeline(connection);
         }
@@ -119,7 +119,7 @@ WHERE letter_id=$id AND status='running' AND lease_token=$token AND restore_gene
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (var connection = Program.OpenCampaignConnection(campaign))
             {
-                string generation = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
                 Program.ExecuteSql(connection, @"UPDATE correspondence_delivery_jobs SET status='incomplete',lease_token='',lease_until=0,
 last_error='Reply attempt limit reached after interrupted work.',updated_ts=$now
 WHERE player_id=$player AND timeline_id=$timeline AND restore_generation=$generation
@@ -141,7 +141,7 @@ ORDER BY created_ts,letter_id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *;",
             {
                 try
                 {
-                    if (letter == null || ReadString(job, "source_hash", "") != Program.LetterContentHash(letter))
+                    if (letter == null || ReadString(job, "source_hash", "") != DialogueService.LetterContentHash(letter))
                         throw new InvalidOperationException("Delivered letter source changed.");
                     var reply = TryParseJsonObject(ReadString(job, "reply_json", ""));
                     if (reply == null)
@@ -192,7 +192,7 @@ lease_token='',lease_until=0,next_attempt_ts=$next,updated_ts=$now WHERE letter_
             var result = EmptyCorrespondenceDeliveryResult();
             using (var connection = Program.OpenCampaignConnection(campaign))
             {
-                string generation = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                string generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var args = TestDict("player", player, "timeline", timeline, "generation", generation);
                 foreach (string id in (acknowledgments ?? new List<string>()).Distinct().Take(100))
                 {

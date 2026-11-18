@@ -6,7 +6,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Request-local server state. Neither HTTP JSON nor model output can supply
         // this snapshot. Keep the read revision, not the revision at write time:
@@ -29,8 +29,8 @@ namespace ReignBetaServer
             EnsureConversationContinuitySchema(connection);
             var snapshot = new ContinuityReadSnapshot { Timeline = ContinuityTimeline(payload) };
             string peer = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
-            var access = BuildKnowledgeAccessContext(owner, peer, "", payload);
-            foreach (var row in QuerySql(connection, @"SELECT * FROM conversation_continuity
+            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            foreach (var row in Program.QuerySql(connection, @"SELECT * FROM conversation_continuity
 WHERE owner_id=$owner AND " + MemorySourceTimelineSql("conversation_continuity", access: access) + @" AND status<>'invalidated'
 AND (peer_id='' OR peer_id=$peer);", new Dictionary<string, object> {
                 ["timeline"] = snapshot.Timeline, ["owner"] = owner, ["peer"] = peer }))
@@ -106,10 +106,10 @@ AND (peer_id='' OR peer_id=$peer);", new Dictionary<string, object> {
             if (turn.Length == 0 || spans.Count == 0) return TestDict("status", "source_unavailable", "recoverable", false);
             string timeline = ContinuityTimeline(payload);
             string pendingId = "continuity_pending_" + PromptHash(timeline + "|" + owner + "|" + eventId + "|" + recordId).Substring(0, 32);
-            var value = TestDict("proposal", CloneDictionary(write), "sourceEvidence", source,
+            var value = TestDict("proposal", Program.CloneDictionary(write), "sourceEvidence", source,
                 "expectedRevision", expected, "observedRevision", current,
                 "reason", "concurrent_revision_changed", "meaning", "Unapplied proposal, not established memory.");
-            ExecuteSql(connection, @"INSERT INTO conversation_continuity_pending
+            Program.ExecuteSql(connection, @"INSERT INTO conversation_continuity_pending
 (pending_id,record_id,timeline_id,owner_id,peer_id,source_event_id,source_turn_id,source_hash,world_day,status,payload_json,created_ts)
 VALUES($id,$record,$timeline,$owner,$peer,$event,$turn,$hash,$day,'pending',$payload,$ts)
 ON CONFLICT(pending_id) DO NOTHING;", TestDict("id", pendingId, "record", recordId, "timeline", timeline,
@@ -126,8 +126,8 @@ ON CONFLICT(pending_id) DO NOTHING;", TestDict("id", pendingId, "record", record
             if (snapshot == null || !WorldSimulationService.TableExists(connection, "conversation_turns")) return "";
             snapshot.DeliveredPending.Clear();
             var text = new StringBuilder();
-            var access = BuildKnowledgeAccessContext(owner, peer, "", payload);
-            var rows = QuerySql(connection, @"SELECT p.* FROM conversation_continuity_pending p
+            var access = Program.BuildKnowledgeAccessContext(owner, peer, "", payload);
+            var rows = Program.QuerySql(connection, @"SELECT p.* FROM conversation_continuity_pending p
 LEFT JOIN conversation_turns t ON t.turn_id=p.source_turn_id
 WHERE p.timeline_id=$timeline AND p.owner_id=$owner AND p.peer_id=$peer AND p.status='pending' AND p.world_day<=$day
 AND p.created_ts<=$asof AND COALESCE(t.accepted_sequence,0)<=$sequence
@@ -137,7 +137,7 @@ ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTi
             foreach (var row in rows.Take(16))
             {
                 string id = ReadString(row, "pending_id", ""), recordId = ReadString(row, "record_id", "");
-                var turn = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
+                var turn = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;",
                     TestDict("id", ReadString(row, "source_turn_id", ""))).SingleOrDefault();
                 var value = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var source = ReadDictionary(value, "sourceEvidence");
@@ -157,7 +157,7 @@ ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTi
                 })) { gaps.Add(id + ": source spans unavailable or changed"); continue; }
                 // Reread current state alongside the rejected update. Do not rebase
                 // a prepared write onto a newer revision or execute its effects.
-                var current = QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND timeline_id=$timeline;",
+                var current = Program.QuerySql(connection, "SELECT * FROM conversation_continuity WHERE record_id=$id AND owner_id=$owner AND timeline_id=$timeline;",
                     TestDict("id", recordId, "owner", owner, "timeline", snapshot.Timeline)).SingleOrDefault();
                 var currentValue = TryParseJsonObject(ReadString(current, "payload_json", "{}"));
                 if (current == null || !MemoryTimeVisible(current, access, connection))
@@ -185,7 +185,7 @@ ORDER BY p.created_ts,p.pending_id LIMIT 17;", TestDict("timeline", ContinuityTi
         {
             if (snapshot == null) return;
             foreach (var pending in snapshot.DeliveredPending.Where(p => p.Value == recordId))
-                ExecuteSql(connection, @"UPDATE conversation_continuity_pending SET status='superseded_after_reread',resolved_event_id=$event
+                Program.ExecuteSql(connection, @"UPDATE conversation_continuity_pending SET status='superseded_after_reread',resolved_event_id=$event
 WHERE pending_id=$id AND record_id=$record AND timeline_id=$timeline AND status='pending' AND source_event_id<>$event;",
                     TestDict("event", eventId, "id", pending.Key, "record", recordId, "timeline", snapshot.Timeline));
         }
@@ -195,7 +195,7 @@ WHERE pending_id=$id AND record_id=$record AND timeline_id=$timeline AND status=
         {
             // The accepted event is server-issued. sceneTurnId can identify a
             // preceding client scene; it is never the canonical source of a reply.
-            var turn = WorldSimulationService.TableExists(connection, "conversation_turns") ? QuerySql(connection, @"SELECT turn_id
+            var turn = WorldSimulationService.TableExists(connection, "conversation_turns") ? Program.QuerySql(connection, @"SELECT turn_id
 FROM conversation_turns WHERE event_id=$event AND speaker_id=$owner AND text=$text AND status='active'
 ORDER BY turn_order DESC LIMIT 1;", new Dictionary<string, object> {
                 ["event"] = eventId, ["owner"] = owner, ["text"] = acceptedReply ?? "" }).FirstOrDefault() : null;

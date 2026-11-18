@@ -326,15 +326,15 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 ?? new Dictionary<string, object>();
             var evidenceContext = Program.CloneDictionary(context);
             evidenceContext["worldDay"] = ReadDouble(context, "worldDay", ReadDouble(chemistry, "last_day", 0d));
-            evidenceContext["timelineId"] = Program.ContinuityTimeline(context);
-            evidenceContext["memoryAsOfAcceptedSequence"] = Program.ReadAcceptedMemorySourceWatermark(connection);
+            evidenceContext["timelineId"] = DialogueService.ContinuityTimeline(context);
+            evidenceContext["memoryAsOfAcceptedSequence"] = DialogueService.ReadAcceptedMemorySourceWatermark(connection);
             evidenceContext["memoryAsOfTimestamp"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             return new Dictionary<string, object>
             {
                 ["pairKey"] = pairKey,
                 ["campaignId"] = campaignId,
-                ["timelineId"] = Program.ContinuityTimeline(context),
-                ["restoreGeneration"] = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", ""),
+                ["timelineId"] = DialogueService.ContinuityTimeline(context),
+                ["restoreGeneration"] = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", ""),
                 ["sharedSources"] = RelationshipHistorySourceEvidence(connection, heroAId, heroBId, evidenceContext, true),
                 ["heroAId"] = heroAId,
                 ["heroBId"] = heroBId,
@@ -686,7 +686,7 @@ VALUES($id,$pair,$a,$b,$ordinal,$fingerprint,$objective,$aView,$bView,
             StringBuilder builder = new StringBuilder();
             var originals = context == null ? new List<Dictionary<string, object>>()
                 : RelationshipHistorySourceEvidence(connection, speakerHeroId, targetHeroId, context, false);
-            var supplied = Program.PlannedPromptSources(context);
+            var supplied = DialogueService.PlannedPromptSources(context);
             originals = originals.Where(record => ReadString(record, "kind", "") != "attributed_turn"
                 || supplied == null || !supplied.TryGetValue(ReadString(record, "sourceId", ""), out var hash)
                 || hash != ReadString(record, "sourceHash", "")).ToList();
@@ -963,13 +963,13 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
                         .AddMinutes(5).ToString("o")
                 });
                 Program.WriteJsonObject(
-                    Program.ConversationReadinessStatePath(fixtureCampaignId),
+                    DialogueService.ConversationReadinessStatePath(fixtureCampaignId),
                     new Dictionary<string, object>
                     {
                         ["schemaVersion"] = 1,
                         ["qualificationId"] = "fixture-qualification",
                         ["campaignId"] = fixtureCampaignId,
-                        ["buildVersion"] = Program.CurrentConversationBuildVersion(),
+                        ["buildVersion"] = DialogueService.CurrentConversationBuildVersion(),
                         ["status"] = "running"
                     });
                 using (ReignDbConnection connection =
@@ -988,7 +988,7 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
                         });
                 }
                 Dictionary<string, object> applied =
-                    Program.ConversationQualificationRelationshipFixtureApi(
+                    DialogueService.ConversationQualificationRelationshipFixtureApi(
                         new Dictionary<string, object>
                         {
                             ["confirmation"] = "qualification_fixture",
@@ -1001,7 +1001,7 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
                             ["affinityBtoA"] = -34
                         });
                 Dictionary<string, object> restored =
-                    Program.ConversationQualificationRelationshipFixtureApi(
+                    DialogueService.ConversationQualificationRelationshipFixtureApi(
                         new Dictionary<string, object>
                         {
                             ["confirmation"] = "qualification_fixture",

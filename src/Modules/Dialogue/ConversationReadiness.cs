@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static readonly Dictionary<string, Tuple<int, double, bool>> ConversationReadinessGates =
             new Dictionary<string, Tuple<int, double, bool>>(StringComparer.OrdinalIgnoreCase)
@@ -36,10 +36,10 @@ namespace ReignBetaServer
             return (version?.ToString() ?? "0.0.0.0") + "+mvid." + mvid.Substring(0, 16);
         }
 
-        private static Dictionary<string, object> ConversationReadinessResetApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationReadinessResetApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", ResolveLogCampaignId(""));
+            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
             if (string.IsNullOrWhiteSpace(campaignId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "campaignId is required." };
             string qualificationId = FirstNonEmpty(
@@ -58,18 +58,18 @@ namespace ReignBetaServer
                     ReadString(payload, "stateFingerprint", ""),
                 ["notes"] = ReadString(payload, "notes", "")
             };
-            WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return ConversationReadinessStatusApi(new Dictionary<string, string>
             {
                 ["campaignId"] = campaignId, ["qualificationId"] = qualificationId
             });
         }
 
-        private static Dictionary<string, object> ConversationReadinessMarkerApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationReadinessMarkerApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", ResolveLogCampaignId(""));
-            Dictionary<string, object> state = ReadJsonObject(ConversationReadinessStatePath(campaignId));
+            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
+            Dictionary<string, object> state = Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             if (state.Count == 0) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No active qualification exists." };
             List<Dictionary<string, object>> markers = ReadDictionaryList(state, "markers");
             markers.Add(new Dictionary<string, object>
@@ -78,16 +78,16 @@ namespace ReignBetaServer
                 ["passed"] = ReadBool(payload, "passed", false),
                 ["saveName"] = ReadString(payload, "saveName", ""),
                 ["gameInstanceId"] = ReadString(payload, "gameInstanceId", ""),
-                ["evidence"] = LimitText(ReadString(payload, "evidence", ""), 2000),
+                ["evidence"] = Program.LimitText(ReadString(payload, "evidence", ""), 2000),
                 ["utc"] = DateTimeOffset.UtcNow.ToString("o")
             });
             state["markers"] = markers;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object> { ["ok"] = true, ["markerCount"] = markers.Count };
         }
 
-        private static Dictionary<string, object> ConversationReadinessMigrateBuildApi(
+        internal static Dictionary<string, object> ConversationReadinessMigrateBuildApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -100,9 +100,9 @@ namespace ReignBetaServer
                     ["error"] = "confirmation must be exactly carry-compatible-categories."
                 };
             }
-            string campaignId = ReadString(payload, "campaignId", ResolveLogCampaignId(""));
+            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
             Dictionary<string, object> state =
-                ReadJsonObject(ConversationReadinessStatePath(campaignId));
+                Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             if (state.Count == 0)
                 return new Dictionary<string, object>
                 {
@@ -174,7 +174,7 @@ namespace ReignBetaServer
                 ["requestedSupersededRunIds"] =
                     requestedRunIds.OrderBy(value => value).ToList(),
                 ["supersededRunIds"] = newlySuperseded,
-                ["reason"] = LimitText(ReadString(payload, "reason", ""), 2000),
+                ["reason"] = Program.LimitText(ReadString(payload, "reason", ""), 2000),
                 ["utc"] = DateTimeOffset.UtcNow.ToString("o")
             });
             state["buildVersion"] = currentBuildVersion;
@@ -182,7 +182,7 @@ namespace ReignBetaServer
                 supersededRunIds.OrderBy(runId => runId).ToList();
             state["compatibleBuildTransitions"] = transitions;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             Dictionary<string, object> status = ConversationReadinessStatusApi(
                 new Dictionary<string, string>
                 {
@@ -193,11 +193,11 @@ namespace ReignBetaServer
             return status;
         }
 
-        private static Dictionary<string, object> ConversationReadinessRosterApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationReadinessRosterApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", ResolveLogCampaignId(""));
-            Dictionary<string, object> state = ReadJsonObject(ConversationReadinessStatePath(campaignId));
+            string campaignId = ReadString(payload, "campaignId", Program.ResolveLogCampaignId(""));
+            Dictionary<string, object> state = Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             if (state.Count == 0)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "No active qualification exists." };
             string requestedQualificationId = ReadString(payload, "qualificationId", "");
@@ -216,7 +216,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "targetRoster is required." };
             state["targetRoster"] = roster;
             state["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-            WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+            Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
@@ -225,12 +225,12 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> ConversationReadinessStatusApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> ConversationReadinessStatusApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string campaignId = query.TryGetValue("campaignId", out string requestedCampaign)
-                ? requestedCampaign : ResolveLogCampaignId("");
-            Dictionary<string, object> state = ReadJsonObject(ConversationReadinessStatePath(campaignId));
+                ? requestedCampaign : Program.ResolveLogCampaignId("");
+            Dictionary<string, object> state = Program.ReadJsonObject(ConversationReadinessStatePath(campaignId));
             string qualificationId = query.TryGetValue("qualificationId", out string requestedId)
                 ? requestedId : ReadString(state, "qualificationId", "");
             if (string.IsNullOrWhiteSpace(qualificationId))
@@ -669,12 +669,12 @@ namespace ReignBetaServer
                 ["reportPath"] = ConversationReadinessReportPath(campaignId, qualificationId),
                 ["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o")
             };
-            WriteJsonObject(ConversationReadinessReportPath(campaignId, qualificationId), scorecard);
+            Program.WriteJsonObject(ConversationReadinessReportPath(campaignId, qualificationId), scorecard);
             if (highOverall)
             {
                 state["status"] = "high";
                 state["completedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-                WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
+                Program.WriteJsonObject(ConversationReadinessStatePath(campaignId), state);
             }
             return scorecard;
         }
@@ -696,7 +696,7 @@ namespace ReignBetaServer
             string root = WorldSimulationService.LiveTestRunsRoot(campaignId);
             if (!Directory.Exists(root)) return new List<Dictionary<string, object>>();
             return Directory.GetFiles(root, "*.json", SearchOption.TopDirectoryOnly)
-                .Select(ReadJsonObject)
+                .Select(Program.ReadJsonObject)
                 .Where(run => string.Equals(ReadString(run, "qualificationId", ""), qualificationId, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(run => ReadString(run, "startedUtc", ""))
                 .ToList();
@@ -993,7 +993,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static long PercentileNearestRank(List<long> sortedValues, double percentile)
+        internal static long PercentileNearestRank(List<long> sortedValues, double percentile)
         {
             if (sortedValues == null || sortedValues.Count == 0) return 0;
             int rank = (int)Math.Ceiling(Math.Max(0d, Math.Min(1d, percentile)) * sortedValues.Count);
@@ -1002,7 +1002,7 @@ namespace ReignBetaServer
 
         private static string ConversationReadinessRoot(string campaignId)
         {
-            string path = CampaignFile(campaignId, "audit", "test-data", "conversation-readiness");
+            string path = Program.CampaignFile(campaignId, "audit", "test-data", "conversation-readiness");
             Directory.CreateDirectory(path);
             return path;
         }
@@ -1012,7 +1012,7 @@ namespace ReignBetaServer
         }
         private static string ConversationReadinessReportPath(string campaignId, string qualificationId)
         {
-            return Path.Combine(ConversationReadinessRoot(campaignId), SafePathSegment(qualificationId, "qualification") + ".json");
+            return Path.Combine(ConversationReadinessRoot(campaignId), Program.SafePathSegment(qualificationId, "qualification") + ".json");
         }
     }
 }

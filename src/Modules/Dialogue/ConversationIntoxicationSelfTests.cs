@@ -5,9 +5,9 @@ using ReignBeta.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>> RunConversationIntoxicationSelfTests()
+        internal static List<Dictionary<string, object>> RunConversationIntoxicationSelfTests()
         {
             var rows = new List<Dictionary<string, object>>();
             Action<string, bool> check = (id, passed) => rows.Add(new Dictionary<string, object>

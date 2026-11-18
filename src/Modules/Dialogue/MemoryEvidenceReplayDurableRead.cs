@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ReviewedDurableRecollectionKind = "reviewed_durable_recollection";
         private const string ReviewedDurableProjectionKey = "reviewedDurableProjection";
@@ -42,10 +42,10 @@ namespace ReignBetaServer
         {
             if (!ReignPostgreSqlStorage.Options.IsValidation)
                 throw new InvalidOperationException("Evidence replay sequence advancement requires isolated validation.");
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             // Replay seeds explicit accepted sequences. The local serial sequence
             // must reach the imported cutoff before any subsequent publication.
-            ExecuteSql(connection, @"SELECT setval('memory_accepted_turn_sequence',
+            Program.ExecuteSql(connection, @"SELECT setval('memory_accepted_turn_sequence',
 GREATEST((SELECT last_value FROM memory_accepted_turn_sequence),$cutoff),true);", TestDict("cutoff", cutoff));
         }
 
@@ -54,7 +54,7 @@ GREATEST((SELECT last_value FROM memory_accepted_turn_sequence),$cutoff),true);"
 
         private static string DurableProjectionHash(Dictionary<string, object> projection)
         {
-            var binding = CloneDictionary(projection);
+            var binding = Program.CloneDictionary(projection);
             binding.Remove("projectionSha256");
             return ConversationExactTextHash(CanonicalJson(binding));
         }
@@ -62,14 +62,14 @@ GREATEST((SELECT last_value FROM memory_accepted_turn_sequence),$cutoff),true);"
         // The read gate asks for canonical occurrence and delivery metadata only.
         // Legacy lexical ranking has its own eligibility checks and row reads.
         private static Dictionary<string, object> ReadDurableSourceMetadata(ReignDbConnection connection, string sourceId) =>
-            QuerySql(connection, @"SELECT t.turn_id,t.event_id,t.role,t.speaker_id,t.status,t.accepted_sequence,t.ts,t.world_day,t.participants_json,
+            Program.QuerySql(connection, @"SELECT t.turn_id,t.event_id,t.role,t.speaker_id,t.status,t.accepted_sequence,t.ts,t.world_day,t.participants_json,
 t.payload_json::jsonb->>'timelineId' AS timeline_id,t.xmin::text AS source_revision,s.restore_generation
 FROM conversation_turns t CROSS JOIN memory_precision_state s WHERE t.turn_id=$id AND s.state_id='current';",
                 TestDict("id", sourceId)).SingleOrDefault();
 
         private static bool DurableSourceIncludesPair(Dictionary<string, object> source, string observer, string peer)
         {
-            var participants = TextListFromJson(ReadString(source, "participants_json", "[]"));
+            var participants = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
             return participants.Contains(observer) && participants.Contains(peer);
         }
 
@@ -97,9 +97,9 @@ FROM conversation_turns t CROSS JOIN memory_precision_state s WHERE t.turn_id=$i
             if (sourceId.Length == 0 || eventId.Length == 0 || original.Length == 0 || derived.Contains(original, StringComparison.Ordinal)
                 || !sourceHash.Equals(ReadString(review, "sourceBodySha256", ""), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The reviewed recollection is not pinned to the accepted source.");
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             using var transaction = connection.BeginTransaction();
-            var locked = QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id FOR UPDATE;", TestDict("id", sourceId)).Single();
+            var locked = Program.QuerySql(connection, "SELECT text FROM conversation_turns WHERE turn_id=$id FOR UPDATE;", TestDict("id", sourceId)).Single();
             var source = ReadDurableSourceMetadata(connection, sourceId);
             if (ReadString(locked, "text", "") != original || ReadString(source, "event_id", "") != eventId
                 || ReadString(source, "speaker_id", "") != observer || ReadString(source, "role", "") != "npc"
@@ -108,7 +108,7 @@ FROM conversation_turns t CROSS JOIN memory_precision_state s WHERE t.turn_id=$i
                 || !DurableSourceIncludesPair(source, observer, peer))
                 throw new InvalidOperationException("The accepted source changed before the reviewed projection could be stored.");
             var matches = new List<(Dictionary<string, object> Row, Dictionary<string, object> Payload)>();
-            foreach (var row in QuerySql(connection, @"SELECT * FROM memories WHERE event_id=$event AND owner_id=$observer
+            foreach (var row in Program.QuerySql(connection, @"SELECT * FROM memories WHERE event_id=$event AND owner_id=$observer
 AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", eventId, "observer", observer)))
             {
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
@@ -129,7 +129,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             string projectionHash = DurableProjectionHash(projection);
             projection["projectionSha256"] = projectionHash;
             match.Payload[ReviewedDurableProjectionKey] = projection;
-            ExecuteSql(connection, "UPDATE memories SET payload_json=$payload WHERE memory_id=$id;",
+            Program.ExecuteSql(connection, "UPDATE memories SET payload_json=$payload WHERE memory_id=$id;",
                 TestDict("payload", Json.Serialize(match.Payload), "id", memoryId));
             transaction.Commit();
             return TestDict("status", "stored", "memoryId", memoryId, "projectionSha256", projectionHash,
@@ -137,7 +137,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
                 "restoreGeneration", projection["restoreGeneration"]);
         }
 
-        private sealed class ReviewedDurableReplayRead(string observer, string peer, string timeline)
+        internal sealed class ReviewedDurableReplayRead(string observer, string peer, string timeline)
         {
             internal string RankedId { get; private set; } = "";
             internal string DiscoveredId { get; private set; } = "";
@@ -145,7 +145,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             internal List<string> Denials { get; private set; } = new();
 
             internal MemoryEvidence ProjectRankedMemory(ReignDbConnection connection, Dictionary<string, object> row,
-                KnowledgeAccessContext access, double score)
+                Program.KnowledgeAccessContext access, double score)
             {
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
                 var projection = ReadDictionary(payload, ReviewedDurableProjectionKey);
@@ -160,7 +160,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             }
 
             private List<string> CheckBinding(ReignDbConnection connection, Dictionary<string, object> row, Dictionary<string, object> payload,
-                Dictionary<string, object> projection, KnowledgeAccessContext access)
+                Dictionary<string, object> projection, Program.KnowledgeAccessContext access)
             {
                 if (ReadString(projection, "schema", "") != ReviewedDurableProjectionSchema
                     || !ValidDurableProjectionText(ReadString(projection, "text", ""))
@@ -173,7 +173,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
                 string sourceId = ReadString(projection, "sourceTurnId", ""), eventId = ReadString(projection, "sourceEventId", "");
                 if (sourceId.Length == 0 || eventId.Length == 0 || ReadString(projection, "memoryId", "") != ReadString(row, "memory_id", "")
                     || !DurableMemoryBindingMatches(row, payload, observer, eventId, ReadString(projection, "sourceBodySha256", ""))
-                    || !KnowledgeRowVisibleToNpc("memories", row, access)) return new() { "memory_binding" };
+                    || !Program.KnowledgeRowVisibleToNpc("memories", row, access)) return new() { "memory_binding" };
                 var source = ReadDurableSourceMetadata(connection, sourceId);
                 if (source == null) return new() { "source_missing" };
                 var denials = new List<string>();
@@ -194,21 +194,21 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             internal Dictionary<string, object> CheckControls(string campaign, Dictionary<string, object> context)
             {
                 if (DiscoveredId.Length == 0) return TestDict();
-                using var connection = OpenCampaignConnection(campaign);
-                var row = QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;", TestDict("id", DiscoveredId)).Single();
+                using var connection = Program.OpenCampaignConnection(campaign);
+                var row = Program.QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;", TestDict("id", DiscoveredId)).Single();
                 var payload = TryParseJsonObject(ReadString(row, "payload_json", ""));
                 var projection = ReadDictionary(payload, ReviewedDurableProjectionKey);
-                var access = BuildKnowledgeAccessContext(observer, peer, "", context);
+                var access = Program.BuildKnowledgeAccessContext(observer, peer, "", context);
                 bool accepted = CheckBinding(connection, row, payload, projection, access).Count == 0;
-                var changed = CloneDictionary(payload);
+                var changed = Program.CloneDictionary(payload);
                 var sourceEvidence = ReadDictionary(changed, "sourceEvidence");
                 string hash = ReadString(sourceEvidence, "sourceHash", "");
                 sourceEvidence["sourceHash"] = (hash[0] == '0' ? "1" : "0") + hash.Substring(1);
                 bool tamperBlocked = CheckBinding(connection, row, changed, projection, access).SequenceEqual(new[] { "memory_binding" });
-                var alteredProjection = CloneDictionary(projection);
+                var alteredProjection = Program.CloneDictionary(projection);
                 alteredProjection["text"] = "Altered: " + ReadString(projection, "text", "");
                 bool alteredProjectionBlocked = CheckBinding(connection, row, payload, alteredProjection, access).SequenceEqual(new[] { "projection_integrity" });
-                var foreign = BuildKnowledgeAccessContext(observer + ":foreign", peer, "", context);
+                var foreign = Program.BuildKnowledgeAccessContext(observer + ":foreign", peer, "", context);
                 bool foreignBlocked = CheckBinding(connection, row, payload, projection, foreign).SequenceEqual(new[] { "reader_scope" });
                 access.AsOfAcceptedSequence = ReadLong(projection, "sourceSequence", 0) - 1;
                 bool earlyBlocked = CheckBinding(connection, row, payload, projection, access).SequenceEqual(new[] { "source_occurrence" });
@@ -232,9 +232,9 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             var memoryKey = TestDict("id", memoryId);
             string IndexedState()
             {
-                using var connection = OpenCampaignConnection(campaign);
-                var record = QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;", memoryKey).Single();
-                var index = QuerySql(connection, "SELECT * FROM memory_fts WHERE memory_id=$id ORDER BY text,tags,entities;", memoryKey);
+                using var connection = Program.OpenCampaignConnection(campaign);
+                var record = Program.QuerySql(connection, "SELECT * FROM memories WHERE memory_id=$id;", memoryKey).Single();
+                var index = Program.QuerySql(connection, "SELECT * FROM memory_fts WHERE memory_id=$id ORDER BY text,tags,entities;", memoryKey);
                 if (index.Count == 0) throw new InvalidOperationException("The revocation control needs the original lexical index entry.");
                 return ConversationExactTextHash(CanonicalJson(TestDict("record", record, "index", index)));
             }
@@ -243,7 +243,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             foreach (bool narrowAudience in new[] { false, true })
             {
                 Dictionary<string, object> changed;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     // The first update leaves every value intact. It distinguishes
                     // the row version gate from the later change to source delivery.
@@ -251,7 +251,7 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
                         ? "UPDATE conversation_turns SET participants_json=$audience WHERE turn_id=$id RETURNING text,accepted_sequence,xmin::text AS source_revision;"
                         : "UPDATE conversation_turns SET status=status WHERE turn_id=$id RETURNING text,accepted_sequence,xmin::text AS source_revision;";
                     var args = narrowAudience ? TestDict("id", sourceId, "audience", Json.Serialize(new[] { observer })) : TestDict("id", sourceId);
-                    changed = QuerySql(connection, sql, args).Single();
+                    changed = Program.QuerySql(connection, sql, args).Single();
                 }
                 string revision = ReadString(changed, "source_revision", "");
                 bool sameOccurrence = ReadString(changed, "text", "") == original && ReadLong(changed, "accepted_sequence", -1) == sequence;
@@ -300,12 +300,12 @@ AND source='dialogue_llm' AND status='active' FOR UPDATE;", TestDict("event", ev
             context["worldDay"] = day;
             var audience = new List<string> { observer, peer };
             List<Dictionary<string, object>> rows;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             using (var transaction = connection.BeginTransaction())
             {
-                ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=$end WHERE session_id=$prior;",
+                Program.ExecuteSql(connection, "UPDATE conversation_sessions SET status='closed',end_ts=$end WHERE session_id=$prior;",
                     TestDict("end", ended, "prior", priorSession));
-                ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,$npc,$peer,'active',$start,$end,$audience,$payload);",
                     TestDict("session", session, "campaign", campaign, "npc", observer, "peer", peer, "start", ended + 1,
                         "end", ended + authors.Count, "audience", Json.Serialize(audience), "payload", Json.Serialize(context)));
@@ -319,7 +319,7 @@ VALUES($session,$campaign,$npc,$peer,'active',$start,$end,$audience,$payload);",
                         ReadString(isPlayer ? player : npc, "speaker_name", ""), ReadString(author, "text", ""), channel,
                         day, ended + i + 1, "", audience, context);
                 }
-                rows = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY accepted_sequence;",
+                rows = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$session ORDER BY accepted_sequence;",
                     TestDict("session", session));
                 if (rows.Count != 29 || rows.Any(row => !EvidenceReplayAcceptedTranscriptTurn(row)
                     || ReadLong(row, "accepted_sequence", -1) <= written)
@@ -335,8 +335,8 @@ VALUES($session,$campaign,$npc,$peer,'active',$start,$end,$audience,$payload);",
                 "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""), "text", ReadString(row, "text", ""),
                 "sessionId", session, "exchangeId", ReadString(row, "exchange_id", ""))).ToList();
             SetMemoryTranscriptContext(context, transcript);
-            var wideContext = CloneDictionary(context);
-            var controlContext = CloneDictionary(context);
+            var wideContext = Program.CloneDictionary(context);
+            var controlContext = Program.CloneDictionary(context);
             var wide = BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, wideContext, settings, false);
             var compact = BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, context, settings, false, durableRead: view);
             var controls = view.CheckControls(campaign, context);
@@ -348,7 +348,7 @@ VALUES($session,$campaign,$npc,$peer,'active',$start,$end,$audience,$payload);",
             string original = ReadString(npc, "text", ""), derived = ReadString(review, "text", ""), sourceId = ReadString(npc, "turn_id", "");
             Dictionary<string, object> CaptureRevocation(ReviewedDurableReplayRead reader)
             {
-                var revocationContext = CloneDictionary(controlContext);
+                var revocationContext = Program.CloneDictionary(controlContext);
                 var packet = BuildPrecisionMemoryPacket(campaign, observer, peer, "", query, revocationContext, settings, false, durableRead: reader);
                 return ReadDictionary(CaptureMemoryReplayProviderRequest(prepare(revocationContext, transcript, packet), settings), "providerWireCapture");
             }

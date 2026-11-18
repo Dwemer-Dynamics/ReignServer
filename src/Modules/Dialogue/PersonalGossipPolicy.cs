@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string PersonalGossipVersion = "personal-gossip-v1";
         private static Dictionary<string, object> GossipFields(params object[] fields)
@@ -16,16 +16,16 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static Dictionary<string, object> DefaultPersonalGossipSettings() => GossipFields(
+        internal static Dictionary<string, object> DefaultPersonalGossipSettings() => GossipFields(
             "enabled", true, "policyVersion", PersonalGossipVersion,
             "friendThreshold", 30, "dislikeThreshold", -10, "familyThreshold", 0,
             "namedRecipientMultiplier", 4d, "localDelayHours", 1d,
             "maximumCandidates", 8, "maximumOriginalsPerConversation", 2,
             "maximumOutgoingPerDay", 3, "maximumOutwardHops", 2, "expiryDays", 14d,
-            "chanceAdjustments", PersonalGossipChanceOptions(null));
+            "chanceAdjustments", Program.PersonalGossipChanceOptions(null));
 
         private static Dictionary<string, object> PersonalGossipSettings()
-            => PersonalGossipSettings(LoadSettings());
+            => PersonalGossipSettings(Program.LoadSettings());
         private static Dictionary<string, object> PersonalGossipSettings(Dictionary<string, object> saved)
         {
             var settings = DefaultPersonalGossipSettings();
@@ -33,25 +33,25 @@ namespace ReignBetaServer
             if (configured != null)
                 foreach (string key in settings.Keys.ToList())
                     if (configured.ContainsKey(key)) settings[key] = configured[key];
-            settings["chanceAdjustments"] = PersonalGossipChanceOptions(saved);
+            settings["chanceAdjustments"] = Program.PersonalGossipChanceOptions(saved);
             settings["enabled"] = ReadBool(settings, "enabled", true) && ReadBool(saved, "personalGossipEnabled", true);
             // A future policy requires an explicit implementation, not guessed semantics.
             if (ReadString(settings, "policyVersion", "") != PersonalGossipVersion) settings["enabled"] = false;
             settings["friendThreshold"] = Clamp(ReadInt(settings, "friendThreshold", 30), 1, 100);
             settings["dislikeThreshold"] = Clamp(ReadInt(settings, "dislikeThreshold", -10), -100, -1);
             settings["familyThreshold"] = Clamp(ReadInt(settings, "familyThreshold", 0), 0, 100);
-            settings["namedRecipientMultiplier"] = ClampDouble(ReadDouble(settings, "namedRecipientMultiplier", 4), 1, 100);
-            settings["localDelayHours"] = ClampDouble(ReadDouble(settings, "localDelayHours", 1), 1, 24);
+            settings["namedRecipientMultiplier"] = Program.ClampDouble(ReadDouble(settings, "namedRecipientMultiplier", 4), 1, 100);
+            settings["localDelayHours"] = Program.ClampDouble(ReadDouble(settings, "localDelayHours", 1), 1, 24);
             settings["maximumCandidates"] = Clamp(ReadInt(settings, "maximumCandidates", 8), 1, 8);
             settings["maximumOriginalsPerConversation"] = Clamp(ReadInt(settings, "maximumOriginalsPerConversation", 2), 1, 2);
             settings["maximumOutgoingPerDay"] = Clamp(ReadInt(settings, "maximumOutgoingPerDay", 3), 1, 3);
             settings["maximumOutwardHops"] = Clamp(ReadInt(settings, "maximumOutwardHops", 2), 1, 2);
-            settings["expiryDays"] = ClampDouble(ReadDouble(settings, "expiryDays", 14), 1, 14);
+            settings["expiryDays"] = Program.ClampDouble(ReadDouble(settings, "expiryDays", 14), 1, 14);
             return settings;
         }
 
-        private static int GossipPercent(double value, int cap = 100) =>
-            (int)Math.Round(ClampDouble(double.IsFinite(value) ? value : 0, 0, cap), MidpointRounding.AwayFromZero);
+        internal static int GossipPercent(double value, int cap = 100) =>
+            (int)Math.Round(Program.ClampDouble(double.IsFinite(value) ? value : 0, 0, cap), MidpointRounding.AwayFromZero);
         private static double GossipTrait(Dictionary<string, object> traits, string key) => RelationshipsService.RelationshipTraitPercent(traits, key);
         private static int GossipFeeling(Dictionary<string, object> signal, string key) =>
             new[] { 0, 25, 50, 75, 100 }.Contains(ReadInt(signal, key, 0)) ? ReadInt(signal, key, 0) : 0;
@@ -100,7 +100,7 @@ namespace ReignBetaServer
             if (conclusive == "disproved") return 0;
             if (conclusive == "confirmed") return 100;
             int bonus = account == "firsthand" ? 10 : account == "speculation" ? -15 : 0;
-            return (int)Math.Round(ClampDouble(40 + .25 * affinity + .20 * (socialTrust - 50) + bonus
+            return (int)Math.Round(Program.ClampDouble(40 + .25 * affinity + .20 * (socialTrust - 50) + bonus
                 - 10 * retellings + (corroborated ? 15 : 0) - (exposedLiar ? 25 : 0) - (inconsistent ? 20 : 0), 5, 95), MidpointRounding.AwayFromZero);
         }
         private static int GossipRetellChance(int share, int credibility) => GossipPercent(.40 * share * (.25 + .75 * credibility / 100d), 34);

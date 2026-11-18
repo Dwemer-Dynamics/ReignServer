@@ -76,7 +76,7 @@ namespace ReignBetaServer
             var basis = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json"));
             var rows = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$hero AND category='narrative_development' ORDER BY first_ts;",
                 new Dictionary<string, object> { ["hero"] = heroId });
-            string id = "narrative_development_" + Program.PromptHash(heroId + "|" + ReadString(proposal, "itemId", "") + "|" + exchangeId).Substring(0, 24);
+            string id = "narrative_development_" + DialogueService.PromptHash(heroId + "|" + ReadString(proposal, "itemId", "") + "|" + exchangeId).Substring(0, 24);
             var replay = rows.FirstOrDefault(x => ReadString(x, "characteristic_id", "") == id);
             if (replay != null) return replay;
             var effective = ResolveEffectiveNarrative(new Dictionary<string, object> { ["narrative"] = basis,
@@ -121,11 +121,11 @@ ON CONFLICT(owner_id,normalized_key) DO NOTHING;", new Dictionary<string, object
             {
                 Program.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status='superseded' WHERE owner_id=$hero AND category='narrative_development' AND topic_key=$topic AND characteristic_id<>$id AND status='active';",
                     new Dictionary<string, object> { ["hero"] = heroId, ["topic"] = "narrative/" + ReadString(proposal, "itemId", ""), ["id"] = id });
-                Program.InvalidatePromptRuntimeCache();
+                DialogueService.InvalidatePromptRuntimeCache();
             }
             EnsureCharacterEditorSchema(connection);
             Program.ExecuteSql(connection, "UPDATE character_editor_heads SET revision_token=$token,updated_ts=$ts WHERE hero_id=$hero;",
-                new Dictionary<string, object> { ["token"] = Program.PromptHash(id + "|" + ts), ["ts"] = ts, ["hero"] = heroId });
+                new Dictionary<string, object> { ["token"] = DialogueService.PromptHash(id + "|" + ts), ["ts"] = ts, ["hero"] = heroId });
             return new Dictionary<string, object> { ["characteristic_id"] = id, ["status"] = state, ["narrativeDevelopment"] = decision };
         }
 

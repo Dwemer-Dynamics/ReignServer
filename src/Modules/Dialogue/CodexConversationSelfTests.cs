@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         /// <summary>
         /// Provider-free contracts for the Codex conversation experiments.
@@ -13,7 +13,7 @@ namespace ReignBetaServer
         /// thread identity, and bounded preparation without starting a Codex
         /// process or writing campaign state.
         /// </summary>
-        private static List<Dictionary<string, object>> RunCodexConversationSelfTests()
+        internal static List<Dictionary<string, object>> RunCodexConversationSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             AddCodexSelfTest(results, "options_default_off", TestCodexOptions());
@@ -63,7 +63,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> TestStandardSchemas()
         {
-            Dictionary<string, string> defaults = DefaultPromptTemplates();
+            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
             var checks = new List<Dictionary<string, object>>();
             bool all = true;
             foreach (CodexConversationContractKind kind in new[]
@@ -111,7 +111,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> TestOpeningEvidenceSchema()
         {
-            var defaults = DefaultPromptTemplates();
+            var defaults = Program.DefaultPromptTemplates();
             var actual = CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Individual)
                 .ToDictionary(name => name, name => defaults[name], StringComparer.OrdinalIgnoreCase);
             var payload = TestDict("authoritativeApproachOpening", true, "authoritativeApproachKind", "shared",
@@ -167,7 +167,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> TestCustomFallback()
         {
-            Dictionary<string, string> defaults = DefaultPromptTemplates();
+            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
             var actual = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (string name in CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Individual))
                 actual[name] = defaults[name];
@@ -191,7 +191,7 @@ namespace ReignBetaServer
                 "court_life", new Dictionary<string, object>()) == CodexConversationContractKind.Individual;
             CodexConversationSchemaSelection arbitrary = ResolveCodexConversationSchema(
                 "dialogue", new Dictionary<string, object> { ["prompt"] = "arbitrary caller text" });
-            Dictionary<string, string> defaults = DefaultPromptTemplates();
+            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
             var templates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (string name in CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Individual))
                 templates[name] = defaults.ContainsKey(name) ? defaults[name] : "";
@@ -215,7 +215,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> TestOptionalNullSemantics()
         {
-            Dictionary<string, string> defaults = DefaultPromptTemplates();
+            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
             var templates = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (string name in CodexConversationSchemas.TemplateNames(CodexConversationContractKind.Individual))
                 templates[name] = defaults[name];
@@ -357,7 +357,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> TestBuiltInExampleConformance()
         {
-            Dictionary<string, string> defaults = DefaultPromptTemplates();
+            Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
             bool dialogueOk = TryCheckSchemaExample(
                 CodexConversationContractKind.Individual, defaults, "dialogue_output_schema.json", out string dialogueError);
             bool eventOk = TryCheckSchemaExample(
@@ -504,7 +504,7 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["role"] = "user", ["content"] = "CHARACTER" },
                 new Dictionary<string, object> { ["role"] = "user", ["content"] = "TURN ONE" }
             };
-            List<Dictionary<string, object>> second = first.Select(CloneDictionary).ToList();
+            List<Dictionary<string, object>> second = first.Select(Program.CloneDictionary).ToList();
             second[2]["content"] = "TURN TWO";
             List<CodexPromptSegment> a = CodexConversationContracts.BuildPromptSegments(first);
             List<CodexPromptSegment> b = CodexConversationContracts.BuildPromptSegments(second);
@@ -581,14 +581,14 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> TestProductionPromptParity()
         {
-            Dictionary<string, object> previousSettings = CodexPerformanceSettings.Value;
+            Dictionary<string, object> previousSettings = Program.CodexPerformanceSettings.Value;
             try
             {
-                Dictionary<string, object> fixtureSettings = DefaultSettings();
-                fixtureSettings["llmProvider"] = CodexSubscriptionProvider;
+                Dictionary<string, object> fixtureSettings = Program.DefaultSettings();
+                fixtureSettings["llmProvider"] = Program.CodexSubscriptionProvider;
                 fixtureSettings["codexOptions"] = CodexConversationContracts.NormalizeOptions(
                     new Dictionary<string, object> { ["parallelContextPreparation"] = true });
-                CodexPerformanceSettings.Value = fixtureSettings;
+                Program.CodexPerformanceSettings.Value = fixtureSettings;
 
                 PromptEnvelope sequentialDialogue = BuildPromptParityDialogue(false);
                 PromptEnvelope parallelDialogue = BuildPromptParityDialogue(true);
@@ -622,7 +622,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                CodexPerformanceSettings.Value = previousSettings;
+                Program.CodexPerformanceSettings.Value = previousSettings;
             }
         }
 

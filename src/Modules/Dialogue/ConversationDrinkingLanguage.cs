@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string DrinkNumberWords = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
         private const string DrinkVesselWords = @"cup|glass|goblet|mug|tankard|bottle|drinking horn|horn|bowl|chalice|flagon|flask|jug|pitcher|ewer|wine[- ]?skin|waterskin|skin|amphora";

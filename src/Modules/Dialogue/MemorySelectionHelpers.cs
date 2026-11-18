@@ -9,7 +9,7 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string MemorySelectionSchema = "reign-memory-selection-v1";
         private const string MemorySelectionRankingPolicy = "complete-source-window-max-v1";
@@ -63,9 +63,9 @@ namespace ReignBetaServer
         private static Dictionary<string, object> RequestMemorySelection(Dictionary<string, object> request,
             Dictionary<string, object> settings, int timeout)
         {
-            if (!string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (!string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 return MemorySelectionReplay.Value?.Invoke(request) ?? TestDict("ok", false, "status", "isolated_no_capture");
-            return TryParseJsonObject(PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/selection"), Json.Serialize(request), timeout + 500));
+            return TryParseJsonObject(Program.PostJsonToUrl(SemanticWorkerUrl(settings, "/memory/selection"), Json.Serialize(request), timeout + 500));
         }
 
         private static bool ValidateMemorySelectionResponse(Dictionary<string, object> response, string operation,
@@ -170,7 +170,7 @@ namespace ReignBetaServer
             // identity and the exact authorized observer view both matter.
             candidates = DistinctMemoryBundles(candidates, plan.SuppliedSources);
             string mode = ReadString(settings, "memorySelectionMode", ReadBool(settings, "enableMemoryPrecisionCrossEncoder", false) ? "on" : "off");
-            bool isolated = mode == "replay" && !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value) && MemorySelectionReplay.Value != null;
+            bool isolated = mode == "replay" && !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value) && MemorySelectionReplay.Value != null;
             bool compression = ReadBool(settings, "enableMemoryEvidenceCompression", false);
             var audit = TestDict("schema", MemorySelectionSchema, "mode", mode, "ranker", "Qwen/Qwen3-Reranker-0.6B",
                 "rankingPolicy", MemorySelectionRankingPolicy, "evidencePolicy", MemorySelectionEvidencePolicy,
@@ -282,7 +282,7 @@ namespace ReignBetaServer
             catch (Exception ex)
             {
                 audit["status"] = ReadBool(audit, "rankApplied", false) ? "ranked_compression_unavailable" : "local_fallback";
-                audit["failure"] = LimitText(ex.Message, 180);
+                audit["failure"] = Program.LimitText(ex.Message, 180);
                 if (!isolated && !ReadBool(audit, "rankApplied", false))
                     Interlocked.Exchange(ref MemorySelectionUnavailableUntilTicks, DateTime.UtcNow.AddSeconds(30).Ticks);
             }

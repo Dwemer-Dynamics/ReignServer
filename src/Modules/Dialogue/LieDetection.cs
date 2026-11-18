@@ -9,13 +9,13 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal const string LieFormulaVersion = "reign_historical_lie_v1";
 
         internal static void EnsureWorldHistoryLieDetectionSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_lie_checks (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_lie_checks (
 lie_check_id TEXT PRIMARY KEY,episode_key TEXT NOT NULL UNIQUE,claim_check_id TEXT NOT NULL DEFAULT '',campaign_id TEXT NOT NULL,
 timeline_id TEXT NOT NULL,world_day REAL NOT NULL,claimant_id TEXT NOT NULL,target_id TEXT NOT NULL,raw_claim TEXT NOT NULL,
 normalized_claim TEXT NOT NULL,objective_verdict TEXT NOT NULL,knowledge_basis TEXT NOT NULL,claimant_roguery REAL,
@@ -23,14 +23,14 @@ claimant_charm REAL,claimant_average REAL,target_roguery REAL,target_charm REAL,
 success_chance REAL,roll_value REAL,outcome TEXT NOT NULL,reaction_strategy TEXT NOT NULL DEFAULT '',exploit_opening INTEGER NOT NULL DEFAULT 0,
 evidence_event_ids_json TEXT NOT NULL DEFAULT '[]',known_event_ids_json TEXT NOT NULL DEFAULT '[]',matched_json TEXT NOT NULL DEFAULT '[]',
 mismatched_json TEXT NOT NULL DEFAULT '[]',prompt_packet_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL); ");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_claim_beliefs (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_claim_beliefs (
 belief_id TEXT PRIMARY KEY,lie_check_id TEXT NOT NULL,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,believer_id TEXT NOT NULL,
 claimant_id TEXT NOT NULL,raw_claim TEXT NOT NULL,normalized_claim TEXT NOT NULL,state TEXT NOT NULL,confidence REAL NOT NULL,
 evidence_event_ids_json TEXT NOT NULL DEFAULT '[]',created_day REAL NOT NULL,disproven_day REAL NOT NULL DEFAULT -1,
 discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL); ");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_lie_participants ON world_history_lie_checks(target_id,claimant_id,world_day DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_belief_owner_state ON world_history_claim_beliefs(believer_id,state,updated_ts DESC);");
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_lie_detection_version','1');");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_lie_participants ON world_history_lie_checks(target_id,claimant_id,world_day DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_belief_owner_state ON world_history_claim_beliefs(believer_id,state,updated_ts DESC);");
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_lie_detection_version','1');");
         }
 
         internal static Dictionary<string, object> WorldHistoryLieCheckApi(Dictionary<string, object> payload)
@@ -42,7 +42,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
             string targetKingdomId = ReadFirstString(payload, "targetKingdomId", "speakerKingdomId", "npcKingdomId");
             string claim = ReadFirstString(payload, "claim", "claimText", "playerText", "text", "message");
             double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "currentWorldDay", 0d));
-            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || IsWorldHistoryLookupRequest(claim);
+            bool lookupOnly = ReadBool(payload, "lookupOnly", false) || Program.IsWorldHistoryLookupRequest(claim);
             if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(targetId) || (!lookupOnly && string.IsNullOrWhiteSpace(claimantId)))
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = lookupOnly ? "claim and targetId are required." : "claim, claimantId, and targetId are required." };
@@ -132,9 +132,9 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
             List<string> evidenceIds = ReadStringList(verification, "evidenceEventIds").Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
             List<string> mismatched = ReadStringList(verification, "mismatchedComponents");
             List<string> matched = ReadStringList(verification, "matchedComponents");
-            string normalizedClaim = NormalizeLookup(claim);
+            string normalizedClaim = Program.NormalizeLookup(claim);
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsureWorldHistoryLieDetectionSchema(connection);
@@ -145,7 +145,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
                 List<string> knownIds = ReadStringList(knowledge, "eventIds");
                 ReconcileWorldHistoryClaimBeliefs(connection, targetId, knownIds, worldDay);
                 string episodeKey = StableLieEpisodeKey(campaignId, timelineId, claimantId, targetId, normalizedClaim, evidenceIds, knowledgeBasis);
-                Dictionary<string, object> existing = QuerySql(connection, "SELECT * FROM world_history_lie_checks WHERE episode_key=$key LIMIT 1;", new Dictionary<string, object> { ["key"] = episodeKey }).FirstOrDefault();
+                Dictionary<string, object> existing = Program.QuerySql(connection, "SELECT * FROM world_history_lie_checks WHERE episode_key=$key LIMIT 1;", new Dictionary<string, object> { ["key"] = episodeKey }).FirstOrDefault();
                 if (existing != null) return BuildLieCheckResponse(existing, verification, true);
 
                 Dictionary<string, object> claimantSkills = ResolveLieSkills(payload, "claimantSkills", campaignId, claimantId);
@@ -192,7 +192,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
                 Dictionary<string, object> promptPacket = BuildLiePromptPacket(verification, outcome, knowledgeBasis, knownIds, reactionStrategy, exploitOpening);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                ExecuteSql(connection, @"INSERT INTO world_history_lie_checks(
+                Program.ExecuteSql(connection, @"INSERT INTO world_history_lie_checks(
 lie_check_id,episode_key,claim_check_id,campaign_id,timeline_id,world_day,claimant_id,target_id,raw_claim,normalized_claim,
 objective_verdict,knowledge_basis,claimant_roguery,claimant_charm,claimant_average,target_roguery,target_charm,target_average,
 formula_version,success_chance,roll_value,outcome,reaction_strategy,exploit_opening,evidence_event_ids_json,known_event_ids_json,
@@ -214,7 +214,7 @@ $cr,$cc,$ca,$tr,$tc,$ta,$formula,$chance,$roll,$outcome,$reaction,$exploit,$evid
 
                 PersistLieConsequence(connection, lieCheckId, campaignId, timelineId, claimantId, targetId, claim, normalizedClaim,
                     objectiveVerdict, outcome, reactionStrategy, exploitOpening, evidenceIds, worldDay, ts);
-                Dictionary<string, object> stored = QuerySql(connection, "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
+                Dictionary<string, object> stored = Program.QuerySql(connection, "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                 return BuildLieCheckResponse(stored, verification, false);
             }
         }
@@ -223,10 +223,10 @@ $cr,$cc,$ca,$tr,$tc,$ta,$formula,$chance,$roll,$outcome,$reaction,$exploit,$evid
         {
             if (string.IsNullOrWhiteSpace(targetId)) return false;
             if (targetId.Equals("main_hero", StringComparison.OrdinalIgnoreCase)) return true;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureCategorizedMemorySchema(connection);
-                return QuerySql(connection, @"SELECT player_id FROM conversation_sessions
+                return Program.QuerySql(connection, @"SELECT player_id FROM conversation_sessions
 WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_id)<>'' LIMIT 1;",
                     new Dictionary<string, object>{{"campaign",campaignId},{"target",targetId}}).Any();
             }
@@ -235,18 +235,18 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
         private static void RunPlayerLieDetectionRemovalMigration(ReignDbConnection connection)
         {
             EnsureWorldHistoryLieDetectionSchema(connection);
-            Dictionary<string, object> applied = QuerySql(connection,
+            Dictionary<string, object> applied = Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='player_lie_detection_removed_v1' LIMIT 1;").FirstOrDefault();
             if (string.Equals(ReadString(applied, "value", ""), "complete", StringComparison.OrdinalIgnoreCase)) return;
 
             HashSet<string> playerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "main_hero" };
-            foreach (Dictionary<string, object> row in QuerySql(connection,
+            foreach (Dictionary<string, object> row in Program.QuerySql(connection,
                 "SELECT DISTINCT player_id FROM conversation_sessions WHERE trim(player_id)<>'';"))
             {
                 string playerId = ReadString(row, "player_id", "");
                 if (!string.IsNullOrWhiteSpace(playerId)) playerIds.Add(playerId);
             }
-            List<string> lieCheckIds = QuerySql(connection,
+            List<string> lieCheckIds = Program.QuerySql(connection,
                 "SELECT lie_check_id,target_id FROM world_history_lie_checks;")
                 .Where(row => playerIds.Contains(ReadString(row, "target_id", "")))
                 .Select(row => ReadString(row, "lie_check_id", ""))
@@ -254,28 +254,28 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
             foreach (string lieCheckId in lieCheckIds)
             {
                 Dictionary<string, object> parameters = new Dictionary<string, object> { ["id"] = lieCheckId };
-                ExecuteSql(connection, "DELETE FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id=$id OR memory_id=$memory OR memory_id=$discovery);",
+                Program.ExecuteSql(connection, "DELETE FROM memory_fts WHERE memory_id IN (SELECT memory_id FROM memories WHERE event_id=$id OR memory_id=$memory OR memory_id=$discovery);",
                     new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
-                ExecuteSql(connection, "DELETE FROM memories WHERE event_id=$id OR memory_id=$memory OR memory_id=$discovery;",
+                Program.ExecuteSql(connection, "DELETE FROM memories WHERE event_id=$id OR memory_id=$memory OR memory_id=$discovery;",
                     new Dictionary<string, object>{{"id",lieCheckId},{"memory","memory_"+lieCheckId},{"discovery","memory_discovery_"+lieCheckId}});
-                ExecuteSql(connection, "DELETE FROM beliefs WHERE event_id=$id;", parameters);
-                ExecuteSql(connection, "DELETE FROM world_history_claim_beliefs WHERE lie_check_id=$id;", parameters);
-                ExecuteSql(connection, "DELETE FROM world_history_lie_checks WHERE lie_check_id=$id;", parameters);
+                Program.ExecuteSql(connection, "DELETE FROM beliefs WHERE event_id=$id;", parameters);
+                Program.ExecuteSql(connection, "DELETE FROM world_history_claim_beliefs WHERE lie_check_id=$id;", parameters);
+                Program.ExecuteSql(connection, "DELETE FROM world_history_lie_checks WHERE lie_check_id=$id;", parameters);
             }
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('player_lie_detection_removed_v1','complete');");
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('player_lie_detection_removed_v1','complete');");
         }
 
         private static Dictionary<string, object> VerifySelfAdmittedFalsehood(
             Dictionary<string, object> payload, string claim, string claimantId, string targetId)
         {
-            string q = NormalizeLookup(claim);
+            string q = Program.NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)
-                || ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
+                || Program.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
             {
                 return null;
             }
 
-            bool directAdmission = ContainsExplicitDeceptionAdmission(q) || ContainsAny(q,
+            bool directAdmission = Program.ContainsExplicitDeceptionAdmission(q) || Program.ContainsAny(q,
                 "i know that account is false", "i know this account is false",
                 "i know that claim is false", "i know this claim is false",
                 "what i just said is false", "what i said is false",
@@ -340,14 +340,14 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
                 || !claimantSettlementId.Equals(targetSettlementId, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(settlementName)) return null;
 
-            string q = NormalizeLookup(claim);
-            string normalizedSettlement = NormalizeLookup(settlementName);
+            string q = Program.NormalizeLookup(claim);
+            string normalizedSettlement = Program.NormalizeLookup(settlementName);
             if (!ContradictsNativeCurrentSettlement(claim, settlementName)) return null;
-            bool deniedPresent = ContainsAny(q, "i am not presently in", "im not presently in", "i am not currently in", "im not currently in", "i am not in", "im not in",
+            bool deniedPresent = Program.ContainsAny(q, "i am not presently in", "im not presently in", "i am not currently in", "im not currently in", "i am not in", "im not in",
                     "we are not presently in", "were not presently in", "we are not currently in", "were not currently in", "we are not in", "were not in")
                 || q.Contains("not " + normalizedSettlement)
                 || q.Contains("rather than " + normalizedSettlement);
-            bool deniedEver = ContainsAny(q, "i never entered", "i have never entered", "ive never entered", "i never went to", "i have never been to", "ive never been to", "i was never in",
+            bool deniedEver = Program.ContainsAny(q, "i never entered", "i have never entered", "ive never entered", "i never went to", "i have never been to", "ive never been to", "i was never in",
                 "we never entered", "we have never entered", "weve never entered", "we never went to", "we have never been to", "weve never been to", "we were never in");
             if (!deniedPresent && !deniedEver) return null;
             bool deceptiveIntent = ContainsConversationDeceptiveIntentEvidence(claim);
@@ -377,7 +377,7 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
                 ["objectiveVerdict"] = "contradicted",
                 ["speakerVerdict"] = "contradicted",
                 ["deceptiveIntent"] = deceptiveIntent,
-                ["directAdmission"] = ContainsExplicitDeceptionAdmission(q),
+                ["directAdmission"] = Program.ContainsExplicitDeceptionAdmission(q),
                 ["explanation"] = "The claimant and observer are presently together in " + settlementName + "; this directly contradicts the location denial.",
                 ["evidenceEventIds"] = new List<string> { evidenceId },
                 ["speakerEvidenceEventIds"] = new List<string> { evidenceId },
@@ -402,16 +402,16 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
 
         internal static bool ContradictsNativeCurrentSettlement(string claim, string settlementName)
         {
-            string normalizedSettlement = NormalizeLookup(settlementName);
+            string normalizedSettlement = Program.NormalizeLookup(settlementName);
             if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(normalizedSettlement))
             {
                 return false;
             }
             foreach (string clause in Regex.Split(claim, @"(?<=[.!?;\r\n])\s*"))
             {
-                string q = NormalizeLookup(clause);
-                if (string.IsNullOrWhiteSpace(q) || !ContainsNormalizedPhrase(q, normalizedSettlement)
-                    || ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
+                string q = Program.NormalizeLookup(clause);
+                if (string.IsNullOrWhiteSpace(q) || !Program.ContainsNormalizedPhrase(q, normalizedSettlement)
+                    || Program.ContainsAny(q, "if i said", "if i were", "suppose i", "hypothetically", "as an example"))
                     continue;
                 string place = Regex.Escape(normalizedSettlement).Replace("\\ ", @"\s+");
                 if (Regex.IsMatch(q,
@@ -432,32 +432,32 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
 
         internal static bool ContainsConversationDeceptiveIntentEvidence(string claim)
         {
-            string q = NormalizeLookup(claim);
+            string q = Program.NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)) return false;
-            return ContainsExplicitDeceptionAdmission(q) || ContainsAny(q,
+            return Program.ContainsExplicitDeceptionAdmission(q) || Program.ContainsAny(q,
                 "i personally verified", "i verified it myself", "i inspected", "i saw it myself", "i witnessed it myself",
                 "i know for a fact", "we know for a fact", "accept my report", "accept what i say", "accept my account",
                 "stop questioning me", "do not question me", "dont question me", "don't question me",
                 "believe me without question", "trust me without question", "you should believe me", "you must believe me");
         }
 
-        private static Dictionary<string, object> WorldHistoryLieChecksApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> WorldHistoryLieChecksApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : LatestCampaignId();
+            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
             string claimantId = query.ContainsKey("claimantId") ? query["claimantId"] : string.Empty;
             string targetId = query.ContainsKey("targetId") ? query["targetId"] : string.Empty;
             int limit = Math.Max(1, Math.Min(250, WorldSimulationService.ParseIntInvariant(query.ContainsKey("limit") ? query["limit"] : "", 50)));
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistoryLieDetectionSchema(connection);
-                List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT * FROM world_history_lie_checks
+                List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT * FROM world_history_lie_checks
 WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$target) ORDER BY created_ts DESC LIMIT $limit;",
                     new Dictionary<string, object> { ["claimant"] = claimantId, ["target"] = targetId, ["limit"] = limit });
                 foreach (Dictionary<string, object> row in rows)
                 {
-                    row["evidenceEventIds"] = TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
-                    row["knownEventIds"] = TextListFromJson(ReadString(row, "known_event_ids_json", "[]"));
+                    row["evidenceEventIds"] = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
+                    row["knownEventIds"] = Program.TextListFromJson(ReadString(row, "known_event_ids_json", "[]"));
                     row["promptPacket"] = TryParseJsonObject(ReadString(row, "prompt_packet_json", "{}")) ?? new Dictionary<string, object>();
                     row.Remove("prompt_packet_json");
                 }
@@ -475,7 +475,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             Dictionary<string, object> supplied = ReadDictionary(payload, payloadKey) ?? new Dictionary<string, object>();
             if (!TryReadLieSkill(supplied, "roguery", out double roguery) || !TryReadLieSkill(supplied, "charm", out double charm))
             {
-                Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
+                Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "profile.json"));
                 supplied = ReadDictionary(profile, "skills") ?? ReadDictionary(ReadDictionary(profile, "sourceFacts"), "skills") ?? new Dictionary<string, object>();
                 if (!TryReadLieSkill(supplied, "roguery", out roguery) || !TryReadLieSkill(supplied, "charm", out charm))
                 {
@@ -503,9 +503,9 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             List<string> modes = new List<string>();
             foreach (string eventId in eventIds ?? new List<string>())
             {
-                Dictionary<string, object> evt = QuerySql(connection, "SELECT event_type FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                Dictionary<string, object> evt = Program.QuerySql(connection, "SELECT event_type FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 string eventType = ReadString(evt, "event_type", "");
-                List<Dictionary<string, object>> rules = QuerySql(connection, @"SELECT * FROM world_history_knowledge_rules WHERE event_id=$event AND available_day<=$day AND
+                List<Dictionary<string, object>> rules = Program.QuerySql(connection, @"SELECT * FROM world_history_knowledge_rules WHERE event_id=$event AND available_day<=$day AND
 ((audience_type='entity' AND audience_id=$target) OR (audience_type='kingdom' AND audience_id=$kingdom) OR audience_type='global') ORDER BY available_day;",
                     new Dictionary<string, object> { ["event"] = eventId, ["day"] = worldDay, ["target"] = targetId ?? "", ["kingdom"] = kingdomId ?? "" });
                 bool direct = rules.Any(x => string.Equals(ReadString(x, "audience_type", ""), "entity", StringComparison.OrdinalIgnoreCase)
@@ -530,7 +530,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             List<Dictionary<string, object>> events = new List<Dictionary<string, object>>();
             foreach (string eventId in visibleIds.Take(8))
             {
-                Dictionary<string, object> row = QuerySql(connection, @"SELECT event_id,event_type,category,phase,world_day,location_id,location_name,summary,dissemination_class
+                Dictionary<string, object> row = Program.QuerySql(connection, @"SELECT event_id,event_type,category,phase,world_day,location_id,location_name,summary,dissemination_class
 FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 if (row == null) continue;
                 row["entities"] = WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Take(12).Select(entity => new Dictionary<string, object>
@@ -548,9 +548,9 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
 
         internal static bool IsFirsthandWorldHistoryRole(string eventType, string role)
         {
-            string normalized = NormalizeLookup(role);
-            if (string.IsNullOrWhiteSpace(normalized) || ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
-            return ContainsAny(normalized,
+            string normalized = Program.NormalizeLookup(role);
+            if (string.IsNullOrWhiteSpace(normalized) || Program.ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
+            return Program.ContainsAny(normalized,
                 "participant", "leader", "commander", "attacker", "defender", "winner", "loser", "raider", "besieger", "conqueror",
                 "rescuer", "rescued", "beneficiary", "captor", "prisoner", "victim", "target", "actor", "decision maker", "signatory",
                 "bride", "groom", "spouse", "mother", "father", "child", "tournament competitor", "governor", "owner hero", "recipient", "payer", "payee");
@@ -573,17 +573,17 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
 
         private static double HistoricalLieSuccessChance(double claimantAverage, double targetAverage)
         {
-            return ClampDouble(50d + 0.2d * (claimantAverage - targetAverage), 10d, 80d);
+            return Program.ClampDouble(50d + 0.2d * (claimantAverage - targetAverage), 10d, 80d);
         }
 
         private static Dictionary<string, object> SelectLieReaction(ReignDbConnection connection, string campaignId, string claimantId, string targetId, Dictionary<string, object> payload)
         {
-            Dictionary<string, object> traitDocument = ReadJsonObject(CharacterFile(campaignId, targetId, "traits.json"));
+            Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
             Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
-            int tact = TraitInt(traits, "tact"), pragmatism = TraitInt(traits, "pragmatism"), patience = TraitInt(traits, "patience");
-            int ambition = TraitInt(traits, "ambition"), power = TraitInt(traits, "powerMotivation"), vengeance = TraitInt(traits, "vengefulness");
-            int honesty = TraitInt(traits, "honesty"), assertiveness = TraitInt(traits, "assertiveness"), pride = TraitInt(traits, "pride");
-            int fearfulness = TraitInt(traits, "fearfulness"), curiosity = TraitInt(traits, "curiosity");
+            int tact = Program.TraitInt(traits, "tact"), pragmatism = Program.TraitInt(traits, "pragmatism"), patience = Program.TraitInt(traits, "patience");
+            int ambition = Program.TraitInt(traits, "ambition"), power = Program.TraitInt(traits, "powerMotivation"), vengeance = Program.TraitInt(traits, "vengefulness");
+            int honesty = Program.TraitInt(traits, "honesty"), assertiveness = Program.TraitInt(traits, "assertiveness"), pride = Program.TraitInt(traits, "pride");
+            int fearfulness = Program.TraitInt(traits, "fearfulness"), curiosity = Program.TraitInt(traits, "curiosity");
             Dictionary<string, object> risk = ReadDictionary(payload, "sceneRisk") ?? new Dictionary<string, object>();
             double powerDisadvantage = ReadDouble(risk, "powerDisadvantage", 0d);
             bool unsafeToConfront = powerDisadvantage >= 1d || ReadBool(risk, "targetIsPrisoner", false);
@@ -647,7 +647,7 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
             if (detected)
             {
                 string summary = claimantId + " made a historical claim that conflicted with evidence " + targetId + " knew.";
-                InsertMemoryRow(connection, "memory_" + lieCheckId, lieCheckId, targetId, "detected_falsehood", ts, worldDay, "", summary,
+                Program.InsertMemoryRow(connection, "memory_" + lieCheckId, lieCheckId, targetId, "detected_falsehood", ts, worldDay, "", summary,
                     new List<string> { claimantId, targetId }, new List<string> { targetId }, Json.Serialize(new List<string> { claimantId, targetId }),
                     new List<string> { targetId }, new List<string>(), reaction == "confront" ? new List<string>() : new List<string> { claimantId },
                     "private", 0.8d, 0.6d, 1d, new List<string> { "historical_claim", "detected_falsehood", reaction }, "active",
@@ -655,17 +655,17 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
             }
             else if (accepted)
             {
-                Dictionary<string, object> traitDocument = ReadJsonObject(CharacterFile(campaignId, targetId, "traits.json"));
+                Dictionary<string, object> traitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
                 Dictionary<string, object> traits = ReadDictionary(traitDocument, "foundationTraits") ?? ReadDictionary(traitDocument, "hiddenReignTraits") ?? traitDocument;
-                double confidence = ClampDouble(0.6d + 0.1d * TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
+                double confidence = Program.ClampDouble(0.6d + 0.1d * Program.TraitInt(traits, "socialTrust"), 0.35d, 0.8d);
                 string beliefId = "whb_" + Guid.NewGuid().ToString("N");
-                ExecuteSql(connection, @"INSERT INTO world_history_claim_beliefs(belief_id,lie_check_id,campaign_id,timeline_id,believer_id,claimant_id,
+                Program.ExecuteSql(connection, @"INSERT INTO world_history_claim_beliefs(belief_id,lie_check_id,campaign_id,timeline_id,believer_id,claimant_id,
 raw_claim,normalized_claim,state,confidence,evidence_event_ids_json,created_day,disproven_day,discovered_event_ids_json,created_ts,updated_ts)
 VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'accepted',$confidence,$evidence,$day,-1,'[]',$ts,$ts);",
                     new Dictionary<string, object> { ["id"] = beliefId, ["lie"] = lieCheckId, ["campaign"] = campaignId, ["timeline"] = timelineId,
                         ["believer"] = targetId, ["claimant"] = claimantId, ["claim"] = claim, ["normalized"] = normalizedClaim,
                         ["confidence"] = confidence, ["evidence"] = Json.Serialize(evidenceIds), ["day"] = worldDay, ["ts"] = ts });
-                InsertBelief(connection, lieCheckId, new Dictionary<string, object> { ["believerId"] = targetId, ["claim"] = claim,
+                Program.InsertBelief(connection, lieCheckId, new Dictionary<string, object> { ["believerId"] = targetId, ["claim"] = claim,
                     ["confidence"] = confidence, ["knownBy"] = new List<string> { targetId }, ["aboutEntities"] = new List<string> { claimantId },
                     ["visibility"] = "private", ["state"] = "accepted_unverified", ["lieCheckId"] = lieCheckId }, ts, "world_history_lie_check");
             }
@@ -676,25 +676,25 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             EnsureWorldHistoryLieDetectionSchema(connection);
             if (string.IsNullOrWhiteSpace(believerId) || selectedEventIds == null || selectedEventIds.Count == 0) return new List<string>();
             HashSet<string> selected = new HashSet<string>(selectedEventIds, StringComparer.OrdinalIgnoreCase);
-            List<Dictionary<string, object>> rows = QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id=$believer AND state='accepted';", new Dictionary<string, object> { ["believer"] = believerId });
+            List<Dictionary<string, object>> rows = Program.QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id=$believer AND state='accepted';", new Dictionary<string, object> { ["believer"] = believerId });
             List<string> reconciled = new List<string>();
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (Dictionary<string, object> row in rows)
             {
-                List<string> linked = TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
+                List<string> linked = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]"));
                 List<string> discovered = linked.Where(selected.Contains).ToList();
                 if (discovered.Count == 0) continue;
                 string beliefId = ReadString(row, "belief_id", "");
                 string lieCheckId = ReadString(row, "lie_check_id", "");
-                ExecuteSql(connection, "UPDATE world_history_claim_beliefs SET state='disproven',disproven_day=$day,discovered_event_ids_json=$events,updated_ts=$ts WHERE belief_id=$id;",
+                Program.ExecuteSql(connection, "UPDATE world_history_claim_beliefs SET state='disproven',disproven_day=$day,discovered_event_ids_json=$events,updated_ts=$ts WHERE belief_id=$id;",
                     new Dictionary<string, object> { ["day"] = worldDay, ["events"] = Json.Serialize(discovered), ["ts"] = ts, ["id"] = beliefId });
-                ExecuteSql(connection, "UPDATE beliefs SET confidence=0,payload_json=$payload WHERE event_id=$lie;", new Dictionary<string, object>
+                Program.ExecuteSql(connection, "UPDATE beliefs SET confidence=0,payload_json=$payload WHERE event_id=$lie;", new Dictionary<string, object>
                 {
                     ["lie"] = lieCheckId, ["payload"] = Json.Serialize(new Dictionary<string, object> { ["state"] = "disproven", ["beliefId"] = beliefId, ["discoveredEventIds"] = discovered })
                 });
                 string claimantId = ReadString(row, "claimant_id", "");
                 string summary = believerId + " later learned that a historical claim from " + claimantId + " conflicted with reliable evidence.";
-                InsertMemoryRow(connection, "memory_discovery_" + beliefId, lieCheckId, believerId, "discovered_falsehood", ts, worldDay, "", summary,
+                Program.InsertMemoryRow(connection, "memory_discovery_" + beliefId, lieCheckId, believerId, "discovered_falsehood", ts, worldDay, "", summary,
                     new List<string> { claimantId, believerId }, new List<string> { believerId }, Json.Serialize(new List<string> { claimantId, believerId }),
                     new List<string> { believerId }, new List<string>(), new List<string> { claimantId }, "private", 0.85d, 0.65d, 1d,
                     new List<string> { "historical_claim", "disproven_belief", "later_discovery" }, "active", "world_history_lie_reconciliation",
@@ -717,8 +717,8 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
                 ["formulaVersion"] = ReadString(row, "formula_version", LieFormulaVersion), ["successChance"] = ReadNullableDouble(row, "success_chance"),
                 ["roll"] = ReadNullableDouble(row, "roll_value"), ["outcome"] = ReadString(row, "outcome", "not_adjudicable"),
                 ["reactionStrategy"] = ReadString(row, "reaction_strategy", ""), ["exploitOpening"] = ReadInt(row, "exploit_opening", 0) != 0,
-                ["evidenceEventIds"] = TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]")),
-                ["knownEventIds"] = TextListFromJson(ReadString(row, "known_event_ids_json", "[]")), ["promptPacket"] = packet,
+                ["evidenceEventIds"] = Program.TextListFromJson(ReadString(row, "evidence_event_ids_json", "[]")),
+                ["knownEventIds"] = Program.TextListFromJson(ReadString(row, "known_event_ids_json", "[]")), ["promptPacket"] = packet,
                 ["verification"] = verification, ["cached"] = cached
             };
         }
@@ -897,28 +897,28 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             });
             add("truth_never_rolls", ReadString(truthful, "outcome", "") == "truthful" && ReadNullableDouble(truthful, "roll") == null, "Verified truth never enters the deception contest.");
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistoryLieDetectionSchema(connection);
-                Dictionary<string, object> belief = QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id='observer_a' ORDER BY created_ts LIMIT 1;").FirstOrDefault();
+                Dictionary<string, object> belief = Program.QuerySql(connection, "SELECT * FROM world_history_claim_beliefs WHERE believer_id='observer_a' ORDER BY created_ts LIMIT 1;").FirstOrDefault();
                 add("later_reconciliation", belief != null && ReadString(belief, "state", "") == "disproven" && ReadDouble(belief, "disproven_day", -1d) == 104d,
                     "Relevant regional evidence disproves the earlier accepted claim on retrieval.");
 
-                string characterDir = Path.GetDirectoryName(CharacterFile(campaignId, "reaction_feign", "traits.json"));
+                string characterDir = Path.GetDirectoryName(Program.CharacterFile(campaignId, "reaction_feign", "traits.json"));
                 Directory.CreateDirectory(characterDir);
-                WriteJsonObject(CharacterFile(campaignId, "reaction_feign", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_feign", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
                 {
                     ["tact"] = 2, ["pragmatism"] = 2, ["patience"] = 1, ["ambition"] = 2, ["powerMotivation"] = 2, ["vengefulness"] = 1
                 }});
-                WriteJsonObject(CharacterFile(campaignId, "reaction_confront", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_confront", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
                 {
                     ["honesty"] = 2, ["assertiveness"] = 2, ["pride"] = 2, ["fearfulness"] = -1
                 }});
-                WriteJsonObject(CharacterFile(campaignId, "reaction_probe", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_probe", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>
                 {
                     ["curiosity"] = 2, ["tact"] = 1, ["patience"] = 1
                 }});
-                WriteJsonObject(CharacterFile(campaignId, "reaction_quiet", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>() });
+                Program.WriteJsonObject(Program.CharacterFile(campaignId, "reaction_quiet", "traits.json"), new Dictionary<string, object> { ["foundationTraits"] = new Dictionary<string, object>() });
                 Dictionary<string, object> safeRisk = new Dictionary<string, object> { ["sceneRisk"] = new Dictionary<string, object> { ["powerDisadvantage"] = 0d } };
                 Dictionary<string, object> unsafeRisk = new Dictionary<string, object> { ["sceneRisk"] = new Dictionary<string, object> { ["powerDisadvantage"] = 2d } };
                 Dictionary<string, object> feign = SelectLieReaction(connection, campaignId, "main_hero", "reaction_feign", unsafeRisk);

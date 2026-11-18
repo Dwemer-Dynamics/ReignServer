@@ -36,8 +36,8 @@ namespace ReignBetaServer
             {
                 using(var connection=Program.OpenCampaignConnection(campaign))
                 {
-                    Program.EnsureConversationAgencySchema(connection);
-                    Program.SpecialistFixtureTurn(connection,campaign,"pledge_npc","npc",reply,day:11,ts:11);
+                    DialogueService.EnsureConversationAgencySchema(connection);
+                    DialogueService.SpecialistFixtureTurn(connection,campaign,"pledge_npc","npc",reply,day:11,ts:11);
                     Receipt(connection,"pledge",Decision(1,reply));
                     var rows=ReadCharacterDecisionTransitions(connection,"npc",access);
                     Check("accepted_life_decision_links_original",rows.Count==1&&ReadString(rows[0],"sourceId","")=="pledge_npc"
@@ -57,15 +57,15 @@ namespace ReignBetaServer
                     Check("asof_excludes_future_acceptance",ReadCharacterDecisionTransitions(connection,"npc",new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="main",WorldDay=10}).Count==0);
                     Check("branch_does_not_inherit_unrestored_decision",ReadCharacterDecisionTransitions(connection,"npc",new Program.KnowledgeAccessContext{NpcId="npc",TimelineId="branch",WorldDay=30}).Count==0);
                     Receipt(connection,"missing",Decision(1,reply));
-                    Program.SpecialistFixtureTurn(connection,campaign,"uncommitted_npc","npc",reply,day:11,ts:11);
+                    DialogueService.SpecialistFixtureTurn(connection,campaign,"uncommitted_npc","npc",reply,day:11,ts:11);
                     Receipt(connection,"uncommitted",Decision(1,reply),commit:"pending");
                     Check("no_source_or_pending_receipt_never_promoted",ReadCharacterDecisionTransitions(connection,"npc",access).Count==1);
-                    Program.SpecialistFixtureTurn(connection,campaign,"badquote_npc","npc",reply,day:11,ts:11);
+                    DialogueService.SpecialistFixtureTurn(connection,campaign,"badquote_npc","npc",reply,day:11,ts:11);
                     var badQuote = Decision(1,reply); badQuote["replyQuote"]="I will obey you unconditionally.";
                     Receipt(connection,"badquote",badQuote);
                     Check("unsupported_decision_quote_is_not_dynamic_character",ReadCharacterDecisionTransitions(connection,"npc",access).Count==1);
                     string withdrawal="I can no longer support this plan. I will not follow you.";
-                    Program.SpecialistFixtureTurn(connection,campaign,"withdraw_npc","npc",withdrawal,day:12,ts:12);
+                    DialogueService.SpecialistFixtureTurn(connection,campaign,"withdraw_npc","npc",withdrawal,day:12,ts:12);
                     Receipt(connection,"withdraw",Decision(2,withdrawal,"personal_refusal"));
                     var history=ReadCharacterDecisionTransitions(connection,"npc",access);
                     var current=CurrentCharacterLifeState(history);
@@ -104,12 +104,12 @@ INSERT INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audienc
                     Check("historical_acceptance_marked_superseded",ReadString(Program.QuerySql(reopened,"SELECT * FROM dynamic_characteristics WHERE source_event_id='pledge_npc';").Single(),"status","")=="superseded");
                     var dynamics=TestDict("active",new[]{TestDict("category","life_transition","text",reply,"status","active"),
                         TestDict("category","preference","text","I like quiet gardens.","status","active")});
-                    Check("life_state_does_not_crowd_out_soft_traits",Program.SelectNaturalDynamicCharacteristics(dynamics,"").Count==1);
+                    Check("life_state_does_not_crowd_out_soft_traits",DialogueService.SelectNaturalDynamicCharacteristics(dynamics,"").Count==1);
                 }
                 foreach(string mode in new[]{"in_person","party_chat","social_event","tavern_house","correspondence"})
                 {
                     var payload=new Dictionary<string,object>(context){["mode"]=mode};
-                    Check("shared_protected_context_"+mode,Program.BuildProtectedConversationContinuity(campaign,"npc",payload,TestDict()).Contains("CURRENT DYNAMIC CHARACTER"));
+                    Check("shared_protected_context_"+mode,DialogueService.BuildProtectedConversationContinuity(campaign,"npc",payload,TestDict()).Contains("CURRENT DYNAMIC CHARACTER"));
                 }
             }
             catch(Exception ex){results.Add(TestDict("caseId","character_life_fixture_completed","passed",false,"summary",Program.LimitText(ex.ToString(),2500)));}

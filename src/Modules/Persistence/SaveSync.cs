@@ -1076,7 +1076,7 @@ namespace ReignBetaServer
             return !IsSaveSyncFingerprintExcluded(relative);
         }
 
-        internal static Program.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
+        internal static DialogueService.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
             string currentSnapshotRoot, string targetSnapshotRoot)
         {
             Dictionary<string, Dictionary<string, object>> current = ReadSaveSyncEmbeddingDocuments(currentSnapshotRoot);
@@ -1099,11 +1099,11 @@ namespace ReignBetaServer
                 return SaveSyncSemanticBlockedCampaigns.Contains(campaignId ?? "");
         }
 
-        internal static Program.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
+        internal static DialogueService.SaveSyncSemanticReconciliationPlan BuildSaveSyncSemanticReconciliationPlan(
             Dictionary<string, Dictionary<string, object>> current,
             Dictionary<string, Dictionary<string, object>> target)
         {
-            Program.SaveSyncSemanticReconciliationPlan plan = new Program.SaveSyncSemanticReconciliationPlan();
+            DialogueService.SaveSyncSemanticReconciliationPlan plan = new DialogueService.SaveSyncSemanticReconciliationPlan();
             current = current ?? new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             target = target ?? new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
             plan.CurrentDocuments = current.Count;
@@ -1127,7 +1127,7 @@ namespace ReignBetaServer
                 else if (currentHasVector)
                 {
                     plan.DeleteVectorIds.Add(ReadString(currentRow, "vector_id", ""));
-                    plan.InvalidatedCurrentSources.Add(new Program.SemanticSourceIdentity
+                    plan.InvalidatedCurrentSources.Add(new DialogueService.SemanticSourceIdentity
                     {
                         SourceType = ReadString(currentRow, "source_type", ""),
                         SourceId = ReadString(currentRow, "source_id", "")
@@ -1146,7 +1146,7 @@ namespace ReignBetaServer
                     && string.Equals(ReadString(currentRow, "vector_id", ""), ReadString(targetRow, "vector_id", ""), StringComparison.OrdinalIgnoreCase);
                 if (!compatible)
                 {
-                    plan.RequeueSources.Add(new Program.SemanticSourceIdentity
+                    plan.RequeueSources.Add(new DialogueService.SemanticSourceIdentity
                     {
                         SourceType = ReadString(targetRow, "source_type", ""),
                         SourceId = ReadString(targetRow, "source_id", "")
@@ -1206,7 +1206,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
         private static bool SaveSyncEmbeddingDocumentEligible(Dictionary<string, object> row)
         {
             if (!string.Equals(ReadString(row, "source_type", ""), "world_history_event", StringComparison.OrdinalIgnoreCase)) return true;
-            return Program.WorldHistoryEventEmbeddingEligible(row);
+            return DialogueService.WorldHistoryEventEmbeddingEligible(row);
         }
 
         internal static void ClearSaveSyncCaches(string campaignId)
@@ -2297,7 +2297,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 string oldSnapshotGeneration = SaveSyncTestSqlValue(campaignId,
                     "SELECT restore_generation FROM " + ReignPostgreSqlStorage.SnapshotSchemaName(campaignId, SaveSyncPostgreSqlSnapshotPointId(oldStoredPoint))
                     + ".memory_precision_state WHERE state_id='current';", "restore_generation");
-                Program.AdvanceMemoryRestoreGeneration(campaignId);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaignId);
                 string preRollbackGeneration = SaveSyncTestSqlValue(campaignId,
                     "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';", "restore_generation");
                 Dictionary<string, object> rolledBack = SaveSyncLoadApi(loadSessionPayload, false);
@@ -2325,7 +2325,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 add("original_input_and_receipt_round_trip_exactly", SaveSyncTestSqlValue(campaignId,
                     "SELECT text FROM conversation_turns WHERE turn_id='old_original';", "text") == "  *I trace a 🌿.*\r\nHello.\t "
                     && SaveSyncTestSqlValue(campaignId, "SELECT source_hash FROM conversation_input_receipts WHERE input_id='old_input';", "source_hash")
-                        == Program.ConversationExactTextHash("  *I trace a 🌿.*\r\nHello.\t "),
+                        == DialogueService.ConversationExactTextHash("  *I trace a 🌿.*\r\nHello.\t "),
                     "Author-only originals and receipt hashes survive snapshot restore byte-for-byte; future receipts and originals are removed with their branch.");
                 add("pre_sync_backup_created", ReadBool(rolledBack, "backupCreated", false) && Directory.Exists(ReadString(rolledBack, "backupPath", "")), "Destructive apply creates a retained pre-sync recovery snapshot.");
 
@@ -2983,13 +2983,13 @@ VALUES('hero_a|hero_b','hero_a','hero_b',$day,$ts);",
                     new Dictionary<string, object> { ["day"] = (int)ts, ["ts"] = ts });
                 Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_sessions(session_id,campaign_id,npc_id,start_ts) VALUES($id,$campaign,'hero_a',$ts);", new Dictionary<string, object> { ["id"] = marker + "_session", ["campaign"] = campaignId, ["ts"] = ts });
                 Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts) VALUES($id,$session,1,'npc',$id,$ts);", new Dictionary<string, object> { ["id"] = marker + "_turn", ["session"] = marker + "_session", ["ts"] = ts });
-                Program.EnsureConversationInputSchema(connection);
+                DialogueService.EnsureConversationInputSchema(connection);
                 const string exactOriginal = "  *I trace a 🌿.*\r\nHello.\t ";
                 Program.ExecuteSql(connection, "INSERT OR REPLACE INTO conversation_turns(turn_id,session_id,turn_order,role,text,ts,status) VALUES($id,$session,-1,'player_source',$text,$ts,'source_only');",
                     TestDict("id", marker + "_original", "session", marker + "_session", "text", exactOriginal, "ts", ts));
                 Program.ExecuteSql(connection, @"INSERT INTO conversation_input_receipts(input_id,timeline_id,session_id,player_id,source_turn_id,source_hash,restore_generation,status,created_ts,updated_ts)
 VALUES($id,'timeline_test',$session,'player',$source,$hash,'fixture','received',$ts,$ts) ON CONFLICT(input_id) DO NOTHING;",
-                    TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", Program.ConversationExactTextHash(exactOriginal), "ts", ts));
+                    TestDict("id", marker + "_input", "session", marker + "_session", "source", marker + "_original", "hash", DialogueService.ConversationExactTextHash(exactOriginal), "ts", ts));
                 Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO rumor_occurrences(
 occurrence_id,campaign_id,timeline_id,archetype_id,thread_key,source_event_id,world_day,expires_day,status,
 exposure_chance,exposure_roll,catalog_revision,participants_json,provenance_summary,snapshot_json,created_ts,updated_ts)

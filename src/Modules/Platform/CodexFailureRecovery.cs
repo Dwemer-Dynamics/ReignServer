@@ -212,9 +212,9 @@ namespace ReignBetaServer
             var source = TestDict("globalPrefixChars", 400000, "layoutVersion", 12,
                 "continuityPreflight", TestDict("capacityVerified", true, "requiredSources", new string('x', 600000)),
                 "canonicalTranscript", TestDict("original", new string('x', 600000)));
-            string summary = Json.Serialize(PromptCachePrefixStatus(source));
+            string summary = Json.Serialize(DialogueService.PromptCachePrefixStatus(source));
             Check("cache_status_does_not_render_private_full_context", summary.Length < 4096
-                && ReadInt(PromptCachePrefixStatus(source), "globalPrefixChars", 0) == 400000
+                && ReadInt(DialogueService.PromptCachePrefixStatus(source), "globalPrefixChars", 0) == 400000
                 && ReadString(ReadDictionary(source, "canonicalTranscript"), "original", "").Length == 600000);
             return rows;
         }

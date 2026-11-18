@@ -16,20 +16,20 @@ namespace ReignBetaServer
         private const string CodexOptionsSchema = "reign-codex-options-v1";
         private const string CodexRuntimeDiagnosticsSchema = "reign-codex-runtime-diagnostics-v1";
         private const string CodexModelVerificationCandidate = "gpt-5.4";
-        private static readonly object CodexRuntimeStateLock = new object();
+        internal static readonly object CodexRuntimeStateLock = new object();
         private static CodexCatalogState CodexRuntimeCatalog = new CodexCatalogState();
         private static CodexProtocolState CodexRuntimeProtocol = new CodexProtocolState();
         private static Dictionary<string, object> CodexLastCapabilityStatus = new Dictionary<string, object>();
-        private static readonly CodexThreadReusePool CodexRuntimeThreads = new CodexThreadReusePool();
+        internal static readonly CodexThreadReusePool CodexRuntimeThreads = new CodexThreadReusePool();
         private static readonly CodexThreadCleanupQueue CodexRuntimeCleanup = new CodexThreadCleanupQueue();
-        private static readonly Dictionary<string, CodexThreadLease> CodexPendingThreadLeases =
+        internal static readonly Dictionary<string, CodexThreadLease> CodexPendingThreadLeases =
             new Dictionary<string, CodexThreadLease>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// A request-local snapshot. The snapshot is deliberately independent of the mutable settings
         /// dictionary so a provider switch cannot move an in-flight request to another provider.
         /// </summary>
-        private sealed class CodexRuntimeOptions
+        internal sealed class CodexRuntimeOptions
         {
             public string Schema = CodexOptionsSchema;
             public string ReasoningMode = "selective";
@@ -84,7 +84,7 @@ namespace ReignBetaServer
             }
         }
 
-        private sealed class CodexRuntimeRequestContext
+        internal sealed class CodexRuntimeRequestContext
         {
             public string RequestType = "dialogue";
             public string Model = "";
@@ -133,7 +133,7 @@ namespace ReignBetaServer
             public bool PersistentRoleplay;
             public int ContextInputLimitTokens;
             public string IncrementalContext = "";
-            public CodexRoleplayMemoryAccess MemoryAccess;
+            public DialogueService.CodexRoleplayMemoryAccess MemoryAccess;
 
             public string ThreadIdentityKey
             {
@@ -255,7 +255,7 @@ namespace ReignBetaServer
             result.PersistentRoleplay = ReadBool(source, "persistentRoleplay", false);
             result.ContextInputLimitTokens = ReadInt(source, "contextInputLimitTokens", 0);
             result.IncrementalContext = ReadString(source, "incrementalContext", "");
-            if (source.TryGetValue("memoryAccess", out object memory)) result.MemoryAccess = memory as CodexRoleplayMemoryAccess;
+            if (source.TryGetValue("memoryAccess", out object memory)) result.MemoryAccess = memory as DialogueService.CodexRoleplayMemoryAccess;
             if (result.PersistentRoleplay) result.Options.ReuseThreads = true;
             result.PromptSegments = ReadDictionaryList(source, "promptSegments");
             result.PromptText = BuildPromptTextForRuntime(payload);
@@ -401,7 +401,7 @@ namespace ReignBetaServer
             return ReadString(identity, key, fallback);
         }
 
-        private sealed class CodexFastResolution
+        internal sealed class CodexFastResolution
         {
             public bool Requested;
             public string State = "off";
@@ -1162,7 +1162,7 @@ namespace ReignBetaServer
             return verification;
         }
 
-        private sealed class CodexTurnAssembly
+        internal sealed class CodexTurnAssembly
         {
             public string Text = "";
             public string Status = "running";
@@ -1191,7 +1191,7 @@ namespace ReignBetaServer
         /// Event assembly is scoped by turn and item. Deltas are useful for timing only; the final completed
         /// agent message is authoritative, so incomplete or rejected drafts are never returned to Reign.
         /// </summary>
-        private sealed class CodexTurnEventAssembler
+        internal sealed class CodexTurnEventAssembler
         {
             private readonly object Sync = new object();
             private readonly string TurnId;
@@ -1442,7 +1442,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void InterruptCodexTurn(string threadId, string turnId, Dictionary<string, object> settings)
+        internal static void InterruptCodexTurn(string threadId, string turnId, Dictionary<string, object> settings)
         {
             if (string.IsNullOrWhiteSpace(threadId) || string.IsNullOrWhiteSpace(turnId)) return;
             try
@@ -1567,7 +1567,7 @@ namespace ReignBetaServer
             }
         }
 
-        private sealed class CodexThreadLease
+        internal sealed class CodexThreadLease
         {
             public string ThreadId;
             public string CorrelationId;
@@ -1578,7 +1578,7 @@ namespace ReignBetaServer
             public string PreviousAcceptedHistorySignature = "";
         }
 
-        private sealed class CodexThreadReusePool
+        internal sealed class CodexThreadReusePool
         {
             private sealed class Entry
             {
@@ -1974,7 +1974,7 @@ namespace ReignBetaServer
                 QueueCodexThreadCleanup(threadId, settings, ref synchronousFallback);
         }
 
-        private static void FinalizeCodexThreadRequest(Dictionary<string, object> result, Dictionary<string, object> context)
+        internal static void FinalizeCodexThreadRequest(Dictionary<string, object> result, Dictionary<string, object> context)
         {
             CodexRuntimeRequestContext request = CaptureCodexRequestContext(LoadSettings(), result, ReadString(context, "requestType", "dialogue"), ReadString(context, "model", ""), ReadString(context, "correlationId", ""), context);
             CodexThreadLease lease;
@@ -2256,7 +2256,7 @@ namespace ReignBetaServer
             return string.IsNullOrWhiteSpace(lower) ? LowestCodexReasoningEffort(supported) : lower;
         }
 
-        private static CodexRuntimeRequestContext BuildCodexRuntimeSelfTestContext(string sessionId, string historySignature, string currentTurn)
+        internal static CodexRuntimeRequestContext BuildCodexRuntimeSelfTestContext(string sessionId, string historySignature, string currentTurn)
         {
             Dictionary<string, object> options = new Dictionary<string, object>
             {
@@ -2301,10 +2301,10 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunCodexRuntimeSelfTests()
         {
             List<Dictionary<string, object>> tests = new List<Dictionary<string, object>>();
-            tests.AddRange(RunCodexRoleplayMemorySelfTests());
+            tests.AddRange(DialogueService.RunCodexRoleplayMemorySelfTests());
             tests.AddRange(RunCodexFailureRecoverySelfTests());
             Action<string, bool, string> add = (id, passed, summary) => tests.Add(new Dictionary<string, object> { ["id"] = id, ["passed"] = passed, ["summary"] = summary });
-            RunCodexConversationCapacitySelfTests((id, passed, evidence) => add(id, passed, "Exact-model Codex context metadata and complete serialized input capacity contract."));
+            DialogueService.RunCodexConversationCapacitySelfTests((id, passed, evidence) => add(id, passed, "Exact-model Codex context metadata and complete serialized input capacity contract."));
             Dictionary<string, object> settings = new Dictionary<string, object> { ["reasoningMode"] = "selective", ["reasoningEffort"] = "high" };
             Dictionary<string, object> options = new Dictionary<string, object>
             {

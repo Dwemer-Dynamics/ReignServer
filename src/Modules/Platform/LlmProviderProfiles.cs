@@ -7,7 +7,7 @@ namespace ReignBetaServer
     internal static partial class Program
     {
         internal const string NanoGptProvider = "nanogpt";
-        private const string OpenRouterProvider = "openrouter";
+        internal const string OpenRouterProvider = "openrouter";
         private const string OpenRouterChatUrl = "https://openrouter.ai/api/v1/chat/completions";
         private const string OllamaCloudProvider = "ollama_cloud";
         private const string OllamaCloudChatUrl = "https://ollama.com/v1/chat/completions";
@@ -27,7 +27,7 @@ namespace ReignBetaServer
             return changed;
         }
 
-        private static bool IsRetiredMemoryRequest(string purpose) =>
+        internal static bool IsRetiredMemoryRequest(string purpose) =>
             purpose == "dialogue_evidence" || purpose == "dialogue_verification" || purpose == "dialogue_memory_repair" || purpose == "context_selector";
 
         internal static List<string> MergeProviderSettings(Dictionary<string, object> settings, Dictionary<string, object> incoming)
@@ -86,7 +86,7 @@ namespace ReignBetaServer
             return body;
         }
 
-        private static bool IsOllamaCloudApiUrl(string value) =>
+        internal static bool IsOllamaCloudApiUrl(string value) =>
             Uri.TryCreate(value, UriKind.Absolute, out Uri uri) && uri.Scheme == "https" && uri.IsDefaultPort
             && string.IsNullOrEmpty(uri.UserInfo) && uri.Host.Equals("ollama.com", StringComparison.OrdinalIgnoreCase);
 
@@ -143,7 +143,7 @@ namespace ReignBetaServer
         private static string DefaultChatProviderModel(string provider) => provider == OllamaCloudProvider ? DefaultOllamaCloudModel
             : provider == OpenRouterProvider ? "openai/gpt-5.5" : provider == CodexSubscriptionProvider ? "gpt-5.5" : "zai-org/glm-5.2";
 
-        private static bool IsOpenRouterApiUrl(string value)
+        internal static bool IsOpenRouterApiUrl(string value)
         {
             return Uri.TryCreate(value, UriKind.Absolute, out Uri uri) && uri.Scheme == "https"
                 && uri.Host.Equals("openrouter.ai", StringComparison.OrdinalIgnoreCase);
@@ -180,11 +180,11 @@ namespace ReignBetaServer
             if (!ReadBool(settings, "chatProviderProfilesInitialized", false))
             {
                 string legacyUrl = ReadString(settings, "apiUrl", "");
-                if (provider == OpenAiCompatibleProvider && IsNanoGptApiUrl(legacyUrl)) provider = NanoGptProvider;
+                if (provider == OpenAiCompatibleProvider && DialogueService.IsNanoGptApiUrl(legacyUrl)) provider = NanoGptProvider;
                 if (provider == OpenAiCompatibleProvider && IsOpenRouterApiUrl(legacyUrl)) provider = OpenRouterProvider;
                 if (provider == OpenAiCompatibleProvider && IsOllamaCloudApiUrl(legacyUrl)) provider = OllamaCloudProvider;
                 // Copy the old key only to its proven endpoint owner, including when Codex is currently selected.
-                if (!settings.ContainsKey("nanoGptApiKey")) settings["nanoGptApiKey"] = !legacyBound && IsNanoGptApiUrl(legacyUrl) ? ReadString(beforeNormalization, "apiKey", "") : "";
+                if (!settings.ContainsKey("nanoGptApiKey")) settings["nanoGptApiKey"] = !legacyBound && DialogueService.IsNanoGptApiUrl(legacyUrl) ? ReadString(beforeNormalization, "apiKey", "") : "";
                 if (!settings.ContainsKey("openRouterApiKey")) settings["openRouterApiKey"] = !legacyBound && IsOpenRouterApiUrl(legacyUrl) ? ReadString(beforeNormalization, "apiKey", "") : "";
                 if (!settings.ContainsKey("ollamaCloudApiKey")) settings["ollamaCloudApiKey"] = !legacyBound && IsOllamaCloudApiUrl(legacyUrl) ? ReadString(beforeNormalization, "apiKey", "") : "";
                 settings["chatProviderProfilesInitialized"] = true;

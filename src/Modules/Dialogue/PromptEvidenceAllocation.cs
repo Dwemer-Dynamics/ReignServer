@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // This expectation is assembled locally, never accepted from a client or
         // a model. Each section is captured before budget compaction/adapters.

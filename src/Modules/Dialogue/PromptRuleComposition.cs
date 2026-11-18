@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // This is a requirement graph, not a similarity-based text deduplicator.
         // Scoped rules (different speakers, permissions or exceptions) have different keys.
@@ -162,7 +162,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PromptCompositionInventory()
+        internal static Dictionary<string, object> PromptCompositionInventory()
         {
             string[] headings = { "WORLD TONE", "NOBLE PROMPT", "AUTHORITATIVE OFFICE ROLE - NON-OVERRIDABLE", "MEMORY WRITE RULES", "VISIBLE REPLY RULES", "SCENE STATE OUTPUT", "ACTION GATE RULES" };
             return new Dictionary<string, object>

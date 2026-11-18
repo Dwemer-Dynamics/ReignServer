@@ -89,7 +89,7 @@ namespace ReignBetaServer
                 {
                     try { using var connection = Program.OpenCampaignConnection(campaign); }
                     catch (InvalidOperationException) { nestedRejected = true; }
-                    try { Program.EnsureSemanticMemorySchema(null); }
+                    try { DialogueService.EnsureSemanticMemorySchema(null); }
                     catch (InvalidOperationException) { semanticRejected = true; }
                     try { Program.LoadSettings(); }
                     catch (InvalidOperationException) { settingsRejected = true; }
@@ -170,7 +170,7 @@ namespace ReignBetaServer
                             string generation = ReadString(Program.QuerySql(connection,
                                 "SELECT value FROM schema_meta WHERE key='semantic_memory_provider_generation';").FirstOrDefault(), "value", "");
                             mainOpened = connection.State == ConnectionState.Open && generation ==
-                                ReadString(Program.LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + Program.SemanticModelVersion;
+                                ReadString(Program.LoadSettings(), "vectorProvider", "local").ToLowerInvariant() + "|" + DialogueService.SemanticModelVersion;
                         }
                     }
                 }

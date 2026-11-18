@@ -4,11 +4,11 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunMemorySelectionHelperSelfTests()
         {
-            if (string.IsNullOrWhiteSpace(CampaignsRootOverride.Value))
+            if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value))
                 throw new InvalidOperationException("Selection contracts require an isolated verifier.");
             var results = new List<Dictionary<string, object>>();
             Dictionary<string, object> Coverage(string text) => TestDict("sourceCoverage", "complete", "windowCount", 1,
@@ -39,7 +39,7 @@ namespace ReignBetaServer
             Check("selected_compact_view_records_actual_use", ReadBool(ReadDictionary(availableViews, "selectionHelpers"), "compressionApplied", false));
             var source = TestDict("turn_id", "old", "speaker_id", "npc", "speaker_name", "Speaker", "role", "npc",
                 "text", "*She smiles as she remembers the secret.* We agreed 300 only after arrival.");
-            var knowledge = new KnowledgeAccessContext { NpcId = "observer" };
+            var knowledge = new Program.KnowledgeAccessContext { NpcId = "observer" };
             string projected = ObserverConversationText(ReadString(source, "text", ""), "npc", "observer");
             var transcript = TestDict();
             SetMemoryTranscriptContext(transcript, new() { TestDict("turnId", "old", "speakerId", "npc", "role", "npc", "text", projected) });

@@ -51,7 +51,7 @@ namespace ReignBetaServer
                 + "CURRENT TAVERN FACTS: " + Json.Serialize(TestDict("campaignId", scope.CampaignId, "timelineId", scope.TimelineId,
                     "townId", scope.TownId, "sessionId", scope.SessionId, "rosterHash", scope.RosterHash, "playerId", scope.PlayerId,
                     "madamId", scope.MadamId, "roster", scope.Roster)) + "\n"
-                + "TAVERN-ONLY REGISTERED ACTION: " + Program.StructuredActionCatalogPrompt(true) + "\n";
+                + "TAVERN-ONLY REGISTERED ACTION: " + DialogueService.StructuredActionCatalogPrompt(true) + "\n";
         }
         private static Dictionary<string, object> TavernVisitQuoteData(TavernHouseVisitQuote quote)
             => TestDict("agreementId", quote.AgreementId, "quoteRevision", quote.QuoteRevision, "townId", quote.TownId,
@@ -62,7 +62,7 @@ namespace ReignBetaServer
         // action validation. No extra model call and no native effects occur here.
         private static void PrepareTavernVisitAction(Dictionary<string, object> state, Dictionary<string, object> chat, Dictionary<string, object> response)
         {
-            if (!Program.UsesStructuredActions(chat)) return;
+            if (!DialogueService.UsesStructuredActions(chat)) return;
             var envelope = ReadDictionary(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(response)), "structuredActionDecision");
             if (!ReadBool(envelope, "valid", false)) return;
             var native = ReadDictionary(chat, "structuredActionContext");

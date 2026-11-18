@@ -89,24 +89,24 @@ namespace ReignBetaServer
             foreach (string type in new[] { "dialogue", "action_router" })
             {
                 var b = new Dictionary<string, object>();
-                var route = ConfigureReasoningRouting(settings, new Dictionary<string, object>(), b, OpenRouterChatUrl, "openai/gpt-5.5", type);
+                var route = DialogueService.ConfigureReasoningRouting(settings, new Dictionary<string, object>(), b, OpenRouterChatUrl, "openai/gpt-5.5", type);
                 var reasoning = ReadDictionary(b, "reasoning");
                 check("reasoning_" + type, ReadBool(route, "providerControlsApplied", false) && ReadBool(reasoning, "exclude", false)
                     && ReadString(reasoning, "effort", "") == (type == "dialogue" ? "medium" : "none"));
             }
             body["caching"] = true; body["stickyprovider"] = true;
-            ConfigurePromptCacheRouting(settings, payload, body, OpenRouterChatUrl, "openai/gpt-5.5", "dialogue");
+            DialogueService.ConfigurePromptCacheRouting(settings, payload, body, OpenRouterChatUrl, "openai/gpt-5.5", "dialogue");
             check("no_nano_cache_flags", !body.ContainsKey("caching") && !body.ContainsKey("stickyprovider"));
             var drafts = new Dictionary<string, object> { [NanoGptProvider] = new Dictionary<string, object> { ["dialogueModel"] = "draft-nano" },
                 [OpenRouterProvider] = new Dictionary<string, object> { ["dialogueModel"] = "openai/draft-router" } };
             MergeProviderSettings(settings, new Dictionary<string, object> { ["llmModelProfiles"] = drafts, ["dialogueModel"] = "openai/draft-router" });
             MergeProviderSettings(settings, new Dictionary<string, object> { ["llmProvider"] = NanoGptProvider });
             check("inactive_draft_preserved", ReadString(settings, "dialogueModel", "") == "draft-nano");
-            check("nano_cache_probe_allowed", SupportsPromptCacheProbe(settings));
+            check("nano_cache_probe_allowed", DialogueService.SupportsPromptCacheProbe(settings));
             settings["llmProvider"] = OpenRouterProvider;
-            check("router_cache_probe_blocked", !SupportsPromptCacheProbe(settings));
+            check("router_cache_probe_blocked", !DialogueService.SupportsPromptCacheProbe(settings));
             settings["llmProvider"] = CodexSubscriptionProvider;
-            check("codex_cache_probe_blocked", !SupportsPromptCacheProbe(settings));
+            check("codex_cache_probe_blocked", !DialogueService.SupportsPromptCacheProbe(settings));
             return rows;
         }
     }

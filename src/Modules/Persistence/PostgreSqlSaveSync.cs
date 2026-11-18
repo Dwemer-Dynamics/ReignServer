@@ -159,11 +159,11 @@ namespace ReignBetaServer
                 bool memorySourcesInitialized = false;
                 using (var memoryConnection = Program.OpenCampaignConnection(campaignId))
                 {
-                    var memoryContext = Program.RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
+                    var memoryContext = DialogueService.RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
                     if (ReadString(memoryContext, "save_point_id", "") != savePointId
-                        || ReadString(memoryContext, "legacy_recovery_version", "") != Program.LegacyMemoryRecoveryVersion)
+                        || ReadString(memoryContext, "legacy_recovery_version", "") != DialogueService.LegacyMemoryRecoveryVersion)
                     {
-                        Program.InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId, loadSessionId);
+                        DialogueService.InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId, loadSessionId);
                         result["memorySourceAccess"] = "verified_snapshot_membership_initialized";
                         memorySourcesInitialized = true;
                     }
@@ -177,7 +177,7 @@ namespace ReignBetaServer
                 {
                     try
                     {
-                        Program.BindVerifiedNoOpLoadSession(campaignId, savePointId, postgresSnapshotPointId, loadSessionId);
+                        DialogueService.BindVerifiedNoOpLoadSession(campaignId, savePointId, postgresSnapshotPointId, loadSessionId);
                         MarkSaveSyncActiveStateClean(campaignId, point);
                     }
                     catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))
@@ -186,7 +186,7 @@ namespace ReignBetaServer
                             "savePointId", savePointId, "error", ex.GetType().Name));
                     }
                 }
-                string noOpProofGeneration = Program.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
+                string noOpProofGeneration = DialogueService.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
                 if (noOpProofGeneration.Length > 0) result["restoreGeneration"] = noOpProofGeneration;
                 timer.Stop();
                 result["durationMs"] = timer.ElapsedMilliseconds;
@@ -260,10 +260,10 @@ namespace ReignBetaServer
                         "Injected Save Sync failure after installing campaign assets.");
 
                 ClearSaveSyncCaches(campaignId);
-                Program.AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
                 MarkSaveSyncActiveStateClean(campaignId, point);
                 // Echoed only when the context is bound to this exact load; never fails the load.
-                string rollbackProofGeneration = Program.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
+                string rollbackProofGeneration = DialogueService.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
                 if (rollbackProofGeneration.Length > 0) result["restoreGeneration"] = rollbackProofGeneration;
                 timer.Stop();
                 result["result"] = "rolled_back";

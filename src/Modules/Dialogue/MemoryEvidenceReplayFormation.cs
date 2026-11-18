@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string SceneFormationReplaySchema = "reign-scene-formation-replay-input-v1";
 
@@ -49,7 +49,7 @@ namespace ReignBetaServer
             // The common seeder expects a query field. This marker never reaches
             // retrieval or formation, and the external manifest admits no query.
             return TestDict("schema", "reign-memory-evidence-replay-input-v1", "cases", cases.Select(item => {
-                var seed = CloneDictionary(item);
+                var seed = Program.CloneDictionary(item);
                 seed["query"] = "scene_formation_seed_only";
                 return seed;
             }).ToList());
@@ -62,11 +62,11 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> session;
                 List<Dictionary<string, object>> turns;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     var key = TestDict("id", sessionId);
-                    session = QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id AND status='closed';", key).Single();
-                    turns = QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id ORDER BY accepted_sequence;", key);
+                    session = Program.QuerySql(connection, "SELECT * FROM conversation_sessions WHERE session_id=$id AND status='closed';", key).Single();
+                    turns = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE session_id=$id ORDER BY accepted_sequence;", key);
                 }
                 var arms = new List<Dictionary<string, object>>();
                 List<string> options = null;
@@ -84,10 +84,10 @@ namespace ReignBetaServer
                     options = currentOptions;
                     string summary = ReadString(result, "summary", ""), id = ReadString(result, "summaryId", "");
                     var diagnostic = ReadDictionary(result, "compactionDiagnostic");
-                    using var read = OpenCampaignConnection(campaign);
-                    var stored = QuerySql(read, "SELECT summary,status,payload_json FROM summaries WHERE summary_id=$id;", TestDict("id", id)).Single();
-                    var indexed = QuerySql(read, "SELECT text FROM summary_fts WHERE summary_id=$id;", TestDict("id", id)).Single();
-                    var linked = QuerySql(read, @"SELECT source_id FROM memory_sources WHERE document_type='summary' AND document_id=$id
+                    using var read = Program.OpenCampaignConnection(campaign);
+                    var stored = Program.QuerySql(read, "SELECT summary,status,payload_json FROM summaries WHERE summary_id=$id;", TestDict("id", id)).Single();
+                    var indexed = Program.QuerySql(read, "SELECT text FROM summary_fts WHERE summary_id=$id;", TestDict("id", id)).Single();
+                    var linked = Program.QuerySql(read, @"SELECT source_id FROM memory_sources WHERE document_type='summary' AND document_id=$id
 AND source_type='turn' ORDER BY ordinal;", TestDict("id", id)).Select(row => ReadString(row, "source_id", "")).ToList();
                     if (!ReadBool(result, "ok", false) || ReadBool(diagnostic, "providerAttempted", true) || ReadString(stored, "status", "") != "active"
                         || ReadString(stored, "summary", "") != summary || ReadString(indexed, "text", "") != summary

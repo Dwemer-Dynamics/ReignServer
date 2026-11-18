@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // One active physical scene per campaign, shared by speaking participants.
         // Session IDs and model prose are deliberately not the storage identity.
@@ -38,15 +38,15 @@ namespace ReignBetaServer
 
         private static DrinkScene LoadDrinkScene(ReignDbConnection connection, Dictionary<string, object> payload, double hour, bool forUpdate = false)
         {
-            if (forUpdate) ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_drink_scene(scene_id,state_json) VALUES('active','{}');");
-            var row = QuerySql(connection, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active'" + (forUpdate ? " FOR UPDATE;" : ";")).SingleOrDefault();
+            if (forUpdate) Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_drink_scene(scene_id,state_json) VALUES('active','{}');");
+            var row = Program.QuerySql(connection, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active'" + (forUpdate ? " FOR UPDATE;" : ";")).SingleOrDefault();
             var stored = TryParseJsonObject(ReadString(row, "state_json", "{}"));
             var scene = new DrinkScene { Scope = DrinkSceneScope(payload), Hour = hour,
                 Stored = stored, BaseHash = PromptHash(CanonicalJson(stored)) };
             double previous = ReadDouble(stored, "hour", double.NaN);
             if (scene.Scope.Length > 0 && scene.Scope == ReadString(stored, "scope", "") && FiniteDrinkNumber(hour)
                 && FiniteDrinkNumber(previous) && hour >= previous - .000001 && hour - previous <= 1d)
-                scene.Vessels = ReadDictionaryList(stored, "vessels").Take(16).Select(CloneDictionary).ToList();
+                scene.Vessels = ReadDictionaryList(stored, "vessels").Take(16).Select(Program.CloneDictionary).ToList();
             return scene;
         }
 
@@ -234,12 +234,12 @@ namespace ReignBetaServer
         {
             var proposed = ReadDictionary(receipt, "drinkScene");
             if (proposed == null) return;
-            ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_drink_scene(scene_id,state_json) VALUES('active','{}');");
-            var row = QuerySql(connection, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active' FOR UPDATE;").Single();
+            Program.ExecuteSql(connection, "INSERT OR IGNORE INTO conversation_drink_scene(scene_id,state_json) VALUES('active','{}');");
+            var row = Program.QuerySql(connection, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active' FOR UPDATE;").Single();
             string hash = PromptHash(CanonicalJson(TryParseJsonObject(ReadString(row, "state_json", "{}"))));
             if (hash != ReadString(receipt, "baseDrinkSceneHash", ""))
                 throw new InvalidOperationException("The shared drink scene changed while the response was prepared.");
-            ExecuteSql(connection, "UPDATE conversation_drink_scene SET state_json=$state WHERE scene_id='active';", TestDict("state", Json.Serialize(proposed)));
+            Program.ExecuteSql(connection, "UPDATE conversation_drink_scene SET state_json=$state WHERE scene_id='active';", TestDict("state", Json.Serialize(proposed)));
         }
 
         private static bool DrinkSceneDeparture(Dictionary<string, object> payload, Dictionary<string, object> parsed, string hero, string reply)

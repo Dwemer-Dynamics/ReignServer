@@ -86,9 +86,9 @@ namespace ReignBetaServer
             if (recruit)
             {
                 string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), Program.EnsureCorrelationId(payload));
-                terms["paymentDependencies"] = Program.CurrentPlayerTransfers(payload).Select((i, slot) => new { i, slot })
+                terms["paymentDependencies"] = DialogueService.CurrentPlayerTransfers(payload).Select((i, slot) => new { i, slot })
                     .Where(x => x.i.Error.Length == 0 && x.i.Command == "transfer_gold" && x.i.Purpose == "recruitment_advance")
-                    .Select(x => ReignBeta.Shared.Dialogue.PlayerActionRules.ActionId(ReadString(payload, "campaignId", "default"), Program.ContinuityTimeline(payload), turn, x.slot)).ToList();
+                    .Select(x => ReignBeta.Shared.Dialogue.PlayerActionRules.ActionId(ReadString(payload, "campaignId", "default"), DialogueService.ContinuityTimeline(payload), turn, x.slot)).ToList();
             }
             if (!ResidentHasUnconditionalConsent(reply)) errors.Add("The current visible reply does not unconditionally agree to join.");
             terms["consentConfirmed"] = errors.Count == 0;
@@ -109,7 +109,7 @@ namespace ReignBetaServer
                         .Cast<Match>().Select(m => int.TryParse(m.Groups[1].Value, out int n) ? n : -1).ToList();
                     var agency = ReadDictionary(payload, "conversationAgencyReceipt");
                     bool exactAgreement = ReadBool(agency, "ok", false) && ReadDictionaryList(agency, "updates")
-                        .Any(r => ReadString(r, "topic", "") == "allegiance" && Program.AgencyAccepted(ReadString(r, "disposition", ""))
+                        .Any(r => ReadString(r, "topic", "") == "allegiance" && DialogueService.AgencyAccepted(ReadString(r, "disposition", ""))
                             && ReadDouble(ReadDictionary(r, "terms"), "gold", -1) == gold);
                     if ((gold > 0 && !prices.Contains(gold) && !(prices.Count == 0 && exactAgreement)) || (gold == 0 && prices.Any(n => n > 0)))
                         errors.Add("The recruitment payment does not match the visible accepted price; confirm the exact price first.");
@@ -124,9 +124,9 @@ namespace ReignBetaServer
             string reply = ReadString(response, "reply", "");
             if (!ReadBool(response, "ok", false) || !IsEncounteredResidentProfile(hero) || !ReadBool(receipt, "ok", false) || ReadBool(receipt, "replayed", false)
                 || !ResidentHasUnconditionalConsent(reply) || !Regex.IsMatch(reply, @"\b(?:companion|retainer|join your clan)\b", RegexOptions.IgnoreCase)) return null;
-            if ((Program._stagedTurnActions ?? new List<Dictionary<string, object>>()).Any(r => ReadString(r, "command", "") == "recruit_encountered_resident")) return null;
+            if ((DialogueService._stagedTurnActions ?? new List<Dictionary<string, object>>()).Any(r => ReadString(r, "command", "") == "recruit_encountered_resident")) return null;
             var decisions = ReadDictionaryList(receipt, "updates").Where(r => ReadString(r, "topic", "") == "allegiance"
-                && Program.AgencyAccepted(ReadString(r, "disposition", ""))).ToList();
+                && DialogueService.AgencyAccepted(ReadString(r, "disposition", ""))).ToList();
             if (decisions.Count != 1) return null;
             double total = ReadDouble(ReadDictionary(decisions[0], "terms"), "gold", -1);
             if (double.IsNaN(total) || double.IsInfinity(total) || total < 0 || total > int.MaxValue || total != Math.Truncate(total)) return null;

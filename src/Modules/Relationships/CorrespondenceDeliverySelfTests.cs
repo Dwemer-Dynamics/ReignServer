@@ -91,7 +91,7 @@ namespace ReignBetaServer
                 DeliverDueCorrespondence(campaign, "player", 13.1d, "main");
                 string future = ReadString(Dispatch("npc5", "player", 14d), "letterId", "");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "courier_before_arrival");
-                Program.AdvanceMemoryRestoreGeneration(campaign, TestDict("savePointId", "courier_before_arrival", "timelineId", "main",
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign, TestDict("savePointId", "courier_before_arrival", "timelineId", "main",
                     "campaignTimeDays", 13d, "worldHistorySequence", 0L, "worldHistoryHeadEventId", ""));
                 using (var connection = Program.OpenCampaignConnection(campaign))
                 {

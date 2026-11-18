@@ -34,13 +34,13 @@ namespace ReignBetaServer
                 if (campaign.Length == 0 || timeline.Length == 0 || player.Length == 0) return ChatViewError("A current campaign, timeline and player are required.");
                 long generation = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
                 using var connection = Program.OpenCampaignConnection(campaign);
-                Program.EnsureChatViewSchema(connection);
+                DialogueService.EnsureChatViewSchema(connection);
                 if (action == "archive")
                 {
                     if (Program.QuerySql(connection, "SELECT session_id FROM conversation_sessions WHERE player_id=$player LIMIT 1;", TestDict("player", player)).Count == 0)
                         return TestDict("ok", true, "entries", new List<object>(), "nextOffset", -1);
                 }
-                else Program.ChatViewScope(connection, request);
+                else DialogueService.ChatViewScope(connection, request);
                 if (action == "list" || action == "archive")
                 {
                     int offset = Math.Max(0, Math.Min(100000, ReadInt(request, "offset", 0)));
@@ -48,13 +48,13 @@ namespace ReignBetaServer
 AND ($session='' OR session_id=$session) ORDER BY created_ts,job_id LIMIT 100 OFFSET $offset;",
                         TestDict("player", player, "timeline", timeline, "session", action == "archive" ? "" : session, "offset", offset));
                     return TestDict("ok", true, "entries", jobs.Select(j => TryParseJsonObject(ReadString(j, "payload_json", "{}")))
-                        .Where(j => Program.ChatViewJobVisible(connection, j, request)).Select(j => ChatViewResponse(campaign, j, false)).ToList(), "nextOffset", jobs.Count == 100 ? offset + 100 : -1);
+                        .Where(j => DialogueService.ChatViewJobVisible(connection, j, request)).Select(j => ChatViewResponse(campaign, j, false)).ToList(), "nextOffset", jobs.Count == 100 ? offset + 100 : -1);
                 }
                 if (action == "state")
                 {
                     var stored = Program.QuerySql(connection, @"SELECT payload_json FROM chat_view_jobs WHERE job_id=$id AND player_id=$player
 AND ($session='' OR session_id=$session);", TestDict("id", ReadString(request, "jobId", ""), "player", player, "timeline", timeline, "session", session)).SingleOrDefault();
-                    return stored == null || !Program.ChatViewJobVisible(connection, TryParseJsonObject(ReadString(stored, "payload_json", "{}")), request) ? ChatViewError("This image is not in the current conversation timeline.")
+                    return stored == null || !DialogueService.ChatViewJobVisible(connection, TryParseJsonObject(ReadString(stored, "payload_json", "{}")), request) ? ChatViewError("This image is not in the current conversation timeline.")
                         : ChatViewResponse(campaign, TryParseJsonObject(ReadString(stored, "payload_json", "{}")), ReadBool(request, "includeImage", true));
                 }
                 if (action != "start") return ChatViewError("Unknown View operation.");
@@ -64,7 +64,7 @@ AND ($session='' OR session_id=$session);", TestDict("id", ReadString(request, "
 WHERE r.request_id=$request AND r.player_id=$player AND r.session_id=$session AND r.timeline_id=$timeline;",
                     TestDict("request", requestId, "player", player, "session", session, "timeline", timeline)).SingleOrDefault();
                 if (admitted != null) return ChatViewResponse(campaign, TryParseJsonObject(ReadString(admitted, "payload_json", "{}")), false);
-                var window = Program.ReadChatViewWindow(connection, request);
+                var window = DialogueService.ReadChatViewWindow(connection, request);
                 var wardrobeHistory = ReadChatViewWardrobeHistory(connection, request, window);
                 var clothingEvidence = ReadChatViewCoverageEvidence(connection, session, window, wardrobeHistory);
                 if (Json.Serialize(ChatViewClothingSelectionInput(window, wardrobeHistory, clothingEvidence)).Length > 180000)
@@ -75,7 +75,7 @@ WHERE r.request_id=$request AND r.player_id=$player AND r.session_id=$session AN
                 MigrateChatViewPromptDefaults();
                 string selectionPrompt = ChatViewEffectivePrompt(ChatViewSelectionPromptName, Program.LoadPromptTemplate(ChatViewSelectionPromptName));
                 string photoPrompt = ChatViewEffectivePrompt(ChatViewPhotoPromptName, Program.LoadPromptTemplate(ChatViewPhotoPromptName));
-                string promptRevision = Program.PromptHash(selectionPrompt + "|" + photoPrompt + "|" + ChatViewReferenceContract + "|" + ChatViewWardrobeContract);
+                string promptRevision = DialogueService.PromptHash(selectionPrompt + "|" + photoPrompt + "|" + ChatViewReferenceContract + "|" + ChatViewWardrobeContract);
                 var hashes = new Dictionary<string, object>(StringComparer.Ordinal);
                 foreach (var actor in window.SelectMany(t => ReadDictionaryList(ReadDictionary(t, "frame"), "actors")).GroupBy(p => ReadString(p, "id", "")).Select(g => g.First()))
                 {
@@ -83,14 +83,14 @@ WHERE r.request_id=$request AND r.player_id=$player AND r.session_id=$session AN
                     string path = ResolveChatViewPortraitPath(campaign, actorId);
                     hashes[actorId] = File.Exists(path) && new FileInfo(path).Length <= 32 * 1024 * 1024 ? Sha256Hex(File.ReadAllBytes(path)) : "missing";
                 }
-                var identity = TestDict("schema", Program.ChatViewVersion, "campaignId", campaign, "timelineId", timeline, "sessionId", session,
+                var identity = TestDict("schema", DialogueService.ChatViewVersion, "campaignId", campaign, "timelineId", timeline, "sessionId", session,
                     "selectionPrompt", selectionPrompt, "photoPrompt", photoPrompt, "referenceContract", ChatViewReferenceContract,
                     "wardrobeContract", ChatViewWardrobeContract, "wardrobeHistory", wardrobeHistory,
                     "wardrobeCoverageContract", ChatViewCoverageContract, "wardrobeCoverageEvidence", clothingEvidence,
                     "playerId", player, "window", window, "referenceHashes", hashes, "capability", capability,
                     "dialogueProvider", ReadString(settings, "llmProvider", ""), "dialogueModel", Program.ModelForRequest(settings, "dialogue"),
                     "dialogueOptions", ChatViewDialogueOptions(settings), "promptRevision", promptRevision);
-                string jobId = Program.PromptHash(Json.Serialize(identity)), key = campaign + "|" + jobId;
+                string jobId = DialogueService.PromptHash(Json.Serialize(identity)), key = campaign + "|" + jobId;
                 lock (ChatViewCreationGate)
                 {
                     // The first transport attempt may have admitted while this request read its sources.
@@ -128,7 +128,7 @@ VALUES($request,$session,$timeline,$player,$job);", TestDict("request", requestI
         private static Dictionary<string, object> ChatViewDialogueOptions(Dictionary<string, object> settings) => settings
             .Where(p => p.Key.IndexOf("reasoning", StringComparison.OrdinalIgnoreCase) >= 0 || p.Key.StartsWith("codex", StringComparison.OrdinalIgnoreCase)
                 && p.Key.IndexOf("option", StringComparison.OrdinalIgnoreCase) >= 0)
-            .Where(p => Program.IsCompactConversationMetadataScalar(p.Value)).ToDictionary(p => p.Key, p => p.Value);
+            .Where(p => DialogueService.IsCompactConversationMetadataScalar(p.Value)).ToDictionary(p => p.Key, p => p.Value);
 
         private static void SaveChatViewJob(ReignDbConnection connection, Dictionary<string, object> job)
         {
@@ -205,7 +205,7 @@ VALUES($id,$session,$timeline,$player,$ts,$payload) ON CONFLICT(job_id) DO UPDAT
                 var history = ReadDictionary(identity, "wardrobeHistory");
                 string selectionData = clothingContract ? Json.Serialize(ChatViewClothingSelectionInput(window, history,
                     coverageContract.Length == 0 ? null : ReadDictionaryList(identity, "wardrobeCoverageEvidence"))) : Json.Serialize(ChatViewSelectionWindow(window));
-                var envelope = Program.BuildSimplePromptEnvelope("chat_view", "chat_view", ReadString(identity, "selectionPrompt", ""), selectionData);
+                var envelope = DialogueService.BuildSimplePromptEnvelope("chat_view", "chat_view", ReadString(identity, "selectionPrompt", ""), selectionData);
                 var reply = PersistenceService.WithCampaignReadLeaseSuspended(() => Program.ChatWithLlm(TestDict("requestType", "chat_view", "campaignId", campaign, "model", ReadString(identity, "dialogueModel", ""),
                     "correlationId", "view_" + id, "messages", envelope.Messages, "promptEnvelope", envelope.Diagnostics,
                     "singleProviderAttempt", true, "response_format", TestDict("type", "json_object")), null, () => !current(), settings));

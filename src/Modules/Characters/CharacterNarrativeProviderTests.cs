@@ -15,7 +15,7 @@ namespace ReignBetaServer
             foreach (var profile in profiles.Skip(offset).Take(count))
             {
                 string id = ReadString(profile, "heroStringId", "");
-                var narrative = Program.ReadJsonObject(Path.Combine(root, Program.PromptHash(id).Substring(0, 24) + ".json"));
+                var narrative = Program.ReadJsonObject(Path.Combine(root, DialogueService.PromptHash(id).Substring(0, 24) + ".json"));
                 if (ReadString(narrative, "status", "") != "ready" || ValidateCharacterNarrative(narrative, true).Count > 0)
                 {
                     results.Add(new Dictionary<string, object> { ["heroStringId"] = id, ["passed"] = false, ["error"] = "No complete authored narrative is available." });
@@ -46,7 +46,7 @@ namespace ReignBetaServer
                 foreach (var scenario in cases)
                 {
                     string caseId = ReadString(scenario, "id", "");
-                    string path = Path.Combine(root, "evaluation", Program.PromptHash(id).Substring(0, 24) + "-" + caseId + ".json");
+                    string path = Path.Combine(root, "evaluation", DialogueService.PromptHash(id).Substring(0, 24) + "-" + caseId + ".json");
                     var candidate = DeepCloneProfileDictionary(narrative);
                     if (ReadInt(scenario, "level", 0) > 0)
                     {
@@ -67,9 +67,9 @@ namespace ReignBetaServer
                     var stack = new Dictionary<string, object> { ["narrative"] = candidate, ["traits"] = ReadDictionary(profile, "traits") };
                     ApplyNarrativePromptProjection(stack);
                     string question = ReadString(scenario, "question", ""), scene = ReadString(scenario, "scene", "");
-                    string prompt = Program.BuildStableCharacterPrompt(id, ReadString(hero, "name", id), hero, stack)
-                        + "\n" + Program.BuildLiveCharacterPrompt(ReadString(hero, "name", id), hero, stack, new Dictionary<string, object>(), question, scene);
-                    string fingerprint = Program.PromptHash("narrative-evaluation-v2" + prompt + Json.Serialize(scenario)
+                    string prompt = DialogueService.BuildStableCharacterPrompt(id, ReadString(hero, "name", id), hero, stack)
+                        + "\n" + DialogueService.BuildLiveCharacterPrompt(ReadString(hero, "name", id), hero, stack, new Dictionary<string, object>(), question, scene);
+                    string fingerprint = DialogueService.PromptHash("narrative-evaluation-v2" + prompt + Json.Serialize(scenario)
                         + Program.ModelForRequest(NarrativeAuthoringSettings, "dialogue") + Program.ModelForRequest(NarrativeAuthoringSettings, "character_construction"));
                     var previous = Program.ReadJsonObject(path);
                     if (ReadString(previous, "fingerprint", "") == fingerprint && ReadBool(previous, "passed", false)) { results.Add(previous); continue; }
@@ -96,7 +96,7 @@ namespace ReignBetaServer
                         ["canonPassed"] = ReadBool(verdict, "canonPassed", false), ["behaviorPassed"] = rulerDutyGuard && ReadBool(verdict, "behaviorPassed", false),
                         ["judge"] = verdict, ["model"] = Program.ModelForRequest(NarrativeAuthoringSettings, "dialogue"), ["completedUtc"] = DateTime.UtcNow.ToString("o") };
                     result["passed"] = structural && ReadBool(result, "privacyPassed", false) && ReadBool(result, "canonPassed", false) && ReadBool(result, "behaviorPassed", false);
-                    if (previous.Count > 0) Program.WriteJsonObject(Path.Combine(root, "evaluation", "history", Program.PromptHash(id).Substring(0, 24) + "-" + caseId + "-" + DateTime.UtcNow.Ticks + ".json"), previous);
+                    if (previous.Count > 0) Program.WriteJsonObject(Path.Combine(root, "evaluation", "history", DialogueService.PromptHash(id).Substring(0, 24) + "-" + caseId + "-" + DateTime.UtcNow.Ticks + ".json"), previous);
                     Program.WriteJsonObject(path, result); results.Add(result);
                 }
             }

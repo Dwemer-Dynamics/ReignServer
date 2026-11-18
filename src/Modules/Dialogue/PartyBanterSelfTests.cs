@@ -6,13 +6,13 @@ using ReignBeta.Shared.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunPartyBanterSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool pass, object data = null) => results.Add(TestDict("caseId", "party_banter_" + id, "passed", pass,
-                "summary", !pass && data != null ? id + ": " + LimitText(Json.Serialize(data), 1200) : id, "data", data));
+                "summary", !pass && data != null ? id + ": " + Program.LimitText(Json.Serialize(data), 1200) : id, "data", data));
             Check("eight_hour_boundary", !PartyBanterPolicy.CanStart(true, true, false, false, 2, 10 + 7.99 / 24, 10, 100, 0)
                 && PartyBanterPolicy.CanStart(true, true, false, false, 2, 10 + 8d / 24, 10, 100, 0));
             Check("travel_and_modal_gates", !PartyBanterPolicy.CanStart(true, false, false, false, 2, 20, 10, 100, 0)
@@ -33,20 +33,20 @@ namespace ReignBetaServer
                 && PartyBanterPolicy.ReadingSeconds(string.Join(" ", Enumerable.Repeat("word", 100))) == 6);
             Check("unicode_character_limit", PartyBanterPolicy.CharacterCount("e\u0301🙂") == 2 && PartyBanterPolicy.Fits("e\u0301🙂", 2) && !PartyBanterPolicy.Fits("e\u0301🙂!", 2));
             Check("output_scales_with_options", PartyBanterPolicy.OutputTokens(12, 1000) > 5000 && PartyBanterPolicy.OutputTokens(6, 360) > 1200);
-            Check("settings_validation", ValidateBanterOptions(TestDict("banterEnabled", false, "banterMaxResponses", 12, "banterMaxCharacters", 1000)) == ""
-                && ValidateBanterOptions(TestDict("banterMaxResponses", 2.5)) != "" && ValidateBanterOptions(TestDict("banterMaxCharacters", 79)) != ""
-                && ValidateBanterOptions(TestDict("banterEnabled", "true")) != "");
+            Check("settings_validation", Program.ValidateBanterOptions(TestDict("banterEnabled", false, "banterMaxResponses", 12, "banterMaxCharacters", 1000)) == ""
+                && Program.ValidateBanterOptions(TestDict("banterMaxResponses", 2.5)) != "" && Program.ValidateBanterOptions(TestDict("banterMaxCharacters", 79)) != ""
+                && Program.ValidateBanterOptions(TestDict("banterEnabled", "true")) != "");
             Check("topic_range", BanterTopicSeeds.Split('\n').Length >= 60 && BanterTopicSeeds.Split('\n').Select(x => x.Split('|')[0]).Distinct().Count() == 12);
             string canceledUrl = "http://banter-offline.invalid/canceled";
-            string canceledProvider = NormalizeLookup(canceledUrl) + "|" + NormalizeLookup("fixture");
-            ProviderState providerState;
-            lock (ProviderMiddlewareLock) providerState = GetProviderStateLocked(canceledProvider, TestDict());
+            string canceledProvider = Program.NormalizeLookup(canceledUrl) + "|" + Program.NormalizeLookup("fixture");
+            Program.ProviderState providerState;
+            lock (Program.ProviderMiddlewareLock) providerState = Program.GetProviderStateLocked(canceledProvider, TestDict());
             long priorFailures = providerState.Failures; bool cancellationObserved = false;
-            try { ProviderPostJson(canceledUrl, "", "{}", TestDict(), TestDict(), "banter_cancel_fixture", "party_banter", "fixture", _ => { }, () => true); }
+            try { Program.ProviderPostJson(canceledUrl, "", "{}", TestDict(), TestDict(), "banter_cancel_fixture", "party_banter", "fixture", _ => { }, () => true); }
             catch (OperationCanceledException) { cancellationObserved = true; }
             Check("cancellation_preserves_shared_provider_circuit", cancellationObserved && providerState.Failures == priorFailures && providerState.ConsecutiveFailures == 0);
             bool subscriptionCanceled = false;
-            try { CodexChatCompletionJson(TestDict(), TestDict(), "fixture", null, null, () => true); }
+            try { Program.CodexChatCompletionJson(TestDict(), TestDict(), "fixture", null, null, () => true); }
             catch (OperationCanceledException) { subscriptionCanceled = true; }
             Check("subscription_cancellation_precedes_runtime_startup", subscriptionCanceled);
             var options = TestDict("maxResponses", 6, "maxCharacters", 80); var ids = new List<string> { "noble", "commoner" };
@@ -73,16 +73,16 @@ namespace ReignBetaServer
             var priorProvider = BanterTestProvider;
             try
             {
-                using var c = OpenCampaignConnection(campaign); EnsureBanterSchema(c); EnsureAcceptedConversationUnitSchema(c);
+                using var c = Program.OpenCampaignConnection(campaign); EnsureBanterSchema(c); EnsureAcceptedConversationUnitSchema(c);
                 string generation = BanterGeneration(c), session = "banter_" + Guid.NewGuid().ToString("N");
                 Dictionary<string, object> Hero(string id, bool noble, bool ruler = false) => TestDict("heroStringId", id, "name", id == "noble" ? "Lady Mira" : "Jon",
                     "age", 30, "isAlive", true, "isLord", noble, "isRuler", ruler, "isFemale", noble, "currentPartyId", "main_party", "cultureId", "vlandia", "occupation", noble ? "Lord" : "Wanderer");
                 var heroes = new List<Dictionary<string, object>> { Hero("noble", true, true), Hero("commoner", false) };
                 string core = string.Join(" ", Enumerable.Repeat("They are reserved yet generous, proud of their work, slow to trust and quick to defend a friend.", 14));
-                foreach (string id in ids) WriteJsonObject(CharacterFile(campaign, id, "traits.json"), TestDict("basePersonalitySummary", core));
+                foreach (string id in ids) Program.WriteJsonObject(Program.CharacterFile(campaign, id, "traits.json"), TestDict("basePersonalitySummary", core));
                 string prompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false);
                 var politicalBlocks = heroes.Select(h => {
-                    string id = CharacterIdFrom(h); var traits = ReadJsonObject(CharacterFile(campaign, id, "traits.json"));
+                    string id = Program.CharacterIdFrom(h); var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, id, "traits.json"));
                     return CharactersService.RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
                         TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(CharactersService.EnsurePoliticalProfile(campaign, id, h, traits)))));
                 }).ToList();
@@ -117,8 +117,8 @@ namespace ReignBetaServer
                         && ReadString(row, "toward", "") == "commoner" && !ReadBool(row, "nameKnown", true)));
                 var p = TestDict("campaignId", campaign, "timelineId", "test", "generation", generation, "sessionId", session,
                     "playerHeroStringId", "player", "partyId", "main_party", "worldDay", 20d, "traveling", true, "heroes", heroes);
-                var ineligible = CloneDictionary(heroes[1]); ineligible["isPrisoner"] = true;
-                var rp = CloneDictionary(p); rp["heroes"] = new[] { heroes[0], ineligible, Hero("player", false) };
+                var ineligible = Program.CloneDictionary(heroes[1]); ineligible["isPrisoner"] = true;
+                var rp = Program.CloneDictionary(p); rp["heroes"] = new[] { heroes[0], ineligible, Hero("player", false) };
                 Check("strict_party_roster", BanterRoster(rp).Count == 1);
                 int calls = 0; bool requestContentValid = false;
                 BanterTestProvider = (request, emit, canceled) => {
@@ -138,7 +138,7 @@ namespace ReignBetaServer
                 if (ReadString(started, "state", "") != "generating")
                     throw new InvalidOperationException("Banter fixture did not start: " + Json.Serialize(started)
                         + "; protected prompt characters=" + (BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), p, false).Length + BanterRules.Length));
-                bool completed = SpinWait.SpinUntil(() => { using var probe = OpenCampaignConnection(campaign); return ReadBool(ReadBanter(probe, session), "generationDone", false); }, 10000);
+                bool completed = SpinWait.SpinUntil(() => { using var probe = Program.OpenCampaignConnection(campaign); return ReadBool(ReadBanter(probe, session), "generationDone", false); }, 10000);
                 var saved = ReadBanter(c, session);
                 Check("provider_messages_include_content", completed && requestContentValid);
                 Check("one_call_fragmented_stream", completed && calls == 1 && ReadDictionaryList(saved, "drafts").Count == 2, saved);
@@ -150,9 +150,9 @@ namespace ReignBetaServer
                 var accepted = PartyBanterApi("accept", p); var retry = PartyBanterApi("accept", p);
                 Check("atomic_acceptance_and_retry", ReadInt(accepted, "accepted", 0) == 1 && ReadInt(retry, "accepted", 0) == 1
                     && ReadCurrentSessionDialogueLines(campaign, session, 30).Count == 1);
-                Check("no_manufactured_player_source", QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND role='player';", TestDict("id", session)).Count == 0);
-                var listener = BuildKnowledgeAccessContext("commoner", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
-                var absent = BuildKnowledgeAccessContext("absent", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
+                Check("no_manufactured_player_source", Program.QuerySql(c, "SELECT turn_id FROM conversation_turns WHERE session_id=$id AND role='player';", TestDict("id", session)).Count == 0);
+                var listener = Program.BuildKnowledgeAccessContext("commoner", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
+                var absent = Program.BuildKnowledgeAccessContext("absent", "player", "", TestDict("timelineId", "test", "worldDay", 20d));
                 Check("accepted_words_recalled_by_listener_only", ReadLogicalConversationTurns(c, session, 30, listener).Count == 1
                     && ReadLogicalConversationTurns(c, session, 30, absent).Count == 0);
                 int fixtureOrdinal = 0;
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                     InsertConversationTurn(c, id, "shared_fixture", id, fixtureOrdinal++,
                         id, "npc", "noble", "Lady Mira", "Words from " + id + " must remain private.", "party_chat", day, 5L, "", audience,
                         TestDict("timelineId", timeline, "worldDay", day));
-                    if (invalid) ExecuteSql(c, "UPDATE conversation_turns SET status='invalidated' WHERE turn_id=$id;", TestDict("id", id));
+                    if (invalid) Program.ExecuteSql(c, "UPDATE conversation_turns SET status='invalidated' WHERE turn_id=$id;", TestDict("id", id));
                 }
                 ExcludedShared("foreign_branch", 20d, "sibling", ids);
                 ExcludedShared("future_branch", 21d, "test", ids);
@@ -170,7 +170,7 @@ namespace ReignBetaServer
                 var shared = BanterSharedExcerpt(c, ids, p);
                 Check("shared_excerpt_excludes_foreign_future_private_and_invalidated", shared.Count == 1
                     && !ReadString(shared[0], "sourceId", "").Contains("branch") && ReadString(shared[0], "quote", "").Contains("worthless coward"));
-                var cutoff = CloneDictionary(p); cutoff["memoryAsOfTimestamp"] = 0L;
+                var cutoff = Program.CloneDictionary(p); cutoff["memoryAsOfTimestamp"] = 0L;
                 Check("shared_excerpt_respects_as_of_before_limit", BanterSharedExcerpt(c, ids, cutoff).Count == 0);
                 p["expectedRevision"] = ReadInt(accepted, "revision", 0);
                 var handoff = PartyBanterApi("handoff", p);
@@ -183,11 +183,11 @@ namespace ReignBetaServer
                     && ReadString(receipts[0], "targetHeroStringId", "") == "noble" && ReadInt(receipts[0], "finalDelta", 0) < 0);
                 p["expectedRevision"] = ReadInt(handoff, "revision", 0);
                 PartyBanterApi("handoff", p);
-                Check("takeover_retry_cannot_duplicate_affinity", QuerySql(c,
+                Check("takeover_retry_cannot_duplicate_affinity", Program.QuerySql(c,
                     "SELECT receipt_id FROM conversation_relationship_receipts WHERE exchange_id=$id;", TestDict("id", session + "_relations")).Count == 1);
-                ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='closed_by_player' WHERE session_id=$id;", TestDict("id", session));
+                Program.ExecuteSql(c, "UPDATE conversation_sessions SET status='closed',close_reason='closed_by_player' WHERE session_id=$id;", TestDict("id", session));
                 Check("reopening_closed_takeover_is_read_only", ReadBool(PartyBanterApi("handoff", p), "readOnly", false));
-                var later = CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
+                var later = Program.CloneDictionary(p); later["sessionId"] = "banter_" + Guid.NewGuid().ToString("N"); later["worldDay"] = 20 + 7d / 24;
                 Check("takeover_preserves_cooldown", !ReadBool(PartyBanterApi("start", later), "eligible", true));
                 p["generation"] = "old_generation";
                 Check("stale_callback_fence", ReadString(PartyBanterApi("accept", p), "errorCode", "") == "banter_stale_generation");
@@ -198,12 +198,12 @@ namespace ReignBetaServer
                 var context = PartyBanterApi("context", later); var restored = ReadDictionary(context, "episode");
                 Check("restore_retains_drafts_and_rebinds", ReadString(restored, "generation", "") == generation && ReadBool(restored, "generationDone", false)
                     && ReadInt(restored, "draftCount", 0) == 1);
-                var abandoned = CloneDictionary(saved); abandoned["sessionId"] = "empty_restored_banter"; abandoned["drafts"] = new List<Dictionary<string, object>>();
+                var abandoned = Program.CloneDictionary(saved); abandoned["sessionId"] = "empty_restored_banter"; abandoned["drafts"] = new List<Dictionary<string, object>>();
                 abandoned["effectsFinalized"] = false; WriteBanter(c, abandoned);
                 PartyBanterApi("context", later);
                 Check("empty_restore_finalizes_without_cooldown", ReadBool(ReadBanter(c, "empty_restored_banter"), "effectsFinalized", false)
                     && ReadDouble(ReadBanter(c, "empty_restored_banter"), "endedDay", 0) == -1);
-                var stopped = ReadBanter(c, "restored_banter"); var stop = CloneDictionary(later);
+                var stopped = ReadBanter(c, "restored_banter"); var stop = Program.CloneDictionary(later);
                 stop["sessionId"] = "restored_banter"; stop["expectedRevision"] = -1; stop["reason"] = "campaign_exit";
                 var exited = PartyBanterApi("finish", stop);
                 Check("exit_discards_unspoken_drafts_despite_inflight_revision", ReadBool(exited, "ok", false)
@@ -211,7 +211,7 @@ namespace ReignBetaServer
                 foreach (bool withPrefix in new[] { false, true })
                 {
                     string legacyId = "banter_" + Guid.NewGuid().ToString("N");
-                    var legacy = CloneDictionary(saved);
+                    var legacy = Program.CloneDictionary(saved);
                     legacy["sessionId"] = legacyId; legacy["generation"] = generation; legacy["revision"] = 1;
                     legacy["state"] = "ready"; legacy["effectsFinalized"] = false; legacy["accepted"] = 0;
                     legacy["startedDay"] = 25d; legacy["endedDay"] = -1d;
@@ -223,7 +223,7 @@ namespace ReignBetaServer
                         "npcId", "noble", "playerId", "player", "channel", "party_chat", "worldDay", 25d,
                         "participants", ids.Concat(new[] { "player" }).ToList()));
                     WriteBanter(c, legacy); // Simulate persisted output from the old installed prompt.
-                    var legacyRequest = CloneDictionary(later);
+                    var legacyRequest = Program.CloneDictionary(later);
                     legacyRequest["sessionId"] = legacyId; legacyRequest["worldDay"] = 25d;
                     legacyRequest["expectedRevision"] = 1; legacyRequest["sequence"] = 1;
                     if (withPrefix)

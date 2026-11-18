@@ -6,7 +6,7 @@ using Reign.Core.Contracts.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string PersonalGossipSignalContract = @"Private source classification: return gossipSignals as an array.
 Only a supported meaningful feeling or personal question creates a detailed gossip signal; do not manufacture a motive.
@@ -74,7 +74,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                 double day = ReadDouble(payload, "worldDay", 0);
                 string session = ReadFirstString(payload, "conversationSessionId", "sessionId");
                 using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = Program.OpenCampaignConnection(campaign))
                 {
                     EnsurePersonalGossipSchema(c);
                     bool fresh = GossipAcceptPresence(c, payload);
@@ -100,7 +100,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                                     + (GossipLocal(self, contact.Person) ? "; currently in the same settlement or party." : "; not established as nearby."));
                         }
                     }
-                    var history = QuerySql(c, @"SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner
+                    var history = Program.QuerySql(c, @"SELECT * FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner
 AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", GossipFields("timeline", timeline, "owner", hero, "day", day));
                     if (history.Count > 0)
                     {
@@ -110,10 +110,10 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
                         text.AppendLine("The record is the complete evidence for that NPC exchange. Do not add unrecorded remarks, repetitions, actions, reactions, or quantities when recalling it. You may offer your interpretation as an interpretation, but do not turn plausible conversational color into an observed event.");
                         text.AppendLine("Known contact identity hints come from current native profile facts. Use those pronouns instead of guessing from a name or copying an earlier mistaken recollection; when none are supplied, use the person's name. This is identity context, not a newly discovered event.");
                         var nominations = new List<string>();
-                        bool alreadyRaised = session.Length > 0 && QuerySql(c,
+                        bool alreadyRaised = session.Length > 0 && Program.QuerySql(c,
                             "SELECT receipt_id FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner AND raise_session=$session LIMIT 1;",
                             GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0;
-                        var traits = ReadJsonObject(CharacterFile(campaign, hero, "traits.json"));
+                        var traits = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "traits.json"));
                         int used = 0;
                         foreach (var row in history)
                         {
@@ -143,8 +143,8 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
                             int chance = GossipRaiseChance(GossipTrait(traits, "curiosity"), ReadInt(data, "personalStake", 25), uncertainty, ReadInt(data, "feeling", 0));
                             if (!data.ContainsKey("raiseChance"))
                             {
-                                data["raiseChance"] = GossipAdjustedChance(chance, "raise", PersonalGossipSettings());
-                                ExecuteSql(c, "UPDATE personal_gossip_history SET payload_json=$json WHERE receipt_id=$id;",
+                                data["raiseChance"] = Program.GossipAdjustedChance(chance, "raise", PersonalGossipSettings());
+                                Program.ExecuteSql(c, "UPDATE personal_gossip_history SET payload_json=$json WHERE receipt_id=$id;",
                                     GossipFields("json", Json.Serialize(data), "id", id));
                             }
                             chance = ReadInt(data, "raiseChance", chance);
@@ -180,7 +180,7 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
             }
             catch (Exception ex)
             {
-                LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", LimitText(ex.Message, 500)));
+                Program.LogOperational("gossip.prompt_failed", GossipFields("campaignId", campaign, "error", Program.LimitText(ex.Message, 500)));
                 return "";
             }
         }
@@ -196,7 +196,7 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
         private static string GossipKnownIdentityHint(string campaign, string hero, string label,
             Dictionary<string, Dictionary<string, object>> facts = null)
         {
-            var profile = ReadJsonObject(CharacterFile(campaign, hero, "profile.json"));
+            var profile = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "profile.json"));
             if (facts != null && !string.IsNullOrWhiteSpace(hero) && !string.IsNullOrWhiteSpace(label) && label.Length <= 160
                 && profile != null && profile.TryGetValue("isFemale", out object sex) && sex is bool female)
                 facts[hero] = GossipFields("contactId", hero, "label", label, "isFemale", female, "pronouns", female ? "she/her" : "he/him");
@@ -264,27 +264,27 @@ AND acquired_day<=$day ORDER BY acquired_day DESC,receipt_id DESC LIMIT 12;", Go
         {
             if (string.IsNullOrWhiteSpace(session)) return;
             var nominated = ReadStringList(payload, "personalGossipAgenda");
-            if (QuerySql(c, "SELECT receipt_id FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner AND raise_session=$session LIMIT 1;",
+            if (Program.QuerySql(c, "SELECT receipt_id FROM personal_gossip_history WHERE timeline_id=$timeline AND owner_id=$owner AND raise_session=$session LIMIT 1;",
                 GossipFields("timeline", timeline, "owner", hero, "session", session)).Count > 0) return;
             foreach (var item in ReadDictionaryList(parsed, "raisedGossip").Take(1))
                 if (nominated.Contains(ReadString(item, "receiptId", "")) && GossipQuoteSupported(ReadString(item, "evidenceQuote", ""), reply))
-                    ExecuteSql(c, @"UPDATE personal_gossip_history SET raise_session=$session WHERE receipt_id=$id AND timeline_id=$timeline
+                    Program.ExecuteSql(c, @"UPDATE personal_gossip_history SET raise_session=$session WHERE receipt_id=$id AND timeline_id=$timeline
 AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields("id", ReadString(item, "receiptId", ""), "timeline", timeline,
                         "owner", hero, "session", session, "day", ReadDouble(payload, "worldDay", 0)));
         }
 
-        private static Dictionary<string, object> PersonalGossipStatusApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> PersonalGossipStatusApi(Dictionary<string, string> query)
         {
             GossipStatusRequest request = GossipStatusRequest.FromQuery(query);
             string campaign = request.CampaignId;
             if (!request.HasCampaign) return GossipStatusProtocol.Failure(GossipStatusProtocol.CampaignRequiredError);
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = Program.OpenCampaignConnection(campaign))
             {
                 if (request.DeliveryOnly)
                     return PersonalGossipDeliveryReadiness(c, campaign, request);
                 if (!WorldSimulationService.TableExists(c, "personal_gossip_messages")) return GossipStatusResponse.NoSchema().ToDictionary();
-                return GossipStatusResponse.Snapshot(PersonalGossipVersion, QuerySql(c, "SELECT message_id,root_id,timeline_id,speaker_id,recipient_id,is_reply,hop,created_day,due_day,expires_day,status,attempts FROM personal_gossip_messages ORDER BY created_day DESC,message_id LIMIT 100;"),
-                    QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
+                return GossipStatusResponse.Snapshot(PersonalGossipVersion, Program.QuerySql(c, "SELECT message_id,root_id,timeline_id,speaker_id,recipient_id,is_reply,hop,created_day,due_day,expires_day,status,attempts FROM personal_gossip_messages ORDER BY created_day DESC,message_id LIMIT 100;"),
+                    Program.QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
                         .Select(row => GossipFields("id", ReadString(row, "topic_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
                             "status", ReadString(row, "status", ""), "shareChance", ReadInt(GossipJson(row), "shareChance", 0),
                             "shareRoll", ReadInt(GossipJson(row), "shareRoll", 0), "candidateAudit", ReadDictionary(GossipJson(row), "candidateAudit"),
@@ -303,13 +303,13 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
             bool schema = WorldSimulationService.TableExists(c, "personal_gossip_messages");
             double day = request.WorldDay.HasValue
                     ? request.WorldDay.Value : schema ? ReadDouble(GossipClock(c, timeline), "world_day", 0) : 0;
-            var counts = schema ? QuerySql(c, @"SELECT status,COUNT(*) AS count FROM personal_gossip_messages
+            var counts = schema ? Program.QuerySql(c, @"SELECT status,COUNT(*) AS count FROM personal_gossip_messages
 WHERE timeline_id=$timeline AND status IN ('pending','generating','awaiting_native_clock','generation_failed') GROUP BY status;",
                 GossipFields("timeline", timeline)) : new List<Dictionary<string, object>>();
             long Count(string status) => counts.Where(r => ReadString(r, "status", "") == status).Sum(r => (long)ReadInt(r, "count", 0));
-            var next = schema ? QuerySql(c, "SELECT MIN(due_day) AS next_day FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit';",
+            var next = schema ? Program.QuerySql(c, "SELECT MIN(due_day) AS next_day FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit';",
                 GossipFields("timeline", timeline)).FirstOrDefault() : null;
-            var ready = schema ? QuerySql(c, "SELECT payload_json FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;",
+            var ready = schema ? Program.QuerySql(c, "SELECT payload_json FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='awaiting_native_clock' ORDER BY created_day,message_id LIMIT 32;",
                 GossipFields("timeline", timeline)).Select(r => ReadString(GossipJson(r), "readyNonce", "")).Where(n => n.Length > 0).ToList() : new List<string>();
             var communications = CommunicationReadiness(c, timeline, day);
             object nextDueDay = next != null && next.TryGetValue("next_day", out object value) && value != null && value != DBNull.Value ? value : null;
@@ -321,7 +321,7 @@ WHERE timeline_id=$timeline AND status IN ('pending','generating','awaiting_nati
                 AwaitingNativeClock = Count("awaiting_native_clock"),
                 FailedComposition = Count("generation_failed") + ReadLong(communications, "failed", 0), ReadyNonces = ready, Communications = communications,
                 NextDueDay = nextDueDay,
-                DueInTransit = schema ? ReadInt(QuerySql(c, "SELECT COUNT(*) AS count FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit' AND due_day<=$day;",
+                DueInTransit = schema ? ReadInt(Program.QuerySql(c, "SELECT COUNT(*) AS count FROM personal_gossip_messages WHERE timeline_id=$timeline AND status='in_transit' AND due_day<=$day;",
                     GossipFields("timeline", timeline, "day", day)).FirstOrDefault(), "count", 0) + ReadLong(communications, "due", 0) : ReadLong(communications, "due", 0)
             }.ToDictionary();
         }

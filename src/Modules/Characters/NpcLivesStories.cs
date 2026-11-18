@@ -46,7 +46,7 @@ namespace ReignBetaServer
             NpcPurposePromptWindows.GetValue(p, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, string>())[hero] = b.ToString();
         }
 
-        internal static void AttachNpcPurposePrompt(Program.PromptEnvelope envelope, Dictionary<string, object> p, string hero)
+        internal static void AttachNpcPurposePrompt(DialogueService.PromptEnvelope envelope, Dictionary<string, object> p, string hero)
         {
             if (p == null || !NpcPurposePromptWindows.TryGetValue(p, out var windows)
                 || !windows.TryGetValue(hero, out var body) || body.Length == 0) return;
@@ -54,7 +54,7 @@ namespace ReignBetaServer
             envelope.TotalChars = envelope.Messages.Sum(m => ReadString(m, "content", "").Length);
             envelope.Diagnostics["messageCount"] = envelope.Messages.Count;
             envelope.Diagnostics["npcPersonalPurpose"] = TestDict("source", "server_snapshot", "heroId", hero,
-                "characters", body.Length, "sha256", Program.PromptHash(body));
+                "characters", body.Length, "sha256", DialogueService.PromptHash(body));
         }
 
         private static void AppendNpcStoryPrompt(StringBuilder b, NpcLivesState state, string hero, Dictionary<string, object> p)
@@ -180,7 +180,7 @@ namespace ReignBetaServer
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
 
-        private static void AcceptNpcStoryAssessment(ReignDbConnection c, NpcLivesState state, Program.AcceptedConversationUnit unit, List<Dictionary<string, object>> sources)
+        private static void AcceptNpcStoryAssessment(ReignDbConnection c, NpcLivesState state, DialogueService.AcceptedConversationUnit unit, List<Dictionary<string, object>> sources)
         {
             string current = ReadFirstString(unit.Payload, "locationId", "currentSettlementId", "settlementId");
             var playerSources = sources.Where(r => ReadString(r, "speaker_id", "") == unit.Player && ReadString(r, "role", "") == "player").ToList();
@@ -234,7 +234,7 @@ namespace ReignBetaServer
             string id = ReadString(p, "id", ""), choice = ReadString(p, "choice", ""), operation = ReadString(p, "operationId", "");
             int revision = ReadInt(p, "revision", -1);
             if (operation.Length == 0) throw new InvalidOperationException("A stable decision receipt is required.");
-            string hash = Program.PromptHash(CanonicalJson(TestDict("id", id, "revision", revision, "choice", choice,
+            string hash = DialogueService.PromptHash(CanonicalJson(TestDict("id", id, "revision", revision, "choice", choice,
                 "heroId", ReadString(p, "heroId", ""), "playerId", player, "agreementHash", ReadString(p, "agreementHash", ""),
                 "proposalId", ReadString(p, "proposalId", ""), "waitDays", ReadDouble(p, "waitDays", 0), "awayDays", ReadDouble(p, "awayDays", 5))));
             if (state.OperationReceipts.TryGetValue(operation, out var prior))
@@ -313,7 +313,7 @@ namespace ReignBetaServer
         {
             string kind = ReadString(p, "kind", ""), id = ReadString(p, "id", ""), operation = ReadString(p, "operationId", "");
             if (operation.Length == 0) throw new InvalidOperationException("Native evidence requires its stable operation identity.");
-            string hash = Program.PromptHash(CanonicalJson(TestDict("kind", kind, "id", id, "revision", ReadInt(p, "revision", -1),
+            string hash = DialogueService.PromptHash(CanonicalJson(TestDict("kind", kind, "id", id, "revision", ReadInt(p, "revision", -1),
                 "heroId", ReadString(p, "heroId", ""), "objectiveId", ReadString(p, "objectiveId", ""), "nativeReceipt", ReadString(p, "nativeReceipt", ""),
                 "encounterId", ReadString(p, "encounterId", ""), "outcome", ReadString(p, "outcome", ""), "locationId", ReadString(p, "locationId", ""),
                 "meeting", ReadDictionary(p, "meeting"), "bindings", ReadDictionary(p, "bindings"),

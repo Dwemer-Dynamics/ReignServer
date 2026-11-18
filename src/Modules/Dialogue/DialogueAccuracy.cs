@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static string ConversationAssessmentAbsenceReason(Dictionary<string, object> parsed)
         {
@@ -23,7 +23,7 @@ namespace ReignBetaServer
             return "relationship_assessment_explicitly_empty";
         }
 
-        private static string StructuredConversationFailureKind(Dictionary<string, object> response)
+        internal static string StructuredConversationFailureKind(Dictionary<string, object> response)
         {
             string content = ReadString(response, "content", "").Trim();
             bool length = ReadString(response, "finishReason", "").Equals("length", StringComparison.OrdinalIgnoreCase);
@@ -33,7 +33,7 @@ namespace ReignBetaServer
             return length ? "incomplete_at_output_limit" : "invalid_structure_or_visible_reply";
         }
 
-        private static Dictionary<string, object> StructuredConversationFailureEvidence(Dictionary<string, object> response, Dictionary<string, object> request)
+        internal static Dictionary<string, object> StructuredConversationFailureEvidence(Dictionary<string, object> response, Dictionary<string, object> request)
         {
             var raw = ReadDictionary(response, "raw");
             var choices = ReadDictionaryList(raw, "choices");
@@ -49,9 +49,9 @@ namespace ReignBetaServer
             };
         }
 
-        private static void PreserveFormatRepairMetadata(Dictionary<string, object> original, Dictionary<string, object> repaired)
+        internal static void PreserveFormatRepairMetadata(Dictionary<string, object> original, Dictionary<string, object> repaired)
         {
-            if (original == null || repaired == null || !ConversationStructuredObjectHasUsableVisibleReply(original)) return;
+            if (original == null || repaired == null || !Program.ConversationStructuredObjectHasUsableVisibleReply(original)) return;
             foreach (string field in new[] { "relationshipAssessments", "memoryWrites", "beliefWrites", "relationshipUpdates",
                 "obligationWrites", "comprehensionWrites", "dynamicCharacteristicWrites", "continuityWrites", "proposalDecisions",
                 "identityIntroductions", "socialSignals", "drinkActions", "drinkingEvents", "drinkConsumptions", "drinkSceneUpdates", "gossipSignals", "publicWitnessSignals", "raisedGossip", "communicationPlans" })
@@ -75,7 +75,7 @@ namespace ReignBetaServer
             if (parsed.ContainsKey("proposalDecisions")) return false;
             var gate = ReadDictionary(parsed, "actionGate");
             string intent = ReadString(gate, "intent", "");
-            if (ActionGateShouldPlan(gate)
+            if (Program.ActionGateShouldPlan(gate)
                 || (!string.IsNullOrWhiteSpace(intent) && intent != "none" && intent != "roleplay_only")
                 || ReadBool(ReadDictionary(parsed, "conceptionGate"), "needed", false)
                 || ReadBool(ReadDictionary(parsed, "conceptionGate"), "completed", false)
@@ -106,7 +106,7 @@ namespace ReignBetaServer
             foreach (string key in new[] { "reply", "body" })
                 if (patch.ContainsKey(key) && ReadString(patch, key, "") != ReadFirstString(original, key, "reply", "body"))
                     return null;
-            var merged = CloneDictionary(original);
+            var merged = Program.CloneDictionary(original);
             var before = ReadDictionaryList(original, "proposalDecisions");
             var after = ReadDictionaryList(patch, "proposalDecisions");
             if (original.ContainsKey("proposalDecisions"))
@@ -117,7 +117,7 @@ namespace ReignBetaServer
                 {
                     if (ReadString(before[i], "topic", "") != ReadString(after[i], "topic", "")
                         || ReadString(before[i], "objectId", "") != ReadString(after[i], "objectId", "")) return null;
-                    var entry = CloneDictionary(before[i]);
+                    var entry = Program.CloneDictionary(before[i]);
                     foreach (string key in new[] { "playerQuote", "replyQuote", "evidenceKeys" })
                         if (after[i].ContainsKey(key)) entry[key] = after[i][key];
                     corrected.Add(entry);
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             if (original == null || candidate == null) return;
             candidate.Remove("repairStatus");
             var status = ReadDictionary(original, "repairStatus");
-            if (status != null) candidate["repairStatus"] = CloneDictionary(status);
+            if (status != null) candidate["repairStatus"] = Program.CloneDictionary(status);
             else if (ReadFirstString(original, "reply", "body").TrimEnd().EndsWith(".,", StringComparison.Ordinal))
                 candidate["repairStatus"] = new Dictionary<string, object>
                 { ["allChecksCleared"] = false, ["stageCount"] = 1 };
@@ -157,7 +157,7 @@ namespace ReignBetaServer
                     : (fallbackText ?? "").TrimEnd().EndsWith(".,", StringComparison.Ordinal);
         }
 
-        private static void PreserveConversationVerification(Dictionary<string, object> payload, Dictionary<string, object> llm)
+        internal static void PreserveConversationVerification(Dictionary<string, object> payload, Dictionary<string, object> llm)
         {
             var repair = ReadDictionary(TryParseJsonObject(ReadString(llm, "content", "")), "repairStatus");
             if (repair != null) payload["repairStatus"] = repair;

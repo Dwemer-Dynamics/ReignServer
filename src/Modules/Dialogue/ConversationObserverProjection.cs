@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string PrivateNarrativePattern = @"\b(?:remember\w*|recall\w*|recollect\w*|recognition|realiz\w*|realise\w*|knows?|knew|think\w*|thought\w*|mind|memor(?:y|ies)|privat\w*|secret\w*|unspoken|understood|misunderst\w*|wonder\w*|ponder\w*|assum\w*|suspect\w*|imagin\w*|dream\w*|notic\w*|intends?|intended|wishes?|wished|hopes?|hoped|feels?|felt)\b|\b(?:see|sees|saw)\s+that\b|\b(?:doesn['’]t|does not|didn['’]t|did not)\s+(?:name|expect|mean)|\b(?:meant|means?)\s+(?:more|only|nothing|something)\b|\b(?:conversation|night|moment)\s+(?:they|we)\s+(?:had|shared)\b";
         private const string ObservableActionPattern = @"\b(?:smiles?|smiled|nods?|nodded|glances?|glanced|looks?|looked|turns?|turned|holds?|held|offers?|offered|reaches?|reached|touch\w*|takes?|took|gives?|gave|puts?|placed|places?|sits?|sat|stands?|stood|steps?|stepped|walks?|walked|shifts?|shifted|straightens?|straightened|watches?|watched|studies|studied|brush\w*|tilts?|tilted|laugh\w*|sigh\w*|frowns?|frowned|raises?|raised|lowers?|lowered|drops?|dropped|moves?|moved|meets?|meeting|met|says?|said|asks?|asked|whispers?|whispered|voice|gaze|cheeks|brows?|mouth|eyes|hands?|fingers)\b";
@@ -135,7 +135,7 @@ namespace ReignBetaServer
                 "coverage", own ? "author_source" : "spoken_and_locally_supported_observable_spans");
         }
 
-        private static string ObserverConversationText(string text, string speaker, string observer, bool playerNarration = false) =>
+        internal static string ObserverConversationText(string text, string speaker, string observer, bool playerNarration = false) =>
             ReadString(ProjectConversationNarration(text, speaker ?? "", observer ?? "", playerNarration || speaker == "__player_source__"), "visibleText", "");
 
         // Only canonical accepted player rows carry this server-owned binding.
@@ -173,7 +173,7 @@ namespace ReignBetaServer
                 {
                     string name = ReadFirstString(line, "speaker", "speakerName", "speaker_name", "name");
                     var matching = profiles.Where(p => ReadString(p, "name", "") == name).ToList();
-                    if (matching.Count == 1) speaker = CharacterIdFrom(matching[0]);
+                    if (matching.Count == 1) speaker = Program.CharacterIdFrom(matching[0]);
                 }
                 string text = ReadString(copy, "text", "");
                 string audience = ReadString(copy, "audienceHeroStringId", "");
@@ -195,7 +195,7 @@ namespace ReignBetaServer
         // Model-authored paraphrases may mix an observation and an internal
         // interpretation. Keep that complete interpretation with its author;
         // publish a separate exact observable account for the actual audience.
-        private static List<Dictionary<string, object>> ScopeConversationMemoryWrites(
+        internal static List<Dictionary<string, object>> ScopeConversationMemoryWrites(
             List<Dictionary<string, object>> writes, string hero, string player, string playerText, string reply,
             string eventId, List<string> participants)
         {
@@ -222,13 +222,13 @@ namespace ReignBetaServer
                     "visibility", "private", "observerScope", "observable_source_spans", "evidenceType", "observation",
                     "sourceValidation", "supported_observable_spans", "observerProjection", TestDict(
                         "player", ProjectConversationNarration(playerText, player, "", true), "npc", ProjectConversationNarration(reply, hero, "")),
-                    "importance", result.Max(r => MemoryImportance01(r, .55d))));
+                    "importance", result.Max(r => Program.MemoryImportance01(r, .55d))));
             }
             return result;
         }
 
-        private static List<Dictionary<string, object>> ProjectRetrievedConversationMemories(ReignDbConnection connection,
-            List<Dictionary<string, object>> rows, KnowledgeAccessContext knowledge)
+        internal static List<Dictionary<string, object>> ProjectRetrievedConversationMemories(ReignDbConnection connection,
+            List<Dictionary<string, object>> rows, Program.KnowledgeAccessContext knowledge)
         {
             var result = new List<Dictionary<string, object>>();
             foreach (var row in rows ?? new List<Dictionary<string, object>>())
@@ -236,7 +236,7 @@ namespace ReignBetaServer
                 if (ReadString(row, "owner_id", "") == knowledge.NpcId || !HasPrivateNarrativeMeaning(ReadString(row, "summary", "")))
                 { result.Add(row); continue; }
                 string eventId = ReadString(row, "event_id", "");
-                var originals = eventId.Length == 0 ? new List<Dictionary<string, object>>() : QuerySql(connection,
+                var originals = eventId.Length == 0 ? new List<Dictionary<string, object>>() : Program.QuerySql(connection,
                     "SELECT * FROM conversation_turns WHERE event_id=$event AND status='active' ORDER BY accepted_sequence;", TestDict("event", eventId))
                     .Where(r => PrecisionTurnVisible(r, knowledge.NpcId, knowledge, connection)).ToList();
                 // A mixed-scope legacy paraphrase without an eligible original is

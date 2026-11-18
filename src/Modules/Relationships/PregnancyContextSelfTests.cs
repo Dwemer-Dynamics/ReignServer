@@ -77,19 +77,19 @@ VALUES('stale_conception_news','stale_conception','kingdom','realm',28,'realm_ne
                 Program.ExecuteSql(c, "UPDATE conception_contexts SET world_day=40 WHERE timeline_id='test' AND pregnancy_id='pregnancy';");
                 Check("dated_letter_excludes_future_canonical_snapshot", !BuildCurrentPregnancyPrompt(campaign, "test", "mother", 28, staleProfile).Contains("ARE pregnant"));
                 Program.ExecuteSql(c, "UPDATE conception_contexts SET world_day=28 WHERE timeline_id='test' AND pregnancy_id='pregnancy';");
-                Program.EnsureBanterSchema(c);
+                DialogueService.EnsureBanterSchema(c);
                 var banterHeroes = new List<Dictionary<string, object>> { TestDict("heroStringId", "mother", "name", "Ingunde", "age", 30,
                     "isAlive", true, "isLord", true, "currentPartyId", "main_party"), TestDict("heroStringId", "banter_listener", "name", "Listener", "age", 30,
                     "isAlive", true, "isLord", true, "currentPartyId", "main_party") };
-                var banterDraft = Program.ValidateBanterDraft(Json.Serialize(TestDict("speakerId", "mother", "text", "I am pregnant.",
+                var banterDraft = DialogueService.ValidateBanterDraft(Json.Serialize(TestDict("speakerId", "mother", "text", "I am pregnant.",
                     "pregnancyDisclosures", ReadDictionaryList(Disclosure("pregnancy", "I am pregnant."), "pregnancyDisclosures"))),
                     new List<string> { "mother", "banter_listener" }, TestDict("maxCharacters", 360), new());
-                string generation = Program.BanterGeneration(c), session = "pregnancy_banter";
-                Program.WriteBanter(c, TestDict("sessionId", session, "timelineId", "test", "generation", generation, "state", "ready", "revision", 0,
+                string generation = DialogueService.BanterGeneration(c), session = "pregnancy_banter";
+                DialogueService.WriteBanter(c, TestDict("sessionId", session, "timelineId", "test", "generation", generation, "state", "ready", "revision", 0,
                     "accepted", 0, "playerHeroStringId", "player", "playerName", "Player", "heroIds", new[] { "mother", "banter_listener" },
                     "heroes", banterHeroes, "drafts", new[] { banterDraft }, "options", TestDict("maxCharacters", 360)));
                 Check("banter_draft_disclosure_grants_nothing", !ReadPregnancyKnowledge(c, "test", "pregnancy", "banter_listener").Pregnancy);
-                var acceptedBanter = Program.PartyBanterApi("accept", TestDict("campaignId", campaign, "timelineId", "test", "worldDay", 28d,
+                var acceptedBanter = DialogueService.PartyBanterApi("accept", TestDict("campaignId", campaign, "timelineId", "test", "worldDay", 28d,
                     "generation", generation, "sessionId", session, "expectedRevision", 0, "sequence", 1, "partyId", "main_party", "heroes", banterHeroes));
                 Check("accepted_banter_grants_listener_knowledge_without_gameplay_effects", ReadInt(acceptedBanter, "accepted", 0) == 1
                     && ReadPregnancyKnowledge(c, "test", "pregnancy", "banter_listener").Pregnancy, acceptedBanter);
@@ -111,17 +111,17 @@ VALUES('stale_conception_news','stale_conception','kingdom','realm',28,'realm_ne
                     && rules.Any(rule => ReadString(rule, "audienceId", "") == "mother"));
                 foreach (string mode in new[] { "in_person", "event", "correspondence" })
                 {
-                    var profile = Program.PromptParityProfile(); profile["heroStringId"] = "mother";
+                    var profile = DialogueService.PromptParityProfile(); profile["heroStringId"] = "mother";
                     profile["isPregnant"] = true; profile["pregnancyContexts"] = new[] { TryParseJsonObject(Json.Serialize(f)) };
                     var empty = TestDict(); var lines = new List<Dictionary<string, object>>();
-                    var payload = Program.PromptParityPayload(mode, false); payload["timelineId"] = "test";
+                    var payload = DialogueService.PromptParityPayload(mode, false); payload["timelineId"] = "test";
                     payload["playerHeroStringId"] = "player"; payload["worldDay"] = 28d; payload["mode"] = mode;
                     var motive = TestDict("sanitizedState", empty, "prompt", "", "relationshipNpcToTarget", empty, "relationshipNpcToSpouse", empty);
-                    Program.PromptEnvelope envelope = mode == "correspondence"
-                        ? Program.BuildCorrespondencePromptEnvelope(campaign, "mother", "Ingunde", "player", "Player", 28d, "How are you?", profile, Program.PromptParityCharacteristics(), empty, "", payload)
+                    DialogueService.PromptEnvelope envelope = mode == "correspondence"
+                        ? DialogueService.BuildCorrespondencePromptEnvelope(campaign, "mother", "Ingunde", "player", "Player", 28d, "How are you?", profile, DialogueService.PromptParityCharacteristics(), empty, "", payload)
                         : mode == "in_person"
-                            ? Program.BuildDialoguePromptEnvelope(campaign, "mother", "Ingunde", "Player", "Player", "How are you?", "At court.", profile, Program.PromptParityCharacteristics(), empty, empty, empty, lines, lines, lines, lines, Program.PromptParityIdentity(), payload, "", "")
-                            : Program.BuildEventPromptEnvelope(campaign, "fixture_event", "mother", "Ingunde", "Player", "Player", "How are you?", "At court.", payload, profile, Program.PromptParityCharacteristics(), empty, empty, empty, lines, lines, lines, lines, Program.PromptParityIdentity(), "", "", motive);
+                            ? DialogueService.BuildDialoguePromptEnvelope(campaign, "mother", "Ingunde", "Player", "Player", "How are you?", "At court.", profile, DialogueService.PromptParityCharacteristics(), empty, empty, empty, lines, lines, lines, lines, DialogueService.PromptParityIdentity(), payload, "", "")
+                            : DialogueService.BuildEventPromptEnvelope(campaign, "fixture_event", "mother", "Ingunde", "Player", "Player", "How are you?", "At court.", payload, profile, DialogueService.PromptParityCharacteristics(), empty, empty, empty, lines, lines, lines, lines, DialogueService.PromptParityIdentity(), "", "", motive);
                     string final = Json.Serialize(envelope.Messages);
                     Check("final_envelope_" + mode, final.Contains("ARE pregnant") && final.Contains("Actual Father") && final.Contains("pregnancyDisclosures"));
                 }
@@ -134,12 +134,12 @@ VALUES('stale_conception_news','stale_conception','kingdom','realm',28,'realm_ne
                 using (var future = Program.OpenCampaignConnection(campaign))
                     GrantPregnancyKnowledge(future, "test", f, "future_observer", true, true, "future", "future_hash", 29d);
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "pregnancy_before");
-                Program.AdvanceMemoryRestoreGeneration(campaign, point);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign, point);
                 using (var restored = Program.OpenCampaignConnection(campaign))
                 {
                     BindRecoveredPregnancyKnowledge(restored, "test", "sibling", 8, "pregnancy_head");
                     Check("unverified_sibling_has_no_knowledge", !ReadPregnancyKnowledge(restored, "sibling", "pregnancy", "player").Pregnancy);
-                    Program.BindRecoveredLetterSources(restored, "test", "recovered", 8, "pregnancy_head");
+                    DialogueService.BindRecoveredLetterSources(restored, "test", "recovered", 8, "pregnancy_head");
                     BindRecoveredPregnancyKnowledge(restored, "test", "recovered", 8, "pregnancy_head");
                     Check("actual_snapshot_recovery_retains_known_paternity", ReadPregnancyKnowledge(restored, "recovered", "pregnancy", "player").Paternity);
                     Check("snapshot_retains_fractional_day_discovery", ReadPregnancyKnowledge(restored, "recovered", "pregnancy", "fractional_observer").Pregnancy);

@@ -683,9 +683,9 @@ namespace ReignBetaServer
         }
     }
 
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static void EnrichCodexGenerationContext(
+        internal static void EnrichCodexGenerationContext(
             Dictionary<string, object> settings,
             Dictionary<string, object> payload,
             string requestType,
@@ -693,7 +693,7 @@ namespace ReignBetaServer
             Dictionary<string, object> context,
             Dictionary<string, object> requestBody)
         {
-            if (!UsesCodexSubscription(settings) || context == null || requestBody == null) return;
+            if (!Program.UsesCodexSubscription(settings) || context == null || requestBody == null) return;
             payload = payload ?? new Dictionary<string, object>();
             Dictionary<string, object> options = CodexConversationContracts.NormalizeOptions(
                 ReadDictionary(settings, "codexOptions"));
@@ -719,7 +719,7 @@ namespace ReignBetaServer
                 ReadString(authoritativeMetadata, "timelineId", ""),
                 ReadString(authoritativeMetadata, "loadGeneration", ""),
                 ReadString(context, "timelineId", ""),
-                CodexConversationTimeline(campaignId));
+                Program.CodexConversationTimeline(campaignId));
             string loadGeneration = FirstNonEmpty(
                 ReadString(authoritativeMetadata, "loadGeneration", ""),
                 ReadString(context, "loadGenerationId", ""),
@@ -767,7 +767,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> compact = CodexConversationContracts.CompactMetadataPolicy(requestType);
                 context["compactMetadata"] = compact;
-                List<Dictionary<string, object>> requestMessages = messages.Select(CloneDictionary).ToList();
+                List<Dictionary<string, object>> requestMessages = messages.Select(Program.CloneDictionary).ToList();
                 if (requestMessages.Count > 0)
                 {
                     int last = requestMessages.Count - 1;
@@ -796,7 +796,7 @@ namespace ReignBetaServer
 
             string authorityHash = CodexConversationContracts.AuthorityHash(payload, authoritativeMetadata, context);
             context["authorityHash"] = authorityHash;
-            Dictionary<string, object> schemaPayload = CloneDictionary(payload);
+            Dictionary<string, object> schemaPayload = Program.CloneDictionary(payload);
             foreach (KeyValuePair<string, object> pair in authoritativeMetadata)
                 if (!schemaPayload.ContainsKey(pair.Key)) schemaPayload[pair.Key] = pair.Value;
             // This private marker is created only from the active server-owned
@@ -879,10 +879,10 @@ namespace ReignBetaServer
             }
             Dictionary<string, string> actual = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, string> defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, string> builtIns = DefaultPromptTemplates();
+            Dictionary<string, string> builtIns = Program.DefaultPromptTemplates();
             foreach (string name in CodexConversationSchemas.TemplateNames(kind))
             {
-                try { actual[name] = LoadPromptTemplate(name); }
+                try { actual[name] = Program.LoadPromptTemplate(name); }
                 catch { actual[name] = ""; }
                 defaults[name] = builtIns.ContainsKey(name) ? builtIns[name] : "";
             }

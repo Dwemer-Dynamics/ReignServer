@@ -902,7 +902,7 @@ namespace ReignBetaServer
                     ["target"] = target.Data
                 }
             };
-            Dictionary<string, object> opportunity = Program.CalculatePerceivedOpportunity(actor.Data, characteristics, opportunityPayload, new Dictionary<string, object> { ["identityState"] = "known" });
+            Dictionary<string, object> opportunity = DialogueService.CalculatePerceivedOpportunity(actor.Data, characteristics, opportunityPayload, new Dictionary<string, object> { ["identityState"] = "known" });
             bool closeKin = RelationshipSimulationCloseKin(actor, target);
             bool suitable = ReadBool(actor.Data, "isFemale", false) != ReadBool(target.Data, "isFemale", false) && !closeKin;
             Dictionary<string, object> payload = new Dictionary<string, object>
@@ -933,7 +933,7 @@ namespace ReignBetaServer
                     ["lastEventDay"] = romanceThread.LastEventDay
                 };
             }
-            return Program.CalculateRomanticPosture("simulation:" + run.RunId, actorId, targetId, actor.Data, characteristics,
+            return DialogueService.CalculateRomanticPosture("simulation:" + run.RunId, actorId, targetId, actor.Data, characteristics,
                 relationshipContext,
                 new Dictionary<string, object> { ["facets"] = spouseFacets }, opportunity, payload, "autonomous_relationship", "A private autonomous social opportunity.");
         }

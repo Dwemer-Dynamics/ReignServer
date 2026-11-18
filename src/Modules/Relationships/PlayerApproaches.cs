@@ -41,17 +41,17 @@ ON CONFLICT(timeline_id,state_key) DO UPDATE SET value_json=EXCLUDED.value_json;
 
         // Runs on the accepted-source transaction: observations and contact resets
         // can never outlive a rolled-back reply. Presence is captured on the game thread.
-        internal static Dictionary<string, object> RecordAcceptedPlayerAttention(ReignDbConnection c, Program.AcceptedConversationUnit unit,
+        internal static Dictionary<string, object> RecordAcceptedPlayerAttention(ReignDbConnection c, DialogueService.AcceptedConversationUnit unit,
             List<Dictionary<string, object>> sourceRows, PlayerApproachOptions options = null)
         {
             string mode = ReadFirstString(unit.Payload, "channel", "conversationMode");
-            if (mode.Contains("letter") || mode.Contains("correspondence") || Program.IsTechnicalConversationNotice(unit.Reply))
+            if (mode.Contains("letter") || mode.Contains("correspondence") || DialogueService.IsTechnicalConversationNotice(unit.Reply))
                 return TestDict("status", "excluded");
             var presence = ReadDictionaryList(unit.Payload, "playerAttentionPresence");
             var speaker = presence.FirstOrDefault(p => ReadString(p, "heroId", "") == unit.Hero);
             if (speaker == null || unit.Hero == unit.Player) return TestDict("status", "no_native_presence");
             EnsurePlayerApproachSchema(c);
-            string timeline = Program.ContinuityTimeline(unit.Payload);
+            string timeline = DialogueService.ContinuityTimeline(unit.Payload);
             int day = (int)Math.Floor(ReadDouble(unit.Payload, "worldDay", 0d));
             string exchange = ReadFirstString(unit.Payload, "sceneTurnId", "exchangeId", "turnId");
             string source = ReadString(sourceRows.LastOrDefault(r => ReadString(r, "speaker_id", "") == unit.Hero), "turn_id", "");
@@ -94,7 +94,7 @@ VALUES($timeline,$player,$observer,$target,$day,$name,$location,$exchange,$sourc
 
         internal static Dictionary<string, object> PlayerApproachEvaluateApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
         {
-            string campaign = ReadString(p, "campaignId", "default"), timeline = Program.ContinuityTimeline(p), player = ReadString(p, "playerId", "");
+            string campaign = ReadString(p, "campaignId", "default"), timeline = DialogueService.ContinuityTimeline(p), player = ReadString(p, "playerId", "");
             string kind = ReadString(p, "kind", "shared");
             double worldDay = ReadDouble(p, "worldDay", -1);
             if (player.Length == 0 || worldDay < 0 || double.IsNaN(worldDay) || double.IsInfinity(worldDay)
@@ -212,7 +212,7 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
 
         internal static Dictionary<string, object> PlayerApproachDecisionApi(Dictionary<string, object> p, PlayerApproachOptions options = null)
         {
-            string campaign = ReadString(p, "campaignId", "default"), timeline = Program.ContinuityTimeline(p), id = ReadString(p, "requestId", "");
+            string campaign = ReadString(p, "campaignId", "default"), timeline = DialogueService.ContinuityTimeline(p), id = ReadString(p, "requestId", "");
             string choice = ReadString(p, "choice", "");
             if (id.Length == 0 || !new[] { "accept", "refuse", "cancel", "acknowledge" }.Contains(choice)) return TestDict("ok", false, "error", "Invalid approach decision.");
             lock (CampaignRelationshipWriteLock(campaign))
@@ -289,7 +289,7 @@ GROUP BY target_id;", TestDict("timeline", timeline, "player", player, "hero", h
                 EnsurePlayerApproachSchema(c);
                 return Program.QuerySql(c, @"SELECT event_text,source_id,calendar_day,created_ts FROM player_attention_events
 WHERE timeline_id=$timeline AND observer_id=$hero AND player_id=$player ORDER BY sequence_id DESC LIMIT 80;",
-                    TestDict("timeline", Program.ContinuityTimeline(payload), "hero", hero, "player", player)).Select(r => TestDict("role", "system", "speaker", "Bannerlord Reign",
+                    TestDict("timeline", DialogueService.ContinuityTimeline(payload), "hero", hero, "player", player)).Select(r => TestDict("role", "system", "speaker", "Bannerlord Reign",
                         "text", ReadString(r, "event_text", ""), "channel", "witnessed_player_attention", "sourceId", ReadString(r, "source_id", ""),
                         "worldDay", ReadInt(r, "calendar_day", 0), "ts", ReadLong(r, "created_ts", 0))).Reverse().ToList();
             }
@@ -319,7 +319,7 @@ WHERE timeline_id=$timeline AND observer_id=$hero AND player_id=$player ORDER BY
         internal static string PlayerAttentionPrompt(string campaign, string hero, Dictionary<string, object> payload)
         {
             if (payload == null || !payload.ContainsKey("playerAttentionPresence")) return "";
-            string timeline = Program.ContinuityTimeline(payload), player = ReadFirstString(payload, "playerHeroStringId", "playerId");
+            string timeline = DialogueService.ContinuityTimeline(payload), player = ReadFirstString(payload, "playerHeroStringId", "playerId");
             using (var c = Program.OpenCampaignConnection(campaign))
             {
                 EnsurePlayerApproachSchema(c);
@@ -337,8 +337,8 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                         + (ReadBool(payload, "rescueOpening", false) ? Program.LoadPromptTemplate("rescue_opening.txt")
                             : "The rescue opening has already been heard. Respond to the player's current contribution; do not restart your thanks or invent further rescue facts.");
                     if (ReadBool(payload, "rescueOpening", false)) rescuePrompt += "\n" + IndividualNpcOpeningCue;
-                    context += "\n\n" + Program.RenderContinuityRecord("rescue_" + Program.PromptHash(Json.Serialize(rescue)).Substring(0, 24),
-                        "native_rescue", hero, Program.GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, rescuePrompt);
+                    context += "\n\n" + DialogueService.RenderContinuityRecord("rescue_" + DialogueService.PromptHash(Json.Serialize(rescue)).Substring(0, 24),
+                        "native_rescue", hero, DialogueService.GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, rescuePrompt);
                 }
                 string id = ReadString(payload, "approachRequestId", "");
                 if (id.Length == 0) return context;
@@ -360,8 +360,8 @@ AND observer_id=$hero AND player_id=$player ORDER BY calendar_day DESC,sequence_
                 // Keep them with the saved authority through whole-record packing;
                 // projecting an empty original player turn must not erase the cue.
                 if (opening) approachPrompt += "\n" + IndividualNpcOpeningCue;
-                context += "\n\n" + Program.RenderContinuityRecord("player_approach_" + Program.PromptHash(id + "|" + hero).Substring(0, 24),
-                    "player_approach_brief", hero, Program.GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, approachPrompt);
+                context += "\n\n" + DialogueService.RenderContinuityRecord("player_approach_" + DialogueService.PromptHash(id + "|" + hero).Substring(0, 24),
+                    "player_approach_brief", hero, DialogueService.GroupConversationSessionId(payload), ReadDouble(payload, "worldDay", 0d), 115, true, approachPrompt);
                 return context;
             }
         }

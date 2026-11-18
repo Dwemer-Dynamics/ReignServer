@@ -7,7 +7,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static string FinalGauntletCatalogPath()
         {
@@ -18,7 +18,7 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletCatalogBuildApi(
                 Dictionary<string, object> payload)
         {
@@ -38,14 +38,14 @@ namespace ReignBetaServer
                     ["cases"] = catalog.Select(
                         FinalGauntletDescriptorMap).Cast<object>().ToList()
                 };
-            WriteJsonObject(FinalGauntletCatalogPath(), artifact);
+            Program.WriteJsonObject(FinalGauntletCatalogPath(), artifact);
             artifact["ok"] = true;
             artifact["path"] = FinalGauntletCatalogPath();
             return artifact;
         }
 #endif
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletStateFingerprintApi(
                 Dictionary<string, object> payload)
         {
@@ -228,11 +228,11 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> FinalGauntletCatalogApi(
+        internal static Dictionary<string, object> FinalGauntletCatalogApi(
             Dictionary<string, string> query)
         {
             Dictionary<string, object> catalog =
-                ReadJsonObject(FinalGauntletCatalogPath());
+                Program.ReadJsonObject(FinalGauntletCatalogPath());
             return catalog.Count > 0
                 ? new Dictionary<string, object>
                 {
@@ -246,12 +246,12 @@ namespace ReignBetaServer
 #endif
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> FinalGauntletRunStartApi(
+        internal static Dictionary<string, object> FinalGauntletRunStartApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             if (string.IsNullOrWhiteSpace(campaignId))
                 return new Dictionary<string, object>
                 {
@@ -268,7 +268,7 @@ namespace ReignBetaServer
                         "An authoritative campaign/clan census fingerprint is required."
                 };
             Dictionary<string, object> catalogArtifact =
-                ReadJsonObject(FinalGauntletCatalogPath());
+                Program.ReadJsonObject(FinalGauntletCatalogPath());
             if (catalogArtifact.Count == 0)
                 catalogArtifact = FinalGauntletCatalogBuildApi(payload);
             List<FinalGauntletCaseDescriptor> approved =
@@ -346,12 +346,12 @@ namespace ReignBetaServer
 #endif
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> FinalGauntletLeaseApi(
+        internal static Dictionary<string, object> FinalGauntletLeaseApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
@@ -366,7 +366,7 @@ namespace ReignBetaServer
                 {
                     string instanceId =
                         ReadString(leased, "caseInstanceId", "");
-                    leased["case"] = QuerySql(
+                    leased["case"] = Program.QuerySql(
                         connection,
                         @"SELECT * FROM final_gauntlet_cases
 WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
@@ -383,14 +383,14 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
 #endif
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletPromoteApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             Dictionary<string, object> catalog =
-                ReadJsonObject(FinalGauntletCatalogPath());
+                Program.ReadJsonObject(FinalGauntletCatalogPath());
             if (catalog.Count == 0)
                 catalog = FinalGauntletCatalogBuildApi(payload);
             using (ReignDbConnection connection =
@@ -417,12 +417,12 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
         }
 #endif
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletResumeApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
                 return FinalConversationGauntletScheduler.Resume(
@@ -432,24 +432,24 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
                     ReadStringList(payload, "supportedModes"));
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletPauseApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
                 return FinalConversationGauntletScheduler.RequestPause(
                     connection, ReadString(payload, "runId", ""));
         }
 
-        private static Dictionary<string, object> FinalGauntletResultApi(
+        internal static Dictionary<string, object> FinalGauntletResultApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
@@ -503,7 +503,7 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
             if (liveRun.Count > 0)
                 evidence["sourceAuditEntries"] =
                     WorldSimulationService.CollectLiveTestAuditEvidence(liveRun);
-            ExecuteSql(
+            Program.ExecuteSql(
                 connection,
                 @"INSERT INTO final_gauntlet_evidence(
 run_id,case_instance_id,evidence_key,schema_version,payload_json,created_ts)
@@ -522,12 +522,12 @@ created_ts=excluded.created_ts;",
                 });
         }
 
-        private static Dictionary<string, object> FinalGauntletCancelApi(
+        internal static Dictionary<string, object> FinalGauntletCancelApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
@@ -540,7 +540,7 @@ created_ts=excluded.created_ts;",
             }
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletActionEvidenceApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -567,12 +567,12 @@ created_ts=excluded.created_ts;",
             };
         }
 
-        private static Dictionary<string, object>
+        internal static Dictionary<string, object>
             FinalGauntletFaultArmApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(
-                payload, "campaignId", ResolveLogCampaignId(""));
+                payload, "campaignId", Program.ResolveLogCampaignId(""));
             string runId = ReadString(payload, "runId", "");
             Dictionary<string, object> runtime =
                 WorldSimulationService.LoadLiveTestRuntime(campaignId);
@@ -616,7 +616,7 @@ created_ts=excluded.created_ts;",
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> FinalGauntletRunStatusApi(
+        internal static Dictionary<string, object> FinalGauntletRunStatusApi(
             Dictionary<string, string> query,
             bool includeReport)
         {
@@ -624,7 +624,7 @@ created_ts=excluded.created_ts;",
             string campaignId = query.TryGetValue(
                 "campaignId", out string campaign)
                 ? campaign
-                : ResolveLogCampaignId("");
+                : Program.ResolveLogCampaignId("");
             string runId = query.TryGetValue("runId", out string run)
                 ? run : "";
             using (ReignDbConnection connection =
@@ -645,17 +645,17 @@ created_ts=excluded.created_ts;",
                 stored["ok"] = true;
                 if (includeReport)
                 {
-                    stored["attempts"] = QuerySql(
+                    stored["attempts"] = Program.QuerySql(
                         connection,
                         @"SELECT * FROM final_gauntlet_attempts
 WHERE run_id=$run ORDER BY case_instance_id,attempt_number;",
                         new Dictionary<string, object> { ["run"] = runId });
-                    stored["assertions"] = QuerySql(
+                    stored["assertions"] = Program.QuerySql(
                         connection,
                         @"SELECT * FROM final_gauntlet_assertions
 WHERE run_id=$run ORDER BY case_instance_id,assertion_id;",
                         new Dictionary<string, object> { ["run"] = runId });
-                    stored["evidence"] = QuerySql(
+                    stored["evidence"] = Program.QuerySql(
                         connection,
                         @"SELECT run_id,case_instance_id,evidence_key,
 schema_version,created_ts FROM final_gauntlet_evidence
@@ -670,19 +670,19 @@ WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
 #endif
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> FinalGauntletReviewPackApi(
+        internal static Dictionary<string, object> FinalGauntletReviewPackApi(
             Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
             string campaignId = query.TryGetValue(
                 "campaignId", out string campaign)
-                ? campaign : ResolveLogCampaignId("");
+                ? campaign : Program.ResolveLogCampaignId("");
             string runId = query.TryGetValue("runId", out string run)
                 ? run : "";
             using (ReignDbConnection connection =
                 FinalGauntletStore.OpenControlConnection())
             {
-                List<Dictionary<string, object>> items = QuerySql(
+                List<Dictionary<string, object>> items = Program.QuerySql(
                     connection,
                     @"SELECT review_id,case_instance_id,
 blinded_payload_json,created_ts
@@ -696,7 +696,7 @@ ORDER BY review_id;",
                 {
                     ["ok"] = true,
                     ["runId"] = runId,
-                    ["items"] = QuerySql(
+                    ["items"] = Program.QuerySql(
                         connection,
                         @"SELECT review_id,case_instance_id,
 blinded_payload_json,created_ts
@@ -733,7 +733,7 @@ ORDER BY review_id;",
         private static List<FinalGauntletCaseDescriptor>
             BuildFinalGauntletRuntimeCatalog()
         {
-            string root = FindVerificationSourceRoot();
+            string root = Program.FindVerificationSourceRoot();
             string enumPath = string.IsNullOrWhiteSpace(root)
                 ? string.Empty
                 : Path.Combine(
@@ -742,7 +742,7 @@ ORDER BY review_id;",
                     "src",
                     "World",
                     "ReignWorldActionType.cs");
-            List<string> actions = DiscoverActionNames(enumPath)
+            List<string> actions = Program.DiscoverActionNames(enumPath)
                 .Where(value => !string.Equals(
                     value, "Unknown",
                     StringComparison.OrdinalIgnoreCase))

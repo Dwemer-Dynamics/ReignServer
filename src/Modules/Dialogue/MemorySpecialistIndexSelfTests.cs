@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static Dictionary<string, object> SpecialistFixtureTurn(ReignDbConnection connection, string campaign,
             string id, string speaker, string text, double day = 10, long ts = 10, string timeline = "main",
@@ -13,23 +13,23 @@ namespace ReignBetaServer
             audience ??= new[] { "npc", "player", "listener" };
             session = FirstNonEmpty(session, "session_" + id);
             var payload = new Dictionary<string, object>(extra ?? TestDict()) { ["timelineId"] = timeline, ["playerHeroStringId"] = "player", ["playerName"] = "Michael" };
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
+            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conversation_sessions(session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                 TestDict("session", session, "campaign", campaign, "ts", ts, "audience", Json.Serialize(audience), "payload", Json.Serialize(payload)));
             InsertConversationTurn(connection, id, session, id, (int)ts, id, role, speaker, speaker == "npc" ? "Ira" : speaker,
                 text, "in_person", day, ts, "", audience.ToList(), payload);
-            return QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
+            return Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Single();
         }
 
         private static List<Dictionary<string, object>> RunMemorySpecialistIndexSelfTests()
         {
-            if (string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)) throw new InvalidOperationException("Specialist contracts require isolated Verification Lab.");
+            if (string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)) throw new InvalidOperationException("Specialist contracts require isolated Verification Lab.");
             var results = new List<Dictionary<string, object>>();
             void Check(string id, bool passed, object data = null) => results.Add(TestDict("caseId", "memory_specialist_" + id, "passed", passed, "summary", id, "data", data));
             string campaign = "memory_specialist_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var connection = OpenCampaignConnection(campaign);
+                using var connection = Program.OpenCampaignConnection(campaign);
                 var source = SpecialistFixtureTurn(connection, campaign, "source", "npc", "Ira asked Michael about the little plant. Michael had already answered her.");
                 var doc = BuildMemorySpecialistDocument(source);
                 Check("speaker_is_source_identity_not_mentioned_actor", ReadString(doc, "speakerId", "") == "npc"
@@ -83,7 +83,7 @@ VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                     && ReadString(BuildMemorySpecialistDocument(source, RebindMemoryExtractionReplay(capture, "source", modelHash)), "extractorStatus", "") == "local_metadata");
                 capture["result"] = extraction;
                 StoreMemorySpecialistDocument(connection, source, extraction);
-                var storedExtraction = TryParseJsonObject(ReadString(QuerySql(connection,
+                var storedExtraction = TryParseJsonObject(ReadString(Program.QuerySql(connection,
                     "SELECT payload_json FROM memory_specialist_sources WHERE turn_id='source';").Single(), "payload_json", "{}"));
                 Check("captured_extraction_uses_production_acceptance_and_storage", ReadString(storedExtraction, "extractorStatus", "") == "source_bound_candidates"
                     && ReadInt(storedExtraction, "rejectedSpans", 0) == 1 && ReadStringList(storedExtraction, "actorIds").Count == 0
@@ -103,7 +103,7 @@ VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                 // topic; annotations widen discovery but never filter lexical recall.
                 StoreMemorySpecialistDocument(connection, source);
                 SpecialistFixtureTurn(connection, campaign, "source_player", "player", "The herb grows beside a stream.", ts:11, session: "session_source", role: "player");
-                var knowledge = new KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };
+                var knowledge = new Program.KnowledgeAccessContext { NpcId = "npc", PlayerId = "player", TimelineId = "main", WorldDay = 20 };
                 var plan = PlanMemoryQuery("npc", "player", "What did we say about botany?", TestDict("timelineId", "main", "worldDay", 20d));
                 Check("paraphrased_topic_finds_original", FindMemorySpecialistTurns(connection, plan, knowledge, 4, 32, true).Any(r => ReadString(r, "turn_id", "") == "source"));
                 var legacy=SearchExactConversationHistory(connection,"npc","botany",TestDict(),12000,null,"",30,knowledge);
@@ -128,31 +128,31 @@ VALUES($session,$campaign,'npc','player','closed',1,$ts,$audience,$payload);",
                     .Any(r=>ReadString(r,"turn_id","")=="unrelated"));
                 Check("clarification_anchor_retains_preceding_claim", ExpandPrecisionQuestionContext(connection,new(){clarification,response},knowledge)
                     .Any(r=>ReadString(r,"turn_id","")=="claim"));
-                var beforeClarification = new KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=41 };
+                var beforeClarification = new Program.KnowledgeAccessContext { NpcId="npc",PlayerId="player",TimelineId="main",WorldDay=20,AsOfTimestamp=41 };
                 Check("future_clarification_is_not_leaked", !ExpandPrecisionQuestionContext(connection,new(){assumption},beforeClarification)
                     .Any(r=>ReadString(r,"turn_id","")=="clarification"));
-                ExecuteSql(connection,"UPDATE conversation_turns SET participants_json='[\"player\",\"outsider\"]' WHERE turn_id='clarification';");
+                Program.ExecuteSql(connection,"UPDATE conversation_turns SET participants_json='[\"player\",\"outsider\"]' WHERE turn_id='clarification';");
                 Check("hidden_correction_cannot_be_skipped_to_retrieve_ack", !ExpandPrecisionQuestionContext(connection,new(){assumption},knowledge)
                     .Any(r=>ReadString(r,"turn_id","")=="clarified_response"));
-                var early = new KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=9 };
+                var early = new Program.KnowledgeAccessContext { NpcId="npc", PlayerId="player", TimelineId="main", WorldDay=9 };
                 var earlyPlan = PlanMemoryQuery("npc","player","botany",TestDict("timelineId","main","worldDay",9d));
                 Check("future_original_excluded", FindMemorySpecialistTurns(connection, earlyPlan, early, 4, 32, false).Count == 0);
-                var foreign = new KnowledgeAccessContext { NpcId="outsider", TimelineId="main", WorldDay=20 };
+                var foreign = new Program.KnowledgeAccessContext { NpcId="outsider", TimelineId="main", WorldDay=20 };
                 Check("unheard_source_excluded", FindMemorySpecialistTurns(connection, new MemoryQueryPlan { Observer="outsider", Query="botany", Timeline="main", WorldDay=20 }, foreign, 4, 32, false).Count == 0);
                 var privateSource = SpecialistFixtureTurn(connection,campaign,"private","npc","*I secretly remember our garden and the rare flower.* Let us discuss the weather.", ts:20);
                 StoreMemorySpecialistDocument(connection,privateSource);
-                var listener = new KnowledgeAccessContext { NpcId="listener", TimelineId="main", WorldDay=20 };
+                var listener = new Program.KnowledgeAccessContext { NpcId="listener", TimelineId="main", WorldDay=20 };
                 var publicPlan = new MemoryQueryPlan { Observer="listener", Query="botany", Timeline="main", WorldDay=20 };
                 Check("private_thought_tags_do_not_influence_listener_search", !FindMemorySpecialistTurns(connection,publicPlan,listener,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
                 Check("own_private_memory_remains_searchable", FindMemorySpecialistTurns(connection,plan,knowledge,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
-                ExecuteSql(connection,"UPDATE conversation_turns SET text='The weather is cold.' WHERE turn_id='private';");
+                Program.ExecuteSql(connection,"UPDATE conversation_turns SET text='The weather is cold.' WHERE turn_id='private';");
                 Check("changed_original_invalidates_derived_tags", !FindMemorySpecialistTurns(connection,plan,knowledge,8,32,false).Any(r=>ReadString(r,"turn_id","")=="private"));
-                Check("changed_source_is_detected_for_background_reindex", QuerySql(connection,@"SELECT t.turn_id FROM conversation_turns t
+                Check("changed_source_is_detected_for_background_reindex", Program.QuerySql(connection,@"SELECT t.turn_id FROM conversation_turns t
 JOIN memory_specialist_sources i ON i.turn_id=t.turn_id WHERE t.turn_id='private' AND i.source_revision<>t.xmin::text;").Count==1);
                 Check("missing_index_does_not_filter_lexical_candidates", FuseMemorySpecialistRanks(new(){source},new(),1).Count==1);
                 Check("rank_fusion_deduplicates_source",FuseMemorySpecialistRanks(new(){source},new(){source},4).Count==1);
             }
-            catch(Exception ex) { results.Add(TestDict("caseId","memory_specialist_fixture_completed","passed",false,"summary",LimitText(ex.ToString(),2500))); }
+            catch(Exception ex) { results.Add(TestDict("caseId","memory_specialist_fixture_completed","passed",false,"summary",Program.LimitText(ex.ToString(),2500))); }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             return results;
         }

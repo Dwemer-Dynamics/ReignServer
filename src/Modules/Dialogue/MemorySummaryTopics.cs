@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static readonly HashSet<string> MemoryTopicMetadata = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -31,7 +31,7 @@ namespace ReignBetaServer
 
         // Tags help discovery only. They neither establish a fact nor change its
         // speaker, visibility, memory lane, uncertainty or original source text.
-        private static List<string> BuildMemorySummaryTopics(IEnumerable<Dictionary<string, object>> rows, int maximum)
+        internal static List<string> BuildMemorySummaryTopics(IEnumerable<Dictionary<string, object>> rows, int maximum)
         {
             int limit = Math.Clamp(maximum <= 0 ? 5 : maximum, 1, 12);
             var explicitCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -45,7 +45,7 @@ namespace ReignBetaServer
                 string source = ReadString(row, "summary", "");
                 string body = MemoryTopicSourceText(source);
                 bool hasProvenanceNotice = MemoryTopicProvenanceNotices.Any(notice => source.Contains(notice, StringComparison.OrdinalIgnoreCase));
-                var tags = TextListFromJson(ReadString(row, "tags_json", "[]"))
+                var tags = Program.TextListFromJson(ReadString(row, "tags_json", "[]"))
                     .Concat(ReadStringList(row, "tags"))
                     .Select(NormalizeMemoryTopic).Where(IsUsefulMemoryTopic)
                     // Older summaries extracted their tags from the generated
@@ -72,7 +72,7 @@ namespace ReignBetaServer
                     return "not_" + word;
                 }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
                 int termRank = 0;
-                foreach (string term in MemoryQueryTerms(body).Select(NormalizeMemoryTopic)
+                foreach (string term in Program.MemoryQueryTerms(body).Select(NormalizeMemoryTopic)
                     .Where(t => IsUsefulMemoryTopic(t) && !negated.Contains(t)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     textCounts[term] = textCounts.GetValueOrDefault(term) + 1;

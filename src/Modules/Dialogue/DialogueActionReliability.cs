@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private const double MaximumGuestTermDays = 126d;
+        internal const double MaximumGuestTermDays = 126d;
         private const string DialogueActionExecutionRules =
             "ACTION MEANING AND NATIVE EXECUTION\n"
             + "A present accepted invitation to join the player's traveling group uses accept_temporary_party_guest, not a map order or permanent clan recruitment. "
@@ -31,7 +31,7 @@ namespace ReignBetaServer
             "attack_settlement", "capture_settlement_plan", "issue_campaign_order"
         };
 
-        private static bool SpeakerInPlayerParty(Dictionary<string, object> payload, Dictionary<string, object> hero)
+        internal static bool SpeakerInPlayerParty(Dictionary<string, object> payload, Dictionary<string, object> hero)
         {
             string party = FirstNonEmpty(ReadFirstString(hero, "currentPartyId", "partyId"),
                 ReadFirstString(payload, "speakerPartyId", "npcPartyId"));
@@ -39,7 +39,7 @@ namespace ReignBetaServer
             return !string.IsNullOrWhiteSpace(party) && party.Equals(playerParty, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool HasDirectCampaignOrderRequest(string text)
+        internal static bool HasDirectCampaignOrderRequest(string text)
         {
             // Scene narration is not a spoken order. The semantic planner still
             // determines acceptance, exact targets and authority after this gate.
@@ -50,21 +50,21 @@ namespace ReignBetaServer
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
-        private static bool IsSharedTravelOnly(Dictionary<string, object> gate, string playerText)
+        internal static bool IsSharedTravelOnly(Dictionary<string, object> gate, string playerText)
         {
-            string text = NormalizeLookup(playerText);
+            string text = Program.NormalizeLookup(playerText);
             if (HasDirectCampaignOrderRequest(playerText)
-                || !string.IsNullOrWhiteSpace(TemporaryPartyGuestCandidateToPreserve(gate, playerText))) return false;
-            string intent = NormalizeLookup(ReadString(gate, "intent", ""));
+                || !string.IsNullOrWhiteSpace(Program.TemporaryPartyGuestCandidateToPreserve(gate, playerText))) return false;
+            string intent = Program.NormalizeLookup(ReadString(gate, "intent", ""));
             return Regex.IsMatch(text, @"\b(?:we|our route|our trip|together|let s)\b")
                 && Regex.IsMatch(intent, @"\b(?:travel|detour|itinerary|destination|tournament|go to|ride to)\b")
                 && !Regex.IsMatch(intent, @"\b(?:transfer|gift|marriage|clan membership|arrest|declare war|peace treaty)\b");
         }
 
-        private static bool DialoguePlannerCandidateEligible(string command, Dictionary<string, object> payload,
+        internal static bool DialoguePlannerCandidateEligible(string command, Dictionary<string, object> payload,
             Dictionary<string, object> hero, Dictionary<string, object> gate, string playerText)
         {
-            command = CanonicalCommand(command);
+            command = Program.CanonicalCommand(command);
             if (command == "accept_temporary_party_guest" && TemporaryGuestAlreadySatisfied(payload, hero)) return false;
             if (command == "renew_temporary_party_guest" && !GuestCanRenew(CurrentSpeakerGuest(payload, hero))) return false;
             bool sceneFollow = command == "follow"
@@ -76,76 +76,76 @@ namespace ReignBetaServer
                 var guest = TemporaryGuestDialogueContext(payload,
                     FirstNonEmpty(ReadFirstString(payload, "speakerHeroStringId", "heroStringId"), ReadString(hero, "heroStringId", "")));
                 return guest != null && ReadBool(guest, "inMainParty", false)
-                    && Regex.IsMatch(NormalizeLookup(playerText), @"\b(?:accept (?:banishment|that risk)|fight(?:ing)? (?:your|our|my|their) own (?:realm|faction|clan)|own faction combat)\b");
+                    && Regex.IsMatch(Program.NormalizeLookup(playerText), @"\b(?:accept (?:banishment|that risk)|fight(?:ing)? (?:your|our|my|their) own (?:realm|faction|clan)|own faction combat)\b");
             }
             return true;
         }
 
-        private static void CompleteConversationActionTerms(Dictionary<string, object> action,
+        internal static void CompleteConversationActionTerms(Dictionary<string, object> action,
             Dictionary<string, object> payload, Dictionary<string, object> hero, string text)
         {
             // The hidden planner supplies negotiated terms. Test fixture defaults
             // must never add money, durations, fiefs or an unrelated target here.
-            CompleteTestDirectiveActionDefaults(action, payload, hero, text, includeTestValues: false);
-            var terms = ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
-            string command = CanonicalCommand(ReadString(action, "command", ""));
+            Program.CompleteTestDirectiveActionDefaults(action, payload, hero, text, includeTestValues: false);
+            var terms = Program.ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
+            string command = Program.CanonicalCommand(ReadString(action, "command", ""));
             if ((command == "transfer_item" || command == "transfer_gold" || command == "give_gold_to_player")
                 && TransferDirectionNeedsResolution(action, terms))
-                ApplyTransferDirectionDefaults(action, terms, payload, hero, text, command);
+                Program.ApplyTransferDirectionDefaults(action, terms, payload, hero, text, command);
             action["terms"] = terms;
             if (command == "transfer_item") CompleteNamedGiftTerms(action, terms, payload, text);
-            CompleteFallbackDirectiveTerms(action, payload, hero, text, includeTestValues: false);
+            Program.CompleteFallbackDirectiveTerms(action, payload, hero, text, includeTestValues: false);
             // Fallback completion may replace the dictionary; bind the terms actually attached to the action.
             terms = ReadDictionary(action, "terms") ?? terms;
             BindTemporaryGuestActionTerms(command, terms, payload, hero);
             action["terms"] = terms;
         }
 
-        private static bool HasExplicitCurrentSettlementReference(string text)
-            => Regex.IsMatch(NormalizeLookup(text), @"\b(?:this|current|our present) (?:town|village|castle|settlement)|\b(?:wait|stay|hold|patrol|defend) here\b");
+        internal static bool HasExplicitCurrentSettlementReference(string text)
+            => Regex.IsMatch(Program.NormalizeLookup(text), @"\b(?:this|current|our present) (?:town|village|castle|settlement)|\b(?:wait|stay|hold|patrol|defend) here\b");
 
-        private static bool TransferDirectionNeedsResolution(Dictionary<string, object> action, Dictionary<string, object> terms)
+        internal static bool TransferDirectionNeedsResolution(Dictionary<string, object> action, Dictionary<string, object> terms)
             => FirstNonEmpty(ReadFirstString(action, "FromHero", "fromHero", "actorHeroStringId", "actorHeroId"),
                     ReadFirstString(terms, "fromHeroStringId", "FromHero")).Length == 0
                 || FirstNonEmpty(ReadFirstString(action, "ToHero", "toHero", "targetHeroStringId", "targetHeroId", "TargetHero"),
                     ReadFirstString(terms, "toHeroStringId", "ToHero")).Length == 0;
 
-        private static string ClassifyDialogueQueueOutcome(int candidateCount, int queuedCount, bool actionable, List<string> errors)
+        internal static string ClassifyDialogueQueueOutcome(int candidateCount, int queuedCount, bool actionable, List<string> errors)
         {
             if (queuedCount > 0) return "queued_awaiting_native";
-            if (errors != null && errors.Count > 0) return ClassifyActionFailure(candidateCount, errors);
+            if (errors != null && errors.Count > 0) return Program.ClassifyActionFailure(candidateCount, errors);
             return actionable ? "no_executable_action" : "no_action_detected";
         }
 
-        private static List<Dictionary<string, object>> ExecutableRouterCandidates(
+        internal static List<Dictionary<string, object>> ExecutableRouterCandidates(
             List<Dictionary<string, object>> candidates, string campaignId,
             Dictionary<string, object> payload, string resolutionText)
         {
             return candidates.Where(candidate =>
             {
-                var normalized = NormalizeActionCommand(CloneDictionary(candidate), campaignId,
+                var normalized = Program.NormalizeActionCommand(Program.CloneDictionary(candidate), campaignId,
                     out List<string> errors, payload, resolutionText);
                 return normalized != null && errors.Count == 0;
             }).ToList();
         }
 
-        private static List<Dictionary<string, object>> PreferResolvedRouterCandidates(
+        internal static List<Dictionary<string, object>> PreferResolvedRouterCandidates(
             List<Dictionary<string, object>> resolved, List<Dictionary<string, object>> fallback)
         {
             var result = new List<Dictionary<string, object>>();
-            foreach (var candidate in resolved.Concat(fallback)) AppendUniqueActionCandidate(result, candidate);
+            foreach (var candidate in resolved.Concat(fallback)) Program.AppendUniqueActionCandidate(result, candidate);
             return result;
         }
 
-        private static bool TryCompleteAcceptedGuestSchedule(Dictionary<string, object> terms,
+        internal static bool TryCompleteAcceptedGuestSchedule(Dictionary<string, object> terms,
             Dictionary<string, object> payload, string exchange)
         {
-            string text = NormalizeLookup(exchange);
+            string text = Program.NormalizeLookup(exchange);
             var calendar = ReadDictionary(payload, "campaignCalendar");
-            bool openEnded = ContainsAnyNormalized(text, "open ended", "no fixed end date", "every thirty days");
-            double days = openEnded ? 0 : ExtractItemAmount(text, "days?");
+            bool openEnded = Program.ContainsAnyNormalized(text, "open ended", "no fixed end date", "every thirty days");
+            double days = openEnded ? 0 : Program.ExtractItemAmount(text, "days?");
             if (!openEnded && days <= 0)
-                days = ExtractItemAmount(Regex.Replace(text, @"\b(?:more|additional|extra)\s+(?=days?\b)", ""), "days?");
+                days = Program.ExtractItemAmount(Regex.Replace(text, @"\b(?:more|additional|extra)\s+(?=days?\b)", ""), "days?");
             bool fixedSeason = Regex.IsMatch(text, @"\bfor (?:the|a|one|1|this) season\b|\b(?:full|one) season (?:of )?(?:service|travel)\b");
             if (!openEnded && fixedSeason) days = ReadDouble(calendar, "daysPerSeason", 0);
             var explicitDays = Regex.Match(exchange ?? "", @"(?<![\w.\d])(\d+(?:\.\d+)?)\s+(?:(?:more|additional|extra)\s+)?days?\b", RegexOptions.IgnoreCase);
@@ -170,9 +170,9 @@ namespace ReignBetaServer
             var wages = Regex.Matches(exchange ?? "", @"\b(\d[\d,]*|" + numberWord + @"(?:[\s-]+" + numberWord + @")*)\s*(?:denars?|gold)?\s*(?:a|per|each)\s*(day|week|season|year)\b", RegexOptions.IgnoreCase);
             if (wages.Count > 0)
             {
-                var distinct = wages.Cast<Match>().Select(x => ExtractMoneyAmount(x.Groups[1].Value + " gold", 0)
+                var distinct = wages.Cast<Match>().Select(x => Program.ExtractMoneyAmount(x.Groups[1].Value + " gold", 0)
                     + ":" + x.Groups[2].Value.ToLowerInvariant()).Distinct().ToList();
-                int amount = ExtractMoneyAmount(wages[0].Groups[1].Value + " gold", 0);
+                int amount = Program.ExtractMoneyAmount(wages[0].Groups[1].Value + " gold", 0);
                 if (distinct.Count != 1 || amount <= 0) return false;
                 string unit = wages[0].Groups[2].Value.ToLowerInvariant();
                 double period = unit == "day" ? 1 : ReadDouble(calendar,
@@ -191,11 +191,11 @@ namespace ReignBetaServer
             return true;
         }
 
-        private static void BindAcceptedItemDelivery(Dictionary<string, object> action, string speaker)
+        internal static void BindAcceptedItemDelivery(Dictionary<string, object> action, string speaker)
         {
-            if (CanonicalCommand(ReadString(action, "command", "")) != "transfer_item" || string.IsNullOrWhiteSpace(speaker)) return;
+            if (Program.CanonicalCommand(ReadString(action, "command", "")) != "transfer_item" || string.IsNullOrWhiteSpace(speaker)) return;
             action["acceptedByHeroStringId"] = speaker;
-            var terms = ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
+            var terms = Program.ToCaseInsensitiveDictionary(ReadDictionary(action, "terms") ?? new Dictionary<string, object>());
             // Native validation compares the accepted speaker to the actual source
             // or recipient. A third party's permission cannot change protected gear.
             terms["sourceConsentConfirmed"] = true;
@@ -204,7 +204,7 @@ namespace ReignBetaServer
             action["terms"] = terms;
         }
 
-        private static void ValidateGuestServiceTerms(Dictionary<string, object> terms, List<string> errors)
+        internal static void ValidateGuestServiceTerms(Dictionary<string, object> terms, List<string> errors)
         {
             if (ReadBool(terms, "startNow", false) && ReadBool(terms, "deferStart", false))
                 errors.Add("A guest agreement cannot both start now and defer its start.");
@@ -219,14 +219,14 @@ namespace ReignBetaServer
                 errors.Add("Guest wages require self, father, mother or an exact wageRecipientHeroStringId.");
         }
 
-        private static List<Dictionary<string, object>> ActionInventoryItems(Dictionary<string, object> inventory)
+        internal static List<Dictionary<string, object>> ActionInventoryItems(Dictionary<string, object> inventory)
             => inventory != null && inventory.ContainsKey("items")
                 ? ReadDictionaryList(inventory, "items") : ReadDictionaryList(inventory, "topItems");
 
-        private static List<Dictionary<string, object>> MentionedActionItems(Dictionary<string, object> index, string text)
+        internal static List<Dictionary<string, object>> MentionedActionItems(Dictionary<string, object> index, string text)
         {
             var rows = new List<Dictionary<string, object>>();
-            string normalized = NormalizeLookup(text);
+            string normalized = Program.NormalizeLookup(text);
             var assets = ReadDictionary(index, "assets");
             foreach (string side in new[] { "player", "speaker" })
             {
@@ -235,11 +235,11 @@ namespace ReignBetaServer
                 foreach (var row in ActionInventoryItems(ReadDictionary(holder, "inventory"))
                     .Concat(ReadDictionaryList(appearance, "civilianEquipment")).Concat(ReadDictionaryList(appearance, "battleEquipment")))
                 {
-                    string name = NormalizeLookup(ReadString(row, "name", ""));
-                    string id = NormalizeLookup(ReadString(row, "itemId", ""));
-                    if ((name.Length < 3 || !NormalizedTextContainsPhrase(normalized, name))
-                        && (id.Length < 3 || !NormalizedTextContainsPhrase(normalized, id))) continue;
-                    var copy = CloneDictionary(row);
+                    string name = Program.NormalizeLookup(ReadString(row, "name", ""));
+                    string id = Program.NormalizeLookup(ReadString(row, "itemId", ""));
+                    if ((name.Length < 3 || !Program.NormalizedTextContainsPhrase(normalized, name))
+                        && (id.Length < 3 || !Program.NormalizedTextContainsPhrase(normalized, id))) continue;
+                    var copy = Program.CloneDictionary(row);
                     copy["holder"] = side;
                     rows.Add(copy);
                 }
@@ -247,16 +247,16 @@ namespace ReignBetaServer
             return rows.Take(20).ToList();
         }
 
-        private static bool HasNativeItemGiftRequest(Dictionary<string, object> payload, string text)
-            => Regex.IsMatch(NormalizeLookup(Regex.Replace(text ?? "", @"\*[^*]*\*", " ")),
+        internal static bool HasNativeItemGiftRequest(Dictionary<string, object> payload, string text)
+            => Regex.IsMatch(Program.NormalizeLookup(Regex.Replace(text ?? "", @"\*[^*]*\*", " ")),
                 @"\b(?:give|gift|hand|take|offer|donate|here is|here s)\b")
                 && MentionedActionItems(ReadDictionary(payload, "actionResolutionIndex"), text).Count > 0;
 
-        private static Dictionary<string, object> BuildAcceptedNamedGiftFallback(Dictionary<string, object> gate,
+        internal static Dictionary<string, object> BuildAcceptedNamedGiftFallback(Dictionary<string, object> gate,
             Dictionary<string, object> payload, Dictionary<string, object> hero, string playerText, HashSet<string> allowed)
         {
             if (!allowed.Contains("transfer_item") || !HasNativeItemGiftRequest(payload, playerText)
-                || !ShouldPreserveAcceptedItemGift(gate, playerText, CommandFromDirectiveText(playerText))) return null;
+                || !ShouldPreserveAcceptedItemGift(gate, playerText, Program.CommandFromDirectiveText(playerText))) return null;
             var action = TestDict("command", "transfer_item", "source", "accepted_named_gift_fallback",
                 "reason", "The speaker accepted the specifically offered native item.");
             CompleteConversationActionTerms(action, payload, hero, playerText);
@@ -282,10 +282,10 @@ namespace ReignBetaServer
             string itemId = ReadString(row, "itemId", ""), name = ReadString(row, "name", itemId);
             action["Item"] = itemId;
             terms["itemId"] = itemId;
-            if (rows.Count == 1) ApplyResolvedItemTerms(terms, row);
-            int amount = ExtractInventoryItemAmount(text, name);
+            if (rows.Count == 1) Program.ApplyResolvedItemTerms(terms, row);
+            int amount = Program.ExtractInventoryItemAmount(text, name);
             if (amount == 0 && Regex.IsMatch(text ?? "", @"\b(?:the|a|an|one|my|this|that)\s+" + Regex.Escape(name) + @"\b", RegexOptions.IgnoreCase)) amount = 1;
-            if (amount > 0) AddIfMissing(terms, "amount", amount);
+            if (amount > 0) Program.AddIfMissing(terms, "amount", amount);
         }
     }
 }

@@ -1383,7 +1383,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 return existing;
 
             List<Dictionary<string, object>> profiles =
-                Program.MergedInteractionParticipantProfiles(payload);
+                DialogueService.MergedInteractionParticipantProfiles(payload);
             string playerId = ReadFirstString(
                 payload,
                 "playerHeroStringId",
@@ -1401,7 +1401,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     ["heroStringId"] = observerId ?? ""
                 };
             string encounterId = FirstNonEmpty(
-                Program.GroupConversationSessionId(payload),
+                DialogueService.GroupConversationSessionId(payload),
                 ReadFirstString(
                     payload,
                     "conversationSessionId",
@@ -1649,7 +1649,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     StringComparison.OrdinalIgnoreCase))
                 return;
             List<Dictionary<string, object>> profiles =
-                Program.MergedInteractionParticipantProfiles(payload);
+                DialogueService.MergedInteractionParticipantProfiles(payload);
             string playerId = ReadFirstString(
                 payload,
                 "playerHeroStringId",
@@ -2141,7 +2141,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 string name = ReadFirstString(write, "claimedName", "name");
                 string quote = ReadFirstString(write, "supportingQuote", "evidenceQuote");
                 string spoken = introducer == speakerId ? acceptedReply : introducer == playerId ? playerText : "";
-                bool audibleQuote = ReadDictionaryList(Program.ProjectConversationNarration(spoken, introducer, observer), "spans")
+                bool audibleQuote = ReadDictionaryList(DialogueService.ProjectConversationNarration(spoken, introducer, observer), "spans")
                     .Any(span => ReadString(span, "kind", "") == "spoken_statement"
                         && ReadString(span, "text", "").Contains(quote, StringComparison.Ordinal));
                 if (!heard.Contains(observer) || quote.Length < 8 || quote.Length > 600 || name.Length > 80
@@ -3050,7 +3050,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 candidates.Add(canonicalName + " " + qualifier);
             }
             List<Dictionary<string, object>> others =
-                Program.MergedInteractionParticipantProfiles(payload)
+                DialogueService.MergedInteractionParticipantProfiles(payload)
                 .Concat(new[] { ReadDictionary(payload, "observer") })
                 .Where(profile => profile != null
                     && !IdentityHeroId(profile).Equals(subjectId,
@@ -3637,14 +3637,14 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                         "Reconciliation appends verification without deleting the original claim evidence.", null);
                 }
                 add("marvonara_false_claims_are_rejected",
-                    Program.VerifiedPoliticalAuthorityContradiction(
+                    DialogueService.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
                                 "A sovereign at war on twelve fronts walks into my hall."
                         },
                         marvonaraIdentity)
-                    && !Program.VerifiedPoliticalAuthorityContradiction(
+                    && !DialogueService.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -3654,21 +3654,21 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     "False local ownership and an inflated current-war count trigger repair, while a grounded observer-relative acknowledgment passes.",
                     null);
                 add("cumulative_roles_and_conversation_venue_are_enforced",
-                    Program.VerifiedPoliticalAuthorityContradiction(
+                    DialogueService.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
                                 "You are a king. That makes you a ruler, not a lord."
                         },
                         marvonaraIdentity)
-                    && Program.VerifiedPoliticalAuthorityContradiction(
+                    && DialogueService.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
                                 "1084 Winter — Amitatys\n\nThis is Amitatys, not your clan's city."
                         },
                         marvonaraIdentity)
-                    && !Program.VerifiedPoliticalAuthorityContradiction(
+                    && !DialogueService.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -4043,7 +4043,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                         "player") == "",
                     "A shared transcript reveals a same-clan participant but withholds an unidentified NPC's canonical name without creating reverse-direction knowledge.",
                     observerSafeTranscript);
-                Program.UpdateSharedGroupConversationState(
+                DialogueService.UpdateSharedGroupConversationState(
                     campaignId,
                     groupIdentityPayload,
                     "foreign",
@@ -4052,7 +4052,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     "identity_group_session",
                     100);
                 string safeCachedSpeaker =
-                    Program.BuildSharedGroupConversationPrompt(
+                    DialogueService.BuildSharedGroupConversationPrompt(
                         campaignId,
                         groupIdentityPayload,
                         "player",

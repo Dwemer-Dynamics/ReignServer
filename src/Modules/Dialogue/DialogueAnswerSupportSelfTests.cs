@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunDialogueAnswerSupportAssertions()
         {
@@ -90,7 +90,7 @@ namespace ReignBetaServer
                 Check("indirect_embedded_or_nonaffirmative_untouched_" + rows.Count, calls == 0 && Visible(result) == embedded);
             }
             var namedIndirect = TestDict("reply", "Ira asked whether the cost was counted; but michael of calradia replied with a number.");
-            var multiwordPayload = CloneDictionary(payload);
+            var multiwordPayload = Program.CloneDictionary(payload);
             multiwordPayload["participantProfiles"] = new[] { TestDict("heroStringId", "player", "name", "Michael of Calradia") };
             Check("indirect_main_answer_known_multiword_name", AnswerSupportClaims(namedIndirect, multiwordPayload).Count == 1);
             Check("indirect_missing_profiles_does_not_guess_names", AnswerSupportClaims(namedIndirect).Count == 0);
@@ -212,13 +212,13 @@ namespace ReignBetaServer
             PrepareCountedRouteProviderRequest(auditRequest, request);
             Check("sealed_source_request_wire_preserved", IsSealedAnswerSupportAudit(auditRequest)
                 && CanonicalJson(auditRequest) == sealedBefore && !auditRequest.ContainsKey("politicalAuthors"));
-            foreach (var forged in new[] { CloneDictionary(auditRequest), TryParseJsonObject(Json.Serialize(auditRequest)) })
+            foreach (var forged in new[] { Program.CloneDictionary(auditRequest), TryParseJsonObject(Json.Serialize(auditRequest)) })
             {
                 Check("matching_json_is_not_authority_" + rows.Count, !IsSealedAnswerSupportAudit(forged));
                 PrepareCountedRouteProviderRequest(forged, request);
                 Check("unsealed_copies_get_route_guidance_" + rows.Count, forged.ContainsKey("politicalAuthors"));
             }
-            var ordinaryWriter = CloneDictionary(request);
+            var ordinaryWriter = Program.CloneDictionary(request);
             PrepareCountedRouteProviderRequest(ordinaryWriter, request);
             Check("ordinary_route_request_still_prepared", ordinaryWriter.ContainsKey("politicalAuthors"));
             bool dispatchSealed = false;
@@ -277,7 +277,7 @@ namespace ReignBetaServer
             const string compound = "What did I propose, and what did you say after I clarified?";
             const string proposal = "You meant separate baths.";
             const string acknowledged = "I accepted that arrangement.";
-            var combinedPayload = CloneDictionary(payload); combinedPayload["playerText"] = compound;
+            var combinedPayload = Program.CloneDictionary(payload); combinedPayload["playerText"] = compound;
             string combinedReply = claim + " Ira asked how much the army eats, and you answered with a number. " + proposal + " " + acknowledged;
             int coverageCalls = 0; calls = 0;
             var combined = ApplyAnswerSupportGuard(TestDict("ok", true, "content", Json.Serialize(TestDict("reply", combinedReply,
@@ -366,12 +366,12 @@ namespace ReignBetaServer
             calls = 0; var negativeCap = Run(Draft(), _ => { calls++; return TestDict(); }, -1);
             Check("negative_capacity_cannot_dispatch", calls == 0 && ReadDictionaryList(Body(negativeCap), "continuityWrites").Count == 1);
             var three = Draft(); var threeOriginals = ReadDictionaryList(three, "continuityWrites");
-            three["continuityWrites"] = new[] { threeOriginals[0], CloneDictionary(threeOriginals[0]), CloneDictionary(threeOriginals[0]), threeOriginals[1] };
+            three["continuityWrites"] = new[] { threeOriginals[0], Program.CloneDictionary(threeOriginals[0]), Program.CloneDictionary(threeOriginals[0]), threeOriginals[1] };
             calls = 0; var threeResult = Run(three, check => { calls++; return Reply(check); });
             Check("three_bound_candidates_make_only_two_calls", calls == 2 && ReadDictionaryList(Body(threeResult), "continuityWrites").Count == 3
                 && ReadInt(ReadDictionary(threeResult, "dialogueQuestionCoverage"), "withheldQuestionItems", 0) == 1);
             var two = Draft(); var twoWrites = ReadDictionaryList(two, "continuityWrites");
-            var nextQuestion = CloneDictionary(twoWrites[0]);
+            var nextQuestion = Program.CloneDictionary(twoWrites[0]);
             var nextState = ReadDictionary(nextQuestion, "questionState");
             ReadDictionary(nextState, "question")["quote"] = "Did I greet you?";
             nextState["answers"] = new[] { TestDict("turnId", "current_npc", "speakerId", "npc", "quote", "Yes.") };
@@ -432,7 +432,7 @@ namespace ReignBetaServer
             Check("model_supplied_audit_labels_stripped_without_authority", !clean.ContainsKey("dialogueQuestionCoverage")
                 && !Body(clean).ContainsKey("dialogueQuestionCoverage") && ReadString(Body(clean), "reply", "") == "Welcome.");
             var preserve = Draft(); preserve["emotion"] = "warm"; preserve["customNumbers"] = new object[] { 0.5d, 2, true };
-            var unchangedFields = CloneDictionary(preserve); unchangedFields.Remove("continuityWrites");
+            var unchangedFields = Program.CloneDictionary(preserve); unchangedFields.Remove("continuityWrites");
             var preservedResult = Body(Run(preserve, check => Reply(check, "partial")));
             preservedResult.Remove("continuityWrites"); preservedResult.Remove("dialogueQuestionCoverage");
             Check("independent_fields_preserved_under_hold", CanonicalJson(unchangedFields) == CanonicalJson(preservedResult));

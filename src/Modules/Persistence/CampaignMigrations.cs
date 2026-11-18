@@ -52,10 +52,10 @@ namespace ReignBetaServer
         {
             Program.EnsureMemorySchema(connection);
             Program.CampaignSchemaAfterMemoryForTests?.Invoke();
-            Program.EnsureCategorizedMemorySchema(connection);
+            DialogueService.EnsureCategorizedMemorySchema(connection);
             WorldSimulationService.EnsureWorldHistorySchema(connection);
-            Program.EnsureSemanticMemorySchema(connection, providerGeneration);
-            Program.RunCategorizedMemoryMigration(connection, campaignId);
+            DialogueService.EnsureSemanticMemorySchema(connection, providerGeneration);
+            DialogueService.RunCategorizedMemoryMigration(connection, campaignId);
             // Repair legacy scalar memories once, outside warm reads.
             Program.ExecuteSql(connection, @"DELETE FROM memories
 WHERE source='dialogue_llm'

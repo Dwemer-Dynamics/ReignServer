@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunConversationAcceptedUnitSelfTests()
         {
@@ -16,14 +16,14 @@ namespace ReignBetaServer
             try
             {
                 string generation;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                     EnsureConversationAgencySchema(connection); EnsureIntoxicationSchema(connection);
                     EnsureAcceptedConversationUnitSchema(connection);
                     CharactersService.EnsureIdentitySchema(connection); EnsureConversationSceneStateSchema(connection);
                     ReputationService.EnsureSocialReputationSchema(connection); EnsureConversationContinuitySchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO conversation_sessions
+                    Program.ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
 VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""player"",""listener""]','{""timelineId"":""agency_timeline""}');", TestDict("campaign", campaign));
                 }
@@ -70,14 +70,14 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                             unit.PlayerText, unit.Reply, unit.EventId, unit.Timestamp, acceptance: accept), fault);
                 int Count(string table, string field = "", string id = "")
                 {
-                    using var connection = OpenCampaignConnection(campaign);
-                    return ReadInt(QuerySql(connection, "SELECT COUNT(*) AS n FROM " + table + (field.Length == 0 ? "" : " WHERE " + field + "=$id") + ";",
+                    using var connection = Program.OpenCampaignConnection(campaign);
+                    return ReadInt(Program.QuerySql(connection, "SELECT COUNT(*) AS n FROM " + table + (field.Length == 0 ? "" : " WHERE " + field + "=$id") + ";",
                         field.Length == 0 ? null : TestDict("id", id)).Single(), "n", 0);
                 }
                 bool AcceptedSourcesMatch(AcceptedConversationUnit value, int projectionCount = 2)
                 {
-                    using var connection = OpenCampaignConnection(campaign);
-                    var rows = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", value.EventId));
+                    using var connection = Program.OpenCampaignConnection(campaign);
+                    var rows = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", value.EventId));
                     var active = rows.Where(row => ReadString(row, "status", "") == "active").ToList();
                     var originals = rows.Where(row => ReadString(row, "status", "") == "source_only").ToList();
                     if (rows.Count != projectionCount + 1 || active.Count != projectionCount || originals.Count != 1
@@ -87,7 +87,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     var source = originals.Single();
                     string id = ReadString(source, "turn_id", ""), original = originalInputs[value.Payload];
                     var metadata = TryParseJsonObject(ReadString(source, "payload_json", "{}"));
-                    var authors = TextListFromJson(ReadString(source, "participants_json", "[]"));
+                    var authors = Program.TextListFromJson(ReadString(source, "participants_json", "[]"));
                     return id == captured.SourceId && captured.Original == original && ReadString(source, "text", "") == original
                         && ReadString(source, "role", "") == "player_source" && ReadString(source, "channel", "") == "player_input_source"
                         && ReadString(source, "speaker_id", "") == value.Player && ReadInt(source, "turn_order", 0) < 0
@@ -96,8 +96,8 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                         && ReadString(metadata, "exactTextHash", "") == ConversationExactTextHash(original)
                         && ReadString(metadata, "evidenceType", "") == "original_player_input" && !ReadBool(metadata, "retrievalEligible", true)
                         && new[] { value.Hero, "listener" }.All(observer => !PrecisionTurnVisible(source, observer,
-                            BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
-                        && QuerySql(connection, "SELECT turn_id FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", id)).Count == 0;
+                            Program.BuildKnowledgeAccessContext(observer, value.Player, value.Location, value.Payload), connection))
+                        && Program.QuerySql(connection, "SELECT turn_id FROM conversation_turn_fts WHERE turn_id=$id;", TestDict("id", id)).Count == 0;
                 }
                 var unit = Unit("atomic", effects: true);
                 foreach (string phase in new[] { "after_sources", "after_effects", "after_context_effects", "after_memory", "before_unit_receipt" })
@@ -172,12 +172,12 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 mixedRecall.PlayerText = "I just counted eight sealed crates by the inner door. What were my terms from our previous conversation?";
                 mixedRecall.Payload["playerText"] = mixedRecall.PlayerText;
                 mixedRecall.RetrievalEligible = !IsPureConversationRecallRequest(mixedRecall.PlayerText);
-                mixedRecall.Memories = NormalizeMemoryWrites(new[] { TestDict("text", mixedRecall.PlayerText, "ownerId", "npc", "sourceEvidence",
+                mixedRecall.Memories = Program.NormalizeMemoryWrites(new[] { TestDict("text", mixedRecall.PlayerText, "ownerId", "npc", "sourceEvidence",
                     TestDict("turnId", "current_player", "speakerId", "player", "quote", mixedRecall.PlayerText)) }, campaign, "npc", mixedRecall.Timestamp);
                 var mixedRecallReceipt = ReadDictionary(Publish(mixedRecall), "acceptedUnit");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var report = QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event AND source='dialogue_llm' AND status='active';",
+                    var report = Program.QuerySql(connection, "SELECT * FROM memories WHERE event_id=$event AND source='dialogue_llm' AND status='active';",
                         TestDict("event", mixedRecall.EventId)).SingleOrDefault();
                     var reportPayload = TryParseJsonObject(ReadString(report, "payload_json", "{}"));
                     Check("mixed_terms_recall_keeps_exact_current_player_report",
@@ -194,10 +194,10 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 catch (InvalidOperationException) { privateFailure = true; }
                 Check("whisper_public_and_private_sources_rollback_together", privateFailure && Count("conversation_turns", "event_id", privateUnit.EventId) == 0);
                 var whisper = Publish(privateUnit);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    var rows = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;", TestDict("id", privateUnit.EventId));
-                    var access = BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
+                    var rows = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$id;", TestDict("id", privateUnit.EventId));
+                    var access = Program.BuildKnowledgeAccessContext("listener", "player", "", privateUnit.Payload);
                     Check("whisper_accepts_both_projections_without_private_leak", AcceptedSourcesMatch(privateUnit, 4)
                         && ReadDictionary(ReadDictionary(whisper, "acceptedUnit"), "privateExchange").Count > 0
                         && rows.Where(r => PrecisionTurnVisible(r, "listener", access)).All(r => !ReadString(r, "text", "").Contains("SECRET-ORCHARD-901")));
@@ -210,10 +210,10 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && Count("conversation_accepted_units", "unit_id", concurrentA.EventId) == 1
                     && Count("events", "event_id", concurrentA.EventId) == 1);
                 Check("identical_text_new_logical_turn_is_distinct", Unit("another_turn").EventId != concurrentA.EventId);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     foreach (string id in new[] { "npc", "player", "listener" })
-                        ExecuteSql(connection, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult) VALUES($id,$id,1,1);", TestDict("id", id));
+                        Program.ExecuteSql(connection, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult) VALUES($id,$id,1,1);", TestDict("id", id));
                     CharactersService.UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "player", "name", "Michael"), "fixture", "", 20d, "");
                     CharactersService.UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "listener", "name", "Listener"), "fixture", "", 20d, "");
                 }
@@ -251,22 +251,22 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && ReadDictionaryList(ReadDictionary(contextReceipt, "scene"), "denied").Count == 1);
                 Publish(contextUnit);
                 Check("context_effect_replay_does_not_repeat", Count("identity_evidence") == identityBefore + 1 && Count("court_social_signal_evidence") == 1);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    string listener = ReadString(QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='listener';").Single(), "payload_json", "");
-                    string author = ReadString(QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='npc';").Single(), "payload_json", "");
+                    string listener = ReadString(Program.QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='listener';").Single(), "payload_json", "");
+                    string author = ReadString(Program.QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='npc';").Single(), "payload_json", "");
                     Check("scene_handoffs_preserve_author_thought_without_broadcasting", !listener.Contains("SECRET-THOUGHT-901")
                         && listener.Contains("courtyard") && author.Contains("SECRET-THOUGHT-901"));
                 }
                 var whisperContext = Unit("private_context", group: true, whisper: true); Context(whisperContext);
                 whisperContext.Reply += " SECRET-SPOKEN-901."; whisperContext.Parsed["reply"] = whisperContext.Reply;
                 var privateContextReceipt = ReadDictionary(Publish(whisperContext), "acceptedUnit");
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
-                    string listener = ReadString(QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='listener';").Single(), "payload_json", "");
+                    string listener = ReadString(Program.QuerySql(connection, "SELECT payload_json FROM conversation_scene_handoffs WHERE owner_id='listener';").Single(), "payload_json", "");
                     Check("private_handoff_and_introduction_do_not_reach_bystander", !listener.Contains("SECRET-SPOKEN-901")
                         && ReadDictionaryList(privateContextReceipt, "introductions").All(item => !ReadBool(item, "ok", true)));
-                    var falseIntroducer = CloneDictionary(contextUnit.Parsed);
+                    var falseIntroducer = Program.CloneDictionary(contextUnit.Parsed);
                     falseIntroducer["identityIntroductions"] = new[] { TestDict("observerId", "player", "subjectId", "npc", "introducerId", "listener",
                         "claimedName", "Michael", "supportingQuote", "Let me introduce Michael.") };
                     var invalid = CharactersService.ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, falseIntroducer, "test", "npc", "player",
@@ -275,7 +275,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     var thought = CharactersService.ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, contextUnit.Parsed, "test", "npc", "player", "Hello.",
                         "*She thinks: Let me introduce Michael.*", new[] { "npc", "player", "listener" }, connection);
                     Check("private_narration_cannot_verify_an_introduction", thought.Count == 1 && !ReadBool(thought[0], "ok", true));
-                    var playerScene = CloneDictionary(contextUnit.Payload);
+                    var playerScene = Program.CloneDictionary(contextUnit.Payload);
                     var playerUpdate = TestDict("sceneStateUpdates", new[] { TestDict("heroStringId", "player", "location", "garden",
                         "supportingQuote", "I walk into the garden.") });
                     var playerMoved = FinalizeConversationSceneState(campaign, playerScene, "npc", "*I walk into the garden.*",
@@ -308,7 +308,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 concernUnit.Continuity.Add(concern);
                 Publish(concernUnit);
                 var losing = Unit("concern_losing");
-                using (var connection = OpenCampaignConnection(campaign)) CaptureContinuityReadSnapshot(connection, losing.Payload, "npc");
+                using (var connection = Program.OpenCampaignConnection(campaign)) CaptureContinuityReadSnapshot(connection, losing.Payload, "npc");
                 var winning = Unit("concern_winning");
                 SetConcernReply(winning, "I learned that the western gate was closed for repairs.");
                 winning.Continuity.Add(new Dictionary<string, object>(concern) { ["expectedRevision"] = 1,
@@ -334,11 +334,11 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && !ReadBool(losingReplay, "memoryUpdateComplete", true) && Count("conversation_continuity_pending") == 1
                     && Count("conversation_drinking_turns") == effectCount);
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, "pending_continuity_checkpoint");
-                using (var connection = OpenCampaignConnection(campaign))
-                    ExecuteSql(connection, "UPDATE conversation_continuity_pending SET status='discarded_test_future';");
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    Program.ExecuteSql(connection, "UPDATE conversation_continuity_pending SET status='discarded_test_future';");
                 ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, "pending_continuity_checkpoint");
                 AdvanceMemoryRestoreGeneration(campaign);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 Check("snapshot_restores_pending_receipt_and_canonical_source", Count("conversation_continuity_pending", "status", "pending") == 1
                     && AcceptedSourcesMatch(losing)
@@ -349,16 +349,16 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && pendingPrompt.Contains("MEMORY UPDATE INCOMPLETE") && pendingPrompt.Contains("current revision 2")
                     && pendingPrompt.Contains("The repairs are still under discussion."));
                 Check("pending_source_remains_private_and_time_scoped",
-                    !BuildProtectedConversationContinuity(campaign, "listener", CloneDictionary(resolution.Payload), TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
+                    !BuildProtectedConversationContinuity(campaign, "listener", Program.CloneDictionary(resolution.Payload), TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
                     && !BuildProtectedConversationContinuity(campaign, "npc", new Dictionary<string, object>(resolution.Payload) { ["timelineId"] = "other" }, TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
                     && !BuildProtectedConversationContinuity(campaign, "npc", new Dictionary<string, object>(resolution.Payload) { ["worldDay"] = 19d }, TestDict()).Contains("MEMORY UPDATE INCOMPLETE")
                     && !BuildProtectedConversationContinuity(campaign, "npc", new Dictionary<string, object>(resolution.Payload) { ["memoryAsOfTimestamp"] = 19L }, TestDict()).Contains("MEMORY UPDATE INCOMPLETE"));
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     using var transaction = connection.BeginTransaction();
-                    ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed source must not authorize recovery.' WHERE event_id=$event AND speaker_id='npc';",
+                    Program.ExecuteSql(connection, "UPDATE conversation_turns SET text='Changed source must not authorize recovery.' WHERE event_id=$event AND speaker_id='npc';",
                         TestDict("event", losing.EventId));
-                    var changedPayload = CloneDictionary(resolution.Payload);
+                    var changedPayload = Program.CloneDictionary(resolution.Payload);
                     CaptureContinuityReadSnapshot(connection, changedPayload, "npc");
                     string changedPrompt = BuildPendingContinuityPrompt(connection, changedPayload, "npc", "player", new List<string>());
                     Check("pending_changed_source_is_withheld_with_gap", changedPrompt.Length == 0
@@ -389,7 +389,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     && Count("conversation_negotiation_turns") == beforeFailedNegotiations
                     && Count("court_social_signal_evidence") == beforeFailedSocial && Count("identity_evidence") == beforeFailedIdentity
                     && Count("conversation_turns", "event_id", failedConversation.EventId) == 2);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     Check("failed_effect_receipt_still_allows_spoken_history", ReadLogicalConversationTurns(connection, "accepted_unit_session", 100)
                         .Any(t => ReadString(t, "event_id", "") == failedConversation.EventId && ReadString(t, "role", "") == "npc"
                             && !ReadString(t, "text", "").Contains("[Dialogue memory correction")));
@@ -417,7 +417,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                         && ReadDouble(drinking, "consumed", -1) == .25
                         && ReadString(drinking, "acceptedReplyHash", "") == PromptHash(privateDrink.Reply), privateReceipt);
                 }
-                using (var connection = OpenCampaignConnection(campaign)) RelationshipsService.EnsurePlayerApproachSchema(connection);
+                using (var connection = Program.OpenCampaignConnection(campaign)) RelationshipsService.EnsurePlayerApproachSchema(connection);
                 foreach (string route in new[] { "party", "private_party", "social_event" })
                 {
                     var silent = Unit("silent_" + route, group: route != "social_event", whisper: route == "private_party");
@@ -450,10 +450,10 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     Check(route + "_silence_replay_retains_participation", ReadBool(replayed, "idempotentReplay", false)
                         && ReadString(replayed, "participation", "") == "quiet" && ReadString(replayed, "reply", "missing") == ""
                         && ReadBool(ReadDictionary(Publish(silent), "acceptedUnit"), "idempotentReplay", false));
-                    using var connection = OpenCampaignConnection(campaign);
-                    var sources = QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", silent.EventId));
+                    using var connection = Program.OpenCampaignConnection(campaign);
+                    var sources = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE event_id=$event;", TestDict("event", silent.EventId));
                     Check(route + "_silence_has_no_fabricated_npc_source", sources.All(row => ReadString(row, "role", "") != "npc")
-                        && ReadStringList(receipt, "sourceIds").All(id => QuerySql(connection,
+                        && ReadStringList(receipt, "sourceIds").All(id => Program.QuerySql(connection,
                             "SELECT turn_id FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).Count == 1));
                 }
                 var afterSilence = Unit("after_silent_turn", group: true);
@@ -512,8 +512,8 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 }
                 string StoredReceipt(string unitId)
                 {
-                    using var connection = OpenCampaignConnection(campaign);
-                    return ReadString(QuerySql(connection, "SELECT receipt_json FROM conversation_accepted_units WHERE unit_id=$unit;",
+                    using var connection = Program.OpenCampaignConnection(campaign);
+                    return ReadString(Program.QuerySql(connection, "SELECT receipt_json FROM conversation_accepted_units WHERE unit_id=$unit;",
                         TestDict("unit", unitId)).Single(), "receipt_json", "");
                 }
                 string beforeAck = StoredReceipt(view.EventId);
@@ -539,7 +539,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     int ColdTables()
                     {
                         using var metadata = ReignPostgreSqlStorage.OpenMetadataConnection();
-                        return ReadInt(QuerySql(metadata, "SELECT COUNT(*) AS n FROM pg_tables WHERE schemaname=$schema;",
+                        return ReadInt(Program.QuerySql(metadata, "SELECT COUNT(*) AS n FROM pg_tables WHERE schemaname=$schema;",
                             TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(coldCampaign))).Single(), "n", -1);
                     }
                     int coldBefore = ColdTables();
@@ -570,7 +570,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
 
                 var noOptIn = Unit("view_insertion_without_opt_in");
                 var noOptInReceipt = ReadDictionary(Publish(noOptIn), "acceptedUnit");
-                var borrowed = CloneDictionary(viewDescriptor); borrowed["unitId"] = noOptIn.EventId;
+                var borrowed = Program.CloneDictionary(viewDescriptor); borrowed["unitId"] = noOptIn.EventId;
                 Check("view_insertion_without_descriptor_or_old_receipt_is_unknown", ReadDictionary(noOptInReceipt, "viewInsertion") == null
                     && ReadString(Ack(borrowed), "reason", "") == "no_view_insertion_descriptor"
                     && ReadString(Ack(viewDescriptor, "unitId", unit.EventId), "reason", "") == "no_view_insertion_descriptor"
@@ -589,7 +589,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 AdvanceMemoryRestoreGeneration(campaign);
                 Check("view_insertion_old_restore_generation_never_writes", staleDescriptor != null
                     && ReadString(Ack(staleDescriptor), "disposition", "") == "stale" && StoredReceipt(staleView.EventId) == beforeRestore);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var stale = Unit("pre_restore");
                 GenerateSinglePassConversation(TestDict(), stale.Payload, "dialogue", responder: _ =>
@@ -599,15 +599,15 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 try { Publish(stale); } catch (InvalidOperationException) { restoreRejected = true; }
                 Check("restore_rejects_entire_pending_unit", restoreRejected && Count("conversation_turns", "event_id", stale.EventId) == 0
                     && Count("events", "event_id", stale.EventId) == 0 && Count("conversation_accepted_units", "unit_id", stale.EventId) == 0);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var edited = Unit("view_insertion_edited_source"); edited.ViewInsertionRequested = true;
                 var editedDescriptor = ReadDictionary(ReadDictionary(Publish(edited), "acceptedUnit"), "viewInsertion");
                 string beforeEdit = StoredReceipt(edited.EventId);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                 {
                     // The real editor statements; every active npc-session row is listed so only the target text changes.
-                    var rows = QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
+                    var rows = Program.QuerySql(connection, @"SELECT t.* FROM conversation_turns t JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE s.npc_id='npc' AND t.status='active';").Select(row => TestDict("id", ReadString(row, "turn_id", ""),
                         "text", ReadString(row, "turn_id", "") == ReadString(editedDescriptor, "sourceTurnId", "")
                             ? ReadString(row, "text", "") + " Edited." : ReadString(row, "text", ""),

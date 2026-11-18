@@ -425,7 +425,7 @@ namespace ReignBetaServer
             bool explicitSuite = !string.IsNullOrWhiteSpace(requestedSuite);
             if (string.Equals(requestedSuite, "categorized_memory", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "pipeline.categorized_memory", "categorized_memory", RunCategorizedMemorySubsystemSelfTests(), caseResultLimit:64);
+                AddSubsystemListSummary(checks, "pipeline.categorized_memory", "categorized_memory", DialogueService.RunCategorizedMemorySubsystemSelfTests(), caseResultLimit:64);
                 return;
             }
             if (string.Equals(requestedSuite, "live_interaction", StringComparison.OrdinalIgnoreCase))
@@ -437,26 +437,26 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.war_economy_options", "war_economy_options", RunWarEconomyOptionsSelfTests());
             if (string.Equals(requestedSuite, "memory_evidence_replay", StringComparison.OrdinalIgnoreCase))
             {
-                var replay = RunMemoryEvidenceReplay();
+                var replay = DialogueService.RunMemoryEvidenceReplay();
                 AddVerificationCheck(checks, "replay.memory_evidence", "memory_evidence_replay", ReadBool(replay, "ok", false),
                     "Provider-free local evidence and writer replay; captured responses and semantic acceptance remain separate.", replay);
                 return;
             }
             if (string.Equals(requestedSuite, "memory_accuracy_replay", StringComparison.OrdinalIgnoreCase))
             {
-                var replay = RunMemoryAccuracyReplay();
+                var replay = DialogueService.RunMemoryAccuracyReplay();
                 AddVerificationCheck(checks, "replay.memory_accuracy", "memory_accuracy_replay", ReadBool(replay, "ok", false),
                     "Provider-free source-only comparison; semantic, full-input and native acceptance remain separate.", replay);
                 return;
             }
             if (string.Equals(requestedSuite, "personal_gossip", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "contracts.personal_gossip", "personal_gossip", RunPersonalGossipSelfTests());
+                AddSubsystemListSummary(checks, "contracts.personal_gossip", "personal_gossip", DialogueService.RunPersonalGossipSelfTests());
                 return;
             }
             if (string.Equals(requestedSuite, "communications", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "contracts.communications", "communications", RunCommunicationSelfTests());
+                AddSubsystemListSummary(checks, "contracts.communications", "communications", DialogueService.RunCommunicationSelfTests());
                 return;
             }
             if (requestedSuite == "relationship_throughput_contracts" || requestedSuite == "relationship_throughput_smoke"
@@ -478,7 +478,7 @@ namespace ReignBetaServer
                 if (!HasArg(Environment.GetCommandLineArgs(), "--run-verification"))
                     throw new InvalidOperationException("Injected Codex contracts require the isolated non-listening Verification Lab CLI through reign_run_offline_verification.");
                 AddSubsystemListSummary(checks, "contracts.codex_runtime", "codex_performance", RunCodexRuntimeSelfTests());
-                AddSubsystemListSummary(checks, "contracts.codex_conversation", "codex_performance", RunCodexConversationSelfTests());
+                AddSubsystemListSummary(checks, "contracts.codex_conversation", "codex_performance", DialogueService.RunCodexConversationSelfTests());
                 var integration = RunCodexPerformanceIntegrationSelfTests();
                 AddVerificationCheck(checks, "contracts.codex_integration", "codex_performance", ReadBool(integration, "ok", false), "Codex settings and physical provider-call cap contracts.", integration);
                 var reports = RunCodexPerformanceReportSelfTests();
@@ -507,12 +507,12 @@ namespace ReignBetaServer
             if (string.Equals(requestedSuite, "prompt_efficiency", StringComparison.OrdinalIgnoreCase))
             {
                 RunPromptSizeContract(checks);
-                AddSubsystemListSummary(checks, "pipeline.prompt_caching", "prompt_efficiency", RunPromptCachingSelfTests());
+                AddSubsystemListSummary(checks, "pipeline.prompt_caching", "prompt_efficiency", DialogueService.RunPromptCachingSelfTests());
             }
             if (ShouldRunVerificationSuite(requestedSuite, "memory_precision"))
-                AddSubsystemListSummary(checks, "pipeline.memory_precision", "memory_precision", RunMemoryPrecisionSelfTests());
+                AddSubsystemListSummary(checks, "pipeline.memory_precision", "memory_precision", DialogueService.RunMemoryPrecisionSelfTests());
             if (string.Equals(requestedSuite, "conversation_intoxication", StringComparison.OrdinalIgnoreCase))
-                AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", RunConversationIntoxicationSelfTests());
+                AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", DialogueService.RunConversationIntoxicationSelfTests());
             if (string.Equals(requestedSuite, "relationships", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RelationshipsService.RunCurrentRelationshipSelfTests(), caseResultLimit:512);
             if (string.Equals(requestedSuite, "wanderer_population", StringComparison.OrdinalIgnoreCase))
@@ -544,9 +544,9 @@ namespace ReignBetaServer
             if (ShouldRunVerificationSuite(requestedSuite, "contracts") ||
                 string.Equals(requestedSuite, "ui_contracts", StringComparison.OrdinalIgnoreCase))
             {
-                AddSubsystemListSummary(checks, "contracts.structured_actions", "contracts", RunStructuredActionSelfTests());
+                AddSubsystemListSummary(checks, "contracts.structured_actions", "contracts", DialogueService.RunStructuredActionSelfTests());
                 AddSubsystemListSummary(checks, "contracts.npc_lives", "contracts", CharactersService.RunNpcLivesSelfTests());
-                AddSubsystemListSummary(checks, "contracts.communications", "contracts", RunCommunicationSelfTests());
+                AddSubsystemListSummary(checks, "contracts.communications", "contracts", DialogueService.RunCommunicationSelfTests());
                 AddSubsystemListSummary(checks, "contracts.rulers", "contracts", RelationshipsService.RunRulerJudgmentSelfTests());
                 RunBuildAndContractChecks(checks, includeExpensiveSubsystems: explicitSuite);
             }
@@ -606,12 +606,12 @@ namespace ReignBetaServer
             AddSubsystemListSummary(checks, "contracts.encountered_residents", "characters", CharactersService.RunEncounteredResidentTests());
             AddSubsystemListSummary(checks, "contracts.tavern_house", "characters", CharactersService.RunTavernHouseContractTests());
             AddSubsystemListSummary(checks, "contracts.starting_children", "characters", CharactersService.RunStartingChildrenTests());
-            AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", RunConversationIntoxicationSelfTests());
+            AddSubsystemListSummary(checks, "contracts.conversation_intoxication", "conversation_modes", DialogueService.RunConversationIntoxicationSelfTests());
             AddSubsystemListSummary(checks, "contracts.dialogue_marriage", "actions_trade",
                 WorldSimulationService.RunDialogueMarriageActionAssertions().Concat(WorldSimulationService.VerifyDialogueMarriageNormalization()).ToList());
 #if !REIGN_EXCLUDE_COURT
-            AddSubsystemListSummary(checks, "contracts.castle_scene_context", "conversation_modes", RunConversationSceneStateSelfTests());
-            AddSubsystemListSummary(checks, "contracts.sovereign_conduct", "conversation_modes", RunPoliticalDangerPostureSelfTests());
+            AddSubsystemListSummary(checks, "contracts.castle_scene_context", "conversation_modes", DialogueService.RunConversationSceneStateSelfTests());
+            AddSubsystemListSummary(checks, "contracts.sovereign_conduct", "conversation_modes", DialogueService.RunPoliticalDangerPostureSelfTests());
             AddSubsystemListSummary(checks, "contracts.sovereign_identity", "knowledge_identity", CharactersService.RunIdentitySubsystemSelfTests());
             AddSubsystemListSummary(checks, "contracts.court_and_resident_ambassadors", "court_system", CourtService.RunCourtSelfTests());
             bool courtAuthorityStability = !Reign.Core.Contracts.Court.ReignCourtAuthorityStability.ShouldInterrupt(1)
@@ -639,20 +639,20 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RelationshipsService.RunCurrentRelationshipSelfTests());
                 AddSubsystemListSummary(checks, "contracts.notable_mbti", "memory_relationships", RelationshipsService.RunNotableMbtiSelfTests());
             }
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_models", "conversation_modes", RunFinalConversationGauntletModelSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_catalog", "conversation_modes", RunFinalConversationGauntletCatalogSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_fixtures", "conversation_modes", RunFinalConversationGauntletFixtureSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_evidence", "conversation_modes", RunFinalConversationGauntletEvidenceSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_evaluation", "conversation_modes", RunFinalConversationGauntletEvaluationSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_scheduler", "conversation_modes", RunFinalConversationGauntletSchedulerSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_actions", "actions_trade", RunFinalConversationGauntletActionSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_reports", "conversation_modes", RunFinalConversationGauntletReportSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_provider_budget", "conversation_modes", RunFinalConversationGauntletProviderBudgetSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_coverage", "conversation_modes", RunFinalConversationGauntletCoverageSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_readiness_selection", "conversation_modes", RunFinalConversationGauntletReadinessSelectionSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_manifest", "conversation_modes", RunFinalConversationGauntletManifestSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_long_horizon_budget", "conversation_modes", RunFinalConversationGauntletLongHorizonBudgetSelfTests());
-            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_lifecycle", "conversation_modes", RunFinalConversationGauntletLifecycleSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_models", "conversation_modes", DialogueService.RunFinalConversationGauntletModelSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_catalog", "conversation_modes", DialogueService.RunFinalConversationGauntletCatalogSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_fixtures", "conversation_modes", DialogueService.RunFinalConversationGauntletFixtureSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_evidence", "conversation_modes", DialogueService.RunFinalConversationGauntletEvidenceSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_evaluation", "conversation_modes", DialogueService.RunFinalConversationGauntletEvaluationSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_scheduler", "conversation_modes", DialogueService.RunFinalConversationGauntletSchedulerSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_actions", "actions_trade", DialogueService.RunFinalConversationGauntletActionSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_reports", "conversation_modes", DialogueService.RunFinalConversationGauntletReportSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_provider_budget", "conversation_modes", DialogueService.RunFinalConversationGauntletProviderBudgetSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_coverage", "conversation_modes", DialogueService.RunFinalConversationGauntletCoverageSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_readiness_selection", "conversation_modes", DialogueService.RunFinalConversationGauntletReadinessSelectionSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_manifest", "conversation_modes", DialogueService.RunFinalConversationGauntletManifestSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_long_horizon_budget", "conversation_modes", DialogueService.RunFinalConversationGauntletLongHorizonBudgetSelfTests());
+            AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_lifecycle", "conversation_modes", DialogueService.RunFinalConversationGauntletLifecycleSelfTests());
             string root = FindVerificationSourceRoot();
             bool sourceFound = !string.IsNullOrWhiteSpace(root);
             AddVerificationCheck(checks, "contracts.source_root", "contracts", sourceFound, sourceFound ? "Workspace source root discovered." : "Workspace source root could not be discovered.", new Dictionary<string, object> { ["sourceRoot"] = root });
@@ -3007,8 +3007,8 @@ namespace ReignBetaServer
         private static void RunPromptSizeContract(List<Dictionary<string, object>> checks)
         {
             AddSubsystemListSummary(checks, "contracts.wilderness_variety", "prompt_efficiency", WorldSimulationService.RunWildernessVarietySelfTests());
-            int commoner = BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>()).Length;
-            int noble = BuildDialogueGlobalPrefix(false, true, new List<Dictionary<string, object>>()).Length;
+            int commoner = DialogueService.BuildDialogueGlobalPrefix(false, false, new List<Dictionary<string, object>>()).Length;
+            int noble = DialogueService.BuildDialogueGlobalPrefix(false, true, new List<Dictionary<string, object>>()).Length;
             int maximum = Math.Max(commoner, noble);
             AddVerificationCheck(checks, "contracts.dialogue_prompt_budget", "prompt_efficiency", commoner > 0 && noble > 0 && maximum <= 45000,
                 "Assembled ordinary-dialogue system prefixes: commoner=" + commoner + ", noble=" + noble + " characters.",
@@ -3075,21 +3075,21 @@ namespace ReignBetaServer
             trace("character_editor:start");
             AddSubsystemListSummary(checks, "pipeline.character_editor", "character_construction", CharactersService.RunCharacterEditorSubsystemSelfTests());
             trace("categorized_memory:start");
-            AddSubsystemListSummary(checks, "pipeline.categorized_memory", "memory_relationships", RunCategorizedMemorySubsystemSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.categorized_memory", "memory_relationships", DialogueService.RunCategorizedMemorySubsystemSelfTests());
             trace("dynamic_characteristics:start");
             AddSubsystemListSummary(checks, "pipeline.dynamic_characteristics", "memory_relationships", CharactersService.RunDynamicCharacteristicsSelfTests());
             trace("npc_dialogue_audit:start");
-            AddSubsystemListSummary(checks, "pipeline.npc_dialogue_audit", "memory_relationships", RunNpcDialogueAuditSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.npc_dialogue_audit", "memory_relationships", DialogueService.RunNpcDialogueAuditSelfTests());
             trace("party_dialogue_audit:start");
-            AddSubsystemListSummary(checks, "pipeline.party_dialogue_audit", "memory_relationships", RunPartyDialogueAuditSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.party_dialogue_audit", "memory_relationships", DialogueService.RunPartyDialogueAuditSelfTests());
             trace("live_interaction:start");
             AddSubsystemListSummary(checks, "pipeline.live_interaction", "conversation_modes", WorldSimulationService.RunLiveInteractionTestSelfTests());
             trace("conversation_readiness:start");
-            AddSubsystemListSummary(checks, "pipeline.conversation_readiness_evaluation", "conversation_modes", RunConversationReadinessEvaluationSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.conversation_readiness_evaluation", "conversation_modes", DialogueService.RunConversationReadinessEvaluationSelfTests());
             trace("final_conversation_gauntlet_models:start");
-            AddSubsystemListSummary(checks, "pipeline.final_conversation_gauntlet_models", "conversation_modes", RunFinalConversationGauntletModelSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.final_conversation_gauntlet_models", "conversation_modes", DialogueService.RunFinalConversationGauntletModelSelfTests());
             trace("semantic_memory:start");
-            AddSubsystemListSummary(checks, "pipeline.semantic_memory", "memory_relationships", RunSemanticMemorySelfTests());
+            AddSubsystemListSummary(checks, "pipeline.semantic_memory", "memory_relationships", DialogueService.RunSemanticMemorySelfTests());
             trace("character_profiles:start");
             AddSubsystemListSummary(checks, "pipeline.character_profiles", "character_construction", CharactersService.RunCharacterProfileLibrarySelfTests(includeCourt: false));
             trace("identity:start");
@@ -3100,7 +3100,7 @@ namespace ReignBetaServer
             trace("save_sync:start");
             AddSubsystemListSummary(checks, "pipeline.save_sync", "server_lifecycle", PersistenceService.RunSaveSyncSelfTests());
             trace("prompt_caching:start");
-            AddSubsystemListSummary(checks, "pipeline.prompt_caching", "prompt_efficiency", RunPromptCachingSelfTests());
+            AddSubsystemListSummary(checks, "pipeline.prompt_caching", "prompt_efficiency", DialogueService.RunPromptCachingSelfTests());
             trace("complete");
         }
 
@@ -3899,7 +3899,7 @@ namespace ReignBetaServer
             return enumText.Length == 0 ? ActionNamesFallback() : ParseActionNames(enumText);
         }
 
-        private static List<string> DiscoverActionNames(string enumPath)
+        internal static List<string> DiscoverActionNames(string enumPath)
         {
             if (!File.Exists(enumPath)) return ActionNamesFallback();
             return ParseActionNames(File.ReadAllText(enumPath));

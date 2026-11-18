@@ -4,9 +4,9 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             RunFinalConversationGauntletActionSelfTests()
         {
             List<Dictionary<string, object>> checks =

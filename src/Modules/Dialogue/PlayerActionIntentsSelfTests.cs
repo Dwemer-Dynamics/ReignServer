@@ -5,7 +5,7 @@ using ReignBeta.Shared.Dialogue;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static List<Dictionary<string, object>> RunPlayerActionIntentsSelfTests()
         {
@@ -14,13 +14,13 @@ namespace ReignBetaServer
             string campaign = "player_actions_test_" + Guid.NewGuid().ToString("N");
             Dictionary<string, object> NewContribution(Dictionary<string, object> prior, string id)
             {
-                var next = CloneDictionary(prior);
+                var next = Program.CloneDictionary(prior);
                 PlayerInputSources.Remove(next); // A new authored contribution is not an observer clone of the prior one.
                 next["sceneTurnId"] = id; next["contributionId"] = id; next["correlationId"] = id;
                 next.Remove("inputReceipt"); next.Remove("inputSourceId");
                 return next;
             }
-            var payload = CloneDictionary(ReadDictionary(DefaultActionTestSnapshot(), "payload"));
+            var payload = Program.CloneDictionary(ReadDictionary(Program.DefaultActionTestSnapshot(), "payload"));
             payload["campaignId"] = campaign; payload["timelineId"] = "player_actions_timeline";
             payload["sceneTurnId"] = "captured"; payload["correlationId"] = "captured";
             payload["playerText"] = "*I give her the 2000 denars to join as a companion* You can leave tomorrow.";
@@ -35,10 +35,10 @@ namespace ReignBetaServer
             var first = rows.FirstOrDefault();
             if (first != null)
             {
-                var poll = NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
+                var poll = Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
                 var delivered = ReadDurableConversationAction(campaign, ReadString(first, "id", ""));
                 delivered["deliveredTs"] = 1L; SaveDurableConversationAction(campaign, delivered);
-                var retry = NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
+                var retry = Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>());
                 add("lost_delivery_ack_reuses_id", ReadDictionaryList(poll, "actions").Count == 1
                     && ReadDictionaryList(retry, "actions").Count == 1
                     && ReadString(ReadDictionaryList(retry, "actions").FirstOrDefault(), "serverActionId", "") == ReadString(first, "id", ""), retry);
@@ -58,7 +58,7 @@ namespace ReignBetaServer
                     var held = ReadDurableConversationAction(campaign, heldId);
                     held["ts"] = 1L; held["deliveryCount"] = count; held["deliveredTs"] = now - sinceDelivery;
                     held["deliveryGeneration"] = rowGeneration; SaveDurableConversationAction(campaign, held);
-                    return ReadDictionaryList(NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
+                    return ReadDictionaryList(Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions")
                         .Count(a => ReadString(a, "serverActionId", "") == heldId);
                 };
                 string liveGeneration = ReadString(ReadDurableConversationAction(campaign, heldId), "deliveryGeneration", "");
@@ -86,20 +86,20 @@ namespace ReignBetaServer
                     && ReadInt(holdSummary, "backedOffCount", 0) == 1 && ReadInt(ReadDictionary(holdSummary, "byStatus"), "executing", 0) == 1
                     && ReadLong(holdSummary, "oldestAgeSeconds", 0) >= now - 1 && holdSample != null && ReadLong(holdSample, "deliveryCount", 0) == 10
                     && ReadString(holdSample, "command", "").Length > 0
-                    && ReadInt(ReadDictionary(ActionFailures(TestDict("campaignId", campaign), new Dictionary<string, string>()), "unresolvedDeliveries"), "backedOffCount", 0) == 1, holdSummary);
+                    && ReadInt(ReadDictionary(Program.ActionFailures(TestDict("campaignId", campaign), new Dictionary<string, string>()), "unresolvedDeliveries"), "backedOffCount", 0) == 1, holdSummary);
                 }
                 finally { _actionRedeliveryProcessStartOverride = null; }
-                ReportAction(TestDict("campaignId", campaign, "actionId", ReadString(first, "id", ""), "serverActionId", ReadString(first, "id", ""), "status", "completed", "message", "Verified fixture transfer."));
-                add("terminal_report_stops_delivery", ReadDictionaryList(NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions").Count == 0, null);
+                Program.ReportAction(TestDict("campaignId", campaign, "actionId", ReadString(first, "id", ""), "serverActionId", ReadString(first, "id", ""), "status", "completed", "message", "Verified fixture transfer."));
+                add("terminal_report_stops_delivery", ReadDictionaryList(Program.NextActions(TestDict("campaignId", campaign), new Dictionary<string, string>()), "actions").Count == 0, null);
                 var resolvedSummary = UnresolvedActionDeliverySummary(campaign);
                 add("redelivery_backed_off_row_accepts_terminal_report", ReadString(ReadDurableConversationAction(campaign, heldId), "status", "") == "completed"
                     && ReadBool(resolvedSummary, "ok", false) && ReadInt(resolvedSummary, "unresolvedCount", -1) == 0, resolvedSummary);
-                var stale = CloneDictionary(first); stale["status"] = "rejected";
+                var stale = Program.CloneDictionary(first); stale["status"] = "rejected";
                 SaveDurableConversationAction(campaign, stale);
                 add("late_reply_cannot_overwrite_applied_receipt", ReadString(stale, "status", "") == "completed"
                     && ReadString(ReadDurableConversationAction(campaign, ReadString(first, "id", "")), "status", "") == "completed", stale);
             }
-            var alteredRetry = CloneDictionary(payload); alteredRetry["playerText"] = "I give you 2500 gold to join as a companion.";
+            var alteredRetry = Program.CloneDictionary(payload); alteredRetry["playerText"] = "I give you 2500 gold to join as a companion.";
             PlayerInputSources.Remove(alteredRetry);
             bool changedInputRejected = false, changedInputGenerated = false;
             try { RunPlayerActionTurn(alteredRetry, () => { changedInputGenerated = true; return TestDict("ok", true, "reply", "I will consider joining."); }); }
@@ -114,7 +114,7 @@ namespace ReignBetaServer
             string protocolId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").FirstOrDefault(), "id", "");
             var protocolRecord = ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "record");
             string protocolActor = ReadString(protocolRecord, "actorHeroStringId", ""), protocolGeneration;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
                 protocolGeneration = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             Func<string, string, string> protocolReport = (player, message) => Json.Serialize(TestDict("campaignId", campaign,
                 "serverActionId", protocolId, "actionId", protocolId, "timelineId", "player_actions_timeline", "playerHeroStringId", player,
@@ -129,33 +129,33 @@ namespace ReignBetaServer
                     "termsHash", ReadString(protocolRecord, "termsHash", ""), "status", "completed", "reportJson", json, "reportSha256", sha);
             };
             string protocolJson = protocolReport(protocolActor, "A kind gift was handed over with thanks.");
-            Func<string, int> protocolCount = sql => { using (var c = OpenCampaignConnection(campaign)) return QuerySql(c, sql, TestDict("id", protocolId)).Count; };
+            Func<string, int> protocolCount = sql => { using (var c = Program.OpenCampaignConnection(campaign)) return Program.QuerySql(c, sql, TestDict("id", protocolId)).Count; };
             const string directionalSql = "SELECT event_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';";
             const string actionReceiptSql = "SELECT receipt_id FROM conversation_relationship_receipts WHERE source_turn_id=$id AND mode='completed_action' AND status='action_effect' AND severity_tier='routine';";
             // Derived court-popularity metrics and dependent standing/reputation rows for the action pair.
             var derivedArgs = TestDict("campaign", campaign, "actor", protocolActor, "target", ReadString(protocolRecord, "targetHeroStringId", ""));
             const string derivedMetricSql = "SELECT subject_id,positive_count,negative_count,calculated_day FROM court_dynamic_reputation_metrics WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND domain='popularity' AND subject_id IN ($actor,$target) ORDER BY subject_id;";
-            Func<ReignDbConnection, string> derivedSnapshot = c => Json.Serialize(new object[] { QuerySql(c, derivedMetricSql, derivedArgs),
-                QuerySql(c, "SELECT subject_id,standing_value,revision FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id;", derivedArgs),
-                QuerySql(c, "SELECT subject_id,tag_id,status,reputation_value FROM character_reputations WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id,tag_id;", derivedArgs) });
-            Func<string> derivedCommitted = () => { using (var c = OpenCampaignConnection(campaign)) { ReputationService.EnsureSocialReputationSchema(c); ReputationService.EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
+            Func<ReignDbConnection, string> derivedSnapshot = c => Json.Serialize(new object[] { Program.QuerySql(c, derivedMetricSql, derivedArgs),
+                Program.QuerySql(c, "SELECT subject_id,standing_value,revision FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id;", derivedArgs),
+                Program.QuerySql(c, "SELECT subject_id,tag_id,status,reputation_value FROM character_reputations WHERE campaign_id=$campaign AND timeline_id='player_actions_timeline' AND subject_id IN ($actor,$target) ORDER BY subject_id,tag_id;", derivedArgs) });
+            Func<string> derivedCommitted = () => { using (var c = Program.OpenCampaignConnection(campaign)) { ReputationService.EnsureSocialReputationSchema(c); ReputationService.EnsureCourtSocialReputationSchema(c); return derivedSnapshot(c); } };
             string derivedBefore = derivedCommitted();
             int derivedMetricsBefore, derivedMetricsInTransaction = -1;
-            using (var c = OpenCampaignConnection(campaign)) derivedMetricsBefore = QuerySql(c, derivedMetricSql, derivedArgs).Count;
+            using (var c = Program.OpenCampaignConnection(campaign)) derivedMetricsBefore = Program.QuerySql(c, derivedMetricSql, derivedArgs).Count;
             bool interrupted = false;
             try
             {
                 TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson), (step, c) =>
                 {
                     if (step != 2) return;
-                    derivedMetricsInTransaction = QuerySql(c, derivedMetricSql, derivedArgs).Count(r => ReadDouble(r, "calculated_day", 0d) == 20d);
+                    derivedMetricsInTransaction = Program.QuerySql(c, derivedMetricSql, derivedArgs).Count(r => ReadDouble(r, "calculated_day", 0d) == 20d);
                     throw new InvalidOperationException("Injected pre-commit failure.");
                 });
             }
             catch (InvalidOperationException) { interrupted = true; }
             var afterInterrupt = ReadDurableConversationAction(campaign, protocolId);
             add("terminal_report_interruption_rolls_back_everything", interrupted && !IsProtocolOwnedTerminalAction(afterInterrupt)
-                && !IsTerminalActionReportStatus(ReadString(afterInterrupt, "status", "")) && protocolCount(directionalSql) == 0 && protocolCount(actionReceiptSql) == 0, afterInterrupt);
+                && !Program.IsTerminalActionReportStatus(ReadString(afterInterrupt, "status", "")) && protocolCount(directionalSql) == 0 && protocolCount(actionReceiptSql) == 0, afterInterrupt);
             add("terminal_report_interruption_rolls_back_derived_standing", derivedMetricsBefore == 0 && derivedMetricsInTransaction > 0
                 && derivedCommitted() == derivedBefore, TestDict("inTransaction", derivedMetricsInTransaction, "before", derivedBefore));
             // Read-only preflight: the same predicates, distinct dispositions, no writes and no campaign creation.
@@ -165,17 +165,17 @@ namespace ReignBetaServer
             var changedType = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson.Replace("\"RegularTransferGold\"", "\"RegularDuelPlayer\"")));
             // The stored record carries the normalized type; a different stored type or any typeValue
             // override is rejected by GET and POST, then the exact original row text is restored.
-            Func<string> storedPayload = () => { using (var c = OpenCampaignConnection(campaign)) return ReadString(QuerySql(c,
+            Func<string> storedPayload = () => { using (var c = Program.OpenCampaignConnection(campaign)) return ReadString(Program.QuerySql(c,
                 "SELECT payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", protocolId)).Single(), "payload_json", ""); };
             string originalPayload = storedPayload();
             Func<string, bool> storedOverrideRejected = patch =>
             {
-                using (var c = OpenCampaignConnection(campaign)) ExecuteSql(c,
+                using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c,
                     "UPDATE conversation_action_outbox SET payload_json=jsonb_set(payload_json::jsonb, '{record}', (payload_json::jsonb->'record') || $patch::jsonb)::text WHERE action_id=$id;",
                     TestDict("id", protocolId, "patch", patch));
                 var get = preflight(campaign, protocolId, protocolGeneration, ReadString(protocolRecord, "termsHash", ""));
                 var post = TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
-                using (var c = OpenCampaignConnection(campaign)) ExecuteSql(c,
+                using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c,
                     "UPDATE conversation_action_outbox SET payload_json=$payload WHERE action_id=$id;", TestDict("id", protocolId, "payload", originalPayload));
                 return ReadString(get, "disposition", "") == "conflict" && ReadString(get, "reason", "") == "action_type_mismatch"
                     && ReadString(post, "reason", "") == "action_type_mismatch";
@@ -198,8 +198,8 @@ namespace ReignBetaServer
                 && ReadString(preflight(absentCampaign, protocolId, protocolGeneration, protocolTerms), "disposition", "") == "unknown", eligible);
             // A known row made ineligible by a foreign projection owner answers ineligible only for
             // its exact current scope; stale or mismatched scope never permits legacy fallback.
-            Action<string, bool> foreignOwner = (id, present) => { using (var c = OpenCampaignConnection(campaign)) { RebellionService.EnsureRebellionSchema(c);
-                ExecuteSql(c, present ? @"INSERT INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
+            Action<string, bool> foreignOwner = (id, present) => { using (var c = Program.OpenCampaignConnection(campaign)) { RebellionService.EnsureRebellionSchema(c);
+                Program.ExecuteSql(c, present ? @"INSERT INTO negotiated_action_drafts(negotiation_id,campaign_id,timeline_id,broker_hero_id,first_kingdom_id,
 second_kingdom_id,first_ruler_id,second_ruler_id,command,terms_json,terms_hash,status,created_day,updated_day,expires_day,queued_action_id)
 VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peace','{}','h','queued',20,20,30,$id);"
                     : "DELETE FROM negotiated_action_drafts WHERE negotiation_id=$n AND campaign_id=$campaign AND queued_action_id=$id;",
@@ -225,19 +225,19 @@ VALUES($n,$campaign,'player_actions_timeline','b','k1','k2','r1','r2','make_peac
             // (through a metadata connection, never FileLock), the peer releases FileLock, and the
             // acceptance finishes late with the assertion failed.
             string pairTarget = ReadString(protocolRecord, "targetHeroStringId", "");
-            string profilePath = CharacterFile(campaign, pairTarget, "profile.json");
+            string profilePath = Program.CharacterFile(campaign, pairTarget, "profile.json");
             string originalProfile;
-            lock (FileLock) originalProfile = System.IO.File.Exists(profilePath) ? System.IO.File.ReadAllText(profilePath) : null;
-            var spouseProfile = ReadJsonObject(profilePath); spouseProfile["spouseId"] = protocolActor;
-            WriteJsonObject(profilePath, spouseProfile);
+            lock (Program.FileLock) originalProfile = System.IO.File.Exists(profilePath) ? System.IO.File.ReadAllText(profilePath) : null;
+            var spouseProfile = Program.ReadJsonObject(profilePath); spouseProfile["spouseId"] = protocolActor;
+            Program.WriteJsonObject(profilePath, spouseProfile);
             var standingKey = TestDict("campaign", campaign, "timeline", "player_actions_timeline", "subject", pairTarget);
             Dictionary<string, object> priorStanding, ordinaryStanding;
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = Program.OpenCampaignConnection(campaign))
             {
                 ReputationService.EnsureSocialReputationSchema(c);
-                priorStanding = QuerySql(c, @"SELECT standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts,calculation_status,last_error
+                priorStanding = Program.QuerySql(c, @"SELECT standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts,calculation_status,last_error
 FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey).FirstOrDefault();
-                ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
+                Program.ExecuteSql(c, @"INSERT INTO character_public_standing(campaign_id,timeline_id,subject_id,standing_value,sources_json,revision,calculated_revision,last_changed_day,updated_ts)
 VALUES($campaign,$timeline,$subject,-5,$sources,1,1,20,$ts) ON CONFLICT(campaign_id,timeline_id,subject_id) DO UPDATE SET
 standing_value=-5,sources_json=$sources,revision=character_public_standing.revision+1,calculated_revision=character_public_standing.revision+1,updated_ts=$ts;",
                     new Dictionary<string, object>(standingKey) { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -261,7 +261,7 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
             // Backends currently waiting on a lock held by this connection's backend. pg_locks
             // and pg_blocking_pids are read live on every call; pg_stat_activity is a snapshot
             // fixed at its first read in a transaction and would miss a peer backend opened later.
-            Func<ReignDbConnection, List<int>> blockedWaiters = c => QuerySql(c,
+            Func<ReignDbConnection, List<int>> blockedWaiters = c => Program.QuerySql(c,
                 "SELECT DISTINCT pid FROM pg_locks WHERE NOT granted AND pg_backend_pid()=ANY(pg_blocking_pids(pid));")
                 .Select(r => ReadInt(r, "pid", 0)).Where(pid => pid != 0).ToList();
             try
@@ -270,10 +270,10 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
                 {
                     if (step == 0)
                     {
-                        int acceptancePid = ReadInt(QuerySql(c, "SELECT pg_backend_pid() AS pid;").Single(), "pid", 0);
+                        int acceptancePid = ReadInt(Program.QuerySql(c, "SELECT pg_backend_pid() AS pid;").Single(), "pid", 0);
                         peer = System.Threading.Tasks.Task.Run(() =>
                         {
-                            lock (FileLock)
+                            lock (Program.FileLock)
                             {
                                 peerHolds.Set();
                                 try
@@ -312,7 +312,7 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
                                     watchdogFired = true;
                                     if (knownPeer == 0) return;
                                     using (var meta = ReignPostgreSqlStorage.OpenMetadataConnection())
-                                        watchdogCancelled = QuerySql(meta, @"SELECT pg_cancel_backend(pid) AS cancelled FROM (SELECT DISTINCT pid FROM pg_locks
+                                        watchdogCancelled = Program.QuerySql(meta, @"SELECT pg_cancel_backend(pid) AS cancelled FROM (SELECT DISTINCT pid FROM pg_locks
 WHERE pid=$peer AND NOT granted AND $acceptance=ANY(pg_blocking_pids(pid))) AS waiting;",
                                             TestDict("peer", knownPeer, "acceptance", acceptancePid)).Count(r => ReadBool(r, "cancelled", false));
                                 }
@@ -323,12 +323,12 @@ WHERE pid=$peer AND NOT granted AND $acceptance=ANY(pg_blocking_pids(pid))) AS w
                     else if (step == 1)
                     {
                         evaluated.Set();
-                        bool entered = System.Threading.Monitor.TryEnter(FileLock);
-                        if (entered) System.Threading.Monitor.Exit(FileLock);
+                        bool entered = System.Threading.Monitor.TryEnter(Program.FileLock);
+                        if (entered) System.Threading.Monitor.Exit(Program.FileLock);
                         fileLockHeldByPeer = !entered;
                         // The pair row exactly as the production evaluation just wrote it in this
                         // transaction, before reputation recompute can change the target's standing.
-                        chemistryAtEvaluation = QuerySql(c, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
+                        chemistryAtEvaluation = Program.QuerySql(c, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
 effective_affinity_a_to_b,effective_affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                             TestDict("pair", RelationshipsService.AmbientPairKey(protocolActor, pairTarget))).FirstOrDefault();
                         // Inside the acceptance scope the pair resolves from its snapshot; any other hero is refused.
@@ -353,18 +353,18 @@ effective_affinity_a_to_b,effective_affinity_b_to_a FROM relationship_pair_chemi
                 if (!workersJoined) peerError = FirstNonEmpty(peerError, "worker_not_joined");
                 else { peerHolds.Dispose(); evaluated.Dispose(); }
                 // Never wait unboundedly on FileLock here: a peer that failed to join may still hold it.
-                if (System.Threading.Monitor.TryEnter(FileLock, 30000))
+                if (System.Threading.Monitor.TryEnter(Program.FileLock, 30000))
                     try
                     {
                         if (originalProfile == null) System.IO.File.Delete(profilePath);
                         else System.IO.File.WriteAllText(profilePath, originalProfile);
                     }
-                    finally { System.Threading.Monitor.Exit(FileLock); }
+                    finally { System.Threading.Monitor.Exit(Program.FileLock); }
                 else restoreError = "profile_restore_skipped_file_lock_busy";
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = Program.OpenCampaignConnection(campaign))
                     if (priorStanding == null)
-                        ExecuteSql(c, "DELETE FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey);
-                    else ExecuteSql(c, @"UPDATE character_public_standing SET standing_value=$value,sources_json=$priorSources,revision=$revision,
+                        Program.ExecuteSql(c, "DELETE FROM character_public_standing WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;", standingKey);
+                    else Program.ExecuteSql(c, @"UPDATE character_public_standing SET standing_value=$value,sources_json=$priorSources,revision=$revision,
 calculated_revision=$calculated,last_changed_day=$day,updated_ts=$updated,calculation_status=$status,last_error=$error
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         new Dictionary<string, object>(standingKey) { ["value"] = ReadInt(priorStanding, "standing_value", 0),
@@ -406,8 +406,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             protocolFirst = protocolFirst ?? TerminalActionReportApi(protocolEnvelope(protocolActor, protocolJson));
             var protocolEffect = ReadDictionary(protocolFirst, "nativeEffect");
             List<int> directionalDeltas;
-            using (var connection = OpenCampaignConnection(campaign))
-                directionalDeltas = QuerySql(connection, "SELECT native_delta FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';",
+            using (var connection = Program.OpenCampaignConnection(campaign))
+                directionalDeltas = Program.QuerySql(connection, "SELECT native_delta FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';",
                     TestDict("id", protocolId)).Select(r => ReadInt(r, "native_delta", 0)).Where(d => d != 0).ToList();
             add("terminal_report_stages_one_isolated_action_delta", ReadString(protocolFirst, "disposition", "") == "accepted"
                 && ReadInt(protocolEffect, "delta", 0) != 0 && ReadInt(protocolEffect, "delta", 0) == RelationshipsService.CompletedActionSharedDelta(directionalDeltas)
@@ -416,11 +416,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             // The retried first acceptance commits exactly one derived metric per changed target, at the report day.
             List<string> derivedTargets;
             List<Dictionary<string, object>> derivedMetrics;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
             {
-                derivedTargets = QuerySql(connection, "SELECT target_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%' AND native_delta<>0;",
+                derivedTargets = Program.QuerySql(connection, "SELECT target_id FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%' AND native_delta<>0;",
                     TestDict("id", protocolId)).Select(r => ReadString(r, "target_id", "")).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
-                derivedMetrics = QuerySql(connection, derivedMetricSql, derivedArgs);
+                derivedMetrics = Program.QuerySql(connection, derivedMetricSql, derivedArgs);
             }
             string derivedAfterFirst = derivedCommitted();
             add("terminal_report_commits_one_set_of_derived_writes", derivedTargets.Count > 0
@@ -430,12 +430,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 TestDict("targets", derivedTargets, "metrics", derivedMetrics));
             // Action memory commits with projectedTs under the exact outbox row lock: one row per owner, stable IDs.
             const string memorySql = "SELECT owner_id,memory_id FROM memories WHERE event_id='action_' || $id ORDER BY owner_id,memory_id;";
-            Func<ReignDbConnection, string> memoryIn = c => Json.Serialize(QuerySql(c, memorySql, TestDict("id", protocolId)));
-            Func<string> memoryRows = () => { using (var c = OpenCampaignConnection(campaign)) return memoryIn(c); };
-            Func<bool> onePerOwner = () => { using (var c = OpenCampaignConnection(campaign)) { var rows = QuerySql(c, memorySql, TestDict("id", protocolId));
+            Func<ReignDbConnection, string> memoryIn = c => Json.Serialize(Program.QuerySql(c, memorySql, TestDict("id", protocolId)));
+            Func<string> memoryRows = () => { using (var c = Program.OpenCampaignConnection(campaign)) return memoryIn(c); };
+            Func<bool> onePerOwner = () => { using (var c = Program.OpenCampaignConnection(campaign)) { var rows = Program.QuerySql(c, memorySql, TestDict("id", protocolId));
                 return rows.Count > 0 && rows.Select(r => ReadString(r, "owner_id", "")).Distinct().Count() == rows.Count; } };
             Func<bool> markerProjected = () => ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "terminalReport")?.ContainsKey("projectedTs") == true;
-            Action clearProjected = () => { using (var c = OpenCampaignConnection(campaign)) ExecuteSql(c,
+            Action clearProjected = () => { using (var c = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(c,
                 "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedTs}')::text WHERE action_id=$id;", TestDict("id", protocolId)); };
             Func<Action<ReignDbConnection>, bool> project = seam => ProjectAcceptedTerminalReport(campaign, protocolId, ReadString(protocolFirst, "reportSha256", ""),
                 protocolGeneration, TryParseJsonObject(protocolJson), protocolRecord, ReadString(protocolFirst, "authoritativeStatus", ""), seam);
@@ -469,24 +469,24 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             System.Threading.Tasks.Task<bool> queued = null;
             bool queuedObserved = false, holderUpgraded = false;
             string holderError = "";
-            using (var c = OpenCampaignConnection(campaign))
+            using (var c = Program.OpenCampaignConnection(campaign))
             using (var transaction = c.BeginTransaction())
             {
-                Func<long> revision = () => ReadLong(QuerySql(c, "SELECT source_revision FROM memory_precision_state WHERE state_id='current';").Single(), "source_revision", 0);
-                QuerySql(c, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;");
-                QuerySql(c, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", protocolId));
+                Func<long> revision = () => ReadLong(Program.QuerySql(c, "SELECT source_revision FROM memory_precision_state WHERE state_id='current';").Single(), "source_revision", 0);
+                Program.QuerySql(c, "SELECT restore_generation FROM memory_precision_state WHERE state_id='current' FOR SHARE;");
+                Program.QuerySql(c, "SELECT action_id FROM conversation_action_outbox WHERE action_id=$id FOR UPDATE;", TestDict("id", protocolId));
                 long revisionBefore = revision();
                 queued = System.Threading.Tasks.Task.Run(() => project(null));
                 // Proceed only once the projection is actually blocked by this transaction.
                 for (int i = 0; i < 300 && !queuedObserved && !queued.IsCompleted; i++)
                 {
-                    queuedObserved = ReadLong(QuerySql(c, "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid));").Single(), "n", 0) > 0;
+                    queuedObserved = ReadLong(Program.QuerySql(c, "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid));").Single(), "n", 0) > 0;
                     if (!queuedObserved) System.Threading.Thread.Sleep(50);
                 }
                 try
                 {
                     // A statement trigger fires with zero rows: the real memory trigger upgrades the generation row.
-                    ExecuteSql(c, "DELETE FROM memories WHERE false;");
+                    Program.ExecuteSql(c, "DELETE FROM memories WHERE false;");
                     holderUpgraded = revision() > revisionBefore;
                     transaction.Commit();
                 }
@@ -517,14 +517,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             add("terminal_report_preflight_reports_protocol_owner", ReadString(ownedPreflight, "disposition", "") == "accepted"
                 && ReadString(ownedPreflight, "reason", "") == "protocol_owned", ownedPreflight);
             // A late legacy report of the same status is answered from the protocol row without projections.
-            var legacyLate = ReportAction(TestDict("campaignId", campaign, "serverActionId", protocolId, "status", "completed", "result", TestDict("message", "Late legacy report.")));
+            var legacyLate = Program.ReportAction(TestDict("campaignId", campaign, "serverActionId", protocolId, "status", "completed", "result", TestDict("message", "Late legacy report.")));
             add("terminal_report_legacy_report_defers_to_protocol_owner", ReadString(legacyLate, "terminalReportOwner", "") == "protocol"
                 && ReadString(legacyLate, "status", "") == "completed" && !legacyLate.ContainsKey("memoryStore")
                 && ReadString(ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "report"), "message", "") == "A kind gift was handed over with thanks."
                 && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1, legacyLate);
             // A legacy terminal winner cannot be upgraded into the protocol.
             string legacyId = ReadString(ReadDictionaryList(two, "queuedDialogueActions").ElementAtOrDefault(1), "id", "");
-            ReportAction(TestDict("campaignId", campaign, "serverActionId", legacyId, "status", "completed", "result", TestDict("message", "Legacy handover.")));
+            Program.ReportAction(TestDict("campaignId", campaign, "serverActionId", legacyId, "status", "completed", "result", TestDict("message", "Legacy handover.")));
             var legacyWinner = preflight(campaign, legacyId, protocolGeneration, ReadString(ReadDictionary(ReadDurableConversationAction(campaign, legacyId), "record"), "termsHash", ""));
             add("terminal_report_preflight_keeps_legacy_winner", legacyId.Length > 0 && ReadString(legacyWinner, "disposition", "") == "conflict"
                 && ReadString(legacyWinner, "reason", "") == "legacy_terminal_status"
@@ -559,11 +559,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             payload["channel"] = "in_person"; payload["guardedPromptOverride"] = true;
             add("test_directive_keeps_existing_gate", CurrentPlayerTransfers(payload).Count == 0, null);
             payload.Remove("guardedPromptOverride");
-            var group = CloneDictionary(payload);
+            var group = Program.CloneDictionary(payload);
             group["attendees"] = new List<Dictionary<string, object>> { TestDict("heroStringId", "npc_a"), TestDict("heroStringId", "npc_b") };
             add("two_npc_attendees_make_you_ambiguous", !SinglePlayerTransferRecipient(group)
                 && CurrentPlayerTransfers(group).All(i => i.Error.Length > 0), null);
-            var hypothetical = CloneDictionary(payload);
+            var hypothetical = Program.CloneDictionary(payload);
             hypothetical["playerText"] = "For example:\nI give you 2000 gold.";
             var hypotheticalRecord = TestDict("source", "dialogue_auto_commit", "actorHeroStringId", ReadString(payload, "playerHeroStringId", ""));
             var hypotheticalErrors = new List<string>();
@@ -607,7 +607,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             failedNpcPayload["playerText"] = "The weather is pleasant.";
             string failedNpcId = "";
             var failedNpcResult = RunPlayerActionTurn(failedNpcPayload, () => {
-                var row = QueueAction(campaign, stagedNpc("unbound")); failedNpcId = ReadString(row, "id", "");
+                var row = Program.QueueAction(campaign, stagedNpc("unbound")); failedNpcId = ReadString(row, "id", "");
                 return TestDict("ok", false, "queuedDialogueActions", new List<Dictionary<string, object>> { row });
             });
             add("failed_npc_response_discards_staged_native_action", !ReadBool(failedNpcResult, "ok", true)
@@ -617,7 +617,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             mixedFailurePayload["playerText"] = "I give you 17 gold.";
             string discardedNpcId = "";
             var mixedFailure = RunPlayerActionTurn(mixedFailurePayload, () => {
-                discardedNpcId = ReadString(QueueAction(campaign, stagedNpc("unbound")), "id", "");
+                discardedNpcId = ReadString(Program.QueueAction(campaign, stagedNpc("unbound")), "id", "");
                 throw new InvalidOperationException("Injected storage failure after action staging.");
             });
             add("failed_npc_keeps_only_independent_player_handover", ReadBool(mixedFailure, "ok", false)
@@ -627,7 +627,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 && ReadDurableConversationAction(campaign, discardedNpcId) == null, mixedFailure);
 
             string generation;
-            using (var connection = OpenCampaignConnection(campaign))
+            using (var connection = Program.OpenCampaignConnection(campaign))
                 generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             var batchPayload = TestDict("campaignId", campaign, "timelineId", "player_actions_timeline", "sceneTurnId", "atomic_batch");
             Func<string, Dictionary<string, object>> batchRow = id => TestDict("id", id, "campaignId", campaign,
@@ -648,7 +648,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             var duplicateBatch = PublishConversationActionBatch(campaign, batchPayload, acceptedResponse, batchRows(), generation);
             add("atomic_batch_commits_once_without_json_cache", ReadBool(batch, "atomic", false) && ReadInt(batch, "createdCount", 0) == 2
                 && ReadInt(duplicateBatch, "createdCount", -1) == 0
-                && ReadActionQueueUnlocked(campaign).Count(r => ReadString(r, "id", "").StartsWith("da_batch_", StringComparison.Ordinal)) == 2, batch);
+                && Program.ReadActionQueueUnlocked(campaign).Count(r => ReadString(r, "id", "").StartsWith("da_batch_", StringComparison.Ordinal)) == 2, batch);
             var changedBatch = new List<Dictionary<string, object>> { batchRow("da_batch_must_rollback"), batchRow("da_batch_b") };
             bool changedReplyRejected = false;
             try { PublishConversationActionBatch(campaign, batchPayload, TestDict("ok", true, "reply", "I refuse those terms."), changedBatch, generation); }
@@ -682,14 +682,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             // context bound inside the transaction; every refusal mutates nothing.
             {
                 var P = Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RecoverySchema;
-                Func<string> liveGeneration = () => { using (var c = OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""); };
-                Func<Dictionary<string, object>> restoreContext = () => { using (var c = OpenCampaignConnection(campaign)) return TerminalReportRestoreContext(c); };
-                Action<string, string> setContext = (column, value) => { using (var c = OpenCampaignConnection(campaign))
-                    ExecuteSql(c, "UPDATE memory_restored_source_context SET " + column + "=$v WHERE state_id='current';", TestDict("v", value)); };
+                Func<string> liveGeneration = () => { using (var c = Program.OpenCampaignConnection(campaign)) return ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""); };
+                Func<Dictionary<string, object>> restoreContext = () => { using (var c = Program.OpenCampaignConnection(campaign)) return TerminalReportRestoreContext(c); };
+                Action<string, string> setContext = (column, value) => { using (var c = Program.OpenCampaignConnection(campaign))
+                    Program.ExecuteSql(c, "UPDATE memory_restored_source_context SET " + column + "=$v WHERE state_id='current';", TestDict("v", value)); };
                 Func<string, Dictionary<string, object>> markerOf = id => ReadDictionary(ReadDurableConversationAction(campaign, id), "terminalReport");
                 Func<Dictionary<string, object>, string, string, string, Dictionary<string, object>> recover = (envelope, live, session, point) =>
                 {
-                    var e = CloneDictionary(envelope); e["schema"] = P;
+                    var e = Program.CloneDictionary(envelope); e["schema"] = P;
                     e["recovery"] = TestDict("liveGeneration", live, "savePointId", point, "loadSessionId", session);
                     e["loadProof"] = TestDict("loadSessionId", session, "savePointId", point, "restoreGeneration", live);
                     return e;
@@ -710,9 +710,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 // Fixture precondition: the second row is an eligible gold transfer, so later
                 // dispositions are about recovery authority, not fixture shape.
                 string jobIneligible = "missing";
-                using (var c = OpenCampaignConnection(campaign))
+                using (var c = Program.OpenCampaignConnection(campaign))
                 {
-                    var storedJob = QuerySql(c, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", jobId)).FirstOrDefault();
+                    var storedJob = Program.QuerySql(c, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", jobId)).FirstOrDefault();
                     var jobPayload = storedJob == null ? null : TryParseJsonObject(ReadString(storedJob, "payload_json", "{}"));
                     if (jobPayload != null) jobIneligible = TerminalReportIneligibility(c, jobPayload, campaign, jobId, ReadString(storedJob, "timeline_id", ""));
                 }
@@ -817,9 +817,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 // Remaining held/rollback cases run on an unreported pa_ row from the original
                 // generation. The context row is saved exactly and restored afterwards.
                 string savedContext;
-                using (var cx = OpenCampaignConnection(campaign))
-                    savedContext = ReadString(QuerySql(cx, "SELECT to_jsonb(c)::text AS saved FROM memory_restored_source_context c WHERE c.state_id='current';").Single(), "saved", "");
-                Action restoreSavedContext = () => { using (var cx = OpenCampaignConnection(campaign)) ExecuteSql(cx,
+                using (var cx = Program.OpenCampaignConnection(campaign))
+                    savedContext = ReadString(Program.QuerySql(cx, "SELECT to_jsonb(c)::text AS saved FROM memory_restored_source_context c WHERE c.state_id='current';").Single(), "saved", "");
+                Action restoreSavedContext = () => { using (var cx = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(cx,
                     "DELETE FROM memory_restored_source_context; INSERT INTO memory_restored_source_context SELECT * FROM jsonb_populate_record(CAST(NULL AS memory_restored_source_context), CAST($saved AS jsonb));",
                     TestDict("saved", savedContext)); };
                 const string reboundTimeline = "stage3_rebound_timeline";
@@ -837,16 +837,16 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var giftEnvelope = TestDict("schema", Reign.Core.Contracts.Actions.TerminalActionReportProtocol.RequestSchema, "campaignId", campaign,
                         "timelineId", "player_actions_timeline", "playerHeroStringId", giftActor, "generation", protocolGeneration,
                         "actionId", giftId, "termsHash", ReadString(giftRecord, "termsHash", ""), "status", "completed", "reportJson", giftJson, "reportSha256", giftSha);
-                    Func<string, string, int> countFor = (sql, id) => { using (var cx = OpenCampaignConnection(campaign)) return QuerySql(cx, sql, TestDict("id", id)).Count; };
+                    Func<string, string, int> countFor = (sql, id) => { using (var cx = Program.OpenCampaignConnection(campaign)) return Program.QuerySql(cx, sql, TestDict("id", id)).Count; };
                     const string giftMemorySql = "SELECT owner_id,memory_id FROM memories WHERE event_id='action_' || $id ORDER BY owner_id,memory_id;";
                     const string sharedRowSql = "SELECT activity_id FROM shared_activity_events WHERE source_id LIKE 'action_receipt_%' AND (payload_json::jsonb->'facts'->>'actionId')=$id;";
                     Func<string> giftRow = () => Json.Serialize(ReadDurableConversationAction(campaign, giftId));
                     Func<bool> giftUntouched = () => markerOf(giftId) == null && countFor(directionalSql, giftId) == 0
                         && countFor(actionReceiptSql, giftId) == 0 && countFor(giftMemorySql, giftId) == 0 && countFor(sharedRowSql, giftId) == 0;
                     string giftIneligible = "missing";
-                    using (var cx = OpenCampaignConnection(campaign))
+                    using (var cx = Program.OpenCampaignConnection(campaign))
                     {
-                        var storedGift = QuerySql(cx, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", giftId)).FirstOrDefault();
+                        var storedGift = Program.QuerySql(cx, "SELECT timeline_id,payload_json FROM conversation_action_outbox WHERE action_id=$id;", TestDict("id", giftId)).FirstOrDefault();
                         var storedGiftPayload = storedGift == null ? null : TryParseJsonObject(ReadString(storedGift, "payload_json", "{}"));
                         if (storedGiftPayload != null) giftIneligible = TerminalReportIneligibility(cx, storedGiftPayload, campaign, giftId, ReadString(storedGift, "timeline_id", ""));
                     }
@@ -861,7 +861,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
 
                     // Empty context: with no restore context row no proof can be bound, so both a first
                     // acceptance and an adoption fail closed as load_proof_stale and nothing is written.
-                    using (var cx = OpenCampaignConnection(campaign)) ExecuteSql(cx, "DELETE FROM memory_restored_source_context;");
+                    using (var cx = Program.OpenCampaignConnection(campaign)) Program.ExecuteSql(cx, "DELETE FROM memory_restored_source_context;");
                     var emptyFirst = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
                     var emptyAdopt = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
                     restoreSavedContext();
@@ -903,11 +903,11 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var headContext = restoreContext();
                     long headSequence = ReadLong(headContext, "head_sequence", 0);
                     string headEvent = ReadString(headContext, "head_event_id", "");
-                    using (var cx = OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, "player_actions_timeline", reboundTimeline, headSequence, headEvent);
+                    using (var cx = Program.OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, "player_actions_timeline", reboundTimeline, headSequence, headEvent);
                     string reboundTo = ReadString(restoreContext(), "timeline_id", "");
                     var reboundAdopt = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
                     var reboundFirst = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
-                    using (var cx = OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, reboundTimeline, "player_actions_timeline", headSequence, headEvent);
+                    using (var cx = Program.OpenCampaignConnection(campaign)) BindRecoveredMemorySources(cx, reboundTimeline, "player_actions_timeline", headSequence, headEvent);
                     string reboundBack = ReadString(restoreContext(), "timeline_id", "");
                     var reboundAdmitted = TerminalActionReportApi(recover(protocolBase, g3, "stage3_l2", "stage3_point"));
                     add("terminal_report_recovery_rebound_timeline_held_then_admitted", reboundTo == reboundTimeline && reboundBack == "player_actions_timeline"
@@ -925,12 +925,12 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     Func<object> projectedTsOf = () => { var m = markerOf(protocolId); return m != null && m.TryGetValue("projectedTs", out object v) ? v : null; };
                     object projectedTsBefore = projectedTsOf();
                     int sharedOriginal = countFor(sharedRowSql, protocolId);
-                    using (var cx = OpenCampaignConnection(campaign))
+                    using (var cx = Program.OpenCampaignConnection(campaign))
                     {
-                        ExecuteSql(cx, "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedShared}')::text WHERE action_id=$id;", TestDict("id", protocolId));
-                        var sharedIds = QuerySql(cx, sharedRowSql, TestDict("id", protocolId)).Select(r => ReadString(r, "activity_id", "")).ToList();
+                        Program.ExecuteSql(cx, "UPDATE conversation_action_outbox SET payload_json=(payload_json::jsonb #- '{terminalReport,projectedShared}')::text WHERE action_id=$id;", TestDict("id", protocolId));
+                        var sharedIds = Program.QuerySql(cx, sharedRowSql, TestDict("id", protocolId)).Select(r => ReadString(r, "activity_id", "")).ToList();
                         foreach (string sharedId in sharedIds)
-                            ExecuteSql(cx, "DELETE FROM shared_activity_observers WHERE activity_id=$a; DELETE FROM shared_activity_events WHERE activity_id=$a;", TestDict("a", sharedId));
+                            Program.ExecuteSql(cx, "DELETE FROM shared_activity_observers WHERE activity_id=$a; DELETE FROM shared_activity_events WHERE activity_id=$a;", TestDict("a", sharedId));
                     }
                     bool legacyShape = markerOf(protocolId)?.ContainsKey("projectedTs") == true && markerOf(protocolId)?.ContainsKey("projectedShared") == false
                         && countFor(sharedRowSql, protocolId) == 0;
@@ -957,7 +957,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                             TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"), (step, cx) =>
                             {
                                 if (step != seam) return;
-                                ExecuteSql(cx, "UPDATE memory_precision_state SET restore_generation='stage3_injected_restore' WHERE state_id='current';");
+                                Program.ExecuteSql(cx, "UPDATE memory_precision_state SET restore_generation='stage3_injected_restore' WHERE state_id='current';");
                                 throw new InvalidOperationException("Injected restore during recovery acceptance.");
                             });
                         }
@@ -968,9 +968,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                     var giftAccepted = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
                     var giftMarker = markerOf(giftId);
                     int giftDirectional = countFor(directionalSql, giftId), giftActionReceipts = countFor(actionReceiptSql, giftId);
-                    string giftMemory; using (var cx = OpenCampaignConnection(campaign)) giftMemory = Json.Serialize(QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
+                    string giftMemory; using (var cx = Program.OpenCampaignConnection(campaign)) giftMemory = Json.Serialize(Program.QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
                     var giftReplay = TerminalActionReportApi(recover(giftEnvelope, g3, "stage3_l2", "stage3_point"));
-                    string giftMemoryAfterReplay; using (var cx = OpenCampaignConnection(campaign)) giftMemoryAfterReplay = Json.Serialize(QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
+                    string giftMemoryAfterReplay; using (var cx = Program.OpenCampaignConnection(campaign)) giftMemoryAfterReplay = Json.Serialize(Program.QuerySql(cx, giftMemorySql, TestDict("id", giftId)));
                     string giftReceipt = ReadString(ReadDictionary(giftAccepted, "nativeEffect"), "receiptId", "");
                     // The gift shares the protocol pair (fixture precondition), so derivedArgs reads its standing;
                     // the clean acceptance must change it, which makes the rollback comparison above meaningful.
@@ -993,8 +993,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 finally
                 {
                     restoreSavedContext();
-                    using (var cx = OpenCampaignConnection(campaign))
-                        ExecuteSql(cx, "DELETE FROM memory_continuity_branches WHERE timeline_id=$t;", TestDict("t", reboundTimeline));
+                    using (var cx = Program.OpenCampaignConnection(campaign))
+                        Program.ExecuteSql(cx, "DELETE FROM memory_continuity_branches WHERE timeline_id=$t;", TestDict("t", reboundTimeline));
                 }
             }
             var point = PersistenceService.SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");
@@ -1007,7 +1007,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             var restored = PersistenceService.SaveSyncLoadApi(point, false);
             add("save_sync_rewinds_outbox_and_ignores_newer_json", ReadBool(registered, "ok", false) && ReadBool(restored, "ok", false)
                 && ReadDurableConversationActions(campaign).Count == before
-                && !ReadActionQueueUnlocked(campaign).Any(r => ReadString(ReadDictionary(r, "record"), "negotiationId", "") == "future_gift"), restored);
+                && !Program.ReadActionQueueUnlocked(campaign).Any(r => ReadString(ReadDictionary(r, "record"), "negotiationId", "") == "future_gift"), restored);
             return results;
         }
     }

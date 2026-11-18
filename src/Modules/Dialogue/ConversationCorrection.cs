@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ConversationCorrectionContract =
             "CORRECTIONS AND DISPUTED RELEVANCE: A stored agenda is this NPC's fallible intention, not an order the player owes. " +
@@ -71,7 +71,7 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ReconcileConversationPlanForPrompt(Dictionary<string, object> state,
             string playerText, Dictionary<string, object> payload)
         {
-            var result = CloneDictionary(state ?? TestDict());
+            var result = Program.CloneDictionary(state ?? TestDict());
             string correction = FirstNonEmpty(ReadString(payload, "currentConversationCorrection", ""), IsConversationCorrection(playerText) ? playerText : "");
             string plan = ReadString(result, "currentPlan", "");
             if (correction.Length > 0 && plan.Length > 0
@@ -130,7 +130,7 @@ namespace ReignBetaServer
             var updates = ReadDictionary(parsed, "stateUpdates");
             string plan = ReadString(updates, "currentPlan", "");
             if (contested.Length > 0 && (updates == null || !updates.ContainsKey("currentPlan")
-                || NormalizeLookup(plan) == NormalizeLookup(contested)))
+                || Program.NormalizeLookup(plan) == Program.NormalizeLookup(contested)))
                 Issue(contested, "unreconciled_currentPlan");
             if (DisputesConversationRelevance(correction))
             {

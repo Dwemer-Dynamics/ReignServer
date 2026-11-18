@@ -25,7 +25,7 @@ PRIMARY KEY(timeline_id,pregnancy_id,observer_id));");
         {
             // The restore context exists only after restoring the exact Save Sync snapshot.
             // Never inherit discoveries solely because two timelines have related names.
-            var restored = Program.RestoredLetterContext(c, recovered);
+            var restored = DialogueService.RestoredLetterContext(c, recovered);
             if (restored == null || ReadLong(restored, "head_sequence", -1) != sequence
                 || ReadString(restored, "head_event_id", "") != head || requested == recovered) return;
             EnsurePregnancyContextSchema(c);
@@ -99,14 +99,14 @@ AND event_id IN (SELECT event_id FROM world_history_events WHERE event_type='chi
 VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE SET facts_json=$json,world_day=$day;",
                         TestDict("timeline", timeline, "id", f.PregnancyId, "json", Json.Serialize(f), "day", day));
                     GrantPregnancyKnowledge(c, timeline, f, f.MotherId, f.Illicit, f.BiologicalFatherId.Length > 0,
-                        "native_pregnancy:" + f.PregnancyId, Program.PromptHash(Json.Serialize(f)), day);
+                        "native_pregnancy:" + f.PregnancyId, DialogueService.PromptHash(Json.Serialize(f)), day);
                     foreach (string observer in observers)
                     {
                         if (f.MotherExposed || present.Contains(f.MotherId) && PregnancyContextPolicy.Visible(f))
                             GrantPregnancyKnowledge(c, timeline, f, observer,
                                 f.MotherExposed || f.MarriageAtConceptionKnown && f.SpouseAtConceptionId.Length == 0,
                                 f.FatherExposed, f.MotherExposed ? "pregnancy_exposure:" + f.PregnancyId : "native_visible_pregnancy:" + f.PregnancyId,
-                                Program.PromptHash(Json.Serialize(f)), day);
+                                DialogueService.PromptHash(Json.Serialize(f)), day);
                     }
                     rows.Add(TestDict("pregnancyId", f.PregnancyId, "knowledge", observers.Concat(new[] { f.MotherId }).Distinct()
                         .ToDictionary(id => id, id => (object)ReadPregnancyKnowledge(c, timeline, f.PregnancyId, id))));
@@ -212,7 +212,7 @@ VALUES($timeline,$id,$json,$day) ON CONFLICT(timeline_id,pregnancy_id) DO UPDATE
                 if (!pregnancy && !illicit && !father) continue;
                 foreach (string observer in audience.Distinct())
                     GrantPregnancyKnowledge(c, timeline, f, observer, illicit || father && f.Illicit, father,
-                        sourceId, Program.PromptHash(quote), day);
+                        sourceId, DialogueService.PromptHash(quote), day);
             }
         }
     }

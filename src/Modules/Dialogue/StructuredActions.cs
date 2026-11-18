@@ -5,7 +5,7 @@ using Reign.Core.Contracts.Actions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         internal static bool UsesStructuredActions(Dictionary<string, object> payload) => ReadInt(payload, "structuredActionProtocolVersion", 0) == ActionNegotiation.ProtocolVersion;
 
@@ -19,17 +19,17 @@ namespace ReignBetaServer
             request["structuredActionRepairContext"] = StructuredActionPromptContext(payload);
         }
 
-        private static bool StructuredActionResponseHasDecision(string content, Dictionary<string, object> request)
+        internal static bool StructuredActionResponseHasDecision(string content, Dictionary<string, object> request)
         {
             if (!UsesStructuredActions(request)) return true;
             var decision = ReadDictionary(TryParseJsonObject(content), "structuredActionDecision");
             return decision != null
                 && new[] { "kind", "proposalId", "revision", "termsHash", "reason", "clauses" }.All(decision.ContainsKey)
                 && new[] { "none", "accept", "reject", "counter", "propose" }.Contains(ReadString(decision, "kind", ""))
-                && StructuredCollectionIsDictionaryArray(decision["clauses"]);
+                && Program.StructuredCollectionIsDictionaryArray(decision["clauses"]);
         }
 
-        private static Dictionary<string, object> RepairMissingStructuredActionResponseDecision(
+        internal static Dictionary<string, object> RepairMissingStructuredActionResponseDecision(
             Dictionary<string, object> llm, Dictionary<string, object> request, string campaignId,
             string correlationId, string auditMode, string heroId, string eventId,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder)
@@ -37,7 +37,7 @@ namespace ReignBetaServer
             string content = ReadString(llm, "content", "");
             var parsed = TryParseJsonObject(content);
             if (!UsesStructuredActions(request) || !ReadBool(llm, "ok", false)
-                || !ConversationStructuredObjectHasUsableVisibleReply(parsed)
+                || !Program.ConversationStructuredObjectHasUsableVisibleReply(parsed)
                 || StructuredActionResponseHasDecision(content, request)) return llm;
             var diagnostics = TestDict("attempted", false, "providerCalls", 0, "callKind", "structured_action_metadata_repair");
             llm["structuredActionMetadataRepair"] = diagnostics;
@@ -45,9 +45,9 @@ namespace ReignBetaServer
             {
                 llm["ok"] = false;
                 llm["errorCode"] = "structured_action_decision_incomplete";
-                llm["error"] = "The hidden action decision could not be verified. No conversation effects are authorized. " + LimitText(error, 800);
+                llm["error"] = "The hidden action decision could not be verified. No conversation effects are authorized. " + Program.LimitText(error, 800);
                 diagnostics["completed"] = false;
-                diagnostics["error"] = LimitText(error, 800);
+                diagnostics["error"] = Program.LimitText(error, 800);
                 return llm;
             }
             // Never replace an existing choice or repair its consent identity.
@@ -85,7 +85,7 @@ namespace ReignBetaServer
             diagnostics["attempted"] = true;
             diagnostics["providerCalls"] = 1;
             diagnostics["requestCharacters"] = messages.Sum(m => ReadString(m, "content", "").Length);
-            var repair = responder == null ? ChatWithLlm(repairRequest) : responder(repairRequest);
+            var repair = responder == null ? Program.ChatWithLlm(repairRequest) : responder(repairRequest);
             diagnostics["usage"] = ReadDictionary(repair, "usage") ?? TestDict();
             var recovered = TryParseJsonObject(ReadString(repair, "content", ""));
             if (!ReadBool(repair, "ok", false) || !StructuredActionResponseHasDecision(Json.Serialize(recovered), request))
@@ -104,8 +104,8 @@ namespace ReignBetaServer
                 parsed["structuredActionDecision"] = raw;
                 llm["content"] = Json.Serialize(parsed);
                 diagnostics["completed"] = true;
-                DiagnosticValidation("Recover omitted hidden action decision", true, new List<string>(), ReadString(repair, "content", ""));
-                WriteAudit(campaignId, correlationId, "server", auditMode, "llm.structured_action_metadata_repair",
+                Program.DiagnosticValidation("Recover omitted hidden action decision", true, new List<string>(), ReadString(repair, "content", ""));
+                Program.WriteAudit(campaignId, correlationId, "server", auditMode, "llm.structured_action_metadata_repair",
                     heroId, "", eventId, "completed", ReadLong(repair, "durationMs", 0),
                     "The omitted hidden action decision was recovered without resending the dialogue context or rewriting its reply.", diagnostics);
                 return llm;
@@ -212,7 +212,7 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> StructuredActionPromptContext(Dictionary<string, object> payload)
         {
-            var context = CloneDictionary(ReadDictionary(payload, "structuredActionContext") ?? TestDict());
+            var context = Program.CloneDictionary(ReadDictionary(payload, "structuredActionContext") ?? TestDict());
             context.Remove("tavernHouse");
             var scopedProposal = ReadDictionary(context, "proposal");
             if (!CharactersService.TavernActionScopeEnabled && scopedProposal != null
@@ -308,7 +308,7 @@ namespace ReignBetaServer
         // decision validation continue to use the original typed proposal.
         private static Dictionary<string, object> StructuredActionModelFacts(Dictionary<string, object> context)
         {
-            var view = CloneDictionary(context);
+            var view = Program.CloneDictionary(context);
             void Pairs(Dictionary<string, object> row, string key)
             {
                 var arguments = ReadDictionary(row, key);
@@ -490,7 +490,7 @@ namespace ReignBetaServer
             var terms = ReadDictionaryList(raw, "clauses");
             if (terms.Count != decision.Clauses.Count || terms.Any(t => !KnownFields(t, termKeys))) return false;
             var argumentKeys = new HashSet<string>(new[] { "key", "value" }, StringComparer.OrdinalIgnoreCase);
-            if (terms.Any(t => !t.TryGetValue("arguments", out object arguments) || !StructuredCollectionIsDictionaryArray(arguments)
+            if (terms.Any(t => !t.TryGetValue("arguments", out object arguments) || !Program.StructuredCollectionIsDictionaryArray(arguments)
                 || ReadDictionaryList(t, "arguments").Any(a => !KnownFields(a, argumentKeys)))) return false;
             var echoed = ActionNegotiation.CreateProposal(offered,
                 new ActionDecision { Kind = "counter", Clauses = decision.Clauses }, player, npc, conversation, day);
@@ -524,7 +524,7 @@ namespace ReignBetaServer
                     throw new InvalidOperationException("The response repair did not pass; no structured action is authorized.");
                 string actualPlayer = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
                 string actualNpc = ReadFirstString(payload, "speakerHeroStringId", "heroStringId", "heroId");
-                if (actualNpc.Length == 0) actualNpc = CharacterIdFrom(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker"));
+                if (actualNpc.Length == 0) actualNpc = Program.CharacterIdFrom(ReadDictionary(payload, "hero") ?? ReadDictionary(payload, "speaker"));
                 if (string.IsNullOrEmpty(player) || string.IsNullOrEmpty(npc) || player != actualPlayer || npc != actualNpc || player == npc)
                     throw new InvalidOperationException("The action participants do not match this response.");
                 var raw = ReadDictionary(parsed, "structuredActionDecision");
@@ -550,7 +550,7 @@ namespace ReignBetaServer
             }
             catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is System.Text.Json.JsonException || ex is OverflowException)
             {
-                output["valid"] = false; output["error"] = LimitText(ex.Message, 1000);
+                output["valid"] = false; output["error"] = Program.LimitText(ex.Message, 1000);
             }
             payload["validatedStructuredActionDecision"] = output;
         }

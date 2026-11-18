@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private static Dictionary<string, object> DrinkingFixture(string action, string serving = "", int count = 1)
         {
@@ -472,7 +472,7 @@ namespace ReignBetaServer
                 "I hand the rope to her.", "I hand a mystery drink to her.", "I hand it to him.", "I hand it to the waitress.", "I offer her two full cups of wine." })
                 check("drink_record_invalid_offer_" + PromptHash(rejected).Substring(0, 8),
                     CurrentPlayerDrinkOffer(TestDict("playerText", rejected), held, true)?.Vessel.Id != held.Id, null, null);
-            var defaults = DefaultPromptTemplates();
+            var defaults = Program.DefaultPromptTemplates();
             foreach (var mode in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group, CodexConversationContractKind.Castle, CodexConversationContractKind.Social })
             {
                 var schema = CodexConversationSchemas.Select(mode, defaults, defaults, TestDict()).Schema;
@@ -548,8 +548,8 @@ namespace ReignBetaServer
                 BuildIntoxicationPrompt(campaign, "concurrent", payload, profile, null);
                 var concurrent = ReadDictionary(payload, "intoxicationContext");
                 int receipts;
-                using (var connection = OpenCampaignConnection(campaign))
-                    receipts = QuerySql(connection, "SELECT turn_key FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;",
+                using (var connection = Program.OpenCampaignConnection(campaign))
+                    receipts = Program.QuerySql(connection, "SELECT turn_key FROM conversation_drinking_turns WHERE hero_id=$hero AND turn_key=$turn;",
                         new Dictionary<string, object> { ["hero"] = "concurrent", ["turn"] = "main:concurrent-sip" }).Count;
                 check("DRINK-084", ReadDouble(concurrent, "drinks", -1) == .25 && ReadDouble(ReadDictionary(concurrent, "vessel"), "remaining", -1) == .75
                     && receipts == 1, concurrent, .25);
@@ -611,7 +611,7 @@ namespace ReignBetaServer
                     && ReadDouble(ReadDictionary(payload, "intoxicationReceipt"), "consumed", -1) == .25
                     && ReadString(ReadDictionary(payload, "intoxicationReceipt"), "commitState", "") == "prepared", null, .25);
                 string generation;
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 var final = CommitFinalConversationEffects(campaign, "quiet", payload, null, profile, null, quietParsed, quietReply, generation);
                 var quietCommitted = ReadDictionary(final, "drinking");
@@ -641,7 +641,7 @@ namespace ReignBetaServer
                 check("quiet_drink_snapshot_restores_record_and_count", ReadDouble(restoredQuiet, "drinks", -1) == .25
                     && ReadString(ReadDictionary(restoredQuiet, "vessel"), "id", "") == quietId
                     && ReadDouble(ReadDictionary(restoredQuiet, "vessel"), "remaining", -1) == .75, restoredQuiet, .25);
-                using (var connection = OpenCampaignConnection(campaign))
+                using (var connection = Program.OpenCampaignConnection(campaign))
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                 payload["turnId"] = "quiet-corrected-refusal";
                 var corrected = QuietDrinkFixture(ReadDrinkVessel(ReadDictionary(restoredQuiet, "vessel")));

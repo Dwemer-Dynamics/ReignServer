@@ -5,13 +5,13 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
-        private static List<Dictionary<string, object>> RunCommunicationSelfTests()
+        internal static List<Dictionary<string, object>> RunCommunicationSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             void Check(string name, bool passed, object detail = null) => results.Add(TestDict("caseId", "communication_" + name,
-                "passed", passed, "name", name, "summary", passed ? name : name + ": " + LimitText(Json.Serialize(detail), 6500), "detail", detail));
+                "passed", passed, "name", name, "summary", passed ? name : name + ": " + Program.LimitText(Json.Serialize(detail), 6500), "detail", detail));
             Check("explicit_will_and_contraction", CommunicationPromise("I will tell target about the school.") && CommunicationPromise("I'll write to target tomorrow."));
             foreach (string text in new[] { "I might tell target.", "I would ask target.", "I will not tell target.", "If you pay, I will tell target.",
                 "She said I will tell target.", "\"I will tell target\" was her promise.", "*I will tell target.*", "I will ask target only if you pay." })
@@ -103,13 +103,13 @@ namespace ReignBetaServer
             Check("metadata_patch_rejects_rewritten_or_unsupported_promise", ApplyCommunicationPlanPatch(untouched, TestDict("reply", "I agree to pay.", "communicationPlans", new[] { repairPlan })) == null
                 && ApplyCommunicationPlanPatch(untouched, TestDict("communicationPlans", new[] { TestDict("evidenceQuote", "I will pay for it.") })) == null
                 && ApplyCommunicationPlanPatch(untouched, TestDict("communicationPlans", new object[0])) == null);
-            var formatOriginal = CloneDictionary(untouched); formatOriginal["communicationPlans"] = new[] { repairPlan };
+            var formatOriginal = Program.CloneDictionary(untouched); formatOriginal["communicationPlans"] = new[] { repairPlan };
             var formatRepaired = TestDict("reply", omittedSummon); PreserveFormatRepairMetadata(formatOriginal, formatRepaired);
             Check("format_repair_retains_existing_communication_metadata", ReadDictionaryList(formatRepaired, "communicationPlans").Count == 1);
             string campaign = "communication_test_" + Guid.NewGuid().ToString("N");
             try
             {
-                using var c = OpenCampaignConnection(campaign);
+                using var c = Program.OpenCampaignConnection(campaign);
                 var repairPayload = TestDict("playerText", "Please send for Pharon and ask him to remain for one full day.", "playerHeroStringId", "main_hero", "timelineId", "main", "worldDay", 10d,
                     "gossipPresence", TestDict("people", new[] { TestDict("heroStringId", "lord_1_14", "name", "Rhagaea", "settlementId", "host_town"),
                         TestDict("heroStringId", "lord_1_15", "name", "Pharon", "isAlive", true), TestDict("heroStringId", "main_hero", "name", "Player") }));
@@ -134,13 +134,13 @@ namespace ReignBetaServer
                     campaign, "test_player_direct_speech", "dialogue", "lord_1_14", _ => { metadataCalls++; return TestDict(); });
                 Check("ordinary_speech_to_player_does_not_schedule_or_request_review", metadataCalls == 2);
                 const string headerReply = "The invitation, exactly as agreed: tomorrow I send Pharon a fresh summons. It goes out tomorrow.";
-                var headerPlan = CloneDictionary(repairPlan); headerPlan["evidenceQuote"] = headerReply;
+                var headerPlan = Program.CloneDictionary(repairPlan); headerPlan["evidenceQuote"] = headerReply;
                 var headerEnvelope = TestDict("ok", true, "content", Json.Serialize(TestDict("reply", headerReply, "communicationPlans", new[] { headerPlan })));
                 int quoteRepairCalls = 0;
                 var quoteRepaired = RepairMissingCommunicationPlans(headerEnvelope, repairPayload, campaign, "test_unusable_quote", "dialogue", "lord_1_14", request => {
                     quoteRepairCalls++;
                     Check("quote_review_sees_only_exact_executable_candidates", Json.Serialize(request).Contains("It goes out tomorrow.", StringComparison.Ordinal));
-                    var selected = CloneDictionary(headerPlan); selected["evidenceQuote"] = "It goes out tomorrow.";
+                    var selected = Program.CloneDictionary(headerPlan); selected["evidenceQuote"] = "It goes out tomorrow.";
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { selected })));
                 });
                 Check("existing_unusable_quote_gets_one_metadata_only_repair", quoteRepairCalls == 1 && ReadBool(quoteRepaired, "ok", false)
@@ -150,12 +150,12 @@ namespace ReignBetaServer
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { headerPlan }))));
                 Check("failed_quote_repair_cannot_publish_unschedulable_promise", !ReadBool(EnsureConversationDelivery(uncorrected), "ok", true));
                 const string compoundReply = "Pharon is summoned to meet me here. The summons goes out tomorrow, and it asks for his own word.";
-                var compoundPlan = CloneDictionary(repairPlan); compoundPlan["evidenceQuote"] = "Pharon is summoned to meet me here. The summons goes out tomorrow";
+                var compoundPlan = Program.CloneDictionary(repairPlan); compoundPlan["evidenceQuote"] = "Pharon is summoned to meet me here. The summons goes out tomorrow";
                 int knownPlanReviewCalls = 0;
                 var compoundFixed = RepairMissingCommunicationPlans(TestDict("ok", true, "content", Json.Serialize(TestDict("reply", compoundReply,
                     "communicationPlans", new[] { compoundPlan }))), repairPayload, campaign, "test_known_recipient_compound_quote", "dialogue", "lord_1_14", _ => {
                         knownPlanReviewCalls++;
-                        var selected = CloneDictionary(compoundPlan); selected["evidenceQuote"] = "The summons goes out tomorrow";
+                        var selected = Program.CloneDictionary(compoundPlan); selected["evidenceQuote"] = "The summons goes out tomorrow";
                         return TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { selected })));
                     });
                 Check("known_recipient_quote_repair_does_not_require_recipient_in_same_clause", knownPlanReviewCalls == 1 && ReadBool(compoundFixed, "ok", false)
@@ -181,25 +181,25 @@ namespace ReignBetaServer
                 var playerUnit = new AcceptedConversationUnit { Campaign = campaign, Hero = "source", Player = "player", Reply = playerPromise,
                     PlayerText = request, Payload = payload, Parsed = TestDict("communicationPlans", new[] { TestDict("key", "player_guard", "recipientId", "player", "evidenceQuote", playerPromise) }) };
                 var playerAcceptance = AcceptCommunicationCommitments(c, playerUnit, playerExchange, ReadStringList(playerExchange, "turnIds")
-                    .SelectMany(id => QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList());
+                    .SelectMany(id => Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList());
                 Check("player_is_not_a_background_npc_recipient", ReadStringList(playerAcceptance, "accepted").Count == 0
                     && ReadStringList(playerAcceptance, "rejected").Any(r => r.Contains("unresolved_recipient", StringComparison.Ordinal)));
                 var exchange = StoreConversationExchange(campaign, payload, "source", "player", "Player", "Source", request, reply, "comm_exchange", 100);
                 string sessionId = ReadString(exchange, "sessionId", "");
-                var current = ReadStringList(exchange, "turnIds").SelectMany(id => QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
+                var current = ReadStringList(exchange, "turnIds").SelectMany(id => Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
                 var plan = TestDict("key", "school", "operation", "send", "kind", "inform", "recipientId", "target", "evidenceQuote", reply,
                     "contentEvidence", new[] { TestDict("turnId", "current_player", "quote", request) }, "delayDays", 0d);
                 var unit = new AcceptedConversationUnit { Campaign = campaign, Hero = "source", Player = "player", PlayerName = "Player", HeroName = "Source",
                     EventId = "comm_exchange", Reply = reply, PlayerText = request, Payload = payload, Parsed = TestDict("communicationPlans", new[] { plan }), Generation = CharactersService.NpcLivesGeneration(c) };
                 var receipt = AcceptCommunicationCommitments(c, unit, exchange, current);
-                var row = QuerySql(c, "SELECT * FROM communication_messages;").SingleOrDefault();
+                var row = Program.QuerySql(c, "SELECT * FROM communication_messages;").SingleOrDefault();
                 Check("accepted_promise_creates_one_draft", ReadStringList(receipt, "accepted").Count == 1 && ReadString(row, "status", "") == "draft", receipt);
                 AcceptCommunicationCommitments(c, unit, exchange, current);
-                Check("accepted_retry_does_not_duplicate", QuerySql(c, "SELECT * FROM communication_messages;").Count == 1);
+                Check("accepted_retry_does_not_duplicate", Program.QuerySql(c, "SELECT * FROM communication_messages;").Count == 1);
                 string originalId = ReadString(row, "message_id", "");
-                var reviewPayload = CloneDictionary(payload); reviewPayload["playerText"] = "Change 2000 to 2400 before sending; keep the other conditions.";
+                var reviewPayload = Program.CloneDictionary(payload); reviewPayload["playerText"] = "Change 2000 to 2400 before sending; keep the other conditions.";
                 const string completeRevision = "I will tell target these revised terms: the offer is 2400 denars for the school, provided the teachers are paid first.";
-                var deltaPlan = CloneDictionary(plan); deltaPlan["evidenceQuote"] = "I will tell target these revised terms";
+                var deltaPlan = Program.CloneDictionary(plan); deltaPlan["evidenceQuote"] = "I will tell target these revised terms";
                 deltaPlan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", ReadString(reviewPayload, "playerText", "")) };
                 var reviewEnvelope = TestDict("ok", true, "content", Json.Serialize(TestDict("reply", completeRevision, "communicationPlans", new[] { deltaPlan })));
                 int revisionReviews = 0;
@@ -208,7 +208,7 @@ namespace ReignBetaServer
                     revisionReviews++;
                     Check("revision_review_contains_old_conditions_and_current_complete_terms", Json.Serialize(candidate).Contains("teachers are paid first", StringComparison.Ordinal)
                         && Json.Serialize(candidate).Contains("pendingDraftTerms", StringComparison.Ordinal));
-                    var completePlan = CloneDictionary(deltaPlan); completePlan["contentEvidence"] = new[] { TestDict("turnId", "current_npc", "quote", completeRevision) };
+                    var completePlan = Program.CloneDictionary(deltaPlan); completePlan["contentEvidence"] = new[] { TestDict("turnId", "current_npc", "quote", completeRevision) };
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { completePlan })));
                 });
                 Check("draft_revision_is_reconciled_once_without_changing_its_identity", revisionReviews == 1 && ReadBool(reconciled, "ok", false)
@@ -216,44 +216,44 @@ namespace ReignBetaServer
                 var deltaOnly = RepairMissingCommunicationPlans(reviewEnvelope, reviewPayload, campaign, "review_delta_only", "dialogue", "source",
                     _ => TestDict("ok", true, "content", Json.Serialize(TestDict("communicationPlans", new[] { deltaPlan }))));
                 Check("delta_only_review_holds_the_prior_draft", !ReadBool(deltaOnly, "ok", true)
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", originalId)).Single(), "status", "") == "needs_clarification");
-                ReleaseCommunicationSession(c, QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).Single(), "closed_by_player", 10);
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", originalId)).Single(), "status", "") == "needs_clarification");
+                ReleaseCommunicationSession(c, Program.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).Single(), "closed_by_player", 10);
                 AdvanceCommunications(c, campaign, "main", 10, people);
-                Check("unresolved_revision_never_dispatches_the_stale_version", QuerySql(c, "SELECT * FROM communication_history;").Count == 0
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", originalId)).Single(), "status", "") == "needs_clarification");
+                Check("unresolved_revision_never_dispatches_the_stale_version", Program.QuerySql(c, "SELECT * FROM communication_history;").Count == 0
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", originalId)).Single(), "status", "") == "needs_clarification");
                 request = "Tell target that I now offer 2400 denars for the school, provided the teachers are paid first.";
                 reply = "I will tell target about your revised offer.";
-                payload = CloneDictionary(payload); payload["playerText"] = request;
+                payload = Program.CloneDictionary(payload); payload["playerText"] = request;
                 var revisedExchange = StoreConversationExchange(campaign, payload, "source", "player", "Player", "Source", request, reply, "comm_revision", 101);
-                current = ReadStringList(revisedExchange, "turnIds").SelectMany(id => QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
+                current = ReadStringList(revisedExchange, "turnIds").SelectMany(id => Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
                 plan["evidenceQuote"] = reply; plan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", request) };
                 unit.Payload = payload; unit.PlayerText = request; unit.Reply = reply; unit.EventId = "comm_revision"; unit.Timestamp = 101;
                 AcceptCommunicationCommitments(c, unit, revisedExchange, current);
-                Check("changed_terms_update_the_existing_draft", QuerySql(c, "SELECT * FROM communication_messages;").Count == 1
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages;").Single(), "message_id", "") == originalId);
-                var session = QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).Single();
+                Check("changed_terms_update_the_existing_draft", Program.QuerySql(c, "SELECT * FROM communication_messages;").Count == 1
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages;").Single(), "message_id", "") == originalId);
+                var session = Program.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).Single();
                 ReleaseCommunicationSession(c, session, "scene_transition", 10);
-                Check("scene_handoff_does_not_dispatch", ReadString(QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "draft");
+                Check("scene_handoff_does_not_dispatch", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "draft");
                 AdvanceCommunications(c, campaign, "main", 10, people);
-                Check("open_conversation_has_no_history", QuerySql(c, "SELECT * FROM communication_history;").Count == 0);
+                Check("open_conversation_has_no_history", Program.QuerySql(c, "SELECT * FROM communication_history;").Count == 0);
                 ReleaseCommunicationSession(c, session, "closed_by_player", 10);
                 AdvanceCommunications(c, campaign, "main", 10, people);
-                row = QuerySql(c, "SELECT * FROM communication_messages;").Single();
+                row = Program.QuerySql(c, "SELECT * FROM communication_messages;").Single();
                 double due = ReadDouble(row, "due_day", 0);
                 Check("dispatch_has_a_real_future_deadline", due > 10 && ReadString(row, "status", "") == "in_transit");
-                Check("sender_knows_dispatch_without_early_recipient_history", QuerySql(c, "SELECT * FROM communication_history;").Count == 1
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_history;").Single(), "owner_id", "") == "source");
+                Check("sender_knows_dispatch_without_early_recipient_history", Program.QuerySql(c, "SELECT * FROM communication_history;").Count == 1
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_history;").Single(), "owner_id", "") == "source");
                 AdvanceCommunications(c, campaign, "main", due - .00001, people);
-                Check("no_delivery_before_boundary", QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='target';").Count == 0);
+                Check("no_delivery_before_boundary", Program.QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='target';").Count == 0);
                 target["available"] = false;
                 AdvanceCommunications(c, campaign, "main", due, people);
-                Check("unavailable_recipient_waits_without_early_history", QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='target';").Count == 0
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "awaiting_recipient"
+                Check("unavailable_recipient_waits_without_early_history", Program.QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='target';").Count == 0
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "awaiting_recipient"
                     && ReadLong(CommunicationReadiness(c, "main", due), "due", -1) == 0);
                 target["available"] = true;
                 AdvanceCommunications(c, campaign, "main", due, people);
                 AdvanceCommunications(c, campaign, "main", due + .00001, people);
-                var history = QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='target';");
+                var history = Program.QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='target';");
                 Check("delivery_is_once_and_preserves_exact_terms", history.Count == 1 && ReadString(GossipJson(history.Single()), "body", "").Contains(request, StringComparison.Ordinal));
                 var sourceIds = new List<string>();
                 payload["worldDay"] = due + .1;
@@ -279,29 +279,29 @@ namespace ReignBetaServer
                 CommunicationPlayers[campaign] = (CharactersService.NpcLivesGeneration(c), "target");
                 ProcessCommunicationReplies(campaign, _ => { controlledReplyCalls++; return TestDict("ok", true); });
                 Check("new_player_hero_never_gets_an_automatic_reply", controlledReplyCalls == 0
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "awaiting_player");
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages;").Single(), "status", "") == "awaiting_player");
                 CommunicationPlayers.TryRemove(campaign, out _);
-                ExecuteSql(c, "UPDATE communication_messages SET status='reply_pending';");
+                Program.ExecuteSql(c, "UPDATE communication_messages SET status='reply_pending';");
                 ProcessCommunicationReplies(campaign, _ => {
-                    ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$generation WHERE state_id='current';", TestDict("generation", Guid.NewGuid().ToString("N")));
+                    Program.ExecuteSql(c, "UPDATE memory_precision_state SET restore_generation=$generation WHERE state_id='current';", TestDict("generation", Guid.NewGuid().ToString("N")));
                     return TestDict("ok", true, "content", Json.Serialize(TestDict("body", "This stale reply must be discarded.", "answerKind", "opinion", "sourceQuote", "", "privacy", "public")));
                 });
-                Check("late_reply_cannot_write_across_restore_generation", QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id<>'';").Count == 0);
+                Check("late_reply_cannot_write_across_restore_generation", Program.QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id<>'';").Count == 0);
                 int replyCalls = 0;
                 ProcessCommunicationReplies(campaign, _ => { replyCalls++; return TestDict("ok", true, "content", Json.Serialize(TestDict(
                     "body", "I think paying the teachers first is wise.", "answerKind", "opinion", "sourceQuote", "", "privacy", "public"))); });
-                var returnMessage = QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id<>'';").Single();
+                var returnMessage = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id<>'';").Single();
                 Check("one_reply_is_queued_after_acquisition", replyCalls == 1 && ReadString(returnMessage, "status", "") == "queued");
                 AdvanceCommunications(c, campaign, "main", due, people);
-                returnMessage = QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id<>'';").Single();
+                returnMessage = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id<>'';").Single();
                 double returnDue = ReadDouble(returnMessage, "due_day", 0);
                 Check("return_journey_has_its_own_deadline", returnDue > due);
-                Check("sender_has_no_early_reply_knowledge", QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='source';").Count == 1);
+                Check("sender_has_no_early_reply_knowledge", Program.QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='source';").Count == 1);
                 AdvanceCommunications(c, campaign, "main", returnDue, people);
                 ProcessCommunicationReplies(campaign, _ => { replyCalls++; throw new InvalidOperationException("No recursive reply."); });
                 Check("reply_arrives_once_without_a_reply_loop", replyCalls == 1
-                    && QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='source';").Count == 2
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id='';").Single(), "status", "") == "replied");
+                    && Program.QuerySql(c, "SELECT * FROM communication_history WHERE owner_id='source';").Count == 2
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE parent_id='';").Single(), "status", "") == "replied");
                 knowledgePayload = TestDict("campaignId", campaign, "timelineId", "main", "playerHeroStringId", "player", "worldDay", returnDue);
                 Check("return_receipt_releases_issuer_meeting_knowledge", CharactersService.NpcLivesPromptBody(meetingKnowledge, "source", "player", knowledgePayload,
                     meetingOptions, c).Contains("meeting_" + originalId, StringComparison.Ordinal));
@@ -323,27 +323,27 @@ namespace ReignBetaServer
                 Check("invitation_does_not_reveal_later_briefing", !CommunicationBody(staged, data, true).Contains(request, StringComparison.Ordinal)
                     && CommunicationBody(staged, data).Contains(request, StringComparison.Ordinal));
                 string libraryPromise = "I will tell target that the library opens tomorrow.";
-                var libraryPayload = CloneDictionary(payload); libraryPayload["playerText"] = "Tell target when the library opens.";
+                var libraryPayload = Program.CloneDictionary(payload); libraryPayload["playerText"] = "Tell target when the library opens.";
                 var libraryExchange = StoreConversationExchange(campaign, libraryPayload, "source", "player", "Player", "Source",
                     ReadString(libraryPayload, "playerText", ""), libraryPromise, "comm_library", 102);
-                var librarySources = ReadStringList(libraryExchange, "turnIds").SelectMany(id => QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
+                var librarySources = ReadStringList(libraryExchange, "turnIds").SelectMany(id => Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
                 var libraryPlan = TestDict("key", "library", "operation", "send", "kind", "inform", "recipientId", "target", "evidenceQuote", libraryPromise,
                     "contentEvidence", new[] { TestDict("turnId", "current_npc", "quote", libraryPromise) });
                 unit.Payload = libraryPayload; unit.Parsed = TestDict("communicationPlans", new[] { libraryPlan }); unit.PlayerText = ReadString(libraryPayload, "playerText", "");
                 unit.Reply = libraryPromise; unit.EventId = "comm_library";
                 AcceptCommunicationCommitments(c, unit, libraryExchange, librarySources);
                 string withdrawal = "I will not tell target the library hours.";
-                var withdrawalPayload = CloneDictionary(libraryPayload); withdrawalPayload["playerText"] = "Do not send the library details.";
+                var withdrawalPayload = Program.CloneDictionary(libraryPayload); withdrawalPayload["playerText"] = "Do not send the library details.";
                 var withdrawalExchange = StoreConversationExchange(campaign, withdrawalPayload, "source", "player", "Player", "Source",
                     ReadString(withdrawalPayload, "playerText", ""), withdrawal, "comm_cancel", 103);
-                var withdrawalSources = ReadStringList(withdrawalExchange, "turnIds").SelectMany(id => QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
+                var withdrawalSources = ReadStringList(withdrawalExchange, "turnIds").SelectMany(id => Program.QuerySql(c, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id))).ToList();
                 libraryPlan["operation"] = "cancel"; libraryPlan["evidenceQuote"] = withdrawal;
                 unit.Payload = withdrawalPayload; unit.PlayerText = ReadString(withdrawalPayload, "playerText", ""); unit.Reply = withdrawal; unit.EventId = "comm_cancel";
                 AcceptCommunicationCommitments(c, unit, withdrawalExchange, withdrawalSources);
                 ReleaseCommunicationSession(c, session, "closed_by_player", returnDue);
-                Check("withdrawn_draft_is_not_dispatched", ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE topic_key='library';").Single(), "status", "") == "cancelled"
-                    && QuerySql(c, "SELECT * FROM communication_history;").Count == 4);
-                ExecuteSql(c, "UPDATE conversation_turns SET text='changed' WHERE turn_id=$id;", TestDict("id", ReadString(ReadDictionaryList(data, "contentEvidence").First(), "turnId", "")));
+                Check("withdrawn_draft_is_not_dispatched", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE topic_key='library';").Single(), "status", "") == "cancelled"
+                    && Program.QuerySql(c, "SELECT * FROM communication_history;").Count == 4);
+                Program.ExecuteSql(c, "UPDATE conversation_turns SET text='changed' WHERE turn_id=$id;", TestDict("id", ReadString(ReadDictionaryList(data, "contentEvidence").First(), "turnId", "")));
                 Check("tampered_source_invalidates_unsent_content", !CommunicationSourcesActive(c, data));
                 // Captured first native failure: three people named Ira, with only
                 // one actually the speaker's daughter. Replay through production
@@ -373,7 +373,7 @@ namespace ReignBetaServer
                     nativeUnit.Hero, nativeUnit.Player, nativeUnit.PlayerName, nativeUnit.HeroName, nativeText, nativePromise, nativeUnit.EventId, 200, acceptance: accept));
                 var nativeReceipt = ReadDictionary(ReadDictionary(nativeExchange, "acceptedUnit"), "communications");
                 Check("captured_native_named_daughter_publishes_one_draft", ReadStringList(nativeReceipt, "accepted").Count == 1
-                    && QuerySql(c, "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14' AND recipient_id='lord_1_37' AND status='draft';").Count == 1, nativeReceipt);
+                    && Program.QuerySql(c, "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14' AND recipient_id='lord_1_37' AND status='draft';").Count == 1, nativeReceipt);
                 var nativeSnapshot = ReadCommunicationSnapshot(c, "main", "lord_1_14", 0, 50);
                 Check("admission_diagnostics_retain_source_bound_receipt", ReadDictionaryList(nativeSnapshot, "admissions").Any(a => ReadString(a, "unit_id", "") == nativeUnit.EventId));
                 var whileOpen = PersonalGossipConversationScheduling(c, "main", 91077.37496207407d, new List<string> { "lord_1_14" });
@@ -397,15 +397,15 @@ namespace ReignBetaServer
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 1);
                 Check("earlier_other_owners_terms_remain_private", CommunicationContent(c, "unrelated_observer", reopenPayload,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
-                var pastCutoff = CloneDictionary(reopenPayload); pastCutoff["memoryAsOfTimestamp"] = 199L;
+                var pastCutoff = Program.CloneDictionary(reopenPayload); pastCutoff["memoryAsOfTimestamp"] = 199L;
                 Check("earlier_terms_respect_time_cutoff", CommunicationContent(c, "lord_1_14", pastCutoff,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
-                var sequenceCutoff = CloneDictionary(reopenPayload);
-                sequenceCutoff["memoryAsOfAcceptedSequence"] = ReadLong(QuerySql(c, "SELECT accepted_sequence FROM conversation_turns WHERE turn_id=$id;",
+                var sequenceCutoff = Program.CloneDictionary(reopenPayload);
+                sequenceCutoff["memoryAsOfAcceptedSequence"] = ReadLong(Program.QuerySql(c, "SELECT accepted_sequence FROM conversation_turns WHERE turn_id=$id;",
                     TestDict("id", originalNativeTurn)).Single(), "accepted_sequence", 0) - 1;
                 Check("earlier_terms_respect_sequence_cutoff", CommunicationContent(c, "lord_1_14", sequenceCutoff,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
-                var wrongTimeline = CloneDictionary(reopenPayload); wrongTimeline["timelineId"] = "unrelated_branch";
+                var wrongTimeline = Program.CloneDictionary(reopenPayload); wrongTimeline["timelineId"] = "unrelated_branch";
                 Check("earlier_terms_respect_timeline", CommunicationContent(c, "lord_1_14", wrongTimeline,
                     "native_reaffirm_session", Array.Empty<Dictionary<string, object>>(), earlierTerms).Count == 0);
                 string reaffirmation = "The letter goes to Ira when you have gone your way — not before, and not with one word added or withheld.";
@@ -420,21 +420,21 @@ namespace ReignBetaServer
                     reaffirmedUnit.Hero, reaffirmedUnit.Player, reaffirmedUnit.PlayerName, reaffirmedUnit.HeroName, reaffirmedUnit.PlayerText, reaffirmation,
                     reaffirmedUnit.EventId, 201, acceptance: accept));
                 Check("captured_impersonal_reaffirmation_rebinds_one_unsent_draft", ReadStringList(ReadDictionary(ReadDictionary(reaffirmedExchange, "acceptedUnit"), "communications"), "accepted").Count == 1
-                    && QuerySql(c, "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14' AND recipient_id='lord_1_37';").Count == 1
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14';").Single(), "status", "") == "draft", reaffirmedExchange);
+                    && Program.QuerySql(c, "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14' AND recipient_id='lord_1_37';").Count == 1
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14';").Single(), "status", "") == "draft", reaffirmedExchange);
                 var actualClose = TestDict("campaignId", campaign, "sessionId", ReadString(reaffirmedExchange, "sessionId", ""),
                     "reason", "closed_by_player", "worldDay", 91077.37496207407d, "ts", 202L);
                 var closeResult = ConversationFinishApi(actualClose);
                 Check("production_player_close_is_acknowledged", ReadBool(closeResult, "ok", false), closeResult);
-                Check("captured_native_promise_releases_only_after_close", QuerySql(c,
+                Check("captured_native_promise_releases_only_after_close", Program.QuerySql(c,
                     "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14' AND recipient_id='lord_1_37' AND status='queued';").Count == 1);
                 ConversationFinishApi(actualClose);
-                Check("production_close_retry_does_not_duplicate_dispatch", QuerySql(c,
+                Check("production_close_retry_does_not_duplicate_dispatch", Program.QuerySql(c,
                     "SELECT * FROM communication_messages WHERE speaker_id='lord_1_14' AND recipient_id='lord_1_37' AND status='queued';").Count == 1);
                 const string rememberedTerms = "The offer is 2,400 denars for the school; teachers must be paid before decoration.";
                 void LetterMemory(string id, string owner, string peer, string timeline, double day, long ts, long sequence, string body)
                 {
-                    ExecuteSql(c, @"INSERT INTO communication_history(receipt_id,message_id,timeline_id,owner_id,peer_id,acquired_day,acquired_ts,accepted_sequence,payload_json)
+                    Program.ExecuteSql(c, @"INSERT INTO communication_history(receipt_id,message_id,timeline_id,owner_id,peer_id,acquired_day,acquired_ts,accepted_sequence,payload_json)
 VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id", id, "timeline", timeline, "owner", owner, "peer", peer,
                         "day", day, "ts", ts, "sequence", sequence, "json", Json.Serialize(TestDict("body", body, "speakerId", peer))));
                 }
@@ -461,7 +461,7 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 Check("unacquired_letters_cannot_support_factual_answer", !ReadBool(ComposeCommunicationReply(campaign, acquiredQuestion,
                     TestDict("body", "What was offered?"), acquiredContext, _ => TestDict("ok", true, "content", Json.Serialize(TestDict("body", "Invented terms.",
                         "answerKind", "answered", "sourceQuote", "FUTURE_DAY_CONFIDENCE", "privacy", "personal")))), "ok", true));
-                var regressionPresence = CloneDictionary(ReadDictionary(reopenPayload, "gossipPresence"));
+                var regressionPresence = Program.CloneDictionary(ReadDictionary(reopenPayload, "gossipPresence"));
                 var regressionPeople = ReadDictionaryList(regressionPresence, "people");
                 regressionPeople.Single(p => GossipHeroId(p) == "lord_1_14")["settlementId"] = "town_ES5";
                 var pharon = GossipTestHero("lord_1_15", "pharon_origin"); pharon["name"] = "Pharon"; regressionPeople.Add(pharon);
@@ -471,7 +471,7 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                     "channel", "in_person", "gossipPresence", regressionPresence);
                 Dictionary<string, object> PublishRegression(string eventName, string playerText, string npcText, Dictionary<string, object> proposed, long timestamp)
                 {
-                    var p = CloneDictionary(regressionPayload); p["sceneTurnId"] = eventName; p["playerText"] = playerText;
+                    var p = Program.CloneDictionary(regressionPayload); p["sceneTurnId"] = eventName; p["playerText"] = playerText;
                     ConversationStartApi(p);
                     var u = new AcceptedConversationUnit { Campaign = campaign, Hero = "lord_1_14", Player = "main_hero", Location = "town_ES5",
                         HeroName = "Rhagaea", PlayerName = "Player", PlayerText = playerText, Reply = npcText,
@@ -492,15 +492,15 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 roomPlan["evidenceQuote"] = "If you pay, I will write to Ira.";
                 roomPlan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", "Change the third bell to the second bell.") };
                 PublishRegression("room_invalid_revision", "Change the third bell to the second bell.", "If you pay, I will write to Ira.", roomPlan, 301);
-                Check("rejected_revision_quarantines_original_production_draft", ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;",
+                Check("rejected_revision_quarantines_original_production_draft", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;",
                     TestDict("id", roomId)).Single(), "status", "") == "needs_clarification");
                 ConversationFinishApi(TestDict("campaignId", campaign, "sessionId", ReadString(roomFirst, "sessionId", ""), "reason", "closed_by_player", "worldDay", 91077.37496207407d, "ts", 302L));
-                Check("production_close_cannot_release_stale_corrected_draft", QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND status='queued';", TestDict("id", roomId)).Count == 0);
+                Check("production_close_cannot_release_stale_corrected_draft", Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id AND status='queued';", TestDict("id", roomId)).Count == 0);
                 regressionPayload["conversationSessionId"] = "reading_room_reconfirmed";
                 const string correctedRoom = "Only the revised terms travel to my daughter: the proposed reading room in Zeonica would open at the second bell on market days, and entry would be free. A proposal only, no spending authorized by anyone.";
                 roomPlan["evidenceQuote"] = correctedRoom; roomPlan["contentEvidence"] = new[] { TestDict("turnId", "current_npc", "quote", correctedRoom) };
                 var roomRevised = PublishRegression("room_reconfirmed", "Please write to Ira with the second bell, free entry and the same no-spending condition.", correctedRoom, roomPlan, 303);
-                var finalRoom = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", roomId)).Single();
+                var finalRoom = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", roomId)).Single();
                 Check("captured_recipient_receipt_promise_resumes_same_draft_with_complete_final_terms", ReadString(finalRoom, "status", "") == "draft"
                     && ReadInt(finalRoom, "revision", 0) == 2 && ReadStringList(ReadDictionary(ReadDictionary(roomRevised, "acceptedUnit"), "communications"), "accepted").Single() == roomId
                     && Json.Serialize(GossipJson(finalRoom)).Contains("no spending authorized", StringComparison.Ordinal));
@@ -509,8 +509,8 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 roomPlan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", "Cancel the whole reading-room note to Ira.") };
                 var roomCancelled = PublishRegression("room_cancelled", "Cancel the whole reading-room note to Ira.", roomWithdrawal, roomPlan, 304);
                 ConversationFinishApi(TestDict("campaignId", campaign, "sessionId", ReadString(roomCancelled, "sessionId", ""), "reason", "closed_by_player", "worldDay", 91077.37496207407d, "ts", 305L));
-                Check("captured_withdrawal_cancels_before_production_close", ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", roomId)).Single(), "status", "") == "cancelled"
-                    && QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", roomId)).Count == 0);
+                Check("captured_withdrawal_cancels_before_production_close", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", roomId)).Single(), "status", "") == "cancelled"
+                    && Program.QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", roomId)).Count == 0);
                 regressionPayload["conversationSessionId"] = "pharon_summon_regression";
                 const string summonsReply = "The summons goes to Pharon when this conversation ends. He is to join me at Onira, where I am actually staying; he comes alone, his troops safe in their camp; and he remains with me one full day after he arrives. When he stands in my hall, I will tell him myself: daughters of working families may enter on the same terms as sons.";
                 var summonPlan = TestDict("key", "pharon_summon_regression", "operation", "send", "kind", "summon_then_inform", "recipientId", "lord_1_15",
@@ -519,27 +519,27 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 var summonAccepted = PublishRegression("pharon_summon_terms", "Send for Pharon to come alone for one full day. Tell him at arrival that daughters of working families may enter on the same terms as sons.", summonsReply, summonPlan, 306);
                 Check("summons_stay_can_be_stated_elsewhere_in_same_accepted_reply", ReadStringList(ReadDictionary(ReadDictionary(summonAccepted, "acceptedUnit"), "communications"), "accepted").Count == 1, summonAccepted);
                 string summonId = ReadStringList(ReadDictionary(ReadDictionary(summonAccepted, "acceptedUnit"), "communications"), "accepted").Single();
-                var summonRow = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single();
-                var summonSession = QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", ReadString(summonRow, "session_id", ""))).Single();
+                var summonRow = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single();
+                var summonSession = Program.QuerySql(c, "SELECT * FROM conversation_sessions WHERE session_id=$id;", TestDict("id", ReadString(summonRow, "session_id", ""))).Single();
                 const double hostDay = 91077.37496207407d;
                 ReleaseCommunicationSession(c, summonSession, "closed_by_player", hostDay);
-                summonRow = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single();
+                summonRow = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single();
                 var holdData = GossipJson(summonRow); var hostWork = CommunicationHostWork(c, "main").Single(w => ReadString(w, "id", "") == summonId);
                 Check("closed_summons_waits_for_native_host_before_dispatch", ReadString(summonRow, "status", "") == "awaiting_host"
                     && ReadString(hostWork, "reservationHash", "").Length > 0 && ReadDouble(hostWork, "expiresDay", 0) == hostDay + 14);
                 AdvanceCommunications(c, campaign, "main", hostDay, regressionPeople);
-                Check("unreserved_summons_has_no_dispatch_or_receipt", ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single(), "status", "") == "awaiting_host"
-                    && QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", summonId)).Count == 0);
+                Check("unreserved_summons_has_no_dispatch_or_receipt", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single(), "status", "") == "awaiting_host"
+                    && Program.QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", summonId)).Count == 0);
                 var hostReceipt = TestDict("communicationId", summonId, "kind", "host_reserved", "hostId", "lord_1_14", "destinationId", "town_ES5",
                     "reservationHash", ReadString(holdData, "hostReservationHash", ""));
                 bool mismatchRejected = false;
-                var forgedHost = CloneDictionary(hostReceipt); forgedHost["hostId"] = "main_hero";
+                var forgedHost = Program.CloneDictionary(hostReceipt); forgedHost["hostId"] = "main_hero";
                 try { AcceptCommunicationNativeReceipt(c, new NpcLivesState { TimelineId = "main" }, forgedHost, hostDay); }
                 catch (InvalidOperationException) { mismatchRejected = true; }
                 Check("host_receipt_cannot_reserve_a_different_actor", mismatchRejected);
                 AcceptCommunicationNativeReceipt(c, new NpcLivesState { TimelineId = "main" }, hostReceipt, hostDay);
                 AcceptCommunicationNativeReceipt(c, new NpcLivesState { TimelineId = "main" }, hostReceipt, hostDay);
-                summonRow = QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single();
+                summonRow = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single();
                 Check("matching_native_host_receipt_releases_once", ReadString(summonRow, "status", "") == "queued"
                     && ReadDouble(GossipJson(summonRow), "hostReservedDay", 0) == hostDay);
                 SetCommunicationStatus(c, summonRow, "awaiting_reply", GossipJson(summonRow));
@@ -548,10 +548,10 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 Check("acquired_refusal_releases_invitation_host", !CommunicationHostWork(c, "main").Any(w => ReadString(w, "id", "") == summonId));
                 SetCommunicationStatus(c, summonRow, "queued", GossipJson(summonRow));
                 ExpireCommunicationHostWaits(c, "main", hostDay + 14);
-                Check("host_wait_has_bounded_expiry_and_cannot_be_reanimated", ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single(), "status", "") == "expired"
+                Check("host_wait_has_bounded_expiry_and_cannot_be_reanimated", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single(), "status", "") == "expired"
                     && !CommunicationHostWork(c, "main").Any(w => ReadString(w, "id", "") == summonId));
                 AcceptCommunicationNativeReceipt(c, new NpcLivesState { TimelineId = "main" }, hostReceipt, hostDay + 14);
-                Check("late_host_ack_does_not_reopen_expired_invitation", ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single(), "status", "") == "expired");
+                Check("late_host_ack_does_not_reopen_expired_invitation", ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", summonId)).Single(), "status", "") == "expired");
                 var directAskRow = TestDict("speaker_id", "queen", "recipient_id", "pharon", "player_id", "player", "kind", "ask");
                 var directAskData = TestDict("speakerName", "Rhagaea", "contentEvidence", new[] { TestDict("speakerId", "player", "quote", "Ask Pharon to repeat Olive 17 and whether this note authorizes payment; it authorizes no spending.") });
                 directAskData["body"] = CommunicationBody(directAskRow, directAskData);
@@ -565,7 +565,7 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 });
                 Check("first_received_question_is_addressed_to_recipient_for_actual_return_letter", directReplyFraming && ReadBool(directAnswer, "ok", false));
                 regressionPayload["conversationSessionId"] = "pharon_pronoun_regression";
-                var pronounPlan = CloneDictionary(summonPlan); pronounPlan["key"] = "pharon_pronoun_regression";
+                var pronounPlan = Program.CloneDictionary(summonPlan); pronounPlan["key"] = "pharon_pronoun_regression";
                 pronounPlan["evidenceQuote"] = "It goes out tomorrow, and I will be at Onira, waiting.";
                 pronounPlan["delayDays"] = 1d;
                 var pronounAccepted = PublishRegression("pharon_pronoun", "Send for Pharon to come alone for one full day. Tell him at arrival that daughters of working families may enter on the same terms as sons.",
@@ -586,28 +586,28 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                     "Cancelled, and cleanly — nothing has left my hand.", birchCancel, 309);
                 ConversationFinishApi(TestDict("campaignId", campaign, "sessionId", ReadString(birchWithdrawn, "sessionId", ""), "reason", "closed_by_player", "worldDay", hostDay, "ts", 310L));
                 Check("withdrawal_key_variation_binds_same_single_unsent_draft", ReadStringList(ReadDictionary(ReadDictionary(birchWithdrawn, "acceptedUnit"), "communications"), "accepted").Single() == birchId
-                    && ReadString(QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", birchId)).Single(), "status", "") == "cancelled"
-                    && QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", birchId)).Count == 0);
+                    && ReadString(Program.QuerySql(c, "SELECT * FROM communication_messages WHERE message_id=$id;", TestDict("id", birchId)).Single(), "status", "") == "cancelled"
+                    && Program.QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", birchId)).Count == 0);
                 regressionPayload["conversationSessionId"] = "ambiguous_withdrawal_regression";
-                var northPlan = CloneDictionary(birchPlan); northPlan["key"] = "north_note";
-                var southPlan = CloneDictionary(birchPlan); southPlan["key"] = "south_note";
+                var northPlan = Program.CloneDictionary(birchPlan); northPlan["key"] = "north_note";
+                var southPlan = Program.CloneDictionary(birchPlan); southPlan["key"] = "south_note";
                 PublishRegression("north_note", "Please write to your daughter Ira: " + birchContent + ".", "I will write to Ira.", northPlan, 311);
                 PublishRegression("south_note", "Please write a separate note to your daughter Ira: " + birchContent + ".", "I will write to Ira.", southPlan, 312);
-                var unclearCancel = CloneDictionary(birchCancel); unclearCancel["key"] = "unknown_note";
+                var unclearCancel = Program.CloneDictionary(birchCancel); unclearCancel["key"] = "unknown_note";
                 var unclear = PublishRegression("unclear_withdrawal", "Cancel that note to your daughter Ira.", "Cancelled, and cleanly — nothing has left my hand.", unclearCancel, 313);
                 ConversationFinishApi(TestDict("campaignId", campaign, "sessionId", ReadString(unclear, "sessionId", ""), "reason", "closed_by_player", "worldDay", hostDay, "ts", 314L));
-                var ambiguousDrafts = QuerySql(c, "SELECT * FROM communication_messages WHERE topic_key IN ('north_note','south_note');");
+                var ambiguousDrafts = Program.QuerySql(c, "SELECT * FROM communication_messages WHERE topic_key IN ('north_note','south_note');");
                 Check("ambiguous_withdrawal_holds_candidates_instead_of_sending_or_picking_one", ambiguousDrafts.Count == 2
                     && ambiguousDrafts.All(row => ReadString(row, "status", "") == "needs_clarification")
-                    && ambiguousDrafts.All(row => QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", ReadString(row, "message_id", ""))).Count == 0));
+                    && ambiguousDrafts.All(row => Program.QuerySql(c, "SELECT * FROM communication_history WHERE message_id=$id;", TestDict("id", ReadString(row, "message_id", ""))).Count == 0));
 
                 const string semanticQuote = "Tomorrow a sealed summons rides to Pharon, asking his own fresh word — acceptance or refusal, owing nothing to the Onira invitation.";
                 const string semanticReply = semanticQuote + " He is to meet me here and remain for one full day after arrival.";
                 const string semanticRequest = "Please send for Pharon. Tell him after arrival that the proposed register is Lantern Nine; no spending is authorized.";
                 regressionPayload["conversationSessionId"] = "semantic_commitment_regression";
-                var semanticPayload = CloneDictionary(regressionPayload); semanticPayload["sceneTurnId"] = "semantic_commitment";
+                var semanticPayload = Program.CloneDictionary(regressionPayload); semanticPayload["sceneTurnId"] = "semantic_commitment";
                 semanticPayload["playerText"] = semanticRequest;
-                var semanticPlan = CloneDictionary(summonPlan); semanticPlan["key"] = "semantic_commitment";
+                var semanticPlan = Program.CloneDictionary(summonPlan); semanticPlan["key"] = "semantic_commitment";
                 semanticPlan["evidenceQuote"] = semanticQuote; semanticPlan["delayDays"] = 1d;
                 semanticPlan["contentEvidence"] = new[] { TestDict("turnId", "current_player", "quote", semanticRequest) };
                 semanticPlan["unconditionalSpeakerCommitment"] = true;
@@ -627,7 +627,7 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                     && ReadFirstString(TryParseJsonObject(ReadString(semanticEnvelope, "content", "")), "reply") == semanticReply);
                 foreach (string field in new[] { "key", "recipientId", "kind", "operation", "destinationId", "evidenceQuote", "stayDays", "delayDays", "contentEvidence" })
                 {
-                    var changed = CloneDictionary(semanticReviewed);
+                    var changed = Program.CloneDictionary(semanticReviewed);
                     changed[field] = field == "stayDays" || field == "delayDays" ? 2d : field == "contentEvidence"
                         ? new[] { TestDict("turnId", "current_player", "quote", "Altered terms") } : "altered";
                     Check("semantic_seal_rejects_changed_" + field, !CommunicationSemanticAccepted(changed, semanticUnit));
@@ -641,12 +641,12 @@ VALUES($id,$id,$timeline,$owner,$peer,$day,$ts,$sequence,$json);", TestDict("id"
                 semanticUnit.Hero = "lord_1_14"; semanticUnit.Reply += " Altered speech.";
                 Check("semantic_seal_rejects_changed_reply", !CommunicationSemanticAccepted(semanticReviewed, semanticUnit));
                 semanticUnit.Reply = semanticReply;
-                var forgedSemantic = CloneDictionary(semanticReviewed); forgedSemantic["semanticCommitmentReceipt"] = new string('0', 64);
+                var forgedSemantic = Program.CloneDictionary(semanticReviewed); forgedSemantic["semanticCommitmentReceipt"] = new string('0', 64);
                 Check("semantic_seal_rejects_forged_receipt", !CommunicationSemanticAccepted(forgedSemantic, semanticUnit));
                 foreach (string rejected in new[] { "I will not send for Pharon.", "If you pay, a summons rides to Pharon.",
                     "She said a summons rides to Pharon.", "Perhaps a summons rides to Pharon.", "A summons might ride to Pharon." })
                 {
-                    var semanticNegative = CloneDictionary(semanticPlan); semanticNegative["evidenceQuote"] = rejected;
+                    var semanticNegative = Program.CloneDictionary(semanticPlan); semanticNegative["evidenceQuote"] = rejected;
                     Check("semantic_review_rejects_clear_noncommitment_" + PromptHash(rejected).Substring(0, 8),
                         ApplyCommunicationPlanPatch(TestDict("reply", rejected), TestDict("communicationPlans", new[] { semanticNegative }), allowSemanticReview: true) == null);
                 }

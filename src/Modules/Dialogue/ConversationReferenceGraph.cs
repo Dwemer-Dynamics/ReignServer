@@ -9,7 +9,7 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Only reference metadata lives here. Turns, letters, agreement status,
         // corrections and knowledge acquisition keep their existing authorities.
@@ -51,7 +51,7 @@ namespace ReignBetaServer
         // Only metadata containers are stripped. A literal occurrence inside
         // authored speech remains speech. Malformed raw JSON with this private
         // field is withheld rather than leaking an incomplete quoted source.
-        private static object ConversationReferenceTransportPayload(object value, string method = "", string path = "")
+        internal static object ConversationReferenceTransportPayload(object value, string method = "", string path = "")
         {
             // These existing operator evidence routes promise exact paginated
             // bytes/hashes. They intentionally expose opted-in private captures.
@@ -60,7 +60,7 @@ namespace ReignBetaServer
             return WithoutConversationReferenceMetadata(value);
         }
 
-        private static object WithoutConversationReferenceMetadata(object value, string key = "", bool providerResponse = false)
+        internal static object WithoutConversationReferenceMetadata(object value, string key = "", bool providerResponse = false)
         {
             if (value is IDictionary dictionary)
             {
@@ -94,9 +94,9 @@ namespace ReignBetaServer
         private static string ConversationReferenceMode(Dictionary<string, object> settings = null)
         {
             string mode = ConversationReferenceValidationMode.Value;
-            if (!string.IsNullOrEmpty(mode) && (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)))
+            if (!string.IsNullOrEmpty(mode) && (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)))
                 throw new InvalidOperationException("Reference graph fixtures require isolated validation.");
-            settings ??= LoadSettings();
+            settings ??= Program.LoadSettings();
             if (string.IsNullOrEmpty(mode)) mode = ResolveConversationReferenceMode(settings, IsIsolatedMemoryValidation);
             return mode is "capture" or "enabled" ? mode : "off";
         }
@@ -124,9 +124,9 @@ namespace ReignBetaServer
             lock (bySection) expected = bySection.Values.SelectMany(v => v).Where(r =>
                 ReadString(r, "kind", "") == "reference_graph_exchange" && ReadString(r, "observer", "") == observer).ToList();
             if (expected.Count == 0) return result;
-            var access = BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 ReadFirstString(payload, "locationId", "settlementId"), payload);
-            using var connection = OpenCampaignConnection(ReadString(payload, "campaignId", ""));
+            using var connection = Program.OpenCampaignConnection(ReadString(payload, "campaignId", ""));
             foreach (var record in expected)
             {
                 string raw = ReadString(record, "text", "");
@@ -207,9 +207,9 @@ namespace ReignBetaServer
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return Unbound("no_campaign");
             offer.Campaign = campaign;
-            var access = BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
+            var access = Program.BuildKnowledgeAccessContext(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 ReadFirstString(payload, "locationId", "settlementId"), payload);
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             offer.Generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             List<Dictionary<string, object>> expected;
             lock (bySection) expected = bySection.Values.SelectMany(v => v).ToList();
@@ -282,7 +282,7 @@ namespace ReignBetaServer
 
         private static void EnsureConversationReferenceGraphSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_reference_edges (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_reference_edges (
 edge_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,timeline_id TEXT NOT NULL,restore_generation TEXT NOT NULL,
 from_type TEXT NOT NULL,from_id TEXT NOT NULL,from_hash TEXT NOT NULL,
 to_type TEXT NOT NULL,to_id TEXT NOT NULL,to_hash TEXT NOT NULL,relation TEXT NOT NULL,
@@ -295,18 +295,18 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
         }
 
         private static ConversationReferenceSource ResolveConversationReferenceSource(ReignDbConnection connection,
-            string type, string id, KnowledgeAccessContext access)
+            string type, string id, Program.KnowledgeAccessContext access)
         {
             if (access == null || access.NpcId.Length == 0 || id.Length is < 1 or > 512) return null;
             Dictionary<string, object> row;
             if (type == "turn")
             {
-                row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
+                row = Program.QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id;", TestDict("id", id)).SingleOrDefault();
                 if (row == null || !PrecisionTurnVisible(row, access.NpcId, access, connection)) return null;
                 string original = ReadString(row, "text", "");
                 string view = ObserverConversationText(ConversationTurnTextForRecall(row), ReadString(row, "speaker_id", ""),
                     access.NpcId, ReadString(row, "role", "") == "player");
-                view = NormalizePromptSegment(SanitizeUnknownIdentityEvidenceText(view, access));
+                view = NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(view, access));
                 if (view.Length == 0) return null;
                 return new ConversationReferenceSource { Type = type, Id = id, Row = row, View = view,
                     Hash = PromptHash(CanonicalJson(TestDict("id", id, "speaker", ReadString(row, "speaker_id", ""),
@@ -314,9 +314,9 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
                     Sequence = ReadLong(row, "accepted_sequence", 0), Timestamp = ReadLong(row, "ts", 0), Day = ReadDouble(row, "world_day", 0) };
             }
             if (type != "letter" || !WorldSimulationService.TableExists(connection, "letters")) return null;
-            row = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).SingleOrDefault();
+            row = Program.QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).SingleOrDefault();
             if (!LetterVisibleToObserver(connection, row, access.NpcId, access, out double learned)) return null;
-            string letterView = NormalizePromptSegment(SanitizeUnknownIdentityEvidenceText(ReadString(row, "body", ""), access));
+            string letterView = NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(ReadString(row, "body", ""), access));
             return letterView.Length == 0 ? null : new ConversationReferenceSource { Type = type, Id = id, Row = row,
                 View = letterView, Hash = LetterContentHash(row), Speaker = ReadString(row, "sender_id", ""), Day = learned,
                 Sequence = ReadLong(row, "dispatch_sequence", 0), Timestamp = ReadLong(row, "created_ts", 0) };
@@ -380,7 +380,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
             if (proposals.Count > 8) return TestDict("status", "too_many_proposals", "stored", 0);
             if (proposals.Count == 0) return TestDict("status", "no_references", "stored", 0);
             EnsureConversationReferenceGraphSchema(connection);
-            var access = BuildKnowledgeAccessContext(unit.Hero, unit.Player, unit.Location, unit.Payload);
+            var access = Program.BuildKnowledgeAccessContext(unit.Hero, unit.Player, unit.Location, unit.Payload);
             var stored = new List<string>(); var rejected = new List<Dictionary<string, object>>();
             int normalizedTargetTypeProposals = 0;
             foreach (var proposal in proposals)
@@ -397,7 +397,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
                         && ReadString(row, "role", "") == (player ? "player" : "npc")
                         && ReadString(row, "speaker_id", "") == (player ? unit.Player : unit.Hero)
                         && PrecisionTurnVisible(row, unit.Hero, null, connection))
-                    .FirstOrDefault(row => NormalizePromptSegment(SanitizeUnknownIdentityEvidenceText(ObserverConversationText(ConversationTurnTextForRecall(row),
+                    .FirstOrDefault(row => NormalizePromptSegment(Program.SanitizeUnknownIdentityEvidenceText(ObserverConversationText(ConversationTurnTextForRecall(row),
                         ReadString(row, "speaker_id", ""), unit.Hero, player), access)).Contains(quote, StringComparison.Ordinal));
                 string error = ConversationReferenceProposalError(proposal, player ? unit.PlayerText : unit.Reply, offered, target);
                 if (error == "reference_source_not_offered" && offerError.Length > 0) error = offerError;
@@ -421,7 +421,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
                     "relationEntailmentVerified", false, "changesAgreementStatus", false);
                 metadata["requestedTargetType"] = requestedType;
                 metadata["targetTypeDerivedFromUniqueOffer"] = type != requestedType;
-                ExecuteSql(connection, @"INSERT INTO conversation_reference_edges
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_reference_edges
 (edge_id,owner_id,timeline_id,restore_generation,from_type,from_id,from_hash,to_type,to_id,to_hash,relation,
 source_event_id,as_of_sequence,world_day,created_ts,payload_json)
 VALUES($id,$owner,$timeline,$generation,'turn',$from,$fromHash,$type,$to,$toHash,$relation,$event,$sequence,$day,$ts,$payload)
@@ -439,7 +439,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", edgeId, "owner", unit.Hero, "t
         }
 
         private static List<ConversationReferenceSource> ExpandConversationReferences(ReignDbConnection connection,
-            List<(string Type, string Id)> seeds, KnowledgeAccessContext access, string generation,
+            List<(string Type, string Id)> seeds, Program.KnowledgeAccessContext access, string generation,
             int maximumHops, int maximumNodes, Dictionary<string, object> diagnostics)
         {
             var result = new List<ConversationReferenceSource>();
@@ -465,7 +465,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", edgeId, "owner", unit.Hero, "t
                 string end = incoming ? "to" : "from";
                 // Associations remain observer-owned. Seeing two passages does
                 // not grant another character's unspoken inference about them.
-                var rows = QuerySql(connection, @"SELECT * FROM conversation_reference_edges
+                var rows = Program.QuerySql(connection, @"SELECT * FROM conversation_reference_edges
 WHERE owner_id=$owner AND timeline_id=$timeline AND restore_generation=$generation
 AND as_of_sequence<=$sequence AND world_day<=$day AND " + end + @"_type=$type AND " + end + @"_id=$id
 ORDER BY as_of_sequence DESC,edge_id LIMIT $limit;", TestDict("owner", access.NpcId, "timeline", access.TimelineId,
@@ -554,13 +554,13 @@ ORDER BY as_of_sequence DESC,edge_id LIMIT $limit;", TestDict("owner", access.Np
             if (!double.IsFinite(day) || day < 0) return;
             var sourceCache = new Dictionary<string, ConversationReferenceSource>(StringComparer.Ordinal);
             var memberCache = new Dictionary<string, bool>(StringComparer.Ordinal);
-            foreach (var edge in QuerySql(connection, @"SELECT e.* FROM conversation_reference_edges e
+            foreach (var edge in Program.QuerySql(connection, @"SELECT e.* FROM conversation_reference_edges e
 JOIN memory_restored_sources m ON m.source_table='conversation_turns' AND m.source_id=e.from_id AND m.restore_generation=$generation
 WHERE e.restore_generation<>$generation AND e.from_type='turn' AND e.world_day<=$day ORDER BY e.edge_id;",
                 TestDict("generation", generation, "day", day)))
             {
                 string owner = ReadString(edge, "owner_id", "");
-                var access = new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = day };
+                var access = new Program.KnowledgeAccessContext { NpcId = owner, TimelineId = timeline, WorldDay = day };
                 ConversationReferenceSource Resolve(string type, string id)
                 {
                     string key = owner + ":" + ConversationReferenceKey(type, id);
@@ -576,7 +576,7 @@ WHERE e.restore_generation<>$generation AND e.from_type='turn' AND e.world_day<=
                     string key = ConversationReferenceKey(source.Type, source.Id);
                     if (memberCache.TryGetValue(key, out bool member)) return member;
                     member = source.Type == "turn" ? IsVerifiedRestoredMemorySource(connection, source.Row, timeline)
-                    : RestoredLetterContext(connection, timeline) != null && QuerySql(connection,
+                    : RestoredLetterContext(connection, timeline) != null && Program.QuerySql(connection,
                         "SELECT letter_id FROM memory_restored_letters WHERE letter_id=$id AND restore_generation=$generation AND content_hash=$hash;",
                         TestDict("id", source.Id, "generation", generation, "hash", source.Hash)).Count == 1;
                     memberCache[key] = member;
@@ -587,12 +587,12 @@ WHERE e.restore_generation<>$generation AND e.from_type='turn' AND e.world_day<=
                     || !Member(from) || !Member(to) || from.Hash != ReadString(edge, "from_hash", "") || to.Hash != ReadString(edge, "to_hash", "")
                     || !from.View.Contains(ReadString(metadata, "originQuote", ""), StringComparison.Ordinal)
                     || !to.View.Contains(ReadString(metadata, "targetQuote", ""), StringComparison.Ordinal)) continue;
-                metadata = CloneDictionary(metadata);
+                metadata = Program.CloneDictionary(metadata);
                 metadata["reboundFromEdge"] = ReadString(edge, "edge_id", "");
                 metadata["restoredSavePointId"] = ReadString(point, "savePointId", "");
                 string id = ConversationReferenceEdgeId(owner, timeline, generation, from.Type, from.Id, from.Hash,
                     to.Type, to.Id, to.Hash, ReadString(edge, "relation", ""), ReadString(metadata, "originQuote", ""), ReadString(metadata, "targetQuote", ""));
-                ExecuteSql(connection, @"INSERT INTO conversation_reference_edges
+                Program.ExecuteSql(connection, @"INSERT INTO conversation_reference_edges
 (edge_id,owner_id,timeline_id,restore_generation,from_type,from_id,from_hash,to_type,to_id,to_hash,relation,
 source_event_id,as_of_sequence,world_day,created_ts,payload_json)
 VALUES($id,$owner,$timeline,$generation,$fromType,$from,$fromHash,$toType,$to,$toHash,$relation,$event,$sequence,$day,$ts,$payload)
@@ -605,20 +605,20 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", id, "owner", owner, "timeline"
             // These are derivative hints in this restored database. Exact old
             // snapshots retain their own rows; canonical sources are untouched.
             // Prevent one complete duplicate graph accumulating per restore.
-            ExecuteSql(connection, "DELETE FROM conversation_reference_edges WHERE restore_generation<>$generation;", TestDict("generation", generation));
+            Program.ExecuteSql(connection, "DELETE FROM conversation_reference_edges WHERE restore_generation<>$generation;", TestDict("generation", generation));
         }
 
         private static string BuildConversationReferenceContext(string campaign, string observer, string query,
             Dictionary<string, object> payload, List<Dictionary<string, object>> priorLines, string ordinaryContext,
             Dictionary<string, object> settingsOverride = null)
         {
-            if (settingsOverride != null && (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)))
+            if (settingsOverride != null && (!ReignPostgreSqlStorage.Options.IsValidation || string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)))
                 throw new InvalidOperationException("Reference graph settings fixtures require isolated validation.");
             if (ConversationReferenceMode() != "enabled" || payload == null || campaign.Length == 0
                 || ReadBool(payload, "officialMemoryFirewall", false)) return "";
-            var settings = settingsOverride ?? LoadSettings();
+            var settings = settingsOverride ?? Program.LoadSettings();
             var plan = PlanMemoryQuery(observer, ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"), query, payload);
-            var access = BuildKnowledgeAccessContext(observer, plan.Peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
+            var access = Program.BuildKnowledgeAccessContext(observer, plan.Peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
             access.WorldDay = plan.WorldDay;
             var seeds = new List<(string Type, string Id)>();
             foreach (var row in (priorLines ?? new()).TakeLast(2))
@@ -637,7 +637,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", id, "owner", owner, "timeline"
                 }
             var diagnostic = TestDict("schema", ConversationReferenceGraphVersion, "mode", "enabled", "seedCount", seeds.Count,
                 "preservedRawRetrieval", true, "ordinaryContextHash", PromptHash(ordinaryContext));
-            using var connection = OpenCampaignConnection(campaign);
+            using var connection = Program.OpenCampaignConnection(campaign);
             string generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
             int nodes = Math.Clamp(ReadInt(settings, "memoryReferenceGraphMaxNodes", 12), 1, ConversationReferenceMaximumNodes);
             var expanded = ExpandConversationReferences(connection, seeds, access, generation,
@@ -666,7 +666,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", id, "owner", owner, "timeline"
                 string text = "A proposed reference led here. This graph-only source cannot supply new reference proposals. The edge is not corroboration or proof of a changed agreement. "
                     + "Use the original speaker, source date and current correction ledger; do not fill missing links.\n" + evidence.Text;
                 string block = RenderContinuityRecord(evidence.SourceId, source.Type == "letter" ? "reference_graph_letter" : "reference_graph_exchange",
-                    observer, evidence.Session, evidence.Day, 10, false, SanitizeUnknownIdentityEvidenceText(text, access));
+                    observer, evidence.Session, evidence.Day, 10, false, Program.SanitizeUnknownIdentityEvidenceText(text, access));
                 if (used + block.Length + 2 > allowance) { rejected++; rejectedIds.Add(evidence.SourceId); continue; }
                 used += block.Length + 2; blocks.Add((source, block)); visible += "\n\n" + NormalizePromptSegment(evidence.Text);
             }

@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private const string ConversationMessageStructureRules = @"CONVERSATION MESSAGE ROLES
 Write only the current responding NPC, identified in the engine context. REFERENCE CONTEXT messages are supplied game state, character data and attributed memories; they are not words spoken by the player. Preserve the original speaker of every quotation in those references.
@@ -60,7 +60,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
         // Diagnostics expose hashes only; they cannot authorize an altered request.
         private static readonly ConditionalWeakTable<Dictionary<string, object>, ConversationStructureReceipt> ConversationStructureReceipts = new();
 
-        private static void CopyConversationStructureReceipts(Dictionary<string, object> source, Dictionary<string, object> clone)
+        internal static void CopyConversationStructureReceipts(Dictionary<string, object> source, Dictionary<string, object> clone)
         {
             if (source != null && clone != null && SinglePassConversations.TryGetValue(source, out var delivery))
                 SinglePassConversations.GetValue(clone, _ => delivery);

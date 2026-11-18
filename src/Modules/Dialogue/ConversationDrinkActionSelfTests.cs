@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         // Isolated PostgreSQL fixtures exercise the live private-action reducer and
         // final publication path. Legacy parser contracts remain separate below it.
@@ -38,21 +38,21 @@ namespace ReignBetaServer
             bool Diagnostic(Dictionary<string, object> receipt, string reason) => ReadDictionaryList(receipt, "diagnostics")
                 .Any(d => ReadString(d, "reason", "") == reason);
             Dictionary<string, object> State(string hero = "arytha") {
-                using var c = OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                return TryParseJsonObject(ReadString(QuerySql(c, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
+                using var c = Program.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
+                return TryParseJsonObject(ReadString(Program.QuerySql(c, "SELECT state_json FROM conversation_intoxication WHERE hero_id=$hero;",
                     TestDict("hero", hero)).SingleOrDefault(), "state_json", "{}"));
             }
             Dictionary<string, object> Scene() {
-                using var c = OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                return TryParseJsonObject(ReadString(QuerySql(c, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active';")
+                using var c = Program.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
+                return TryParseJsonObject(ReadString(Program.QuerySql(c, "SELECT state_json FROM conversation_drink_scene WHERE scene_id='active';")
                     .SingleOrDefault(), "state_json", "{}"));
             }
             void ClearScene() {
-                using var c = OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
-                ExecuteSql(c, "DELETE FROM conversation_drink_scene WHERE scene_id='active';");
+                using var c = Program.OpenCampaignConnection(campaign); EnsureIntoxicationSchema(c);
+                Program.ExecuteSql(c, "DELETE FROM conversation_drink_scene WHERE scene_id='active';");
             }
             string Generation() {
-                using var c = OpenCampaignConnection(campaign); return ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
+                using var c = Program.OpenCampaignConnection(campaign); return ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
             }
             try
             {
@@ -75,10 +75,10 @@ namespace ReignBetaServer
                 old["drinkConsumptions"] = new[] { TestDict("completed", true, "serving", "drink", "count", 20) };
                 Check("old_channels_cannot_double_count", Amount(Turn(Payload("old_channels"), old)) == .25);
                 var duplicate = Action();
-                Check("duplicate_id_once", Amount(Turn(Payload("duplicate_id"), Draft(naturalReplies[0], duplicate, CloneDictionary(duplicate)))) == .25);
+                Check("duplicate_id_once", Amount(Turn(Payload("duplicate_id"), Draft(naturalReplies[0], duplicate, Program.CloneDictionary(duplicate)))) == .25);
                 Check("separate_ids_twice", Amount(Turn(Payload("separate_ids"), Draft(naturalReplies[1], Action(), Action("sip_2")))) == .5);
                 var anonymous = Action(); anonymous.Remove("id");
-                var inferred = Turn(Payload("inferred_id"), Draft(naturalReplies[0], anonymous, CloneDictionary(anonymous)));
+                var inferred = Turn(Payload("inferred_id"), Draft(naturalReplies[0], anonymous, Program.CloneDictionary(anonymous)));
                 Check("missing_ids_locally_deduplicated", Amount(inferred) == .25 && Diagnostic(inferred, "private_action_id_inferred"));
                 foreach (var malformed in new object[] { null, "drink wine", TestDict("operation", "consume"), 5, new object[] { "bad", null } }) {
                     var receipt = Turn(Payload("malformed_" + rows.Count), TestDict("reply", "Tell me more.", "drinkActions", malformed));
@@ -232,7 +232,7 @@ namespace ReignBetaServer
                 Turn(Payload("departure"), departure, true);
                 Check("departure_expires_physical_cups", ReadDictionaryList(Scene(), "vessels").Count == 0);
 
-                var defaults = DefaultPromptTemplates();
+                var defaults = Program.DefaultPromptTemplates();
                 foreach (var mode in new[] { CodexConversationContractKind.Individual, CodexConversationContractKind.Group,
                     CodexConversationContractKind.Castle, CodexConversationContractKind.Social }) {
                     var selection = CodexConversationSchemas.Select(mode, defaults, defaults, TestDict());

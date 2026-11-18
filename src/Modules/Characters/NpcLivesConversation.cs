@@ -36,7 +36,7 @@ namespace ReignBetaServer
             string scope = ReadString(p, "npcLifeContext", "in_person");
             var audience = ReadStringList(p, "npcLifeAudienceIds");
             if (scope == "in_person") return scope;
-            return scope + ":" + Program.PromptHash(string.Join("|", audience.Concat(new[] { player, hero }).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal)));
+            return scope + ":" + DialogueService.PromptHash(string.Join("|", audience.Concat(new[] { player, hero }).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal)));
         }
         private static NpcConversationEncounter NpcEncounter(NpcLivesState state, string player, string hero, Dictionary<string, object> p)
         {
@@ -48,7 +48,7 @@ namespace ReignBetaServer
         }
         private static Dictionary<string, object> NpcLivesOpenApi(string operation, Dictionary<string, object> p, NpcLivesOptions options = null)
         {
-            string campaign = ReadString(p, "campaignId", ""), timeline = Program.ContinuityTimeline(p),
+            string campaign = ReadString(p, "campaignId", ""), timeline = DialogueService.ContinuityTimeline(p),
                 player = ReadFirstString(p, "playerId", "playerHeroStringId"), hero = ReadFirstString(p, "heroId", "heroStringId");
             if (hero.Length == 0 || hero == player) return TestDict("ok", false, "error", "Approach needs a living NPC identity.");
             double day = ReadDouble(p, "worldDay", -1); options ??= Program.ReadNpcLivesOptions();
@@ -226,7 +226,7 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
             string source = encounter.OpeningOperationId + "_npc";
             int ordinal = ReadInt(Program.QuerySql(c, "SELECT COALESCE(MAX(turn_order),-1)+1 AS n FROM conversation_turns WHERE session_id=$id;",
                 TestDict("id", encounter.SessionId)).First(), "n", 0);
-            Program.InsertConversationTurn(c, source, encounter.SessionId, encounter.OpeningOperationId, ordinal, encounter.OpeningOperationId,
+            DialogueService.InsertConversationTurn(c, source, encounter.SessionId, encounter.OpeningOperationId, ordinal, encounter.OpeningOperationId,
                 "npc", hero, ReadString(p, "heroName", hero), reply, encounter.ContextKey == "in_person" ? "in_person" : "party_chat", encounter.OpeningDay, DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 ReadString(p, "locationId", ""), audience, p);
             if (!encounter.AcceptOpening(encounter.OpeningOperationId, reply, activity, encounter.OpeningDay))
@@ -240,14 +240,14 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
         {
             if (p == null || string.IsNullOrWhiteSpace(campaign) || string.IsNullOrWhiteSpace(hero)) return "";
             using var c = Program.OpenCampaignConnection(campaign);
-            var state = ReadNpcLives(c, campaign, Program.ContinuityTimeline(p));
+            var state = ReadNpcLives(c, campaign, DialogueService.ContinuityTimeline(p));
             string player = ReadFirstString(p, "playerHeroStringId", "playerId", "mainHeroStringId");
             string body = NpcLivesPromptBody(state, hero, player, p, Program.ReadNpcLivesOptions(), c);
             // Context compaction retains complete typed records. Unmarked text next
             // to memory records was silently lost before the actual provider request.
             // Owner facts, current story rules and the entire review window are a
             // mandatory source: final preflight must preserve them or refuse dispatch.
-            return body.Length == 0 ? "" : Program.RenderContinuityRecord("npc_life_" + Program.PromptHash(state.TimelineId + "|" + hero + "|" + player + "|" + state.Revision).Substring(0, 24),
+            return body.Length == 0 ? "" : DialogueService.RenderContinuityRecord("npc_life_" + DialogueService.PromptHash(state.TimelineId + "|" + hero + "|" + player + "|" + state.Revision).Substring(0, 24),
                 "npc_personal_life", hero, state.TimelineId, ReadDouble(p, "worldDay", 0), 140, true, body);
         }
         internal static string NpcLivesPromptBody(NpcLivesState state, string hero, string player, Dictionary<string, object> p, NpcLivesOptions options, ReignDbConnection communicationConnection = null)
@@ -262,7 +262,7 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
             foreach (var meeting in state.Meetings.Where(m => (m.IssuerId == hero || m.TargetId == hero)
                 && m.Status != "completed" && m.Status != "cancelled" && m.Status != "interrupted"
                 && (m.ProposalId?.StartsWith("comm_", StringComparison.Ordinal) != true || m.TargetId == hero
-                    || Program.CommunicationReplyKnown(communicationConnection, m.ProposalId, hero, p))))
+                    || DialogueService.CommunicationReplyKnown(communicationConnection, m.ProposalId, hero, p))))
                 b.AppendLine("Accepted meeting commitment [" + meeting.Id + "]: " + meeting.Purpose + "; destination " + meeting.DestinationId
                     + "; scheduled arrival day " + meeting.ScheduledArrivalDay + "; actual arrival day " + meeting.ArrivalDay
                     + "; full stay " + meeting.StayDays + " days after actual arrival; release day " + meeting.ReleaseDay + ". "
@@ -296,7 +296,7 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
         private static void AcceptNpcAnnouncementReactions(NpcLivesState state, string hero, string player, string source, string reply, Dictionary<string, object> parsed, double day,
             NpcAnnouncementReviewWindow window = null)
         {
-            if (string.IsNullOrWhiteSpace(reply) || string.IsNullOrWhiteSpace(source) || Program.IsTechnicalConversationNotice(reply)
+            if (string.IsNullOrWhiteSpace(reply) || string.IsNullOrWhiteSpace(source) || DialogueService.IsTechnicalConversationNotice(reply)
                 || !Program.ReadNpcLivesOptions().Allows("reaction")) return;
             var review = ReadDictionary(parsed, "announcementReview");
             string through = ReadString(review, "throughId", ""), disposition = ReadString(review, "disposition", ""),
@@ -324,13 +324,13 @@ AND payload_json::jsonb->>'timelineId'=$timeline;",
                 state.Announcements.FirstOrDefault(a => a.Id == ReadString(row, "id", "") && a.PlayerId == player && a.WorldDay <= day)?.MarkReacted(hero, source, true);
             }
         }
-        internal static Dictionary<string, object> RecordAcceptedNpcLives(ReignDbConnection c, Program.AcceptedConversationUnit unit, List<Dictionary<string, object>> sources)
+        internal static Dictionary<string, object> RecordAcceptedNpcLives(ReignDbConnection c, DialogueService.AcceptedConversationUnit unit, List<Dictionary<string, object>> sources)
         {
             string mode = ReadFirstString(unit.Payload, "channel", "conversationMode");
             if (mode.Contains("letter") || mode.Contains("correspondence")) return TestDict("status", "excluded");
             var npcSource = sources.LastOrDefault(r => ReadString(r, "speaker_id", "") == unit.Hero && ReadString(r, "role", "") == "npc");
             if (npcSource == null) return TestDict("status", "no_source");
-            var state = ReadNpcLives(c, unit.Campaign, Program.ContinuityTimeline(unit.Payload));
+            var state = ReadNpcLives(c, unit.Campaign, DialogueService.ContinuityTimeline(unit.Payload));
             string source = ReadString(npcSource, "turn_id", "");
             var encounter = NpcEncounter(state, unit.Player, unit.Hero, unit.Payload);
             if (encounter.AcceptTurn(source, ReadDouble(unit.Payload, "worldDay", 0))) encounter.OpeningPending = false;

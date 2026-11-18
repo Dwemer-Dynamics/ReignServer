@@ -29,12 +29,12 @@ namespace ReignBetaServer
             foreach (var row in rows)
             {
                 var reply = sources[ReadString(row, "entry_id", "")];
-                if (Program.PromptHash(ReadString(reply, "text", "")) != ReadString(row, "source_hash", ""))
+                if (DialogueService.PromptHash(ReadString(reply, "text", "")) != ReadString(row, "source_hash", ""))
                     throw new InvalidDataException("Clothing coverage evidence no longer matches its accepted reply.");
                 foreach (var item in ReadDictionaryList(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "evidence"))
                 {
                     if (!sources.TryGetValue(ReadString(item, "turnId", ""), out var source)) continue;
-                    if (Program.PromptHash(ReadString(source, "text", "")) != ReadString(item, "sourceHash", ""))
+                    if (DialogueService.PromptHash(ReadString(source, "text", "")) != ReadString(item, "sourceHash", ""))
                         throw new InvalidDataException("Clothing coverage evidence no longer matches its original words.");
                     var proof = ChatViewQuoteSpan(TestDict("quote", ReadString(item, "quote", ""),
                         "start", ReadInt(item, "start", -1), "length", ReadInt(item, "length", -1)), source);
@@ -109,7 +109,7 @@ namespace ReignBetaServer
             foreach (var hint in hints)
             {
                 var source = sources.SingleOrDefault(t => ReadString(t, "turnId", "") == ReadString(hint, "turnId", ""));
-                if (source == null || ReadString(hint, "evidenceId", "").Length == 0 || ReadString(hint, "sourceHash", "") != Program.PromptHash(ReadString(source, "text", "")))
+                if (source == null || ReadString(hint, "evidenceId", "").Length == 0 || ReadString(hint, "sourceHash", "") != DialogueService.PromptHash(ReadString(source, "text", "")))
                     throw new InvalidDataException("Clothing coverage evidence lost its frozen source.");
                 ChatViewQuoteSpan(TestDict("quote", ReadString(hint, "quote", ""), "start", ReadInt(hint, "start", -1), "length", ReadInt(hint, "length", -1)), source);
             }

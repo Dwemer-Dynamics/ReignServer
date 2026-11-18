@@ -76,7 +76,7 @@ namespace ReignBetaServer
                 ["politicalAuthors"] = new[] { speaker },
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
                 ["correlationId"] = Program.EnsureCorrelationId(payload),
-                ["messages"] = Program.BuildSimplePromptEnvelope(
+                ["messages"] = DialogueService.BuildSimplePromptEnvelope(
                     "government_party_speaker_statement",
                     partyId,
                     "Return one bounded party-speaker statement as valid JSON.",

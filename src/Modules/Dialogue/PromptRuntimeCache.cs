@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class DialogueService
     {
         private sealed class CachedPromptText
         {
@@ -18,13 +18,13 @@ namespace ReignBetaServer
         private static readonly Dictionary<string, CachedPromptText> PromptRuntimeCache =
             new Dictionary<string, CachedPromptText>(StringComparer.OrdinalIgnoreCase);
 
-        private static string LoadPromptTemplateFromRuntimeCache(string name)
+        internal static string LoadPromptTemplateFromRuntimeCache(string name)
         {
-            string path = PromptPath(name);
+            string path = Program.PromptPath(name);
             if (!File.Exists(path))
             {
-                Dictionary<string, string> defaults = DefaultPromptTemplates();
-                return DefaultPromptText(name, defaults);
+                Dictionary<string, string> defaults = Program.DefaultPromptTemplates();
+                return Program.DefaultPromptText(name, defaults);
             }
 
             FileInfo info = new FileInfo(path);
@@ -56,7 +56,7 @@ namespace ReignBetaServer
                     PromptRuntimeCache.Clear();
                     return;
                 }
-                PromptRuntimeCache.Remove(PromptPath(name));
+                PromptRuntimeCache.Remove(Program.PromptPath(name));
             }
         }
     }
