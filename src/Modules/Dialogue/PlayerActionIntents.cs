@@ -310,6 +310,126 @@ namespace ReignBetaServer
         private static void EnsureConversationActionOutbox(ReignDbConnection connection)
             => ExecuteSql(connection, "CREATE TABLE IF NOT EXISTS conversation_action_outbox (action_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,fingerprint TEXT NOT NULL,payload_json TEXT NOT NULL);");
         private static bool DurableConversationAction(string id) => id.StartsWith("pa_", StringComparison.Ordinal) || id.StartsWith("da_", StringComparison.Ordinal);
+
+        // ---- Bounded redelivery of durable actions that never receive a terminal report. ----
+        // Durable work is never expired, dropped or auto-resolved: a row stays deliverable and a
+        // terminal report is accepted at any time. Only the redelivery cadence backs off.
+        private const long ActionRedeliveryBaseSeconds = 30;
+        private const long ActionRedeliveryFreeDeliveries = 4;
+        private const long ActionRedeliveryCapSeconds = 30 * 60;
+
+        // Delay before the next redelivery after deliveryCount deliveries without a terminal report.
+        private static long ActionRedeliveryDelaySeconds(long deliveryCount)
+        {
+            if (deliveryCount <= ActionRedeliveryFreeDeliveries) return ActionRedeliveryBaseSeconds;
+            int shift = (int)Math.Min(6, deliveryCount - ActionRedeliveryFreeDeliveries);
+            return Math.Min(ActionRedeliveryCapSeconds, ActionRedeliveryBaseSeconds << shift);
+        }
+
+        // The client session a delivery belongs to: the campaign restore generation plus the
+        // verified load session. Rollback loads and imports advance the generation; every verified
+        // load (including a no-op or non-rollback load) binds load_session_id, and archive imports
+        // stamp "imported:". A row last delivered under another key is due again immediately and
+        // restarts at the base cadence, so a reloaded client receives it promptly.
+        private static string ActionDeliveryGeneration(string campaign)
+        {
+            try
+            {
+                using (var connection = OpenCampaignConnection(campaign))
+                {
+                    string generation = "";
+                    if (TableExists(connection, "memory_precision_state"))
+                        generation = ReadString(QuerySql(connection,
+                            "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "");
+                    string session = "";
+                    if (TableExists(connection, "memory_restored_source_context"))
+                        session = ReadString(QuerySql(connection,
+                            "SELECT to_jsonb(c)->>'load_session_id' AS load_session_id FROM memory_restored_source_context c WHERE c.state_id='current';").FirstOrDefault(),
+                            "load_session_id", "");
+                    return generation + "|" + session;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (System.Threading.Interlocked.Exchange(ref _actionDeliveryGenerationFailureLogged, 1) == 0)
+                    LogOperational("action.redelivery_generation_unavailable", TestDict("campaignId", campaign ?? "", "error", ex.GetType().Name));
+                return "";
+            }
+        }
+        private static int _actionDeliveryGenerationFailureLogged;
+
+        // Rows delivered before this server process started are due again: a restart must not leave
+        // a lost one-shot report waiting out a long backoff. The override is a self-test seam.
+        private static readonly long ActionRedeliveryProcessStartTs = CurrentProcessStartUnixSeconds();
+        [ThreadStatic] private static long? _actionRedeliveryProcessStartOverride;
+        private static long CurrentProcessStartUnixSeconds()
+        {
+            try { return new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).ToUnixTimeSeconds(); }
+            catch { return DateTimeOffset.UtcNow.ToUnixTimeSeconds(); }
+        }
+
+        private static bool DurableRedeliveryDue(Dictionary<string, object> row, long nowTs, Func<string> generation)
+        {
+            long deliveredTs = ReadLong(row, "deliveredTs", 0);
+            long elapsed = nowTs - deliveredTs;
+            if (elapsed < ActionRedeliveryBaseSeconds) return false;
+            if (elapsed >= ActionRedeliveryDelaySeconds(ReadLong(row, "deliveryCount", 0))) return true;
+            if (deliveredTs < (_actionRedeliveryProcessStartOverride ?? ActionRedeliveryProcessStartTs)) return true;
+            return ReadString(row, "deliveryGeneration", "") != generation();
+        }
+
+        // Bounded, non-sensitive view of durable actions that were delivered and still await a
+        // terminal report. The server knows only each row's last reported status, not client hold reasons.
+        private static Dictionary<string, object> UnresolvedActionDeliverySummary(string campaign, int sampleLimit = 5)
+        {
+            var summary = TestDict("schema", "reign-action-redelivery-holds-v1", "campaignId", campaign ?? "",
+                "baseDelaySeconds", ActionRedeliveryBaseSeconds, "capDelaySeconds", ActionRedeliveryCapSeconds,
+                "backoffAfterDeliveries", ActionRedeliveryFreeDeliveries);
+            try
+            {
+                // Never creates a campaign directory; an existing campaign is read through
+                // OpenCampaignConnection exactly as an action poll would.
+                if (string.IsNullOrWhiteSpace(campaign) || !System.IO.Directory.Exists(CampaignDirectory(campaign)))
+                {
+                    summary["ok"] = true; summary["unresolvedCount"] = 0; summary["backedOffCount"] = 0;
+                    return summary;
+                }
+                long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                var unresolved = ReadDurableConversationActions(campaign)
+                    .Where(r => DurableConversationAction(ReadString(r, "id", ""))
+                        && !IsTerminalActionReportStatus(ReadString(r, "status", ""))
+                        && ReadLong(r, "deliveredTs", 0) > 0)
+                    .OrderBy(r => ReadLong(r, "ts", 0)).ThenBy(r => ReadString(r, "id", ""), StringComparer.Ordinal).ToList();
+                var backedOff = unresolved.Where(r => ReadLong(r, "deliveryCount", 0) > ActionRedeliveryFreeDeliveries).ToList();
+                summary["ok"] = true;
+                summary["unresolvedCount"] = unresolved.Count;
+                summary["backedOffCount"] = backedOff.Count;
+                // Bounded: at most 16 status groups, the rest folded into "other".
+                var groups = unresolved.GroupBy(r => ReadString(r, "status", "unknown"), StringComparer.OrdinalIgnoreCase)
+                    .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).ToList();
+                var byStatus = groups.Take(16).ToDictionary(g => g.Key, g => (object)g.Count());
+                if (groups.Count > 16)
+                    byStatus["other"] = groups.Skip(16).Sum(g => g.Count()) + (byStatus.TryGetValue("other", out object existingOther) ? Convert.ToInt32(existingOther) : 0);
+                summary["byStatus"] = byStatus;
+                summary["oldestAgeSeconds"] = unresolved.Count == 0 ? 0L
+                    : Math.Max(0L, nowTs - unresolved.Min(r => ReadLong(r, "ts", nowTs)));
+                summary["maxDeliveryCount"] = unresolved.Count == 0 ? 0L : unresolved.Max(r => ReadLong(r, "deliveryCount", 0));
+                summary["samples"] = unresolved.Take(Math.Max(0, sampleLimit)).Select(r =>
+                {
+                    long count = ReadLong(r, "deliveryCount", 0);
+                    long due = ReadLong(r, "deliveredTs", 0) + ActionRedeliveryDelaySeconds(count) - nowTs;
+                    return (object)TestDict("actionId", ReadString(r, "id", ""), "command", ReadString(r, "command", ""),
+                        "status", ReadString(r, "status", ""), "deliveryCount", count,
+                        "ageSeconds", Math.Max(0L, nowTs - ReadLong(r, "ts", nowTs)), "nextDeliveryInSeconds", Math.Max(0L, due));
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                LogOperational("action.redelivery_summary_failed", TestDict("campaignId", campaign, "error", ex.GetType().Name));
+                summary["ok"] = false; summary["error"] = "Unresolved action deliveries are unavailable.";
+            }
+            return summary;
+        }
         private static Dictionary<string, object> PublishConversationActionBatch(string campaign,
             Dictionary<string, object> payload, Dictionary<string, object> response,
             List<Dictionary<string, object>> staged, string expectedGeneration, Action<int> beforeCommit = null,

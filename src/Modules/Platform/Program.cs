@@ -20363,9 +20363,15 @@ The previous attempt did not complete a JSON object within its output budget.
             long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             const long deliveryMaxAgeSeconds = 6 * 60 * 60;
 
+            List<Dictionary<string, object>> enteredBackoff = new List<Dictionary<string, object>>();
+
             lock (FileLock)
             {
                 List<Dictionary<string, object>> queue = ReadActionQueueUnlocked(campaignId);
+                // Read at most once per poll, and only when a durable row needs it.
+                string deliveryGeneration = null;
+                Func<string> generation = () => deliveryGeneration ?? (deliveryGeneration = ActionDeliveryGeneration(campaignId));
+                bool changed = false;
                 foreach (Dictionary<string, object> row in queue)
                 {
                     string status = ReadString(row, "status", "queued");
@@ -20379,9 +20385,12 @@ The previous attempt did not complete a JSON object within its output budget.
                         continue;
                     }
 
-                    bool retryDelivery = DurableConversationAction(ReadString(row, "id", ""))
+                    // Durable rows without a terminal report stay deliverable forever; repeated
+                    // redeliveries back off (capped) instead of costing a rewrite every 30 s.
+                    bool durable = DurableConversationAction(ReadString(row, "id", ""));
+                    bool retryDelivery = durable
                         && !IsTerminalActionReportStatus(status)
-                        && nowTs - ReadLong(row, "deliveredTs", 0) >= 30;
+                        && DurableRedeliveryDue(row, nowTs, generation);
                     if (!retryDelivery && !status.Equals("queued", StringComparison.OrdinalIgnoreCase) && !status.Equals("proposed", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
@@ -20394,16 +20403,53 @@ The previous attempt did not complete a JSON object within its output budget.
                         row["expiredTs"] = nowTs;
                         row["expiryReason"] = "Undelivered action exceeded the six-hour delivery window.";
                         SaveDurableConversationAction(campaignId, row);
+                        changed = true;
                         continue;
                     }
 
-                    row["status"] = "delivered";
+                    // A redelivery never regresses a later reported status (for example executing);
+                    // the rejected regression used to discard deliveredTs and redeliver every poll.
+                    if (!durable || ShouldAcceptActionStatusTransition(status, "delivered"))
+                    {
+                        row["status"] = "delivered";
+                    }
                     row["deliveredTs"] = nowTs;
+                    if (durable)
+                    {
+                        // A new client session (restore generation or verified load) restarts the
+                        // backoff so its first redeliveries use the base cadence again.
+                        string currentGeneration = generation();
+                        long priorCount = ReadString(row, "deliveryGeneration", "") == currentGeneration ? ReadLong(row, "deliveryCount", 0) : 0;
+                        long deliveryCount = priorCount + 1;
+                        row["deliveryCount"] = deliveryCount;
+                        row["deliveryGeneration"] = currentGeneration;
+                        if (deliveryCount == ActionRedeliveryFreeDeliveries + 1)
+                        {
+                            enteredBackoff.Add(row);
+                        }
+                    }
                     SaveDurableConversationAction(campaignId, row);
                     selected.Add(row);
+                    changed = true;
                 }
 
-                WriteActionQueueUnlocked(campaignId, queue);
+                // An idle poll leaves the queue cache untouched.
+                if (changed || !File.Exists(CampaignFile(campaignId, "actions", "action-queue.json")))
+                {
+                    WriteActionQueueUnlocked(campaignId, queue);
+                }
+            }
+
+            foreach (Dictionary<string, object> row in enteredBackoff)
+            {
+                LogOperational("action.redelivery_backoff", new Dictionary<string, object>
+                {
+                    ["campaignId"] = campaignId,
+                    ["actionId"] = ReadString(row, "id", ""),
+                    ["status"] = ReadString(row, "status", ""),
+                    ["deliveryCount"] = ReadLong(row, "deliveryCount", 0),
+                    ["nextDelaySeconds"] = ActionRedeliveryDelaySeconds(ReadLong(row, "deliveryCount", 0))
+                });
             }
 
             List<object> records = selected.Select(x => x.ContainsKey("record") ? x["record"] : x).ToList();
@@ -20736,7 +20782,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 ["ok"] = true,
                 ["campaignId"] = campaignId,
                 ["count"] = rows.Count,
-                ["failures"] = rows
+                ["failures"] = rows,
+                ["unresolvedDeliveries"] = UnresolvedActionDeliverySummary(campaignId)
             };
         }
 
@@ -22879,6 +22926,7 @@ Return exactly this JSON shape:
                 ["portraitAtlasKeyLength"] = atlasKey.Length,
                 ["database"] = ReignPostgreSqlStorage.Diagnostics(),
                 ["failedCharacters"] = failed,
+                ["unresolvedActionDeliveries"] = UnresolvedActionDeliverySummary(LatestCampaignId()),
                 ["characterConstructionPolicy"] = CharacterConstructionPolicyStatus()
             };
         }
