@@ -664,7 +664,7 @@ namespace ReignBetaServer
             string notableMbtiPath = VerificationSourceLocator.ResolveUnique(serverRoot, "NotableMbtiProfiles.cs", "src");
             string mbtiProgramSource = VerificationSourceLocator.ReadServerTypeSourceText(serverRoot, "Program");
             string cachingSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PromptCaching.cs", "src"));
-            string diplomacySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src"));
+            string diplomacySource = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "WorldDiplomacyDirector.cs", "src");
             string sceneSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "ConversationSceneState.cs", "src"));
             string memorySource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "CategorizedMemory.cs", "src"));
             string portraitSource = File.ReadAllText(VerificationSourceLocator.ResolveUnique(serverRoot, "PortraitGeneration.cs", "src"));
@@ -1759,8 +1759,7 @@ namespace ReignBetaServer
 
             string diplomacyDebugServerPath = VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDebug.cs", "src");
             string diplomacyDebugServerText = File.Exists(diplomacyDebugServerPath) ? File.ReadAllText(diplomacyDebugServerPath) : "";
-            string diplomacyDirectorPath = VerificationSourceLocator.ResolveUnique(serverRoot, "WorldDiplomacyDirector.cs", "src");
-            string diplomacyDirectorText = File.Exists(diplomacyDirectorPath) ? File.ReadAllText(diplomacyDirectorPath) : "";
+            string diplomacyDirectorText = VerificationSourceLocator.ReadServerSplitSourceText(serverRoot, "WorldDiplomacyDirector.cs", "src");
             string diplomacyDebugActionsText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string diplomacyBehaviorText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
             string individualRelationPatchText = VerificationSourceLocator.ReadClientSourceText(clientRoot);
@@ -1860,21 +1859,10 @@ namespace ReignBetaServer
                         relationshipOverviewStart,
                         relationshipOverviewEnd - relationshipOverviewStart)
                     : "";
-            string mbtiRelationshipPath = VerificationSourceLocator.ResolveUnique(serverRoot, "MbtiRelationships.cs", "src");
-            string mbtiRelationshipText = File.Exists(mbtiRelationshipPath)
-                ? File.ReadAllText(mbtiRelationshipPath) : "";
-            int relationshipLoopStart = mbtiRelationshipText.IndexOf(
-                "internal static Dictionary<string, object> MbtiRelationshipSnapshotApi(",
-                StringComparison.Ordinal);
-            int relationshipLoopEnd = relationshipLoopStart < 0 ? -1
-                : mbtiRelationshipText.IndexOf(
-                    "internal static Dictionary<string, object> RelationshipNativeSyncReportApi(",
-                    relationshipLoopStart, StringComparison.Ordinal);
-            string relationshipLoopSource =
-                relationshipLoopStart >= 0 && relationshipLoopEnd > relationshipLoopStart
-                    ? mbtiRelationshipText.Substring(
-                        relationshipLoopStart, relationshipLoopEnd - relationshipLoopStart)
-                    : "";
+            // The relationship loop is the MbtiRelationshipSnapshotApi declaration, in whichever
+            // MbtiRelationships partial file it lives.
+            string relationshipLoopSource = VerificationSourceLocator.ReadServerSplitMemberSourceText(
+                serverRoot, "MbtiRelationships.cs", "MbtiRelationshipSnapshotApi", "src");
             bool worldTestAuthoritativeOverviewValid =
                 relationshipOverviewSource.Contains("relationship_pair_chemistry")
                 && !relationshipOverviewSource.Contains("world_test_relationship_memberships")
