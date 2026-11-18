@@ -33,6 +33,7 @@ namespace ReignBetaServer
             results.AddRange(RunGroupConversationFloorSelfTests());
             results.AddRange(RunPromptEditorPersistenceTests());
             results.AddRange(RunReignXpOptionsSelfTests());
+            results.AddRange(RunRouteTableContractSelfTests());
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
             var providerChoice = new Dictionary<string, object> {

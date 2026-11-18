@@ -2034,7 +2034,9 @@ namespace ReignBetaServer
                 && faceDetectionText.Contains("Microsoft.ML.OnnxRuntime")
                 && faceDetectionText.Contains("PortraitFocusModelSha256")
                 && controlCenterSource.Contains("/portraits/derivatives/build-missing")
-				&& controlCenterSource.Contains("/portraits/derivatives/rebuild-fallback")
+				// The routes are registered in the route table (Program.PortraitsRoutes.cs), not in Program.cs text.
+				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/build-missing")?.Handler != null
+				&& ServerRoutes.Value.Resolve("POST", "/portraits/derivatives/rebuild-fallback")?.Handler != null
                 && controlCenterSource.Contains("Portrait Cache Derivatives");
             AddVerificationCheck(checks, "contracts.portrait_derivative_pipeline", "portraits_images", derivativeContractValid,
                 derivativeContractValid ? "Full-body portrait masters feed atomic face-focused vertical and party-wide thumbnails, high-resolution portraits, and on-demand zoom derivatives; the Control Center exposes the cache builder." : "Portrait derivative pipeline, routing, or Control Center contract is incomplete.", null);
@@ -2964,9 +2966,10 @@ namespace ReignBetaServer
 
             string programSource = VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
             string programText = File.Exists(programSource) ? File.ReadAllText(programSource) : "";
-            int routeCount = Regex.Matches(programText, "request\\.Path\\s*==\\s*\"(?<path>/[^\"]+)\"")
-                .Cast<Match>()
-                .Count(match => !match.Groups["path"].Value.StartsWith("/court/", StringComparison.OrdinalIgnoreCase));
+            // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
+            int routeCount = ServerRoutes.Value.Routes
+                .Count(route => route.Match == RouteMatch.Exact && route.Path.Length > 1
+                    && !route.Path.StartsWith("/court/", StringComparison.OrdinalIgnoreCase));
             AddVerificationCheck(checks, "contracts.http_routes", "server_lifecycle", routeCount >= 60, "Discovered " + routeCount + " exact HTTP route handlers.", new Dictionary<string, object> { ["routeCount"] = routeCount });
 
             string saveText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBetaSaveDefiner");
@@ -3554,8 +3557,8 @@ namespace ReignBetaServer
             string subModuleText = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignBeta.SubModule");
             if (subModuleText.Length > 0) behaviors = Regex.Matches(subModuleText, "new\\s+([A-Za-z0-9_]+CampaignBehavior)\\s*\\(").Cast<Match>().Select(x => x.Groups[1].Value).Where(x => !IsExcludedCourtVerificationArtifact(x)).Distinct().OrderBy(x => x).ToList();
             List<string> routes = new List<string>();
-            string programPath = string.IsNullOrWhiteSpace(serverRoot) ? "" : VerificationSourceLocator.ResolveUnique(serverRoot, "Program.cs", "src");
-            if (File.Exists(programPath)) routes = Regex.Matches(File.ReadAllText(programPath), "request\\.Path\\s*==\\s*\"([^\"]+)\"").Cast<Match>().Select(x => x.Groups[1].Value).Where(x => !x.StartsWith("/court/", StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(x => x).ToList();
+            // Exact routes come from the registered route table (RouteTable.cs), not from the router's source text.
+            routes = ServerRoutes.Value.Routes.Where(route => route.Match == RouteMatch.Exact).Select(route => route.Path).Where(x => !x.StartsWith("/court/", StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(x => x).ToList();
             List<string> guiMovies = string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(Path.Combine(clientRoot, "GUI", "Prefabs")) ? new List<string>() : Directory.GetFiles(Path.Combine(clientRoot, "GUI", "Prefabs"), "*.xml").Where(path => !IsExcludedCourtVerificationArtifact(path)).Select(Path.GetFileNameWithoutExtension).OrderBy(x => x).ToList();
             List<string> prompts = PromptFileNames.Where(x => !IsExcludedCourtVerificationArtifact(x)).OrderBy(x => x).ToList();
             List<string> uncovered = features.Where(row => ReadBool(row, "implemented", false) && ReadStringArray(row, "tests").Count == 0).Select(row => ReadString(row, "id", "")).ToList();
