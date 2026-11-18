@@ -1057,6 +1057,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             return ReadInt(input, "memoryPrecisionOrdinaryTokens", 4000);
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> RunMemoryEvidenceReplay()
         {
             if (ActiveServerPort > 0 || !HasArg(Environment.GetCommandLineArgs(), "--run-verification")
@@ -1080,7 +1081,9 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             return TestDict("ok", report["ok"], "resultPath", resultPath, "completedCases", report["completedCases"],
                 "fullyReplayedCases", report["fullyReplayedCases"], "inputSha256", report["inputSha256"], "providerCalls", 0, "certificateEligible", false);
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> ReplayMemoryEvidenceFixture(Dictionary<string, object> input, string inputHash,
             byte[] publication = null)
         {
@@ -1373,5 +1376,6 @@ VALUES($session,$campaign,$npc,$player,'closed',$start,$end,$participants,$paylo
                 "modelTreeSha256", denseWorker.ModelTreeHash);
             return report;
         }
+#endif
     }
 }

@@ -972,6 +972,7 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
         private static bool SameCourtText(string a,string b){return string.Equals(a??"",b??"",StringComparison.OrdinalIgnoreCase);}
         private static double CourtStableUnit(string seed){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(seed??""));ulong value=BitConverter.ToUInt64(hash,0);return value/(double)ulong.MaxValue;}}
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCourtSelfTests()
         {
             List<Dictionary<string,object>> results=new List<Dictionary<string,object>>();Action<string,bool,string,object> add=(id,passed,summary,data)=>results.Add(new Dictionary<string,object>{{"ok",true},{"passed",passed},{"suite","court_system"},{"caseId",id},{"name",id},{"summary",summary},{"data",data??new Dictionary<string,object>()},{"durationMs",0}});
@@ -1030,5 +1031,6 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
             finally{try{string root=Path.GetFullPath(Path.Combine(DataDir,"campaigns"))+Path.DirectorySeparatorChar;string target=Path.GetFullPath(path??"");if(target.StartsWith(root,StringComparison.OrdinalIgnoreCase)&&Path.GetFileName(target).StartsWith("__court_self_test_",StringComparison.OrdinalIgnoreCase)&&Directory.Exists(target))Directory.Delete(target,true);}catch{}}
             return results;
         }
+#endif
     }
 }

@@ -40,7 +40,12 @@ namespace ReignBetaServer
                     Console.WriteLine("Provider-free, non-listening import of a completed authored native batch. Validates all inputs before atomic publication. REIGN_DATA_ROOT selects the server-local source store; no shared portraits are changed. See docs/agent/TAVERN_PORTRAIT_SOURCE_PACK.md.");
                     return true;
                 }
+#if !REIGN_EXCLUDE_VERIFICATION
                 string catalog = Path.Combine(FindVerificationSourceRoot(), "ReignBeta", "ModuleData", "reign_tavern_cast.json");
+#else
+                string catalog = null;
+                throw new InvalidOperationException("--import-tavern-native-sources needs the source checkout locator, which this build excludes.");
+#endif
                 Console.WriteLine(Json.Serialize(ImportPreparedTavernSources(manifest, campaign, catalog, PreparedTavernStore)));
             }
             catch (Exception ex)

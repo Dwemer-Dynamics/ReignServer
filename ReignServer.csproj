@@ -39,6 +39,11 @@
     <DefineConstants>$(DefineConstants);REIGN_EXCLUDE_COURT</DefineConstants>
   </PropertyGroup>
 
+  <!-- Opt-in test-free flavour: drops the compiled-in self-tests, VerificationLab, test routes and run flags. -->
+  <PropertyGroup Condition="'$(ReignExcludeVerification)' == 'true'">
+    <DefineConstants>$(DefineConstants);REIGN_EXCLUDE_VERIFICATION</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Include="src\**\*.cs" />
     <Compile Include="shared\Reign.Shared.Source\**\*.cs" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
@@ -47,6 +52,18 @@
   <ItemGroup Condition="'$(ExcludeCourt)' == 'true'">
     <Compile Remove="src\Modules\Court\**\*.cs" />
     <Compile Remove="src\Modules\Spymaster\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(ReignExcludeVerification)' == 'true'">
+    <Compile Remove="src\**\*SelfTests*.cs" />
+    <Compile Remove="src\**\*Tests.cs" />
+    <Compile Remove="src\**\*Fixtures.cs" />
+    <Compile Remove="src\Modules\Platform\VerificationLab.cs" />
+    <Compile Remove="src\Modules\Platform\VerificationSourceLocator.cs" />
+    <Compile Remove="src\Modules\Platform\CodexPerformanceVerification.cs" />
+    <Compile Remove="src\Modules\Court\CapitalAmbassadorTestSystem.cs" />
+    <Compile Remove="src\Modules\Portraits\BackgroundPortraitContracts.cs" />
+    <Compile Remove="src\Modules\Dialogue\PersonalGossipCompositionProbe.cs" />
   </ItemGroup>
 
   <ItemGroup>

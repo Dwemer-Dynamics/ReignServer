@@ -21,6 +21,7 @@ namespace ReignBetaServer
                 response = ArrestEvidenceEvaluateApi(request.JsonBody);
                 return true;
             }
+#if !REIGN_EXCLUDE_VERIFICATION
             if (request.Path == "/arrests/test/contracts")
             {
                 List<Dictionary<string, object>> results = RunArrestSystemSelfTests();
@@ -36,6 +37,7 @@ namespace ReignBetaServer
                 };
                 return true;
             }
+#endif
             return false;
         }
 

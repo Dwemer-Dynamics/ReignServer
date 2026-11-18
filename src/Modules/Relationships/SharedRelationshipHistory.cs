@@ -776,6 +776,7 @@ ORDER BY created_world_day DESC,chapter_ordinal DESC LIMIT 500;",
             return rows;
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunSharedRelationshipHistorySelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
@@ -1041,5 +1042,6 @@ VALUES('fixture_a|fixture_b','fixture_a','fixture_b','INTJ','ESFP',
             }
             return rows;
         }
+#endif
     }
 }

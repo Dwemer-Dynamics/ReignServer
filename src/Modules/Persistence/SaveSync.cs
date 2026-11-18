@@ -2154,6 +2154,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
                 : SaveSyncContentRoot(campaignId, storageId);
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunSaveSyncSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -3093,6 +3094,7 @@ LEFT JOIN world_history_events w ON d.source_type='world_history_event' AND w.ev
             }
             return results;
         }
+#endif
 
         private static void PrepareCampaignRetirementTestPoint(
             string campaignId,

@@ -8,6 +8,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object>
             ExportFinalGauntletReport(
                 ReignDbConnection connection,
@@ -145,6 +146,7 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                 ["scorecard"] = scorecard
             };
         }
+#endif
 
         private static Dictionary<string, object>
             BuildFinalGauntletProviderBudget(
@@ -194,6 +196,7 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                 }).ToList();
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>>
             BuildFinalGauntletCoverageMap(
                 List<Dictionary<string, object>> cases)
@@ -243,6 +246,7 @@ WHERE run_id=$run ORDER BY created_ts,case_instance_id;",
                 ReadString(row, "requirementId", ""),
                 StringComparer.Ordinal).ToList();
         }
+#endif
 
         private static Dictionary<string, object>
             BuildFinalGauntletPartitionRollup(

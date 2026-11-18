@@ -1747,6 +1747,7 @@ VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunCurrentRelationshipSelfTests()
         {
             List<Dictionary<string, object>> results = RunMbtiRelationshipSelfTests();
@@ -1839,6 +1840,7 @@ VALUES($id,$pair,$kind,$a,$b,$day,$summary,$rumor,$payload,$ts);",
             }
             return results;
         }
+#endif
 
         private static void RunPreparedLifecycleWriteSelfTests(ReignDbConnection connection,
             string campaignId, Dictionary<string, object> man, Dictionary<string, object> woman,

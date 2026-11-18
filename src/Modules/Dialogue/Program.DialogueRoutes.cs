@@ -15,6 +15,7 @@ namespace ReignBetaServer
             routes.Legacy("GET", "/llm/prompt-cache/status");
             routes.Post("/llm/prompt-cache/probe", request => PromptCacheProbeApi(request.JsonBody));
             routes.Get("/audit/prompt", request => ReadPromptEvidenceApi(request.Query));
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Legacy("POST", "/tests/npc-dialogue/request");
             routes.Legacy("POST", "/tests/npc-dialogue/request/poll");
             routes.Legacy("POST", "/tests/npc-dialogue/request/ack");
@@ -60,6 +61,7 @@ namespace ReignBetaServer
             routes.Legacy("POST", "/tests/replay-corpus/capture");
             routes.Legacy("GET", "/tests/replay-corpus");
             routes.Legacy("POST", "/tests/replay-corpus/evaluate");
+#endif
             routes.Post("/world-history/lie-check", request => WorldHistoryLieCheckApi(request.JsonBody));
             routes.Get("/world-history/lie-checks", request => WorldHistoryLieChecksApi(request.Query));
             routes.Post("/memory/conversation/start", request => ConversationStartApi(request.JsonBody));
@@ -69,7 +71,9 @@ namespace ReignBetaServer
             routes.Post("/memory/embeddings/reindex", request => SemanticMemoryReindexApi(request.JsonBody));
             routes.Post("/memory/embeddings/retry-failed", request => SemanticMemoryRetryFailedApi(request.JsonBody));
             routes.Post("/conversation-scene/hourly-tick", request => ConversationSceneHourlyTickApi(request.JsonBody));
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Post("/gossip/test", request => PersonalGossipTestApi(request.JsonBody));
+#endif
             routes.Post("/gossip/tick", request => PersonalGossipTickApi(request.JsonBody));
             routes.PostPrefix("/communications/", StringComparison.Ordinal, request => CommunicationApi(request.Path.Substring("/communications/".Length), request.JsonBody));
             routes.Get("/communications/status", request => CommunicationApi("status", request.Query.ToDictionary(pair => pair.Key, pair => (object)pair.Value)));

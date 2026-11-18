@@ -228,6 +228,7 @@ namespace ReignBetaServer
             "relationship_history"
         };
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> PersistBoundedMotiveCliReport(Dictionary<string, object> result, string evidenceDirectory)
         {
             Directory.CreateDirectory(evidenceDirectory);
@@ -243,6 +244,7 @@ namespace ReignBetaServer
                 "failureDetailsLimited", failed.Count > 32, "resultsPath", path,
                 "resultsSha256", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullJson))).ToLowerInvariant());
         }
+#endif
 
         private static void Main(string[] args)
         {
@@ -333,6 +335,7 @@ namespace ReignBetaServer
             EnsurePromptCacheLayoutMigration();
             EnsureDefaultTestCases();
 
+#if !REIGN_EXCLUDE_VERIFICATION
             if (HasArg(args, "--run-verification") || HasArg(args, "--cancel-verification"))
             {
                 string[] verificationArgs = HasArg(args, "--cancel-verification") && !HasArg(args, "--cancel")
@@ -661,6 +664,20 @@ namespace ReignBetaServer
                 Environment.ExitCode = ReadBool(result, "ok", false) ? 0 : 1;
                 return;
             }
+#else
+            if (args.Any(x => x.StartsWith("--run-", StringComparison.OrdinalIgnoreCase))
+                || HasArg(args, "--cancel-verification")
+                || HasArg(args, "--reclassify-sovereign-demeanor-report"))
+            {
+                Console.WriteLine(Json.Serialize(new Dictionary<string, object>
+                {
+                    ["ok"] = false,
+                    ["error"] = "This ReignServer build excludes verification and self-test commands."
+                }));
+                Environment.ExitCode = 1;
+                return;
+            }
+#endif
 
             if (HasArg(args, "--audit-foundation-traits-vnext"))
             {
@@ -685,12 +702,14 @@ namespace ReignBetaServer
                 return;
             }
 
+#if !REIGN_EXCLUDE_VERIFICATION
             if (HasArg(args, "--run-tests"))
             {
                 Dictionary<string, object> cliResult = RunTestsCli(args ?? new string[0]);
                 Console.WriteLine(HasArg(args, "--json") ? Json.Serialize(cliResult) : FormatTestCliResult(cliResult));
                 return;
             }
+#endif
 
             Dictionary<string, object> settings = LoadSettings();
             int port = ReadPort(args, settings);
@@ -1137,6 +1156,7 @@ namespace ReignBetaServer
                     {
                         response = AuditQuery(request.Query);
                     }
+#if !REIGN_EXCLUDE_VERIFICATION
                     else if (request.Method == "POST" && request.Path == "/tests/npc-dialogue/request")
                     {
                         response = NpcDialogueAuditRequestApi(request.JsonBody);
@@ -1502,6 +1522,7 @@ namespace ReignBetaServer
                     {
                         response = ReplayVerificationApi(request.JsonBody);
                     }
+#endif
                     else if (request.Method == "GET" && request.Path == "/world-history/query")
                     {
                         response = WorldHistoryQueryApi(request.Query);
@@ -1539,10 +1560,12 @@ namespace ReignBetaServer
                     {
                         response = CapitalCourtApi(request.JsonBody, body => RunInteractiveRequest(() => RulerPetitionRespond(body)));
                     }
+#if !REIGN_EXCLUDE_VERIFICATION
                     else if (request.Method == "POST" && request.Path == "/court/foreign-ambassadors/test")
                     {
                         response = CapitalAmbassadorTestApi(request.JsonBody);
                     }
+#endif
                     else if (TryHandleSpymasterRoute(request, out response))
                     {
                     }
@@ -24999,6 +25022,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return result;
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> RunTestSuiteApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -25109,6 +25133,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             SaveTestRun(suiteResult);
             return suiteResult;
         }
+#endif
 
         private static Dictionary<string, object> CaptureTestFromCorrelationApi(Dictionary<string, object> payload)
         {
@@ -25205,6 +25230,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> RunTestsCli(string[] args)
         {
             string suite = ArgValue(args, "--suite", "");
@@ -25231,6 +25257,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
                 ["failFast"] = failFast
             });
         }
+#endif
 
         private static string FormatTestCliResult(Dictionary<string, object> result)
         {

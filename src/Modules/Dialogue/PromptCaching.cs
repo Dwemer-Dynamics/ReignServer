@@ -2309,6 +2309,7 @@ namespace ReignBetaServer
             });
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunPromptCachingSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -2717,5 +2718,6 @@ namespace ReignBetaServer
             results.AddRange(RunSkillAwarenessSelfTests());
             return results;
         }
+#endif
     }
 }

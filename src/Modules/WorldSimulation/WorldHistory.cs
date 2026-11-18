@@ -1231,6 +1231,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
         private static double ParseDoubleInvariant(string value, double fallback) { return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback; }
         private static int ParseIntInvariant(string value, int fallback) { return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback; }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> RunWorldHistorySelfTests()
         {
             string campaignId = "wh_" + Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -1286,6 +1287,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             try { Directory.Delete(CampaignDirectory(campaignId), true); } catch { }
             return new Dictionary<string, object> { ["ok"] = assertions.All(x => ReadBool(x, "passed", false)), ["passed"] = assertions.All(x => ReadBool(x, "passed", false)), ["assertions"] = assertions };
         }
+#endif
 
         private static Dictionary<string, object> RunWorldHistoryStressTests(int rowCount = 1000000)
         {

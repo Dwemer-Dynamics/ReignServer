@@ -16,7 +16,9 @@ namespace ReignBetaServer
             routes.Post("/negotiations/draft", request => NegotiationDraftApi(request.JsonBody));
             routes.Post("/negotiations/respond", request => NegotiationRespondApi(request.JsonBody));
             routes.Get("/negotiations/query", request => NegotiationQueryApi(request.Query));
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Get("/rebellions/tests", request => RunRebellionSelfTests());
+#endif
         }
     }
 }

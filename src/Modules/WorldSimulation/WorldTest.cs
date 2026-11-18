@@ -2874,6 +2874,7 @@ FROM world_test_daily_rollups WHERE campaign_id=$campaign AND timeline_id=$timel
             }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunWorldTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -3472,5 +3473,6 @@ VALUES('rumor_inspector_fixture','npc_observer','marital_strife','spouse','Fixtu
             }
             return results;
         }
+#endif
     }
 }

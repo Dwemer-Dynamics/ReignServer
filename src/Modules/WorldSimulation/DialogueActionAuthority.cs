@@ -133,12 +133,14 @@ namespace ReignBetaServer
                     ? "personal_command_consent" : "personal_or_owner_consent";
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunDialogueActionAuthorityAssertions()
         {
             var rows = RunDialogueMarriageActionAssertions();
             rows.AddRange(RunStructuredActionContinuityRepairAssertions());
             return rows;
         }
+#endif
 
         private static List<Dictionary<string, object>> RunStructuredActionContinuityRepairAssertions()
         {

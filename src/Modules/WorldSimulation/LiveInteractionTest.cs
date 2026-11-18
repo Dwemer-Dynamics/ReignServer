@@ -3646,6 +3646,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return evidence;
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -5513,6 +5514,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "Conversation clients use the save-persisted native journal's before/after observations. This checks wiring; native_relation_effect contracts exercise modifiers, caps, partial callback failures and retry behavior.");
             return results;
         }
+#endif
 
         private static string NormalizeLiveTestMode(string value) { return (value ?? "").Trim().ToLowerInvariant().Replace('-', '_'); }
         private static string NormalizeLiveTestPresentation(string value) { return string.Equals(value, "visible", StringComparison.OrdinalIgnoreCase) ? "visible" : "headless"; }

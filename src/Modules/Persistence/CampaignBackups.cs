@@ -1391,8 +1391,10 @@ namespace ReignBetaServer
 
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = running };
+#if !REIGN_EXCLUDE_VERIFICATION
             if (VerificationTask != null && !VerificationTask.IsCompleted)
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Wait for the active verification run to finish before deleting all campaign and test data." };
+#endif
 
             lock (CampaignBackupMutationLock)
             {
@@ -1463,8 +1465,10 @@ namespace ReignBetaServer
         {
             string running = CampaignMutationBlockReason();
             if (!string.IsNullOrWhiteSpace(running)) return running;
+#if !REIGN_EXCLUDE_VERIFICATION
             if (VerificationTask != null && !VerificationTask.IsCompleted)
                 return "A verification run was still active.";
+#endif
             return "";
         }
 

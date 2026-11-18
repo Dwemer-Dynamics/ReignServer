@@ -206,6 +206,7 @@ WHERE timeline_id=$timeline AND slot_day=$slot AND sender_id=$sender;",
             }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>> RunAutonomousCorrespondenceSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
@@ -324,5 +325,6 @@ WHERE sender_id='unmet_low';");
             }
             return results;
         }
+#endif
     }
 }

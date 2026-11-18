@@ -1150,6 +1150,7 @@ RETURNING pair_key;",
             }
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<Dictionary<string, object>>
             RunWorldRelationshipModelSelfTests()
         {
@@ -1572,6 +1573,7 @@ AND pair_key IN (
             }
             return results;
         }
+#endif
 
         private static Dictionary<string, object> BuildWorldTestStandingAndPoliticalMetrics(
             ReignDbConnection connection, string campaignId, string timelineId,

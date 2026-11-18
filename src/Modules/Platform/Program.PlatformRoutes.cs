@@ -99,6 +99,7 @@ namespace ReignBetaServer
             });
             routes.Post("/audit/ingest", request => AuditIngest(request.JsonBody));
             routes.Legacy("GET", "/audit/query");
+#if !REIGN_EXCLUDE_VERIFICATION
             routes.Legacy("GET", "/tests/cases");
             routes.Legacy("POST", "/tests/cases/save");
             routes.Legacy("POST", "/tests/run");
@@ -110,6 +111,7 @@ namespace ReignBetaServer
             routes.Legacy("POST", "/verification/cancel");
             routes.Legacy("GET", "/verification/results");
             routes.Legacy("POST", "/verification/replay");
+#endif
             routes.Post("/events/ingest", request => IngestEvent(request.JsonBody));
             routes.Post("/initialization/readiness/seal", request => InitializationReadinessSealApi(request.JsonBody));
             routes.Post("/initialization/readiness/status", request => InitializationReadinessStatusApi(request.JsonBody));

@@ -17,6 +17,7 @@ namespace ReignBetaServer
             return Path.Combine(directory, "catalog.json");
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object>
             FinalGauntletCatalogBuildApi(
                 Dictionary<string, object> payload)
@@ -42,6 +43,7 @@ namespace ReignBetaServer
             artifact["path"] = FinalGauntletCatalogPath();
             return artifact;
         }
+#endif
 
         private static Dictionary<string, object>
             FinalGauntletStateFingerprintApi(
@@ -225,6 +227,7 @@ namespace ReignBetaServer
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> FinalGauntletCatalogApi(
             Dictionary<string, string> query)
         {
@@ -240,7 +243,9 @@ namespace ReignBetaServer
                 : FinalGauntletCatalogBuildApi(
                     new Dictionary<string, object>());
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> FinalGauntletRunStartApi(
             Dictionary<string, object> payload)
         {
@@ -338,7 +343,9 @@ namespace ReignBetaServer
                 return started;
             }
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> FinalGauntletLeaseApi(
             Dictionary<string, object> payload)
         {
@@ -373,7 +380,9 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
                 return leased;
             }
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object>
             FinalGauntletPromoteApi(Dictionary<string, object> payload)
         {
@@ -406,6 +415,7 @@ WHERE run_id=$run AND case_instance_id=$case LIMIT 1;",
                 return promoted;
             }
         }
+#endif
 
         private static Dictionary<string, object>
             FinalGauntletResumeApi(Dictionary<string, object> payload)
@@ -605,6 +615,7 @@ created_ts=excluded.created_ts;",
                         30, ReadInt(payload, "minutes", 5)))));
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> FinalGauntletRunStatusApi(
             Dictionary<string, string> query,
             bool includeReport)
@@ -656,7 +667,9 @@ WHERE run_id=$run ORDER BY case_instance_id,evidence_key;",
                 return stored;
             }
         }
+#endif
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static Dictionary<string, object> FinalGauntletReviewPackApi(
             Dictionary<string, string> query)
         {
@@ -693,6 +706,7 @@ ORDER BY review_id;",
                 };
             }
         }
+#endif
 
         private static Dictionary<string, object> FinalGauntletDescriptorMap(
             FinalGauntletCaseDescriptor descriptor)
@@ -715,6 +729,7 @@ ORDER BY review_id;",
             };
         }
 
+#if !REIGN_EXCLUDE_VERIFICATION
         private static List<FinalGauntletCaseDescriptor>
             BuildFinalGauntletRuntimeCatalog()
         {
@@ -735,5 +750,6 @@ ORDER BY review_id;",
             return FinalConversationGauntletCatalog
                 .BuildExecutableCatalog(actions);
         }
+#endif
     }
 }
