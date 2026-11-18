@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Reign.Core.Contracts.Diplomacy;
 
 namespace ReignBetaServer
 {
@@ -1071,11 +1072,10 @@ AND selected=1 AND status='selected';", new Dictionary<string, object>
 
         private static Dictionary<string, object> NextPoliticalPressureNotices(Dictionary<string, string> query)
         {
-            query = query ?? new Dictionary<string, string>();
-            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : "default";
-            string timelineId = query.TryGetValue("timelineId", out string timeline) ? timeline : "main";
-            int limit = query.TryGetValue("limit", out string limitText) && int.TryParse(limitText, out int parsed)
-                ? Math.Max(1, Math.Min(10, parsed)) : 3;
+            PoliticalPressureNoticesRequest request = PoliticalPressureNoticesRequest.FromQuery(query);
+            string campaignId = request.CampaignId;
+            string timelineId = request.TimelineId;
+            int limit = request.Limit;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
@@ -1098,37 +1098,35 @@ FROM political_pressure_native_effects WHERE incident_id=$incident ORDER BY effe
 FROM political_pressure_state WHERE campaign_id=$campaign AND timeline_id=$timeline
 ORDER BY actor_kingdom_id,target_kingdom_id LIMIT 1025;",
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
-                return new Dictionary<string, object> { ["ok"] = true, ["count"] = incidents.Count, ["notices"] = incidents,
-                    ["readinessPressure"] = new Dictionary<string, object> { ["version"] = 1, ["campaignId"] = campaignId,
-                        ["timelineId"] = timelineId, ["complete"] = readinessRows.Count <= 1024,
-                        ["pairs"] = readinessRows.Take(1024).ToList() } };
+                return new PoliticalPressureNoticesResponse(incidents,
+                    new PoliticalPressureReadiness(campaignId, timelineId, readinessRows)).ToDictionary();
             }
         }
 
         private static Dictionary<string, object> AcknowledgePoliticalPressureNotice(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string timelineId = ReadString(payload, "timelineId", "main");
-            string incidentId = ReadString(payload, "incidentId", "");
-            double receiptDay = ReadDouble(payload, "worldDay", -1d);
+            PoliticalPressureAcknowledgeRequest request = PoliticalPressureAcknowledgeRequest.FromDictionary(payload);
+            string campaignId = request.CampaignId;
+            string timelineId = request.TimelineId;
+            string incidentId = request.IncidentId;
+            double receiptDay = request.WorldDay;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
                 if (ReadInt(QuerySql(connection, "SELECT COUNT(*) AS count FROM political_pressure_incidents WHERE incident_id=$id;",
                     new Dictionary<string, object> { ["id"] = incidentId }).FirstOrDefault(), "count", 0) == 0)
-                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Political pressure incident was not found." };
-                foreach (Dictionary<string, object> receipt in ReadDictionaryList(payload, "effectReceipts"))
+                    return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
+                foreach (PoliticalPressureEffectReceipt receipt in request.EffectReceipts)
                 {
-                    string effectId = ReadString(receipt, "effectId", "");
                     ExecuteSql(connection, @"UPDATE political_pressure_native_effects SET status=$status,before_value=$before,
 after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=$id AND status='pending';",
                         new Dictionary<string, object>
                         {
-                            ["status"] = ReadBool(receipt, "ok", false) ? "applied" : "failed",
-                            ["before"] = ReadDouble(receipt, "before", -1d), ["after"] = ReadDouble(receipt, "after", -1d),
-                            ["day"] = receiptDay, ["error"] = ReadString(receipt, "error", ""), ["ts"] = ts, ["id"] = effectId
+                            ["status"] = receipt.Ok ? "applied" : "failed",
+                            ["before"] = receipt.Before, ["after"] = receipt.After,
+                            ["day"] = receiptDay, ["error"] = receipt.Error, ["ts"] = ts, ["id"] = receipt.EffectId
                         });
                 }
                 ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$id;",
@@ -1138,7 +1136,7 @@ after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=
                 "message_receipt", "", "", "", "acknowledged", 0, 0, 0, 0, "", incidentId,
                 "Game message displayed and native effects reported.", payload);
             InvalidateWorldTestOverviewCache(campaignId, timelineId);
-            return new Dictionary<string, object> { ["ok"] = true, ["incidentId"] = incidentId };
+            return PoliticalPressureAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
 
         private static void RecordPoliticalPressureActivity(string campaignId, string timelineId,

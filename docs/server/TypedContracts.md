@@ -25,10 +25,12 @@ change.
   step.
 - Adopt a DTO in a handler only when it is a pure refactor. If byte equality of
   a response cannot be guaranteed, adopt the request side only.
-- Every adopted route gets byte-equality checks in its module's existing
-  self-test suite: serialize the legacy dictionary and the DTO output with the
-  server's `Json` and compare strings, plus a live handler call where the suite
-  already has a persistence fixture.
+- Shared field reads live in the internal `Platform/WireReads` helper, which
+  copies the server's `ReadString`/`ReadInt`/`ReadLong`/`ReadBool`/`ReadDouble`/
+  `ReadDictionaryList` fallback rules.
+- The first slice added byte-equality self-tests. Later slices add no new test
+  code (programme decision) and rely on the existing module suites plus the
+  build.
 
 ## Converted
 
@@ -37,15 +39,27 @@ change.
 | `GET /clan-conflicts/notices` | `ClanConflictNoticesRequest` (query) | `ClanConflictNoticesResponse` | `notice_contract_*`, `notice_routes_keep_legacy_wire_bytes` |
 | `POST /clan-conflicts/acknowledge` | `ClanConflictAcknowledgeRequest` | `ClanConflictAcknowledgeResponse` | `notice_contract_*`, `notice_routes_keep_legacy_wire_bytes` |
 
+Slice 2 (no new self-tests; existing suites cover the handlers):
+
+| Route | Request | Response | Existing coverage |
+|---|---|---|---|
+| `GET /political-pressure/notices` | `PoliticalPressureNoticesRequest` (query) | `PoliticalPressureNoticesResponse` + `PoliticalPressureReadiness` | `RunPoliticalPressureSelfTests` |
+| `POST /political-pressure/acknowledge` | `PoliticalPressureAcknowledgeRequest` + `PoliticalPressureEffectReceipt` | `PoliticalPressureAcknowledgeResponse` | `RunPoliticalPressureSelfTests` |
+| `GET /diplomacy/events/next` | `DiplomaticEventsNextRequest` (query, body campaignId fallback) | `DiplomaticEventsNextResponse` (popup and public-history forms) | world test diplomacy announcement checks |
+| `POST /diplomacy/events/acknowledge` | `DiplomaticEventAcknowledgeRequest` | `DiplomaticEventAcknowledgeResponse` | world test diplomacy checks |
+| `GET /gossip/status` | `GossipStatusRequest` (query) | `GossipStatusResponse` (diagnostic), `GossipDeliveryReadinessResponse` (`deliveryOnly=true`), `GossipStatusProtocol.Failure` | personal gossip and witness suites |
+| `GET`/`POST /communications/status` | `CommunicationStatusRequest` (hero, offset, limit; campaign and timeline stay on the shared `CommunicationApi` reads) | `CommunicationStatusResponse` (no-schema and snapshot forms), `CommunicationStatusProtocol.Failure` | communication suite |
+
+Notes: gossip dictionaries keep their case-insensitive comparer. Event objects,
+notice rows, readiness pairs, gossip message rows and topic projections,
+communication rows and the gossip `communications` readiness block stay raw
+dictionaries. The other `/communications/*` operations (`scope`, `tick`) are
+not converted.
+
 ## Next modules
 
-1. `/political-pressure/notices` and `/political-pressure/acknowledge` (same
-   notice/acknowledge shape plus `nativeEffects`, `readinessPressure` and typed
-   `effectReceipts`; covered by `RunPoliticalPressureSelfTests`).
-2. `/diplomacy/events/next` and `/diplomacy/events/acknowledge` (projected
-   event objects the client already reads field by field).
-3. `/gossip/status` and `/communications/status`.
-4. Larger groups (Court, Correspondence, Save Sync) one route group per PR;
+1. `/communications/scope` and `/communications/tick`.
+2. Larger groups (Court, Correspondence, Save Sync) one route group per PR;
    Dialogue and terminal action reports last.
 
 The client adopts the types in its own track after the server change merges.
