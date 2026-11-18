@@ -1057,7 +1057,8 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY case_id,period_ke
             List<string> files = new List<string> { path };
             files.AddRange(Directory.EnumerateFiles(Path.GetDirectoryName(path), "*.cs")
                 .Where(file => Path.GetFileName(file).Length > stem.Length + 3
-                    && Path.GetFileName(file).StartsWith(stem, StringComparison.Ordinal))
+                    && Path.GetFileName(file).StartsWith(stem, StringComparison.Ordinal)
+                    && file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(file => Path.GetFileName(file), StringComparer.Ordinal));
             byte[] bytes = files.SelectMany(file => File.ReadAllBytes(file)).ToArray();
             using (SHA256 sha = SHA256.Create())
