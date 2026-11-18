@@ -55,7 +55,7 @@ namespace ReignBetaServer
             return RelationshipCompatibilityPolicy.AdjustedScore(baseScore);
         }
 
-        private static void EnsureMbtiRelationshipSchema(ReignDbConnection connection)
+        internal static void EnsureMbtiRelationshipSchema(ReignDbConnection connection)
         {
             const string marker =
                 "postgresql_relationship_schema_revision";

@@ -119,7 +119,7 @@ Do not expose a private relationship tag merely because it is supplied as behavi
             };
         }
 
-        private static Dictionary<string, object> BuildNpcRelationshipPromptContext(
+        internal static Dictionary<string, object> BuildNpcRelationshipPromptContext(
             string campaignId,
             string speakerHeroId,
             Dictionary<string, object> eventPayload)

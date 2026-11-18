@@ -7,7 +7,7 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         // This scope is created by the server from the actual response before the action
         // planner runs. JSON markers cannot create it, and retries retain the same scope.
@@ -22,7 +22,7 @@ namespace ReignBetaServer
             public void Dispose() { GovernmentPaymentTurn.Value = Previous; }
         }
 
-        private static IDisposable ReserveGovernmentPaymentOwnership(Dictionary<string, object> payload,
+        internal static IDisposable ReserveGovernmentPaymentOwnership(Dictionary<string, object> payload,
             Dictionary<string, object> response, string playerText, string reply)
         {
             var context = ReadDictionary(payload, "governmentPrivateContext");
@@ -44,7 +44,7 @@ namespace ReignBetaServer
         // Called after canonicalization and reference/direction resolution, before QueueAction.
         // Rejection leaves the native typed receipt as the only possible payment owner;
         // invalid/stale receipts never fall back to a generic payment.
-        private static void ValidateGovernmentPaymentOwnership(Dictionary<string, object> raw,
+        internal static void ValidateGovernmentPaymentOwnership(Dictionary<string, object> raw,
             Dictionary<string, object> terms, string command, List<string> errors)
         {
             var scope = GovernmentPaymentTurn.Value;

@@ -1408,7 +1408,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
         }
 
-        private static List<Dictionary<string, object>> BuildRebellionLetterReplyCandidates(
+        internal static List<Dictionary<string, object>> BuildRebellionLetterReplyCandidates(
             Dictionary<string, object> storedPayload,
             Dictionary<string, object> receivedLetter,
             Dictionary<string, object> npcReply,
@@ -1432,7 +1432,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 ["speakerHeroStringId"] = npcId ?? string.Empty
             };
             List<Dictionary<string, object>> preparation =
-                BuildRebellionPreparationDialogueCandidates(preparationPayload, recipient,
+                RebellionService.BuildRebellionPreparationDialogueCandidates(preparationPayload, recipient,
                     request, replyBody, actionGate);
             if (preparation.Count > 0) return preparation;
 
@@ -1564,7 +1564,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             return new Dictionary<string, object> { ["shouldReply"] = false, ["body"] = "", ["error"] = FirstNonEmpty(ReadString(llm, "error", ""), "No valid letter draft was returned.") };
         }
 
-        private static Dictionary<string, object> MergeCorrespondenceRecipientProfile(
+        internal static Dictionary<string, object> MergeCorrespondenceRecipientProfile(
             Dictionary<string, object> persistedProfile,
             Dictionary<string, object> receivedLetter,
             string expectedHeroId)

@@ -873,7 +873,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$acto
                     ["actor"] = actorId, ["target"] = targetId }).FirstOrDefault(), "pressure_value", 0);
         }
 
-        private static int ApplyPoliticalPressureDelta(string campaignId, string timelineId, double worldDay,
+        internal static int ApplyPoliticalPressureDelta(string campaignId, string timelineId, double worldDay,
             Dictionary<string, object> actor, Dictionary<string, object> target, int delta, string channel, string incidentId)
         {
             string actorId = ReadString(actor, "kingdomId", "");

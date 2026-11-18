@@ -6,9 +6,9 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
-        private static List<Dictionary<string, object>> RunGovernmentSystemSelfTests()
+        internal static List<Dictionary<string, object>> RunGovernmentSystemSelfTests()
         {
             var rows = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, summary, evidence) =>
@@ -106,22 +106,22 @@ namespace ReignBetaServer
                 ["needed"] = true, ["commitment"] = "accepted",
                 ["intent"] = "The NPC agreed to the disclosed government reduction."
             };
-            List<Dictionary<string, object>> consent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> consent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I intend to reduce the senate's control by a small amount. Do I have your consent?",
                 "I understand what this costs the senate, and I consent.", acceptedGate);
-            List<Dictionary<string, object>> refusal = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> refusal = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I intend to reduce the senate's control by a small amount. Do I have your consent?",
                 "No. I will not agree to surrender that authority.", new Dictionary<string, object>
                 {
                     ["needed"] = false, ["commitment"] = "refused"
                 });
-            List<Dictionary<string, object>> conditional = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> conditional = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I intend to reduce the senate's control by a small amount. Do I have your consent?",
                 "I consent if you restore my lands first.", acceptedGate);
-            List<Dictionary<string, object>> unresolvedBargain = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> unresolvedBargain = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I will reduce the senate's control by a small amount. Will you consent if we settle what you need?",
                 "Here is what I need: guarantee the villages keep their voice. Give me that, and you have my consent. Settle that with me and we will shake hands now.",
@@ -130,11 +130,11 @@ namespace ReignBetaServer
                     ["needed"] = true, ["commitment"] = "conditional",
                     ["intent"] = "Consent remains contingent on an unmet guarantee."
                 });
-            List<Dictionary<string, object>> leadingConditional = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> leadingConditional = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I intend to reduce the senate's control by a small amount. Do I have your consent?",
                 "If you restore my lands first, I consent now.", acceptedGate);
-            List<Dictionary<string, object>> negotiatedConsent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> negotiatedConsent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I have pledged to preserve your clan's standing. With that pledge, will you and your clan now consent to a small, limited reduction in the council's control?",
                 "If Sulwych is forgotten again, my next answer will be different. I am consenting on the strength of your word now.",
@@ -143,7 +143,7 @@ namespace ReignBetaServer
                     ["needed"] = true, ["commitment"] = "conditional",
                     ["intent"] = "The NPC grants consent now while preserving the ruler's future obligation."
                 });
-            List<Dictionary<string, object>> chamberFutureDebtConsent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> chamberFutureDebtConsent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Only a small, limited reduction. I am not abolishing the chamber or stripping loyal lords of their lawful standing. With that clear scope, do I have your consent?",
                 "You have my consent. When the chamber is trimmed and the dust settles, Sulwych will have its holding as the price of standing with you today.",
@@ -152,7 +152,7 @@ namespace ReignBetaServer
                     ["needed"] = true, ["commitment"] = "conditional",
                     ["intent"] = "The NPC gives present consent while recording a future political debt."
                 });
-            List<Dictionary<string, object>> namedPresentConsent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> namedPresentConsent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I have pledged to preserve your clan's standing. With that pledge, will you and your clan now consent to a small, limited reduction in the council's control?",
                 "House Sulwych consents to the reduction. You have our vote. When the next fief is awarded, I expect your pledge to be honored.",
@@ -161,7 +161,7 @@ namespace ReignBetaServer
                     ["needed"] = true, ["commitment"] = "conditional",
                     ["intent"] = "The named clan grants consent now while preserving the ruler's future obligation."
                 });
-            List<Dictionary<string, object>> unrelatedNotYetPresentConsent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> unrelatedNotYetPresentConsent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I have pledged to preserve your clan's standing. With that pledge, will you and your clan now consent to a small, limited reduction in the council's control?",
                 "You are not one of those oath-breaking kings -- not yet. You have my consent. Sulwych will support the reduction. I will hold you to your pledge.",
@@ -170,7 +170,7 @@ namespace ReignBetaServer
                     ["needed"] = true, ["commitment"] = "conditional",
                     ["intent"] = "The named clan grants present consent while warning that a broken future pledge would change later loyalty."
                 });
-            List<Dictionary<string, object>> punctuatedNamedPresentConsent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> punctuatedNamedPresentConsent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "I have pledged to preserve your clan's standing. With that pledge, will you and your clan now consent to a small, limited reduction in the council's control?",
                 "Sulwych consents. You'll have our vote. When the next fief is awarded and Sulwych is overlooked, we will have a different conversation.",
@@ -179,20 +179,20 @@ namespace ReignBetaServer
                     ["needed"] = true, ["commitment"] = "conditional",
                     ["intent"] = "The current speaker's named clan grants consent now while preserving a future consequence."
                 });
-            List<Dictionary<string, object>> thirdPartyNamedConsent = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> thirdPartyNamedConsent = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Will you and your clan consent to a small reduction in the council's control?",
                 "Lord Erdur says House Blackridge consents to the reduction. I will carry his words, but I give no answer for Sulwych.",
                 acceptedGate);
-            List<Dictionary<string, object>> namedConditional = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> namedConditional = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Will your clan consent to reducing the council's control by a small amount?",
                 "Sulwych consents if you grant us a fief first.", acceptedGate);
-            List<Dictionary<string, object>> namedRefusal = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> namedRefusal = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Will your clan consent to reducing the council's control by a small amount?",
                 "No one consents to this. We refuse.", acceptedGate);
-            List<Dictionary<string, object>> tentativeProgressive = BuildGovernmentReductionConsentDialogueCandidates(
+            List<Dictionary<string, object>> tentativeProgressive = Program.BuildGovernmentReductionConsentDialogueCandidates(
                 dialoguePayload, dialogueHero,
                 "Will you and your clan consent to a small reduction in the council's control?",
                 "I am considering consent, but I might consent only after you grant us a fief.", acceptedGate);
@@ -208,9 +208,9 @@ namespace ReignBetaServer
                 ["reason"] = "The clanless notable explicitly consented to the disclosed reduction.",
                 ["terms"] = new Dictionary<string, object> { ["consentConfirmed"] = true }
             };
-            Dictionary<string, object> clanlessConsentRecord = NormalizeActionCommand(
+            Dictionary<string, object> clanlessConsentRecord = Program.NormalizeActionCommand(
                 clanlessConsentRaw, "government_self_test", out List<string> clanlessConsentErrors);
-            string consentActionRules = ActionPromptExtraRulesForId("consent_government_reduction");
+            string consentActionRules = Program.ActionPromptExtraRulesForId("consent_government_reduction");
             Dictionary<string, object> consentTerms = consent.Count == 1
                 ? consent[0]["terms"] as Dictionary<string, object> : null;
             add("government.natural_language_reduction_consent",
@@ -258,13 +258,13 @@ namespace ReignBetaServer
                 });
 
             bool ordinaryPromptOverrideRoutesTestActions =
-                ShouldRouteGuardedPromptOverrideActions(true, false, false);
+                Program.ShouldRouteGuardedPromptOverrideActions(true, false, false);
             bool certificationIsolationRoutesNaturalDialogue =
-                !ShouldRouteGuardedPromptOverrideActions(true, true, false);
+                !Program.ShouldRouteGuardedPromptOverrideActions(true, true, false);
             bool actionCooperationRoutesNaturalDialogue =
-                !ShouldRouteGuardedPromptOverrideActions(true, false, true);
+                !Program.ShouldRouteGuardedPromptOverrideActions(true, false, true);
             bool ordinaryDialogueRoutesNaturalDialogue =
-                !ShouldRouteGuardedPromptOverrideActions(false, false, false);
+                !Program.ShouldRouteGuardedPromptOverrideActions(false, false, false);
             add("government.certification_memory_isolation_action_routing",
                 ordinaryPromptOverrideRoutesTestActions
                 && certificationIsolationRoutesNaturalDialogue
@@ -279,9 +279,9 @@ namespace ReignBetaServer
                 });
 
             bool certificationConversationSideEffectsSuppressed =
-                !ShouldPersistGovernmentCertificationConversationSideEffects(true);
+                !Program.ShouldPersistGovernmentCertificationConversationSideEffects(true);
             bool ordinaryConversationSideEffectsPersist =
-                ShouldPersistGovernmentCertificationConversationSideEffects(false);
+                Program.ShouldPersistGovernmentCertificationConversationSideEffects(false);
             add("government.certification_memory_isolation_side_effects",
                 certificationConversationSideEffectsSuppressed
                 && ordinaryConversationSideEffectsPersist,
@@ -302,9 +302,9 @@ namespace ReignBetaServer
                 new Dictionary<string, object> { ["role"] = "assistant", ["text"] = "current reply" }
             };
             List<Dictionary<string, object>> isolatedFirstTurn =
-                IsolateGovernmentCertificationTranscript(oldTranscript, 0);
+                Program.IsolateGovernmentCertificationTranscript(oldTranscript, 0);
             List<Dictionary<string, object>> isolatedFollowUp =
-                IsolateGovernmentCertificationTranscript(oldTranscript, 1);
+                Program.IsolateGovernmentCertificationTranscript(oldTranscript, 1);
             add("government.certification_memory_isolation_transcript",
                 isolatedFirstTurn.Count == 0
                 && isolatedFollowUp.Count == 2
@@ -320,8 +320,8 @@ namespace ReignBetaServer
                 });
 
             string outcomeNeutralIsolationContext =
-                AppendGovernmentCertificationMemoryIsolationContext("authoritative realm facts",
-                    GovernmentCertificationMemoryIsolationDirective);
+                Program.AppendGovernmentCertificationMemoryIsolationContext("authoritative realm facts",
+                    Program.GovernmentCertificationMemoryIsolationDirective);
             add("government.certification_memory_isolation_prompt_semantics",
                 outcomeNeutralIsolationContext.Contains("OUTCOME-NEUTRAL",
                     StringComparison.Ordinal)
@@ -377,8 +377,8 @@ namespace ReignBetaServer
                 }
             };
             Dictionary<string, object> governmentDecision =
-                BuildGovernmentDecisionContext(governmentDecisionPayload);
-            string governmentDecisionPrompt = BuildConversationDecisionPrompt(
+                Program.BuildGovernmentDecisionContext(governmentDecisionPayload);
+            string governmentDecisionPrompt = Program.BuildConversationDecisionPrompt(
                 new Dictionary<string, object>
                 {
                     ["activeDomains"] = new List<Dictionary<string, object>>(),
@@ -480,7 +480,7 @@ namespace ReignBetaServer
                 && BuildGovernmentPrivateConversationPrompt(TestDict("heroStringId", "senator")) == "",
                 "Missing or differently attributed knowledge never supplies a borrowed government record.", null);
 
-            string root = FindVerificationSourceRoot();
+            string root = Program.FindVerificationSourceRoot();
             string governmentPrefabPath = Path.Combine(root, "ReignBeta", "GUI", "Prefabs",
                 "ReignGovernmentScreen.xml");
             string governmentPrefab = File.Exists(governmentPrefabPath)

@@ -54,43 +54,6 @@ namespace ReignBetaServer
             internal int ReplyEnd = -1;
         }
 
-        private static string UnwrapJsonResponse(string text) => UnwrapJsonResponse(text, out _);
-
-        private static string UnwrapJsonResponse(string text, out int sourceOffset)
-        {
-            string original = text ?? "";
-            sourceOffset = original.Length - original.TrimStart().Length;
-            string source = original.Trim();
-            if (!source.StartsWith("```", StringComparison.Ordinal)) return source;
-            int line = source.IndexOf('\n');
-            if (line < 0 || !source.EndsWith("```", StringComparison.Ordinal)) return source;
-            string language = source.Substring(3, line - 3).Trim();
-            if (language.Length != 0 && !language.Equals("json", StringComparison.OrdinalIgnoreCase)) return source;
-            string body = source.Substring(line + 1, source.Length - line - 4);
-            sourceOffset += line + 1 + body.Length - body.TrimStart().Length;
-            return body.Trim();
-        }
-
-        // Generic storage/configuration parsing never searches nested values or
-        // quoted JSON for a replacement document. Recovery belongs to the caller.
-        private static Dictionary<string, object> TryParseStrictJsonObject(string text)
-        {
-            string source = UnwrapJsonResponse(text);
-            if (!source.StartsWith("{", StringComparison.Ordinal)) return null;
-            try
-            {
-                using var document = JsonDocument.Parse(source);
-                if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
-                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (document.RootElement.EnumerateObject().Any(property => !names.Add(property.Name))) return null;
-                return Json.Deserialize<Dictionary<string, object>>(source);
-            }
-            catch (Exception ex) when (ex is JsonException || ex is ArgumentException || ex is InvalidOperationException)
-            {
-                return null;
-            }
-        }
-
         // Read one outer object in source order. TryParseValue consumes a whole
         // value or nothing, so an unfinished array cannot contribute its earlier
         // entries, and nested/quoted objects never become replacement envelopes.

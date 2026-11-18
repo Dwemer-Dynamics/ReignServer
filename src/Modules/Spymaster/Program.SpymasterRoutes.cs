@@ -22,19 +22,19 @@ namespace ReignBetaServer
             switch (request.Path)
             {
                 case "/court/spymaster/memory":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterMemoryApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterMemoryApi); return true;
                 case "/court/spymaster/social/status":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterSocialStatusApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterSocialStatusApi); return true;
                 case "/court/spymaster/social/apply":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterSocialApplyApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterSocialApplyApi); return true;
                 case "/court/spymaster/exposure":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterExposureApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterExposureApi); return true;
                 case "/court/spymaster/agents/tick":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterAgentsTickApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterAgentsTickApi); return true;
                 case "/court/spymaster/agents/status":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterAgentsStatusApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterAgentsStatusApi); return true;
                 case "/court/spymaster/agents/expose":
-                    response = CapitalCourtApi(request.JsonBody, SpymasterAgentExposeApi); return true;
+                    response = CapitalCourtApi(request.JsonBody, SpymasterService.SpymasterAgentExposeApi); return true;
                 default:
                     return false;
             }

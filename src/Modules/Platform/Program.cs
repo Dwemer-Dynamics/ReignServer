@@ -21,7 +21,6 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         private static readonly object FileLock = new object();
         private static readonly ReaderWriterLockSlim CampaignDataGate = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
 
@@ -212,7 +211,7 @@ namespace ReignBetaServer
             "portrait_output_rules.txt"
 		    }.Concat(RelationshipPromptFileNames()).Concat(PortraitClothingPromptFileNames).Concat(PortraitPhysicalConfidencePromptFileNames).Concat(ActionPromptFileNames).Concat(CastleChatPromptFileNames()).Concat(TavernHousePromptFileNames).ToArray(); }
         }
-        private static readonly string[] ContextPullIds =
+        internal static readonly string[] ContextPullIds =
         {
             "check_inventory_appearance",
             "check_player_appearance_status",
@@ -373,7 +372,7 @@ namespace ReignBetaServer
 
             if (HasArg(args, "--run-rebellion-tests"))
             {
-                Dictionary<string, object> result = RunRebellionSelfTests();
+                Dictionary<string, object> result = RebellionService.RunRebellionSelfTests();
                 Console.WriteLine(Json.Serialize(result));
                 Environment.ExitCode = ReadBool(result, "ok", false) ? 0 : 1;
                 return;
@@ -1085,7 +1084,7 @@ namespace ReignBetaServer
                     }
                     else if (request.Method == "GET" && request.Path == "/rebellions/query")
                     {
-                        response = RebellionQueryApi(request.Query);
+                        response = RebellionService.RebellionQueryApi(request.Query);
                     }
 #if !REIGN_EXCLUDE_COURT
                     else if (TryHandleSpymasterRoute(request, out response))
@@ -1458,7 +1457,7 @@ namespace ReignBetaServer
         [ThreadStatic] private static Action CampaignSchemaAfterMemoryForTests;
         [ThreadStatic] private static Action<bool> CampaignSchemaColdWaitObserverForTests;
 
-        private static ReignDbConnection OpenCampaignConnection(string campaignId)
+        internal static ReignDbConnection OpenCampaignConnection(string campaignId)
         {
             // A caller must not carry the reverse order into the cold path.
             if (Monitor.IsEntered(CampaignSchemaLock) && !Monitor.IsEntered(FileLock))
@@ -1534,7 +1533,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool IsPostgreSqlComponentSchemaReady(
+        internal static bool IsPostgreSqlComponentSchemaReady(
             ReignDbConnection connection, string markerKey, int revision)
         {
             if (!ReignPostgreSqlDialect.IsPostgreSql(connection))
@@ -1561,7 +1560,7 @@ SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
             return ready;
         }
 
-        private static void MarkPostgreSqlComponentSchemaReady(
+        internal static void MarkPostgreSqlComponentSchemaReady(
             ReignDbConnection connection, string markerKey, int revision)
         {
             if (!ReignPostgreSqlDialect.IsPostgreSql(connection))
@@ -1789,7 +1788,7 @@ WHERE table_schema=current_schema() AND table_name IN (
             // Rebellion storage is campaign infrastructure. World Test and
             // Save Sync can inspect it before the first weekly evaluation, so
             // it must not depend on a rebellion endpoint having run first.
-            EnsureRebellionSchema(connection);
+            RebellionService.EnsureRebellionSchema(connection);
 #if !REIGN_EXCLUDE_COURT
             EnsureCourtSchema(connection);
 #endif
@@ -1835,7 +1834,7 @@ WHERE table_schema=current_schema()
             }
         }
 
-        private static void ExecuteSql(
+        internal static void ExecuteSql(
             ReignDbConnection connection,
             string sql,
             Dictionary<string, object> parameters = null,
@@ -1930,30 +1929,6 @@ WHERE table_schema=current_schema()
             }
         }
 
-        private static bool IsPostgreSqlSchemaMutation(string sql)
-        {
-            string value = (sql ?? string.Empty).TrimStart();
-            return value.StartsWith("CREATE ", StringComparison.OrdinalIgnoreCase)
-                || value.StartsWith("ALTER ", StringComparison.OrdinalIgnoreCase)
-                || value.StartsWith("DROP ", StringComparison.OrdinalIgnoreCase)
-                || value.StartsWith("TRUNCATE ", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static void AcquirePostgreSqlTransactionMutationLock(
-            ReignDbConnection connection,
-            ReignDbTransaction transaction = null)
-        {
-            using (ReignDbCommand command = connection.CreateCommand())
-            {
-                command.CommandText =
-                    "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 9137));";
-                command.CommandTimeout = 180;
-                if (transaction != null)
-                    command.Transaction = transaction;
-                command.ExecuteNonQuery();
-            }
-        }
-
         [ThreadStatic] private static SqlReadTimingContext CurrentSqlReadTiming;
 
         private sealed class SqlReadTimingContext : IDisposable
@@ -2019,7 +1994,7 @@ WHERE table_schema=current_schema()
             return false;
         }
 
-        private static List<Dictionary<string, object>> QuerySql(
+        internal static List<Dictionary<string, object>> QuerySql(
             ReignDbConnection connection,
             string sql,
             Dictionary<string, object> parameters = null,
@@ -2084,43 +2059,7 @@ WHERE table_schema=current_schema()
             }
         }
 
-        private static bool IsStalePostgreSqlPreparedPlan(Exception exception)
-        {
-            Npgsql.PostgresException postgres = exception as Npgsql.PostgresException;
-            return postgres != null
-                && postgres.SqlState == "0A000"
-                && postgres.MessageText.IndexOf("cached plan",
-                    StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static void ResetPostgreSqlPreparedPlans(
-            ReignDbConnection connection)
-        {
-            Npgsql.NpgsqlConnection postgres = connection as Npgsql.NpgsqlConnection;
-            if (postgres != null) postgres.UnprepareAll();
-        }
-
-        private static bool IsTransientDatabaseContention(Exception exception)
-        {
-            Npgsql.PostgresException postgres = exception as Npgsql.PostgresException;
-            return postgres != null
-                && (postgres.SqlState == Npgsql.PostgresErrorCodes.SerializationFailure
-                    || postgres.SqlState == Npgsql.PostgresErrorCodes.DeadlockDetected
-                    || postgres.SqlState == Npgsql.PostgresErrorCodes.LockNotAvailable);
-        }
-
-        private static void AddSqlParameters(ReignDbCommand command, Dictionary<string, object> parameters)
-        {
-            foreach (KeyValuePair<string, object> pair in parameters ?? new Dictionary<string, object>())
-            {
-                System.Data.Common.DbParameter parameter = command.CreateParameter();
-                parameter.ParameterName = ReignPostgreSqlDialect.ParameterName(command.Connection, pair.Key);
-                parameter.Value = pair.Value ?? DBNull.Value;
-                command.Parameters.Add(parameter);
-            }
-        }
-
-        private static Dictionary<string, object> StoreWorldMemoryEvent(Dictionary<string, object> payload, string source, ReignDbConnection existingConnection = null)
+        internal static Dictionary<string, object> StoreWorldMemoryEvent(Dictionary<string, object> payload, string source, ReignDbConnection existingConnection = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -3956,7 +3895,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
                 || KnowledgePayloadListContains(row, id, "attendees", "attendeeIds", "nearbyHeroIds", "nearbyHeroes");
         }
 
-        private sealed class KnowledgeAccessContext
+        internal sealed class KnowledgeAccessContext
         {
             public string NpcId = "";
             public string TimelineId = "";
@@ -3989,7 +3928,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             }
         }
 
-        private static KnowledgeAccessContext BuildKnowledgeAccessContext(string npcId, string playerId, string locationId, Dictionary<string, object> source)
+        internal static KnowledgeAccessContext BuildKnowledgeAccessContext(string npcId, string playerId, string locationId, Dictionary<string, object> source)
         {
             source = source ?? new Dictionary<string, object>();
             Dictionary<string, object> profile = ReadDictionary(source, "hero")
@@ -6127,7 +6066,7 @@ WHERE hero_a_id=$npc OR hero_b_id=$npc ORDER BY last_day DESC LIMIT 8;",
             }
         }
 
-        private static List<Dictionary<string, object>> NormalizeSelectedContextPulls(List<Dictionary<string, object>> raw, List<string> available)
+        internal static List<Dictionary<string, object>> NormalizeSelectedContextPulls(List<Dictionary<string, object>> raw, List<string> available)
         {
             List<Dictionary<string, object>> selected = new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> item in raw ?? new List<Dictionary<string, object>>())
@@ -7416,7 +7355,7 @@ The previous attempt did not complete a JSON object within its output budget.
             bool privateGovernmentChannel = string.Equals(ReadString(payload, "channel", ""), "in_person", StringComparison.OrdinalIgnoreCase)
                 && !officialAmbassador && !rulerPetitionAudience && !nobleDocketAudience && !courtLifeAudience;
             if (privateGovernmentChannel)
-                payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + BuildGovernmentPrivateConversationPrompt(payload);
+                payload["sceneContext"] = ReadString(payload, "sceneContext", "") + "\n" + GovernmentService.BuildGovernmentPrivateConversationPrompt(payload);
             string dialogueAuditRunId = ReadString(payload, "dialogueAuditRunId", "");
             if (!string.IsNullOrWhiteSpace(dialogueAuditRunId))
             {
@@ -7604,7 +7543,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
             else
             {
-                AppendSpymasterRelevantMemoryBundle(campaignId,
+                SpymasterService.AppendSpymasterRelevantMemoryBundle(campaignId,
                     ReadString(payload, "timelineId", "main"), heroId,
                     selectedContextPulls, contextBundles);
             }
@@ -7957,7 +7896,7 @@ The previous attempt did not complete a JSON object within its output budget.
             {
                 if (!agencyVisibleFailure)
                 {
-                    using (ReserveGovernmentPaymentOwnership(payload, parsed, playerText, reply))
+                    using (GovernmentService.ReserveGovernmentPaymentOwnership(payload, parsed, playerText, reply))
                     {
                         queuedDialogueActions = QueueAcceptedDialogueActions(campaignId, payload, hero, playerText, reply, actionGate, suggestedActions, out dialogueActionErrors);
                     }
@@ -9581,7 +9520,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return values == null || values.Count == 0 ? string.Empty : string.Join("; ", values);
         }
 
-        private static string LimitText(string text, int max)
+        internal static string LimitText(string text, int max)
         {
             text = (text ?? string.Empty).Trim();
             if (max <= 0 || text.Length <= max)
@@ -10990,7 +10929,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return true;
         }
 
-        private const string GovernmentCertificationMemoryIsolationDirective =
+        internal const string GovernmentCertificationMemoryIsolationDirective =
             "Government certification clean-room scope: treat this as the first discussion of this government-power reduction with this NPC. Ignore only dialogue memories or claims created by earlier Government certification runs. Preserve the NPC's native personality, relationship, party posture, realm facts, and consent standards. This instruction is outcome-neutral: it never requests, prefers, predicts, or authorizes agreement or refusal. Do not infer a desired answer from certification metadata. Respond naturally from the supplied state and current conversation.";
 
         private const string ActionAcceptanceCooperationDirective =
@@ -11011,7 +10950,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return builder.ToString().Trim();
         }
 
-        private static string AppendGovernmentCertificationMemoryIsolationContext(
+        internal static string AppendGovernmentCertificationMemoryIsolationContext(
             string sceneContext, string directiveText)
         {
             StringBuilder builder = new StringBuilder();
@@ -11027,7 +10966,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return builder.ToString().Trim();
         }
 
-        private static List<Dictionary<string, object>> IsolateGovernmentCertificationTranscript(
+        internal static List<Dictionary<string, object>> IsolateGovernmentCertificationTranscript(
             List<Dictionary<string, object>> priorLines, int currentTurnIndex)
         {
             // A certification run may reopen an NPC through a durable conversation
@@ -11126,7 +11065,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return queued;
         }
 
-        private static bool ShouldRouteGuardedPromptOverrideActions(
+        internal static bool ShouldRouteGuardedPromptOverrideActions(
             bool isTestDirective,
             bool governmentCertificationMemoryIsolation,
             bool actionAcceptanceCooperation)
@@ -11139,7 +11078,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 && !actionAcceptanceCooperation;
         }
 
-        private static bool ShouldPersistGovernmentCertificationConversationSideEffects(
+        internal static bool ShouldPersistGovernmentCertificationConversationSideEffects(
             bool governmentCertificationMemoryIsolation)
         {
             return !governmentCertificationMemoryIsolation;
@@ -11348,7 +11287,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return queued;
         }
 
-        private static List<Dictionary<string, object>> BuildRebellionDialogueCandidates(
+        internal static List<Dictionary<string, object>> BuildRebellionDialogueCandidates(
             Dictionary<string, object> payload,
             Dictionary<string, object> hero,
             string playerText,
@@ -11382,8 +11321,8 @@ The previous attempt did not complete a JSON object within its output budget.
                 return candidates;
             }
 
-            string summonsResponse = ClassifyRebellionSummonsReply(playerText);
-            string summonsVerdict = ClassifyRebellionRulerVerdict(visibleReply);
+            string summonsResponse = RebellionService.ClassifyRebellionSummonsReply(playerText);
+            string summonsVerdict = RebellionService.ClassifyRebellionRulerVerdict(visibleReply);
             if (!string.IsNullOrWhiteSpace(summonsResponse)
                 && (summonsResponse == "defy" || !string.IsNullOrWhiteSpace(summonsVerdict)))
             {
@@ -11401,7 +11340,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
 
             List<Dictionary<string, object>> preparation =
-                BuildRebellionPreparationDialogueCandidates(payload, hero, playerText, visibleReply,
+                RebellionService.BuildRebellionPreparationDialogueCandidates(payload, hero, playerText, visibleReply,
                     actionGate);
             if (preparation.Count > 0) return preparation;
 
@@ -11438,7 +11377,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return candidates;
         }
 
-        private static List<Dictionary<string, object>> BuildGovernmentReductionConsentDialogueCandidates(
+        internal static List<Dictionary<string, object>> BuildGovernmentReductionConsentDialogueCandidates(
             Dictionary<string, object> payload,
             Dictionary<string, object> hero,
             string playerText,
@@ -11585,7 +11524,7 @@ The previous attempt did not complete a JSON object within its output budget.
             };
         }
 
-        private static bool LooksLikeExplicitPlayerRebellionDeclaration(string text)
+        internal static bool LooksLikeExplicitPlayerRebellionDeclaration(string text)
         {
             string q = NormalizeLookup(text);
             if (q.Contains("should i") || q.Contains("could i") || q.Contains("would i")
@@ -11597,14 +11536,14 @@ The previous attempt did not complete a JSON object within its output budget.
                 || (q.Contains("i challenge your rule") && (q.Contains("rebel") || q.Contains("rebellion")));
         }
 
-        private static bool LooksLikeExplicitPlayerRebellionSurrender(string text)
+        internal static bool LooksLikeExplicitPlayerRebellionSurrender(string text)
         {
             string q = NormalizeLookup(text);
             return (q.Contains("i surrender") || q.Contains("we surrender") || q.Contains("i yield"))
                 && (q.Contains("rebellion") || q.Contains("rebel") || q.Contains("your rule") || q.Contains("the throne"));
         }
 
-        private static bool LooksLikeRebellionRecruitmentRequest(string text)
+        internal static bool LooksLikeRebellionRecruitmentRequest(string text)
         {
             string q = NormalizeLookup(text);
             return q.Contains("join my rebellion") || q.Contains("join our rebellion")
@@ -11612,7 +11551,7 @@ The previous attempt did not complete a JSON object within its output budget.
                 || q.Contains("join me against the ruler");
         }
 
-        private static bool LooksLikePlayerJoinRebellionRequest(string text)
+        internal static bool LooksLikePlayerJoinRebellionRequest(string text)
         {
             string q = NormalizeLookup(text);
             return q.Contains("join your rebellion") || q.Contains("fight for your rebellion")
@@ -11626,14 +11565,14 @@ The previous attempt did not complete a JSON object within its output budget.
                 || q.Contains("give up the rebellion") || q.Contains("surrender your claim");
         }
 
-        private static bool LooksLikeExplicitNpcRebellionSurrender(string text)
+        internal static bool LooksLikeExplicitNpcRebellionSurrender(string text)
         {
             string q = NormalizeLookup(text);
             return q.Contains("i surrender") || q.Contains("we surrender") || q.Contains("i yield")
                 || q.Contains("i give up my claim") || q.Contains("i relinquish my claim");
         }
 
-        private static bool IsUnambiguousActionAcceptance(string text)
+        internal static bool IsUnambiguousActionAcceptance(string text)
         {
             string q = NormalizeLookup(text);
             return !ContainsAnyPhrase(q, DialogueActionBlockingPhrases())
@@ -11919,7 +11858,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return true;
         }
 
-        private static bool ActionGateShouldPlan(Dictionary<string, object> actionGate)
+        internal static bool ActionGateShouldPlan(Dictionary<string, object> actionGate)
         {
             if (actionGate == null || actionGate.Count == 0 || !ReadBool(actionGate, "needed", false))
             {
@@ -16948,9 +16887,9 @@ The previous attempt did not complete a JSON object within its output budget.
             return true;
         }
 
-        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload) => ChatWithLlm(payload, null, null);
+        internal static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload) => ChatWithLlm(payload, null, null);
 
-        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled, Dictionary<string, object> frozenSettings = null)
+        internal static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled, Dictionary<string, object> frozenSettings = null)
         {
             ThrowIfCampaignRequestReplaced();
             payload = payload ?? new Dictionary<string, object>();
@@ -18464,7 +18403,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return string.Empty;
         }
 
-        private static string NormalizeLookup(string value)
+        internal static string NormalizeLookup(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
             {
@@ -18977,7 +18916,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
-        private static Dictionary<string, object> NormalizeActionCommand(Dictionary<string, object> raw, string campaignId, out List<string> errors, Dictionary<string, object> payload = null, string resolutionText = "")
+        internal static Dictionary<string, object> NormalizeActionCommand(Dictionary<string, object> raw, string campaignId, out List<string> errors, Dictionary<string, object> payload = null, string resolutionText = "")
         {
             raw = FlattenActionFields(raw ?? new Dictionary<string, object>());
             errors = new List<string>();
@@ -19052,7 +18991,7 @@ The previous attempt did not complete a JSON object within its output budget.
             BindAndValidateClanAccord(raw, terms, payload, resolutionText, command, errors);
             ResolveActionReferences(raw, terms, payload, resolutionText, command, errors, resolverTrace);
             BindDialogueMarriageParticipants(raw, terms, payload, command, errors);
-            ValidateGovernmentPaymentOwnership(raw, terms, command, errors);
+            GovernmentService.ValidateGovernmentPaymentOwnership(raw, terms, command, errors);
             string termsJson = terms == null ? ReadString(raw, "termsJson", "") : Json.Serialize(terms);
             Dictionary<string, object> record = new Dictionary<string, object>
             {
@@ -19804,7 +19743,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
-        private static Dictionary<string, object> QueueAction(string campaignId, Dictionary<string, object> record)
+        internal static Dictionary<string, object> QueueAction(string campaignId, Dictionary<string, object> record)
         {
             if (_playerActionTurn != null && IsDialogueActionSource(ReadString(record, "source", ""))
                 && !ReadString(record, "serverActionId", "").StartsWith("pa_", StringComparison.Ordinal))
@@ -20133,8 +20072,8 @@ The previous attempt did not complete a JSON object within its output budget.
             Dictionary<string, object> memoryStore = StoreActionResultMemory(payload, "actions_report");
             List<Dictionary<string, object>> nativeRelationChanges = EvaluateCompletedActionRelationships(payload);
             UpdateDiplomaticEventForAction(campaignId, id, status, payload);
-            UpdateNegotiationFromActionReport(campaignId, id, status, payload);
-            UpdateRebellionBackingFromActionReport(campaignId, id, status, payload);
+            RebellionService.UpdateNegotiationFromActionReport(campaignId, id, status, payload);
+            RebellionService.UpdateRebellionBackingFromActionReport(campaignId, id, status, payload);
             Dictionary<string, object> ambassadorReceiptPayload = new Dictionary<string, object>(payload, StringComparer.OrdinalIgnoreCase)
             {
                 ["record"] = matchedRecord ?? new Dictionary<string, object>()
@@ -20612,7 +20551,7 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
-        private static string MapCommandToActionType(string command)
+        internal static string MapCommandToActionType(string command)
         {
             switch (CanonicalCommand(command))
             {
@@ -20742,8 +20681,6 @@ The previous attempt did not complete a JSON object within its output budget.
             }
         }
 
-        private static Dictionary<string, object> TryParseJsonObject(string text) => TryParseStrictJsonObject(text);
-
         private static string ExtractVisibleReply(string content)
         {
             if (string.IsNullOrWhiteSpace(content))
@@ -20773,7 +20710,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return envelope.Error.Length == 0 ? ReadString(envelope.Fields, fieldName, "") : "";
         }
 
-        private static string SanitizeVisibleReply(string text)
+        internal static string SanitizeVisibleReply(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -21141,7 +21078,7 @@ The previous attempt did not complete a JSON object within its output budget.
             return Clamp(value, -2, 2);
         }
 
-        private static int Clamp(int value, int min, int max)
+        internal static int Clamp(int value, int min, int max)
         {
             return Math.Max(min, Math.Min(max, value));
         }
@@ -21691,7 +21628,7 @@ Return exactly this JSON shape:
             return ReadString(background, "encyclopediaText", ReadString(background, "summary", ""));
         }
 
-        private static Dictionary<string, object> LoadCharacterStack(string campaignId, string heroId)
+        internal static Dictionary<string, object> LoadCharacterStack(string campaignId, string heroId)
         {
             Dictionary<string, object> stack = ReadJsonObject(CharacterFile(campaignId, heroId, "characteristics.json"));
             Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
@@ -22916,7 +22853,7 @@ token_budget: 520
 privacy: Suggested action metadata is server/debug material until validated.";
         }
 
-        private static string ActionPromptExtraRulesForId(string id)
+        internal static string ActionPromptExtraRulesForId(string id)
         {
             switch (id)
             {
@@ -24249,7 +24186,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private static string EnsureCorrelationId(Dictionary<string, object> payload)
+        internal static string EnsureCorrelationId(Dictionary<string, object> payload)
         {
             string correlationId = ReadFirstString(payload, "correlationId", "correlationID", "requestId", "clientRequestId");
             if (string.IsNullOrWhiteSpace(correlationId))
@@ -24648,7 +24585,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("spymaster", StringComparison.OrdinalIgnoreCase))
             {
-                results.AddRange(RunSpymasterSystemSelfTests());
+                results.AddRange(SpymasterService.RunSpymasterSystemSelfTests());
             }
             if (string.IsNullOrWhiteSpace(suite) || suite.Equals("campaign_command", StringComparison.OrdinalIgnoreCase))
             {
@@ -25449,7 +25386,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return fallback;
         }
 
-        private static Dictionary<string, object> CloneDictionary(Dictionary<string, object> source)
+        internal static Dictionary<string, object> CloneDictionary(Dictionary<string, object> source)
         {
             if (source == null)
             {
@@ -28296,7 +28233,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return builder.ToString().Trim().ToLowerInvariant();
         }
 
-        private static bool ContainsAny(string text, params string[] needles)
+        internal static bool ContainsAny(string text, params string[] needles)
         {
             if (string.IsNullOrWhiteSpace(text) || needles == null)
             {
@@ -28471,13 +28408,13 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return lines;
         }
 
-        private static string CharacterIdFrom(Dictionary<string, object> hero)
+        internal static string CharacterIdFrom(Dictionary<string, object> hero)
         {
             string value = ReadFirstString(hero, "heroStringId", "heroId", "characterId", "id");
             return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         }
 
-        private static string CampaignDirectory(string campaignId)
+        internal static string CampaignDirectory(string campaignId)
         {
             ThrowIfCampaignRequestReplaced();
             return Path.Combine(CampaignsRoot(), SafePathSegment(campaignId, "default"));
@@ -28612,7 +28549,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             return Path.Combine(CampaignDirectory(campaignId), "characters", SafePathSegment(heroId, "unknown"));
         }
 
-        private static string CharacterFile(string campaignId, string heroId, params string[] segments)
+        internal static string CharacterFile(string campaignId, string heroId, params string[] segments)
         {
             List<string> parts = new List<string> { CharacterDirectory(campaignId, heroId) };
             parts.AddRange(segments ?? new string[0]);
@@ -28865,7 +28802,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             }
         }
 
-        private static Dictionary<string, object> ReadJsonObject(string path)
+        internal static Dictionary<string, object> ReadJsonObject(string path)
         {
             lock (FileLock)
             {
@@ -28914,7 +28851,7 @@ No extreme close-up, face-only crop, cropped head, cropped shoulders, armor, wea
             }
         }
 
-        private static void WriteJsonObject(string path, object value)
+        internal static void WriteJsonObject(string path, object value)
         {
             ThrowIfCampaignRequestReplaced();
             lock (FileLock)

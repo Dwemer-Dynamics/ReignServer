@@ -22,7 +22,7 @@ namespace ReignBetaServer
         private static string SocialCatalogCachedPath = "";
         private static long SocialCatalogCachedWriteTicks = long.MinValue;
 
-        private static void EnsureSocialReputationSchema(ReignDbConnection connection)
+        internal static void EnsureSocialReputationSchema(ReignDbConnection connection)
         {
             EnsureIdentitySchema(connection);
             EnsureMbtiRelationshipSchema(connection);
@@ -1014,7 +1014,7 @@ AND archetype_id=$archetype AND thread_key=$thread AND last_occurrence_id=$id;",
             }
         }
 
-        private static Dictionary<string, object> SocialCharacterStatusApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> SocialCharacterStatusApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
@@ -1263,7 +1263,7 @@ WHERE status='active' AND occurrence_id IN (SELECT occurrence_id FROM rumor_occu
             return count + forgottenCount;
         }
 
-        private static void ReconcileSocialRelationshipsForSubjects(ReignDbConnection connection, string campaignId,
+        internal static void ReconcileSocialRelationshipsForSubjects(ReignDbConnection connection, string campaignId,
             string timelineId, IEnumerable<string> subjectIds, double worldDay,
             bool schemaReady = false, bool rumorsAlreadyExpired = false)
         {

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class GovernmentService
     {
         private static void AddGovernmentCrownDecisionSelfTests(Action<string, bool, string, object> add)
         {

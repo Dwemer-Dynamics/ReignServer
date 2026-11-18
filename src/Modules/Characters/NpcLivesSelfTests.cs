@@ -566,7 +566,7 @@ VALUES('opening_session',$campaign,'companion','player','open',1,1,'[""player"",
                                     "ballots", new[] { TestDict("memberHeroId", "companion", "optionId", "grant") }) })));
                 var completedVoteArrival = BuildNpcOpeningRequest(state, opening, completedVoteSource,
                     "player", "companion", "completed-vote-opening", 200d);
-                string completedVotePrompt = BuildGovernmentPrivateConversationPrompt(completedVoteArrival);
+                string completedVotePrompt = GovernmentService.BuildGovernmentPrivateConversationPrompt(completedVoteArrival);
                 Check("arrival_preserves_native_closed_vote_evidence_without_new_consent",
                     IsNpcLifeApproach(completedVoteArrival) && completedVotePrompt.Contains("completed-mandate")
                     && completedVotePrompt.Contains("\"closed\":true") && completedVotePrompt.Contains("\"ownRecordedBallot\"")

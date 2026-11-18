@@ -444,7 +444,7 @@ LIMIT 1;", new Dictionary<string, object>
             };
         }
 
-        private static Dictionary<string, object> ResolveEffectiveAttitude(
+        internal static Dictionary<string, object> ResolveEffectiveAttitude(
             ReignDbConnection connection, string campaignId, string timelineId,
             string observerId, string targetId, string context = "")
         {
@@ -498,7 +498,7 @@ ORDER BY source;", new Dictionary<string, object>
             };
         }
 
-        private static Dictionary<string, object> ResolveRulerDiplomaticAttitude(
+        internal static Dictionary<string, object> ResolveRulerDiplomaticAttitude(
             ReignDbConnection connection, string campaignId, string timelineId,
             string observerId, string targetId, string context = "")
         {

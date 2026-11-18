@@ -10,7 +10,7 @@ namespace ReignBetaServer
     {
         // The receipt is written inside the accepted conversation's existing transaction.
         // A generated answer or proposed deal alone never changes a political profile.
-        private static Dictionary<string, object> AcceptedPoliticalReflection(AcceptedConversationUnit unit, bool technicalNotice)
+        internal static Dictionary<string, object> AcceptedPoliticalReflection(AcceptedConversationUnit unit, bool technicalNotice)
         {
             var rows = ReadDictionaryList(unit.Parsed, "politicalReflection");
             int interval = ReadInt(unit.Profile, "politicalInterval", -1);
@@ -58,7 +58,7 @@ ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.Timeli
             return revised;
         }
 
-        private static GovernmentPoliticalProfile ApplyPoliticalWorldEvidence(string campaign, string hero,
+        internal static GovernmentPoliticalProfile ApplyPoliticalWorldEvidence(string campaign, string hero,
             GovernmentPoliticalProfile profile, List<Dictionary<string, object>> records, double worldDay)
         {
             if (records.Count == 0 || worldDay < 0) return profile;

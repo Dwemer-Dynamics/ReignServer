@@ -505,7 +505,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key<$cutoff;",
                     });
         }
 
-        private static bool TableExists(ReignDbConnection connection, string table)
+        internal static bool TableExists(ReignDbConnection connection, string table)
         {
             return QuerySql(connection,
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;",
