@@ -190,7 +190,7 @@ namespace ReignBetaServer
                 var tavernState = TestDict("status", phase, "townName", "Lycaron", "playerHeroStringId", "player", "player", people[0],
                     "madamId", "madam", "roster", tavernRoster, "receipt", TestDict("participantHeroIds", new[] { "worker" }));
                 var tavernChat = TestDict("sceneContext", internalScene, "sceneParticipants", people);
-                BindTavernHouseSceneParticipants(tavernState, tavernChat, TavernHousePresentProfiles(tavernState));
+                CharactersService.BindTavernHouseSceneParticipants(tavernState, tavernChat, CharactersService.TavernHousePresentProfiles(tavernState));
                 var exactPeople = NormalizeSceneParticipants(tavernChat, phase == "negotiating" ? "madam" : "worker");
                 string expectedNpc = phase == "negotiating" ? "madam" : "worker";
                 string venue = ResolveSharedConversationVenue(tavernChat, exactPeople, new());
@@ -310,9 +310,9 @@ namespace ReignBetaServer
             var unresolvedSocial = TestDict("ok", true, "heroStringId", "npc", "reply", "Come join our party.",
                 "conversationGrounding", TestDict("status", "unresolved"),
                 "relationshipAssessments", new[] { TestDict("targetHeroStringId", "player", "valence", "positive") });
-            Check("unresolved_group_reply_cannot_join_or_change_relations", !SocialConversationResultAllowsEffects(unresolvedSocial)
-                && ResolveSocialEventMidTurnJoins("", Payload("Hello."), people, new() { "npc" }, new(), new() { unresolvedSocial }).Count == 0
-                && ReadString(CompactSocialEventTurnResult(unresolvedSocial), "groundingStatus", "") == "unresolved");
+            Check("unresolved_group_reply_cannot_join_or_change_relations", !WorldSimulationService.SocialConversationResultAllowsEffects(unresolvedSocial)
+                && WorldSimulationService.ResolveSocialEventMidTurnJoins("", Payload("Hello."), people, new() { "npc" }, new(), new() { unresolvedSocial }).Count == 0
+                && ReadString(WorldSimulationService.CompactSocialEventTurnResult(unresolvedSocial), "groundingStatus", "") == "unresolved");
 
             string campaign = "input_grounding_" + Guid.NewGuid().ToString("N");
             try

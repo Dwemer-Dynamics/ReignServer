@@ -9,7 +9,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly string[] MemoryLaneIds =
+        internal static readonly string[] MemoryLaneIds =
         {
             "personal_state",
             "interpersonal_history",

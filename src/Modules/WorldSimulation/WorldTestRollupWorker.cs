@@ -8,7 +8,7 @@ using System.Threading;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private static readonly AutoResetEvent WorldTestRollupSignal = new AutoResetEvent(false);
         private static readonly object WorldTestRollupStatusGate = new object();
@@ -24,7 +24,7 @@ namespace ReignBetaServer
         private static long WorldTestRollupLastDurationMs;
         private static long WorldTestRollupLastCompletedTs;
 
-        private static void StartWorldTestRollupWorker()
+        internal static void StartWorldTestRollupWorker()
         {
             lock (WorldTestRollupStatusGate)
             {
@@ -40,14 +40,14 @@ namespace ReignBetaServer
             }
         }
 
-        private static void SignalWorldTestRollupWorker()
+        internal static void SignalWorldTestRollupWorker()
         {
             WorldTestRollupSignal.Set();
         }
 
         private static void WorldTestRollupLoop()
         {
-            while (!WorldTestRollupWorkerStopping && !ShutdownRequested)
+            while (!WorldTestRollupWorkerStopping && !Program.ShutdownRequested)
             {
                 bool processed = false;
                 try
@@ -86,12 +86,12 @@ namespace ReignBetaServer
                 Dictionary<string, object> overview = BuildWorldTestOverview(
                     item.CampaignId, item.TimelineId, double.MinValue, double.MaxValue, 100);
                 Dictionary<string, object> rollup = CompactWorldTestRollup(overview);
-                using (ReignDbConnection connection = OpenCampaignConnection(item.CampaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(item.CampaignId))
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     EnsureWorldTestSchema(connection);
                     EnsureWorldTestTelemetrySchema(connection);
-                    Dictionary<string, object> heartbeat = QuerySql(connection, @"
+                    Dictionary<string, object> heartbeat = Program.QuerySql(connection, @"
 SELECT world_day FROM world_test_native_heartbeats
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day LIMIT 1;",
                         new Dictionary<string, object>
@@ -103,7 +103,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day LIMIT 1;"
                     double worldDay = ReadDouble(heartbeat, "world_day", item.DayKey);
                     rollup["worldDay"] = worldDay;
                     long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    ExecuteSql(connection, @"INSERT INTO world_test_daily_rollups(
+                    Program.ExecuteSql(connection, @"INSERT INTO world_test_daily_rollups(
 campaign_id,timeline_id,day_key,world_day,overall_status,rollup_json,created_ts,updated_ts)
 VALUES($campaign,$timeline,$day,$worldDay,$status,$rollup,$ts,$ts)
 ON CONFLICT(campaign_id,timeline_id,day_key) DO UPDATE SET
@@ -115,7 +115,7 @@ world_day=$worldDay,overall_status=$status,rollup_json=$rollup,updated_ts=$ts;",
                             ["status"] = ReadString(overview, "overallStatus", "insufficient_data"),
                             ["rollup"] = Json.Serialize(rollup), ["ts"] = now
                         });
-                    ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
+                    Program.ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
 status='completed',attempt_count=attempt_count+1,last_error='',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day
 AND revision=$revision;",
@@ -129,7 +129,7 @@ AND revision=$revision;",
                     CleanupCompletedWorldTestTelemetry(
                         connection, item.CampaignId, item.TimelineId, item.DayKey);
                     transaction.Commit();
-                    ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
+                    Program.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
                 }
                 stopwatch.Stop();
                 lock (WorldTestRollupStatusGate)
@@ -162,10 +162,10 @@ AND revision=$revision;",
                 }
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(item.CampaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(item.CampaignId))
                     {
                         EnsureWorldTestTelemetrySchema(connection);
-                        ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
+                        Program.ExecuteSql(connection, @"UPDATE world_test_rollup_queue SET
 status='pending',attempt_count=attempt_count+1,last_error=$error,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                             new Dictionary<string, object>
@@ -209,14 +209,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day;",
                 ["queueCutoff"] = completedDayKey - 31,
                 ["evidenceCutoff"] = completedDayKey - 63
             };
-            ExecuteSql(connection, @"DELETE FROM world_test_rollup_queue
+            Program.ExecuteSql(connection, @"DELETE FROM world_test_rollup_queue
 WHERE rowid IN (
   SELECT rowid FROM world_test_rollup_queue
   WHERE campaign_id=$campaign AND timeline_id=$timeline
     AND status='completed' AND day_key<$queueCutoff
   ORDER BY day_key LIMIT 100
 );", parameters);
-            ExecuteSql(connection, @"DELETE FROM world_test_diagnostic_evidence
+            Program.ExecuteSql(connection, @"DELETE FROM world_test_diagnostic_evidence
 WHERE rowid IN (
   SELECT rowid FROM world_test_diagnostic_evidence
   WHERE campaign_id=$campaign AND timeline_id=$timeline
@@ -233,19 +233,19 @@ WHERE rowid IN (
             {
                 string campaignId =
                     ReadString(campaign, "campaignId", "");
-                if (IsInternalCampaignId(campaignId)) continue;
-                string campaignDirectory = CampaignDirectory(campaignId);
+                if (Program.IsInternalCampaignId(campaignId)) continue;
+                string campaignDirectory = Program.CampaignDirectory(campaignId);
                 if (!Directory.Exists(campaignDirectory)
-                    || !IsRealCampaignDirectory(
+                    || !Program.IsRealCampaignDirectory(
                         new DirectoryInfo(campaignDirectory))) continue;
                 try
                 {
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(campaignId))
+                        Program.OpenCampaignConnection(campaignId))
                     {
                         EnsureWorldTestTelemetrySchema(connection);
-                        EnsureMbtiRelationshipSchema(connection);
-                        Dictionary<string, object> row = QuerySql(connection, @"
+                        RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                        Dictionary<string, object> row = Program.QuerySql(connection, @"
 SELECT queue.campaign_id,queue.timeline_id,queue.day_key,queue.revision,queue.updated_ts
 FROM world_test_rollup_queue queue WHERE queue.status='pending'
 AND NOT EXISTS (SELECT 1 FROM relationship_daily_inputs input
@@ -280,18 +280,18 @@ ORDER BY queue.day_key,queue.updated_ts LIMIT 1;").FirstOrDefault();
             {
                 string campaignId =
                     ReadString(campaign, "campaignId", "");
-                if (IsInternalCampaignId(campaignId)) continue;
-                string campaignDirectory = CampaignDirectory(campaignId);
+                if (Program.IsInternalCampaignId(campaignId)) continue;
+                string campaignDirectory = Program.CampaignDirectory(campaignId);
                 if (!Directory.Exists(campaignDirectory)
-                    || !IsRealCampaignDirectory(
+                    || !Program.IsRealCampaignDirectory(
                         new DirectoryInfo(campaignDirectory))) continue;
                 try
                 {
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(campaignId))
+                        Program.OpenCampaignConnection(campaignId))
                     {
                         EnsureWorldTestTelemetrySchema(connection);
-                        pending += ReadInt(QuerySql(connection,
+                        pending += ReadInt(Program.QuerySql(connection,
                             "SELECT COUNT(*) AS count FROM world_test_rollup_queue WHERE status='pending';")
                             .FirstOrDefault(), "count", 0);
                     }

@@ -21,7 +21,7 @@ namespace ReignBetaServer
                     generation = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "");
                     EnsureConversationAgencySchema(connection); EnsureIntoxicationSchema(connection);
                     EnsureAcceptedConversationUnitSchema(connection);
-                    EnsureIdentitySchema(connection); EnsureConversationSceneStateSchema(connection);
+                    CharactersService.EnsureIdentitySchema(connection); EnsureConversationSceneStateSchema(connection);
                     ReputationService.EnsureSocialReputationSchema(connection); EnsureConversationContinuitySchema(connection);
                     ExecuteSql(connection, @"INSERT INTO conversation_sessions
 (session_id,campaign_id,npc_id,player_id,status,start_ts,end_ts,participants_json,payload_json)
@@ -214,8 +214,8 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                 {
                     foreach (string id in new[] { "npc", "player", "listener" })
                         ExecuteSql(connection, "INSERT INTO identity_roster(hero_id,canonical_name,is_alive,is_adult) VALUES($id,$id,1,1);", TestDict("id", id));
-                    UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "player", "name", "Michael"), "fixture", "", 20d, "");
-                    UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "listener", "name", "Listener"), "fixture", "", 20d, "");
+                    CharactersService.UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "player", "name", "Michael"), "fixture", "", 20d, "");
+                    CharactersService.UpsertVerifiedIdentity(connection, TestDict("heroStringId", "npc"), TestDict("heroStringId", "listener", "name", "Listener"), "fixture", "", 20d, "");
                 }
                 void Context(AcceptedConversationUnit target)
                 {
@@ -269,10 +269,10 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                     var falseIntroducer = CloneDictionary(contextUnit.Parsed);
                     falseIntroducer["identityIntroductions"] = new[] { TestDict("observerId", "player", "subjectId", "npc", "introducerId", "listener",
                         "claimedName", "Michael", "supportingQuote", "Let me introduce Michael.") };
-                    var invalid = ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, falseIntroducer, "test", "npc", "player",
+                    var invalid = CharactersService.ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, falseIntroducer, "test", "npc", "player",
                         contextUnit.PlayerText, contextUnit.Reply, new[] { "npc", "player", "listener" }, connection);
                     Check("another_present_character_is_not_the_introducer", invalid.Count == 1 && !ReadBool(invalid[0], "ok", true));
-                    var thought = ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, contextUnit.Parsed, "test", "npc", "player", "Hello.",
+                    var thought = CharactersService.ApplyIdentityIntroductionWrites(campaign, contextUnit.Payload, contextUnit.Parsed, "test", "npc", "player", "Hello.",
                         "*She thinks: Let me introduce Michael.*", new[] { "npc", "player", "listener" }, connection);
                     Check("private_narration_cannot_verify_an_introduction", thought.Count == 1 && !ReadBool(thought[0], "ok", true));
                     var playerScene = CloneDictionary(contextUnit.Payload);
@@ -417,7 +417,7 @@ VALUES('accepted_unit_session',$campaign,'npc','player','open',1,1,'[""npc"",""p
                         && ReadDouble(drinking, "consumed", -1) == .25
                         && ReadString(drinking, "acceptedReplyHash", "") == PromptHash(privateDrink.Reply), privateReceipt);
                 }
-                using (var connection = OpenCampaignConnection(campaign)) EnsurePlayerApproachSchema(connection);
+                using (var connection = OpenCampaignConnection(campaign)) RelationshipsService.EnsurePlayerApproachSchema(connection);
                 foreach (string route in new[] { "party", "private_party", "social_event" })
                 {
                     var silent = Unit("silent_" + route, group: route != "social_event", whisper: route == "private_party");
@@ -613,7 +613,7 @@ WHERE s.npc_id='npc' AND t.status='active';").Select(row => TestDict("id", ReadS
                             ? ReadString(row, "text", "") + " Edited." : ReadString(row, "text", ""),
                         "speaker", ReadString(row, "speaker_name", ""), "role", ReadString(row, "role", ""),
                         "worldDay", ReadDouble(row, "world_day", 0d))).ToList();
-                    SyncEditorConversationTurns(connection, "npc", rows);
+                    CharactersService.SyncEditorConversationTurns(connection, "npc", rows);
                 }
                 var editedAck = editedDescriptor == null ? null : Ack(editedDescriptor);
                 Check("view_insertion_edited_source_rejects_matching_descriptor_without_mutation", editedDescriptor != null

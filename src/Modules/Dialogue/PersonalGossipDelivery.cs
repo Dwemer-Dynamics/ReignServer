@@ -52,11 +52,11 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> row = null, data = null;
                 string token = Guid.NewGuid().ToString("N"), generation = "";
-                long processGeneration = Interlocked.Read(ref CampaignReplacementGeneration);
+                long processGeneration = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
                 CampaignDataGate.EnterReadLock();
                 try
                 {
-                    using (EnterCampaignWorkLock(GossipGate(campaign)))
+                    using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
                     using (var c = OpenCampaignConnection(campaign))
                     {
                         EnsurePersonalGossipSchema(c);
@@ -67,7 +67,7 @@ namespace ReignBetaServer
                         row = QuerySql(c, @"SELECT m.* FROM personal_gossip_messages m JOIN personal_gossip_clock k ON k.timeline_id=m.timeline_id
 WHERE m.timeline_id=$timeline AND m.attempts<3 AND m.expires_day>=k.world_day
 AND (m.status='pending' OR m.status='generating' AND (m.lease_until<$now OR m.lease_token NOT LIKE $generation))
-ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timeline", ActiveWorldHistoryTimeline(c), "generation", generation + ":%")).FirstOrDefault();
+ORDER BY m.created_day,m.message_id LIMIT 1;", GossipFields("now", now, "timeline", WorldSimulationService.ActiveWorldHistoryTimeline(c), "generation", generation + ":%")).FirstOrDefault();
                         if (row == null) return;
                         data = GossipJson(row);
                         if (!GossipSourcesActive(c, data))
@@ -126,12 +126,12 @@ WHERE message_id=$id;", GossipFields("id", ReadString(row, "message_id", ""), "t
                 CampaignDataGate.EnterReadLock();
                 try
                 {
-                    using (EnterCampaignWorkLock(GossipGate(campaign)))
+                    using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
                     using (var c = OpenCampaignConnection(campaign))
                     {
                         EnsurePersonalGossipSchema(c);
                         EnsureMemoryPrecisionSchema(c);
-                        if (processGeneration != Interlocked.Read(ref CampaignReplacementGeneration)
+                        if (processGeneration != Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration)
                             || generation != ReadString(ReadMemoryPrecisionState(c), "restore_generation", "")) continue;
                         var current = QuerySql(c, "SELECT * FROM personal_gossip_messages WHERE message_id=$id AND lease_token=$token;",
                             GossipFields("id", ReadString(row, "message_id", ""), "token", token)).FirstOrDefault();

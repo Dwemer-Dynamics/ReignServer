@@ -6,11 +6,11 @@ using Reign.Core.Contracts.Government;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         // The receipt is written inside the accepted conversation's existing transaction.
         // A generated answer or proposed deal alone never changes a political profile.
-        internal static Dictionary<string, object> AcceptedPoliticalReflection(AcceptedConversationUnit unit, bool technicalNotice)
+        internal static Dictionary<string, object> AcceptedPoliticalReflection(Program.AcceptedConversationUnit unit, bool technicalNotice)
         {
             var rows = ReadDictionaryList(unit.Parsed, "politicalReflection");
             int interval = ReadInt(unit.Profile, "politicalInterval", -1);
@@ -27,8 +27,8 @@ namespace ReignBetaServer
                     return TestDict();
                 accepted.Add(TestDict("value", (int)value, "stance", stance, "importance", importance, "evidenceQuote", quote, "sourceQuote", source));
             }
-            string identity = PromptHash(string.Join("|", rows.Select(x => ReadString(x, "sourceQuote", "").Trim().ToLowerInvariant()).OrderBy(x => x, StringComparer.Ordinal)));
-            return TestDict("heroId", unit.Hero, "timelineId", ContinuityTimeline(unit.Payload), "interval", interval,
+            string identity = Program.PromptHash(string.Join("|", rows.Select(x => ReadString(x, "sourceQuote", "").Trim().ToLowerInvariant()).OrderBy(x => x, StringComparer.Ordinal)));
+            return TestDict("heroId", unit.Hero, "timelineId", Program.ContinuityTimeline(unit.Payload), "interval", interval,
                 "worldDay", ReadDouble(unit.Payload, "worldDay", -1), "receiptId", "political_discussion:" + identity,
                 "acceptedUnitId", unit.EventId, "changes", accepted);
         }
@@ -37,9 +37,9 @@ namespace ReignBetaServer
             GovernmentPoliticalProfile profile, double worldDay)
         {
             if (worldDay < 0) return profile;
-            using var connection = OpenCampaignConnection(campaign);
-            EnsureAcceptedConversationUnitSchema(connection);
-            var receipts = QuerySql(connection, @"SELECT receipt_json FROM conversation_accepted_units
+            using var connection = Program.OpenCampaignConnection(campaign);
+            Program.EnsureAcceptedConversationUnitSchema(connection);
+            var receipts = Program.QuerySql(connection, @"SELECT receipt_json FROM conversation_accepted_units
 WHERE receipt_json::jsonb->'politicalReflection'->>'heroId'=$hero
 AND receipt_json::jsonb->'politicalReflection'->>'timelineId'=$timeline
 ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.TimelineId));
@@ -70,12 +70,12 @@ ORDER BY created_ts,unit_id;", TestDict("hero", hero, "timeline", profile.Timeli
                     || !evidence.Applied || string.IsNullOrEmpty(evidence.TimelineId)) continue;
                 var changes = GovernmentPoliticalBeliefs.WorldEventChanges(evidence, hero);
                 if (changes.Count == 0) continue;
-                string path = CharacterFile(campaign, hero, "politics", "event-" + SafeMemoryKey(profile.TimelineId)
-                    + "-" + PromptHash(evidence.Id) + ".json");
-                var prior = ReadJsonObject(path);
+                string path = Program.CharacterFile(campaign, hero, "politics", "event-" + Program.SafeMemoryKey(profile.TimelineId)
+                    + "-" + Program.PromptHash(evidence.Id) + ".json");
+                var prior = Program.ReadJsonObject(path);
                 if (prior.Count > 0 && CanonicalJson(prior) != CanonicalJson(record))
                     throw new InvalidOperationException("A completed political event cannot change its facts.");
-                if (prior.Count == 0) WriteJsonObject(path, record);
+                if (prior.Count == 0) Program.WriteJsonObject(path, record);
                 GovernmentPoliticalBeliefs.Evolve(revised, evidence.Id, evidence.Kind + ":" + evidence.TargetId,
                     evidence.Interval, true, false, changes);
             }

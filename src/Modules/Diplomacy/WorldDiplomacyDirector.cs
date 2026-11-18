@@ -211,7 +211,7 @@ namespace ReignBetaServer
                     noInitiative["rulerName"] = ReadString(testedRuler, "leaderName", "Unknown ruler");
                     noInitiative["initiativeAttempts"] = initiativeAttempts;
                 }
-                Program.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
+                WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
                     ReadString(noInitiative, "status", "no_ruler_eligible"),
                     initiativeAttempts.Count, false, false);
                 return noInitiative;
@@ -247,7 +247,7 @@ namespace ReignBetaServer
             Dictionary<string, object> decision = AskRulerForDiplomaticDecision(campaignId, payload, ruler, traits, rulerState, mode, fixedTargetId);
             if (!ReadBool(decision, "ok", false))
             {
-                Program.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
+                WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
                     "model_failure", initiativeAttempts.Count, true, true,
                     new Dictionary<string, object> { ["intent"] = mode });
                 return DirectorError(ReadString(decision, "error", "The diplomacy model did not return a usable decision."));
@@ -274,7 +274,7 @@ namespace ReignBetaServer
                 }
                 rulerState["lastConsideredDay"] = worldDay;
                 SaveDirectorState(campaignId, state);
-                Program.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
+                WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
                     "ruler_chose_no_action", initiativeAttempts.Count, true, false,
                     new Dictionary<string, object>
                     {
@@ -542,7 +542,7 @@ namespace ReignBetaServer
                 result["initiativeAttempts"] = initiativeAttempts;
                 if (normalized != null) result["record"] = normalized;
             }
-            Program.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
+            WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
                 ReadString(result, "status", ""), initiativeAttempts.Count, true, false,
                 new Dictionary<string, object>
                 {
@@ -584,8 +584,8 @@ namespace ReignBetaServer
         {
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                Program.EnsureMbtiRelationshipSchema(connection);
-                Program.EnsureWorldRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureWorldRelationshipSchema(connection);
                 foreach (Dictionary<string, object> observer in kingdoms)
                 {
                     string observerHeroId = ReadString(observer,
@@ -600,7 +600,7 @@ namespace ReignBetaServer
                             || string.IsNullOrWhiteSpace(targetHeroId))
                             continue;
                         Dictionary<string, object> attitude =
-                            Program.ResolveRulerDiplomaticAttitude(connection, campaignId,
+                            RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId,
                                 timelineId, observerHeroId, targetHeroId,
                                 "world_diplomacy");
                         attitude["targetKingdomId"] =
@@ -998,7 +998,7 @@ namespace ReignBetaServer
             };
             string rulerHeroId = ReadString(ruler, "leaderHeroId", "");
             Dictionary<string, object> rulerProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, rulerHeroId, "profile.json"));
-            string rulerMbti = Program.BuildCharacterMbtiPromptBlock(campaignId, rulerHeroId, rulerProfile,
+            string rulerMbti = RelationshipsService.BuildCharacterMbtiPromptBlock(campaignId, rulerHeroId, rulerProfile,
                 Program.ReadJsonObject(Program.CharacterFile(campaignId, rulerHeroId, "traits.json")));
             List<Dictionary<string, object>> legalActionCatalog =
                 Program.CompactActionCatalog(Program.ActionCatalog()).Where(x =>
@@ -1113,7 +1113,7 @@ namespace ReignBetaServer
                 : "You are the target NPC ruler answering a diplomatic proposal. Accept, refuse, or make one counteroffer.";
             string responderHeroId = ReadString(responder, "leaderHeroId", "");
             Dictionary<string, object> responderProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, responderHeroId, "profile.json"));
-            string responderMbti = Program.BuildCharacterMbtiPromptBlock(campaignId, responderHeroId, responderProfile,
+            string responderMbti = RelationshipsService.BuildCharacterMbtiPromptBlock(campaignId, responderHeroId, responderProfile,
                 Program.ReadJsonObject(Program.CharacterFile(campaignId, responderHeroId, "traits.json")));
             List<string> counterCommands = DirectorIntentCommands.TryGetValue(mode,
                     out HashSet<string> legalCommands)
@@ -1677,7 +1677,7 @@ namespace ReignBetaServer
                     {
                         Dictionary<string,object> HeroRow(Dictionary<string,object> x)=>new Dictionary<string,object>{{"heroStringId",ReadString(x,"heroId","")},{"isRulingClanMember",true},{"clanFiefCount",ReadInt(x,"fiefCount",-1)}};
                         Dictionary<string,object> ClanRow(Dictionary<string,object> x)=>new Dictionary<string,object>{{"clanId",ReadString(x,"clanId","")},{"leaderId",ReadString(x,"leaderId","")},{"tier",ReadInt(x,"clanTier",0)},{"fiefCount",ReadInt(x,"fiefCount",-1)}};
-                        var quote=Program.MarriageQuote(ReadString(world,"campaignId",""),HeroRow(first),HeroRow(second),ClanRow(first),ClanRow(second),new List<Dictionary<string,object>>(),ReadInt(first,"nativeYear",-1));
+                        var quote=RelationshipsService.MarriageQuote(ReadString(world,"campaignId",""),HeroRow(first),HeroRow(second),ClanRow(first),ClanRow(second),new List<Dictionary<string,object>>(),ReadInt(first,"nativeYear",-1));
                         if(quote==null)errors.Add("Royal marriage opportunity is unavailable this year.");
                         else { terms["marriageTerms"]=quote; candidate["terms"]=terms;
                             string marriagePayer=ReadString(quote,"payerId","");var pay=ReadString(first,"leaderId","")==marriagePayer?first:second;
@@ -2146,17 +2146,17 @@ namespace ReignBetaServer
         {
             string heroId = ReadString(ruler, "leaderHeroId", "");
             Dictionary<string, object> document = string.IsNullOrWhiteSpace(heroId) ? new Dictionary<string, object>() : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
-            if (document.Count > 0 && Program.EnsureTraitPercentageData(document, heroId))
+            if (document.Count > 0 && CharactersService.EnsureTraitPercentageData(document, heroId))
                 Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), document);
             Dictionary<string, object> persisted = ReadDictionary(document, "courtVirtues");
-            if (Program.TraitPercentageDocumentReady(document) && HasCompleteDirectorVirtueProfile(persisted)) return NormalizeDirectorVirtues(persisted);
+            if (CharactersService.TraitPercentageDocumentReady(document) && HasCompleteDirectorVirtueProfile(persisted)) return NormalizeDirectorVirtues(persisted);
 
             if (!string.IsNullOrWhiteSpace(heroId)
-                && Program.LoadCharacterProfileLibrary().TryGetValue(heroId, out Dictionary<string, object> shipped))
+                && CharactersService.LoadCharacterProfileLibrary().TryGetValue(heroId, out Dictionary<string, object> shipped))
             {
                 Dictionary<string, object> shippedTraits = ReadDictionary(shipped, "traits") ?? new Dictionary<string, object>();
                 Dictionary<string, object> shippedVirtues = ReadDictionary(shippedTraits, "courtVirtues");
-                if (Program.TraitPercentageDocumentReady(shippedTraits) && HasCompleteDirectorVirtueProfile(shippedVirtues)) return NormalizeDirectorVirtues(shippedVirtues);
+                if (CharactersService.TraitPercentageDocumentReady(shippedTraits) && HasCompleteDirectorVirtueProfile(shippedVirtues)) return NormalizeDirectorVirtues(shippedVirtues);
             }
 
             return NeutralDirectorVirtues();

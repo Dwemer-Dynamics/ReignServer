@@ -340,7 +340,7 @@ namespace ReignBetaServer
             var politicalNativeCase = CloneDictionary(nativeWriterCase);
             var politicalNativeFixture = ReadDictionary(politicalNativeCase, "writerReplay");
             var capturedPolitics = TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(GovernmentPoliticalBeliefs.Seed(
-                "native_politics_source", "npc", "native_politics_timeline", CoreTraitKeys.ToDictionary(k => k, _ => 50),
+                "native_politics_source", "npc", "native_politics_timeline", CharactersService.CoreTraitKeys.ToDictionary(k => k, _ => 50),
                 new Dictionary<ReignGovernmentPlank, double>(), false)));
             politicalNativeFixture["profile"] = TestDict("name", "Mira", "campaignId", "native_politics_source", "heroStringId", "npc",
                 "politicalTimelineId", "native_politics_timeline", "appliedPoliticalProfile", CloneDictionary(capturedPolitics));

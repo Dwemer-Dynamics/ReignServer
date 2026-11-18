@@ -8,7 +8,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string PoliticalRiskModel = "reign_political_risk_v1";
+        internal const string PoliticalRiskModel = "reign_political_risk_v1";
 
         private static Dictionary<string, object> BuildPoliticalRiskPosture(
             Dictionary<string, object> characteristics,

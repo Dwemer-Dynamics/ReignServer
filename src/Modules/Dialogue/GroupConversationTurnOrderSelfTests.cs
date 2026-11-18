@@ -54,11 +54,11 @@ namespace ReignBetaServer
             check("duplicate_roster_once", GroupConversationTurnOrder.Order(roster.Concat(roster), text, "same").Count == 3);
             check("empty_roster", GroupConversationTurnOrder.Order(null, text, "same").Count == 0);
             var profiles = roster.Select(p => TestDict("heroStringId", p.Id, "name", p.Name)).ToList();
-            check("event_adapter_multiple_named", BuildSocialEventResponseOrder(TestDict("playerText", text, "turnId", "shared"), profiles)
+            check("event_adapter_multiple_named", WorldSimulationService.BuildSocialEventResponseOrder(TestDict("playerText", text, "turnId", "shared"), profiles)
                 .SequenceEqual(new[] { "first", "second", "observer" }));
-            check("event_adapter_unresolved_focus_no_provider", ResolveSocialEventAddressedHeroes(
+            check("event_adapter_unresolved_focus_no_provider", WorldSimulationService.ResolveSocialEventAddressedHeroes(
                 TestDict("playerText", "A curious evening.", "turnId", "shared"), profiles).Count == 3);
-            check("event_adapter_latest_question_only", ResolveSocialEventAddressedHeroes(TestDict("playerText", "Yes.",
+            check("event_adapter_latest_question_only", WorldSimulationService.ResolveSocialEventAddressedHeroes(TestDict("playerText", "Yes.",
                 "transcript", new[] { "Arven: Are you staying?", "Player: Until morning.", "Taren: That settles it.", "Player: Yes." }), profiles).Count == 3);
             return results;
         }

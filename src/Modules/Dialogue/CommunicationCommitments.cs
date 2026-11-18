@@ -116,10 +116,10 @@ The pending commitments below are your own private dispatch ledger. Mention a pa
             string generation = "";
             if (originalPlans.Count > 0)
             using (new CommunicationDataReadLease())
-            using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
+            using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
             using (var c = OpenCampaignConnection(campaign))
             {
-                EnsureCommunicationSchema(c); generation = NpcLivesGeneration(c);
+                EnsureCommunicationSchema(c); generation = CharactersService.NpcLivesGeneration(c);
                 foreach (var plan in originalPlans.Where(p => ReadString(p, "operation", "send") == "send"))
                     drafts.AddRange(QuerySql(c, @"SELECT * FROM communication_messages WHERE timeline_id=$timeline AND speaker_id=$speaker
 AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_clarification') ORDER BY created_day,message_id LIMIT 1;",
@@ -170,8 +170,8 @@ AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_cla
             {
                 if (generation.Length == 0)
                 using (new CommunicationDataReadLease())
-                using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
-                using (var c = OpenCampaignConnection(campaign)) generation = NpcLivesGeneration(c);
+                using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
+                using (var c = OpenCampaignConnection(campaign)) generation = CharactersService.NpcLivesGeneration(c);
                 foreach (var plan in ReadDictionaryList(repaired, "communicationPlans"))
                     if (ReadString(plan, "operation", "send") == "send" && !CommunicationPromise(ReadString(plan, "evidenceQuote", ""), currentReply))
                     {
@@ -191,9 +191,9 @@ AND recipient_id=$recipient AND topic_key=$key AND status IN ('draft','needs_cla
             {
                 if (drafts.Count > 0)
                 using (new CommunicationDataReadLease())
-                using (EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)))
+                using (PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)))
                 using (var c = OpenCampaignConnection(campaign))
-                    if (NpcLivesGeneration(c) == generation)
+                    if (CharactersService.NpcLivesGeneration(c) == generation)
                         foreach (var draft in drafts)
                         {
                             var current = QuerySql(c, @"SELECT * FROM communication_messages WHERE message_id=$id AND revision=$revision
@@ -540,9 +540,9 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence ORD
             return text.ToString();
         }
 
-        private static bool CommunicationReplyKnown(ReignDbConnection c, string id, string hero, Dictionary<string, object> payload)
+        internal static bool CommunicationReplyKnown(ReignDbConnection c, string id, string hero, Dictionary<string, object> payload)
         {
-            if (c == null || !TableExists(c, "communication_history")) return false;
+            if (c == null || !WorldSimulationService.TableExists(c, "communication_history")) return false;
             var access = BuildKnowledgeAccessContext(hero, ReadFirstString(payload, "playerHeroStringId", "playerId"), "", payload);
             return QuerySql(c, @"SELECT receipt_id FROM communication_history WHERE message_id=$id AND timeline_id=$timeline AND owner_id=$hero
 AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence LIMIT 1;",
@@ -550,9 +550,9 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence LIM
                     "day", ReadDouble(payload, "worldDay", 0), "ts", access.AsOfTimestamp, "sequence", access.AsOfAcceptedSequence)).Count > 0;
         }
 
-        private static void BindRecoveredCommunications(ReignDbConnection c, string requested, string recovered, long sequence, string head)
+        internal static void BindRecoveredCommunications(ReignDbConnection c, string requested, string recovered, long sequence, string head)
         {
-            if (requested == recovered || !TableExists(c, "communication_messages")) return;
+            if (requested == recovered || !WorldSimulationService.TableExists(c, "communication_messages")) return;
             var restored = RestoredLetterContext(c, recovered);
             if (restored == null || ReadLong(restored, "head_sequence", -1) != sequence || ReadString(restored, "head_event_id", "") != head) return;
             var args = TestDict("old", requested, "new", recovered, "day", ReadDouble(restored, "world_day", -1));
@@ -560,7 +560,7 @@ AND acquired_day<=$day AND acquired_ts<=$ts AND accepted_sequence<=$sequence LIM
             // similarly named timeline. IDs, content, deadlines and receipts stay fixed.
             ExecuteSql(c, @"UPDATE communication_messages SET timeline_id=$new WHERE timeline_id=$old AND created_day<=$day;
 UPDATE communication_history SET timeline_id=$new WHERE timeline_id=$old AND acquired_day<=$day;", args);
-            if (!TableExists(c, "character_npc_lives_state")) return;
+            if (!WorldSimulationService.TableExists(c, "character_npc_lives_state")) return;
             var old = QuerySql(c, "SELECT value_json FROM character_npc_lives_state WHERE timeline_id=$old;", args).FirstOrDefault();
             if (old == null) return;
             var state = Json.Deserialize<ReignBeta.Shared.Characters.NpcLivesState>(ReadString(old, "value_json", "{}"));

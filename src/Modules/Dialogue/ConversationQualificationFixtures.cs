@@ -7,11 +7,11 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static Dictionary<string, object> ConversationQualificationRelationshipFixtureApi(
+        internal static Dictionary<string, object> ConversationQualificationRelationshipFixtureApi(
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!IsLiveTestArmed(ReadJsonObject(LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -79,12 +79,12 @@ namespace ReignBetaServer
                 ReadInt(payload, "affinityAtoB", 62), -100, 100);
             int secondToFirst = Clamp(
                 ReadInt(payload, "affinityBtoA", -34), -100, 100);
-            string pairKey = AmbientPairKey(firstId, secondId);
+            string pairKey = RelationshipsService.AmbientPairKey(firstId, secondId);
             Dictionary<string, object> before;
             Dictionary<string, object> after;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 before = QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey })
@@ -137,12 +137,12 @@ namespace ReignBetaServer
                 int secondDelta = secondToFirst - currentSecondToFirst;
                 double worldDay = ReadDouble(payload, "worldDay", 0d);
                 if (firstDelta != 0)
-                    ApplyAuthoritativeRelationshipDelta(
+                    RelationshipsService.ApplyAuthoritativeRelationshipDelta(
                         connection, campaignId, firstId, secondId,
                         firstDelta, worldDay, "qualification_fixture",
                         ReadString(payload, "timelineId", "main"));
                 if (secondDelta != 0)
-                    ApplyAuthoritativeRelationshipDelta(
+                    RelationshipsService.ApplyAuthoritativeRelationshipDelta(
                         connection, campaignId, secondId, firstId,
                         secondDelta, worldDay, "qualification_fixture",
                         ReadString(payload, "timelineId", "main"));
@@ -186,7 +186,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!IsLiveTestArmed(ReadJsonObject(LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -395,7 +395,7 @@ known_by_json=$participants,payload_json=$payload,created_utc=$utc;",
             List<string> errors = new List<string>();
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureMbtiRelationshipSchema(connection);
+                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 foreach (Dictionary<string, object> fixture in fixtures)
                 {
                     if (ReadBool(fixture, "restored", false)) continue;
@@ -489,7 +489,7 @@ updated_ts=$ts;",
                 Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            if (!IsLiveTestArmed(ReadJsonObject(LiveTestArmPath())))
+            if (!WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false,
@@ -627,7 +627,7 @@ updated_ts=$ts;",
                 using (ReignDbConnection connection =
                     OpenCampaignConnection(campaignId))
                 {
-                    EnsureIdentitySchema(connection);
+                    CharactersService.EnsureIdentitySchema(connection);
                     Dictionary<string, object> subject =
                         new Dictionary<string, object>
                         {
@@ -647,7 +647,7 @@ updated_ts=$ts;",
                         if (fixture == null)
                         {
                             Dictionary<string, object> original =
-                                ReadAcquaintance(
+                                CharactersService.ReadAcquaintance(
                                     connection, targetId, playerId);
                             identityFixtures.Add(
                                 new Dictionary<string, object>
@@ -663,7 +663,7 @@ updated_ts=$ts;",
                         else if (ReadBool(fixture, "restored", false))
                         {
                             Dictionary<string, object> original =
-                                ReadAcquaintance(
+                                CharactersService.ReadAcquaintance(
                                     connection, targetId, playerId);
                             fixture["originalExists"] =
                                 original != null;
@@ -683,7 +683,7 @@ updated_ts=$ts;",
                         ConversationReadinessStatePath(campaignId), state);
                     foreach (string targetId in targetIds)
                     {
-                        UpsertVerifiedIdentity(
+                        CharactersService.UpsertVerifiedIdentity(
                             connection,
                             new Dictionary<string, object>
                             {
@@ -721,7 +721,7 @@ updated_ts=$ts;",
                     {
                         if (verifyIdentity)
                         {
-                            MaterializeCharacterProfile(
+                            CharactersService.MaterializeCharacterProfile(
                                 campaignId,
                                 targetId,
                                 runtimeProfile,
@@ -747,7 +747,7 @@ updated_ts=$ts;",
                             if (profile.Count == 0)
                                 profile = runtimeProfile;
                             if (traits.Count == 0)
-                                traits = BuildTraitDocument(runtimeProfile);
+                                traits = CharactersService.BuildTraitDocument(runtimeProfile);
                         }
                     }
                 }
@@ -757,7 +757,7 @@ updated_ts=$ts;",
                     {
                         if (verifyIdentity)
                         {
-                            MaterializeCharacterProfile(
+                            CharactersService.MaterializeCharacterProfile(
                                 campaignId,
                                 targetId,
                                 profile,
@@ -767,7 +767,7 @@ updated_ts=$ts;",
                         }
                         else
                         {
-                            traits = BuildTraitDocument(profile);
+                            traits = CharactersService.BuildTraitDocument(profile);
                         }
                     }
                 }
@@ -968,7 +968,7 @@ updated_ts=$ts;",
             List<string> errors = new List<string>();
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureIdentitySchema(connection);
+                CharactersService.EnsureIdentitySchema(connection);
                 foreach (Dictionary<string, object> fixture in fixtures)
                 {
                     if (!force

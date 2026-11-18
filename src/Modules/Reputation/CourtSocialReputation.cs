@@ -908,7 +908,7 @@ updated_ts=excluded.updated_ts;",
                         {
                             string observerId = ReadString(pair[0], "heroStringId", "");
                             string subjectId = ReadString(pair[1], "heroStringId", "");
-                            string status = Program.UpsertVerifiedIdentity(connection, pair[0], pair[1],
+                            string status = CharactersService.UpsertVerifiedIdentity(connection, pair[0], pair[1],
                                 "explicit_group_introduction", sessionId, worldDay, sessionId + ":" + exchange.Key);
                             results.Add(new Dictionary<string, object>
                             {

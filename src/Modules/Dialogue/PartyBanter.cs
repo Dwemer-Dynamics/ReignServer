@@ -80,14 +80,14 @@ events|something amusing about the supplied shared encounter";
         // Injected only by isolated self-tests; production always uses the canonical provider adapter.
         private static Func<Dictionary<string, object>, Action<string>, Func<bool>, Dictionary<string, object>> BanterTestProvider;
 
-        private static void EnsureBanterSchema(ReignDbConnection c) => ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conversation_banter_episodes (
+        internal static void EnsureBanterSchema(ReignDbConnection c) => ExecuteSql(c, @"CREATE TABLE IF NOT EXISTS conversation_banter_episodes (
 session_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,payload_json TEXT NOT NULL,updated_ts BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_banter_timeline ON conversation_banter_episodes(timeline_id,updated_ts);");
 
-        private static string BanterGeneration(ReignDbConnection c) => ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
+        internal static string BanterGeneration(ReignDbConnection c) => ReadString(ReadMemoryPrecisionState(c), "restore_generation", "");
         private static Dictionary<string, object> ReadBanter(ReignDbConnection c, string id) => TryParseJsonObject(ReadString(
             QuerySql(c, "SELECT payload_json FROM conversation_banter_episodes WHERE session_id=$id;", TestDict("id", id)).FirstOrDefault(), "payload_json", "{}")) ?? TestDict();
-        private static void WriteBanter(ReignDbConnection c, Dictionary<string, object> e) => ExecuteSql(c, @"INSERT INTO conversation_banter_episodes(session_id,timeline_id,payload_json,updated_ts)
+        internal static void WriteBanter(ReignDbConnection c, Dictionary<string, object> e) => ExecuteSql(c, @"INSERT INTO conversation_banter_episodes(session_id,timeline_id,payload_json,updated_ts)
 VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_ts=EXCLUDED.updated_ts;",
             TestDict("id", ReadString(e, "sessionId", ""), "timeline", ReadString(e, "timelineId", ""), "payload", Json.Serialize(e), "ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
         private static List<Dictionary<string, object>> RecentBanter(ReignDbConnection c, string timeline) => QuerySql(c,
@@ -97,12 +97,12 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
         private static string BanterJobKey(string campaign, string id) => campaign + ":" + id;
         private static void CancelBanterJob(string campaign, string id) { if (BanterJobs.TryGetValue(BanterJobKey(campaign, id), out var job)) { try { job.Cancellation.Cancel(); } catch (ObjectDisposedException) { } } }
 
-        private static Dictionary<string, object> PartyBanterApi(string operation, Dictionary<string, object> p)
+        internal static Dictionary<string, object> PartyBanterApi(string operation, Dictionary<string, object> p)
         {
             p ??= TestDict(); string campaign = ReadString(p, "campaignId", ""), timeline = ReadString(p, "timelineId", "");
             double day = ReadDouble(p, "worldDay", -1);
             if (campaign.Length == 0 || timeline.Length == 0 || !double.IsFinite(day) || day < 0) return TestDict("ok", false, "error", "Banter requires a current campaign, timeline and clock.");
-            using var ownership = EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign));
+            using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
             using var c = OpenCampaignConnection(campaign); EnsureBanterSchema(c);
             string generation = BanterGeneration(c);
             if (operation == "context")
@@ -171,7 +171,7 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
                 roster.Count, day, ended, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), retryAfter)) return TestDict("ok", true, "eligible", false, "options", options);
             // Fairness is the first key; affinity strength/asymmetry breaks ties.
             int Used(string id) => recent.Count(x => ReadStringList(x, "heroIds").Contains(id));
-            var candidates = roster.Where(h => ReadString(ReadJsonObject(CharacterFile(campaign, CharacterIdFrom(h), "traits.json")), "basePersonalitySummary", "").Length >= PersonalitySummaryMinimumCharacters)
+            var candidates = roster.Where(h => ReadString(ReadJsonObject(CharacterFile(campaign, CharacterIdFrom(h), "traits.json")), "basePersonalitySummary", "").Length >= CharactersService.PersonalitySummaryMinimumCharacters)
                 .OrderBy(h => Used(CharacterIdFrom(h))).ThenBy(h => PromptHash(requestedId + CharacterIdFrom(h))).ToList();
             if (candidates.Count < 2) return TestDict("ok", true, "eligible", false, "reason", "character_foundations_not_ready");
             var chosen = new List<Dictionary<string, object>> { candidates[0] };
@@ -214,8 +214,8 @@ VALUES($id,$timeline,$payload,$ts) ON CONFLICT(session_id) DO UPDATE SET payload
 
         private static int BanterPairWeight(ReignDbConnection c, Dictionary<string, object> a, Dictionary<string, object> b)
         {
-            EnsureMbtiRelationshipSchema(c);
-            var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey(CharacterIdFrom(a), CharacterIdFrom(b)))).FirstOrDefault();
+            RelationshipsService.EnsureMbtiRelationshipSchema(c);
+            var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(CharacterIdFrom(a), CharacterIdFrom(b)))).FirstOrDefault();
             int ab = ReadInt(pair, "affinity_a_to_b", 0), ba = ReadInt(pair, "affinity_b_to_a", 0);
             return Math.Abs(ab - ba) + Math.Max(Math.Abs(ab), Math.Abs(ba));
         }
@@ -252,7 +252,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             out int politicalCharacters)
         {
             politicalCharacters = 0;
-            EnsureIdentitySchema(c); EnsureMbtiRelationshipSchema(c);
+            CharactersService.EnsureIdentitySchema(c); RelationshipsService.EnsureMbtiRelationshipSchema(c);
             var b = new StringBuilder(); b.AppendLine("Topic: " + (topic.StartsWith("events|", StringComparison.Ordinal) && shared.Count == 0 ? "the road's weather" : topic.Split('|').Last()));
             b.AppendLine("Maximum " + ReadInt(options, "maxResponses", 6) + " individual spoken responses; " + ReadInt(options, "maxCharacters", 360) + " characters each. Player is listening silently.");
             b.AppendLine("Current commitments remain active unless explicitly fulfilled, withdrawn or superseded. This joint prompt includes only commitment details known to every speaking character. Excluded private details do not mean a person has no commitments. Do not invent new promises or expose another person's private obligations.");
@@ -265,15 +265,15 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                     "occupation", ReadString(h, "occupation", ""), "partyRole", ReadString(h, "banterPartyRole", "fellow traveler"));
                 b.AppendLine(Json.Serialize(identity));
                 b.AppendLine("PRIVATE CONTEXT FOR " + id + " ONLY; other speakers may not use or disclose these facts unless their own context establishes knowledge:");
-                b.AppendLine(BuildPregnancyPrompt(h));
+                b.AppendLine(RelationshipsService.BuildPregnancyPrompt(h));
                 if (ReadBool(h, "isPregnant", false) || ReadString(h, "pregnancyPrompt", "").Length > 0)
                     b.AppendLine("Put optional pregnancyDisclosures on the same JSONL object as this speaker's text; quote only facts actually disclosed in that spoken line. Drafts are not disclosures.");
                 b.AppendLine(ReadString(traits, "basePersonalitySummary", "")); // Protected complete core, never sliced.
-                string political = RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
-                    TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(EnsurePoliticalProfile(campaign, id, h, traits)))));
+                string political = CharactersService.RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
+                    TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(CharactersService.EnsurePoliticalProfile(campaign, id, h, traits)))));
                 b.AppendLine(political);
                 politicalCharacters += political.Length + Environment.NewLine.Length;
-                foreach (var fact in ReadNpcLives(c, campaign, ContinuityTimeline(p)).Characters.Where(n => n.HeroId == id)
+                foreach (var fact in CharactersService.ReadNpcLives(c, campaign, ContinuityTimeline(p)).Characters.Where(n => n.HeroId == id)
                     .SelectMany(n => n.Facts).Where(f => f.Active && !f.Private))
                     b.AppendLine("Established personal fact for " + id + ": " + fact.Text);
                 var voice = ReadDictionary(ReadJsonObject(CharacterFile(campaign, id, "narrative.json")), "voice") ?? ReadJsonObject(CharacterFile(campaign, id, "voice.json"));
@@ -286,18 +286,18 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                 b.AppendLine(BuildPlayerPerformancePrompt(c, id, persistentPayload, persistentSources, otherObservers));
                 foreach (var other in heroes.Where(x => x != h))
                 {
-                    string target = CharacterIdFrom(other); var acquaintance = ReadAcquaintance(c, id, target);
-                    var view = BuildIdentityView(acquaintance, TestDict("mode", "party_chat", "canonicalName", ReadString(other, "name", ""), "subject", other, "appearance", TestDict()));
-                    var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", AmbientPairKey(id, target))).FirstOrDefault();
-                    int native = ReadInt(FindRelationshipPair(ReadDictionaryList(p, "relationshipPairs"), id, target), "nativeRelation", 0);
+                    string target = CharacterIdFrom(other); var acquaintance = CharactersService.ReadAcquaintance(c, id, target);
+                    var view = CharactersService.BuildIdentityView(acquaintance, TestDict("mode", "party_chat", "canonicalName", ReadString(other, "name", ""), "subject", other, "appearance", TestDict()));
+                    var pair = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", TestDict("pair", RelationshipsService.AmbientPairKey(id, target))).FirstOrDefault();
+                    int native = ReadInt(RelationshipsService.FindRelationshipPair(ReadDictionaryList(p, "relationshipPairs"), id, target), "nativeRelation", 0);
                     int affinity = pair == null ? native : ReputationService.EffectiveDirectionalAffinity(pair, ReadString(pair, "hero_a_id", "") == id, native);
-                    bool known = IdentityStateVerified(acquaintance), ruler = ReadBool(other, "isRuler", false), noble = ReadBool(other, "isLord", false);
-                    string formalAddress = ruler ? string.Join("/", SovereignFormalAddresses(other)) : "";
+                    bool known = CharactersService.IdentityStateVerified(acquaintance), ruler = ReadBool(other, "isRuler", false), noble = ReadBool(other, "isLord", false);
+                    string formalAddress = ruler ? string.Join("/", CharactersService.SovereignFormalAddresses(other)) : "";
                     string authority = ruler ? (ReadString(h, "sovereignHeroStringId", "") == target ? "own sovereign" : "foreign sovereign")
                         : noble && !ReadBool(h, "isLord", false) ? "social superior" : noble ? "noble peer" : "commoner";
                     b.AppendLine(Json.Serialize(TestDict("toward", target, "knownAs", ReadString(view, "usableName", "the other traveler"), "nameKnown", known,
-                        "authority", authority, "address", "usually omit", "formalAddress", formalAddress, "affinity", affinity, "feeling", RelationshipBand(Clamp(affinity, -100, 100)),
-                        "tags", ReadStringList(RelationshipLifecycleView(c, id, target), "tags").Where(IsPromptedRelationshipLifecycleTag).ToList())));
+                        "authority", authority, "address", "usually omit", "formalAddress", formalAddress, "affinity", affinity, "feeling", RelationshipsService.RelationshipBand(Clamp(affinity, -100, 100)),
+                        "tags", ReadStringList(RelationshipsService.RelationshipLifecycleView(c, id, target), "tags").Where(RelationshipsService.IsPromptedRelationshipLifecycleTag).ToList())));
                 }
                 if (includeOptional)
                 {
@@ -347,7 +347,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             var access = EnterCampaignRequestAccess("/party-banter/draft");
             try
             {
-                using var ownership = EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign));
+                using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign));
                 using var c = OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
                 if (!BanterActive(e) || BanterGeneration(c) != generation || ReadString(e, "generation", "") != generation) return;
                 var drafts = ReadDictionaryList(e, "drafts"); var row = ValidateBanterDraft(json, ReadStringList(e, "heroIds"), ReadDictionary(e, "options"), drafts);
@@ -359,7 +359,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             }
             finally { ExitCampaignRequestAccess(access); }
         }
-        private static Dictionary<string, object> ValidateBanterDraft(string json, List<string> ids, Dictionary<string, object> options, List<Dictionary<string, object>> prior)
+        internal static Dictionary<string, object> ValidateBanterDraft(string json, List<string> ids, Dictionary<string, object> options, List<Dictionary<string, object>> prior)
         {
             var row = TryParseJsonObject(json.Trim()); if (row == null) return null;
             string speaker = ReadString(row, "speakerId", ""), text = ReadString(row, "text", "").Trim();
@@ -380,7 +380,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             var access = EnterCampaignRequestAccess("/party-banter/draft");
             try
             {
-                using var ownership = EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaign)); using var c = OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
+                using var ownership = PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaign)); using var c = OpenCampaignConnection(campaign); var e = ReadBanter(c, id);
                 if (!BanterActive(e) || BanterGeneration(c) != generation || ReadString(e, "generation", "") != generation) return;
                 e["generationDone"] = true; e["generationMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - ReadLong(e, "createdUtc", 0); e["error"] = error;
                 if (ReadDictionaryList(e, "drafts").Count == 0) FinishBanter(c, campaign, e, ReadDouble(e, "startedDay", 0), "generation_failed", TestDict());
@@ -464,7 +464,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
                     "sourceTurnIds", new[] { session + "_banter_" + source + "_npc_" + SafeMemoryKey(target) }, "summary", LimitText(ReadString(reaction, "reason", ""), 300)));
             }
             return result.GroupBy(x => ReadString(x, "observerHeroStringId", "") + "->" + ReadString(x, "targetHeroStringId", ""))
-                .Select(g => SelectDominantConversationAssessment(g.ToList())).ToList();
+                .Select(g => RelationshipsService.SelectDominantConversationAssessment(g.ToList())).ToList();
         }
         private static void FinishBanter(ReignDbConnection c, string campaign, Dictionary<string, object> e, double day, string reason, Dictionary<string, object> p)
         {
@@ -473,7 +473,7 @@ ORDER BY t.accepted_sequence DESC,t.ts DESC,t.turn_order DESC LIMIT 16;", TestDi
             bool spoken = ReadInt(e, "accepted", 0) > 0;
             if (spoken)
             {
-                var effects = ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "timelineId", ReadString(e, "timelineId", ""), "exchangeId", id + "_relations",
+                var effects = RelationshipsService.ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "timelineId", ReadString(e, "timelineId", ""), "exchangeId", id + "_relations",
                     "mode", "party_banter", "worldDay", day, "participants", ReadStringList(e, "heroIds"), "assessments", BanterAssessments(e),
                     "relationshipPairs", ReadDictionaryList(p, "relationshipPairs").Count > 0 ? ReadDictionaryList(p, "relationshipPairs") : ReadDictionaryList(e, "relationshipPairs"),
                     "nativeReceiptProtocol", "reign-native-relationship-receipt-v2"));

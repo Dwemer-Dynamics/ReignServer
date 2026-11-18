@@ -8,7 +8,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static string ConversationAssessmentAbsenceReason(Dictionary<string, object> parsed)
+        internal static string ConversationAssessmentAbsenceReason(Dictionary<string, object> parsed)
         {
             string status = ReadString(parsed, "relationshipAssessmentStatus", "");
             if (status == "cleared_after_failed_repair")

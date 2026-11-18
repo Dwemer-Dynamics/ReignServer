@@ -166,12 +166,12 @@ namespace ReignBetaServer
             bound["CampaignId"] = campaign; bound["HeroId"] = observer; bound["TimelineId"] = timeline;
             var value = System.Text.Json.JsonSerializer.Deserialize<GovernmentPoliticalProfile>(Json.Serialize(bound));
             string path = CharacterFile(campaign, observer, "politics", "revision-1-" + SafeMemoryKey(timeline) + ".json");
-            lock (PoliticalProfileLock)
+            lock (CharactersService.PoliticalProfileLock)
             {
                 var existing = ReadJsonObject(path);
                 if (existing.Count > 0 && CanonicalJson(existing) != CanonicalJson(bound))
                     throw new InvalidOperationException("The isolated political revision already has different content.");
-                WritePoliticalRevision(campaign, observer, value);
+                CharactersService.WritePoliticalRevision(campaign, observer, value);
                 if (value.Revision != 1 || CanonicalJson(ReadJsonObject(path)) != CanonicalJson(bound))
                     throw new InvalidOperationException("The isolated political revision did not preserve its captured content.");
             }
@@ -202,7 +202,7 @@ namespace ReignBetaServer
         // network, queue, retries and live cooldown state are outside this slice.
         // Use the production body/policy/cache/reasoning builders, not a second
         // JSON implementation in a private evaluation script.
-        private static Dictionary<string, object> CaptureMemoryReplayProviderRequest(Dictionary<string, object> request,
+        internal static Dictionary<string, object> CaptureMemoryReplayProviderRequest(Dictionary<string, object> request,
             Dictionary<string, object> fixtureSettings)
         {
             var captured = CloneDictionary(request);
@@ -859,7 +859,7 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
                     planAudit["approvedReplySha256"] = PromptHash(reply);
                 }
             }
-            bool quiet = mode != "dialogue" && parsed != null && NormalizeSocialEventParticipation(parsed) == "quiet";
+            bool quiet = mode != "dialogue" && parsed != null && WorldSimulationService.NormalizeSocialEventParticipation(parsed) == "quiet";
             var checkedResponse = RejectProviderReservedSpeech(response, parsed);
             if (!ReferenceEquals(checkedResponse, response))
             {
@@ -929,9 +929,9 @@ OR EXISTS(SELECT 1 FROM reign_meta.save_sync_snapshots WHERE campaign_id=$campai
             using (var connection = OpenCampaignConnection(campaign))
             {
                 foreach (string table in new[] { "conversation_turns", "memories", "beliefs", "obligations", "comprehension" })
-                    if (TableExists(connection, table)) stored[table] = QuerySql(connection,
+                    if (WorldSimulationService.TableExists(connection, table)) stored[table] = QuerySql(connection,
                         "SELECT * FROM " + table + " WHERE event_id=$event LIMIT 256;", TestDict("event", unit.EventId));
-                if (TableExists(connection, "conversation_continuity")) stored["continuity"] = QuerySql(connection,
+                if (WorldSimulationService.TableExists(connection, "conversation_continuity")) stored["continuity"] = QuerySql(connection,
                     "SELECT * FROM conversation_continuity WHERE owner_id=$owner AND timeline_id=$timeline LIMIT 256;",
                     TestDict("owner", observer, "timeline", ContinuityTimeline(payload)));
             }

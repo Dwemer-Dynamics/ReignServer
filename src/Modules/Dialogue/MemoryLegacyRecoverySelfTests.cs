@@ -15,8 +15,8 @@ namespace ReignBetaServer
             const string story = "My horse is Tempest. He gets angry with frogs when they will not hold still to be smelled.";
             const string reply = "So Tempest fights frogs. Stone floats when she thinks no one is watching.";
             const string head = "parent_000000000007_1234abcd", fork = "parent_000000000008_1234abcd";
-            bool oldOptimization = SaveSyncDisableBackgroundOptimizationForTests;
-            SaveSyncDisableBackgroundOptimizationForTests = true;
+            bool oldOptimization = PersistenceService.SaveSyncDisableBackgroundOptimizationForTests;
+            PersistenceService.SaveSyncDisableBackgroundOptimizationForTests = true;
             var point = TestDict("campaignId", campaign, "savePointId", "old", "timelineId", "parent", "campaignTimeDays", 20d,
                 "worldHistorySequence", 7L, "worldHistoryHeadEventId", head);
             var branchPoint = TestDict("campaignId", campaign, "savePointId", "branch", "timelineId", "child", "campaignTimeDays", 21d,
@@ -53,7 +53,7 @@ VALUES('private_rule',$id,'entity','npc',19,'participant');", TestDict("id", id)
                         ProjectPlayerPerformanceEvent(connection, QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id;", TestDict("id", id)).Single());
                     }
                 }
-                var registered = SaveSyncRegisterCore(point);
+                var registered = PersistenceService.SaveSyncRegisterCore(point);
                 Check("real_prefork_native_snapshot_registered", ReadBool(registered, "ok", false), registered);
                 string oldSchema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, "old");
                 using (var connection = OpenCampaignConnection(campaign))
@@ -77,7 +77,7 @@ VALUES('native_after_proof',$campaign,'parent',8,20,'tournament_finished','banne
 INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) VALUES('native_after_proof',0,'player','hero','winner');", TestDict("campaign", campaign, "created", DateTimeOffset.UtcNow.ToString("o")));
                     ProjectPlayerPerformanceEvent(connection, QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id='native_after_proof';").Single());
                 }
-                Check("old_branch_snapshot_registered", ReadBool(SaveSyncRegisterCore(branchPoint), "ok", false));
+                Check("old_branch_snapshot_registered", ReadBool(PersistenceService.SaveSyncRegisterCore(branchPoint), "ok", false));
                 string branchSchema = ReignPostgreSqlStorage.SnapshotSchemaName(campaign, "branch");
                 using (var connection = OpenCampaignConnection(campaign))
                 {
@@ -177,15 +177,15 @@ INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) 
                     Check("postfork_snapshot_cannot_supply_old_authority", VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Count == 0);
                     ExecuteSql(connection, "UPDATE reign_meta.save_sync_snapshots SET created_utc=to_timestamp($epoch) WHERE campaign_id=$campaign AND save_point_id='old';",
                         TestDict("campaign", campaign, "epoch", ReadDouble(beforeProof, "createdEpoch", 0d)));
-                    var ledger = ReadSaveSyncLedger(campaign);
-                    var storedPoint = SaveSyncPoint(ledger, "old");
+                    var ledger = PersistenceService.ReadSaveSyncLedger(campaign);
+                    var storedPoint = PersistenceService.SaveSyncPoint(ledger, "old");
                     string previousFingerprint = ReadString(storedPoint, "snapshotFingerprint", "");
-                    storedPoint["snapshotFingerprint"] = "invalid"; WriteSaveSyncLedger(campaign, ledger);
+                    storedPoint["snapshotFingerprint"] = "invalid"; PersistenceService.WriteSaveSyncLedger(campaign, ledger);
                     Check("manifest_fingerprint_mismatch_fails_closed", VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Count == 0);
                     storedPoint["snapshotFingerprint"] = previousFingerprint;
-                    storedPoint["worldHistoryHeadEventId"] = "wrong"; WriteSaveSyncLedger(campaign, ledger);
+                    storedPoint["worldHistoryHeadEventId"] = "wrong"; PersistenceService.WriteSaveSyncLedger(campaign, ledger);
                     Check("native_and_database_heads_must_match", VerifiedLegacyMemorySnapshots(connection, campaign, branchPoint).Count == 0);
-                    storedPoint["worldHistoryHeadEventId"] = head; WriteSaveSyncLedger(campaign, ledger);
+                    storedPoint["worldHistoryHeadEventId"] = head; PersistenceService.WriteSaveSyncLedger(campaign, ledger);
                 }
                 InitializeVerifiedSnapshotMemorySources(campaign, branchPoint, "branch");
                 using (var connection = OpenCampaignConnection(campaign))
@@ -199,10 +199,10 @@ INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,role) 
             catch (Exception ex) { Check("suite_exception", false, ex.ToString()); results.Last()["summary"] = "Legacy memory recovery exception: " + LimitText(ex.ToString(), 2200); }
             finally
             {
-                SaveSyncDisableBackgroundOptimizationForTests = oldOptimization;
+                PersistenceService.SaveSyncDisableBackgroundOptimizationForTests = oldOptimization;
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                TryDeleteDirectory(SaveSyncCampaignRoot(campaign));
-                TryDeleteDirectory(StrictCampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(PersistenceService.SaveSyncCampaignRoot(campaign));
+                PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign));
             }
             results.AddRange(RunMemoryRecallRecoveryAssertions());
             return results;

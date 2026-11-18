@@ -5,7 +5,7 @@ using System.IO;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         // The database is still read on every day. Only parsing is cached, keyed
         // by the exact stored document, so edits, rollback and restore cannot
@@ -113,8 +113,8 @@ namespace ReignBetaServer
             ReignDbConnection connection, IEnumerable<string> pairKeys)
         {
             if (RelationshipThroughputOriginalReadPath || !ReignPostgreSqlDialect.IsPostgreSql(connection))
-                return QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;");
-            return QuerySql(connection, @"SELECT lifecycle.* FROM relationship_pair_lifecycle lifecycle
+                return Program.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle;");
+            return Program.QuerySql(connection, @"SELECT lifecycle.* FROM relationship_pair_lifecycle lifecycle
 JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested ON requested.value=lifecycle.pair_key;",
                 new Dictionary<string, object> { ["pairs"] = Json.Serialize(pairKeys.Distinct(StringComparer.OrdinalIgnoreCase).ToList()) });
         }
@@ -128,7 +128,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested ON requested.val
         private static readonly HashSet<string> RelationshipRecoveredCampaigns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, string> RelationshipCampaignGenerations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        private static string RelationshipCampaignGeneration(string campaignId)
+        internal static string RelationshipCampaignGeneration(string campaignId)
         {
             lock (RelationshipReadyGate)
             {
@@ -138,7 +138,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested ON requested.val
             }
         }
 
-        private static void ResetRelationshipCampaignScheduling(string campaignId)
+        internal static void ResetRelationshipCampaignScheduling(string campaignId)
         {
             lock (RelationshipReadyGate)
             {
@@ -154,7 +154,7 @@ JOIN jsonb_array_elements_text(CAST($pairs AS jsonb)) requested ON requested.val
             // On startup/restore, no prior worker can still own a processing row.
             bool initial;
             lock (RelationshipReadyGate) initial = !RelationshipRecoveredCampaigns.Contains(campaignId);
-            ExecuteSql(connection, @"UPDATE relationship_daily_inputs
+            Program.ExecuteSql(connection, @"UPDATE relationship_daily_inputs
 SET status='pending',last_error='worker_recovered_interrupted_day'
 WHERE status='processing' AND ($initial=1 OR started_ts<$cutoff);",
                 new Dictionary<string, object> { ["initial"] = initial ? 1 : 0,
@@ -212,9 +212,9 @@ WHERE status='processing' AND ($initial=1 OR started_ts<$cutoff);",
             lock (RelationshipReadyGate) return RelationshipReadyCampaigns.Values.Sum();
         }
 
-        private static int CountUnrepresentedNativeFlags(ReignDbConnection connection, string player)
+        internal static int CountUnrepresentedNativeFlags(ReignDbConnection connection, string player)
         {
-            return ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count FROM relationship_pair_chemistry pair
+            return ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count FROM relationship_pair_chemistry pair
 WHERE pair.native_action_pending=1 AND ($player='' OR (pair.hero_a_id<>$player AND pair.hero_b_id<>$player))
 AND NOT EXISTS (SELECT 1 FROM relationship_native_targets target WHERE target.pair_key=pair.pair_key);",
                 new Dictionary<string, object> { ["player"] = player ?? "" }).FirstOrDefault(), "count", 0);
@@ -244,7 +244,7 @@ AND NOT EXISTS (SELECT 1 FROM relationship_native_targets target WHERE target.pa
         {
             var membership = new List<Dictionary<string, object>>();
             if (RelationshipThroughputOriginalReadPath)
-                return QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle WHERE last_processed_day<$day;",
+                return Program.QuerySql(connection, "SELECT * FROM relationship_pair_lifecycle WHERE last_processed_day<$day;",
                     new Dictionary<string, object> { ["day"] = day });
             int groupKey = 0;
             foreach (var entry in groupsByDay.OrderBy(x => x.Key))
@@ -257,7 +257,7 @@ AND NOT EXISTS (SELECT 1 FROM relationship_native_targets target WHERE target.pa
             if (membership.Count == 0) return new List<Dictionary<string, object>>();
             // Eligibility here is co-presence, not romance state. A quiet historical
             // pair must still be able to reactivate under the original daily rules.
-            return QuerySql(connection, @"WITH presence AS MATERIALIZED (
+            return Program.QuerySql(connection, @"WITH presence AS MATERIALIZED (
  SELECT hero,group_key FROM jsonb_to_recordset(CAST($presence AS jsonb)) AS p(hero text,group_key integer)
 )
 SELECT lifecycle.* FROM relationship_pair_lifecycle lifecycle
@@ -269,7 +269,7 @@ WHERE last_processed_day<$day AND EXISTS (
 
         private static HashSet<string> LoadHistoricalCourtshipExclusions(ReignDbConnection connection, int day)
         {
-            return new HashSet<string>(QuerySql(connection, @"SELECT pair_key,romance_stage FROM relationship_pair_lifecycle
+            return new HashSet<string>(Program.QuerySql(connection, @"SELECT pair_key,romance_stage FROM relationship_pair_lifecycle
 WHERE last_processed_day<$day AND flirt_attempted=1 AND flirt_passed=0
 AND lover_active=0;",
                 new Dictionary<string, object> { ["day"] = day })

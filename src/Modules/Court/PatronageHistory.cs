@@ -13,14 +13,14 @@ namespace ReignBetaServer
             string campaign = query.ContainsKey("campaignId") ? query["campaignId"] : "";
             string timeline = query.ContainsKey("timelineId") ? query["timelineId"] : "";
             string kingdom = query.ContainsKey("kingdomId") ? query["kingdomId"] : "";
-            double day = Program.ParseDoubleInvariant(query.ContainsKey("worldDay") ? query["worldDay"] : "", -1);
+            double day = WorldSimulationService.ParseDoubleInvariant(query.ContainsKey("worldDay") ? query["worldDay"] : "", -1);
             if (string.IsNullOrWhiteSpace(campaign) || string.IsNullOrWhiteSpace(timeline) || string.IsNullOrWhiteSpace(kingdom)
                 || day < 0 || double.IsNaN(day) || double.IsInfinity(day))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "An exact campaign, timeline, kingdom and finite world day are required." };
             var subjects = new List<Dictionary<string, object>>();
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
-                Program.EnsureWorldHistorySchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
                 // Knowledge rules are the authority. Private participant evidence and premature realm news never qualify.
                 var rows = Program.QuerySql(connection, @"SELECT e.event_id,e.event_type,e.summary,e.world_day FROM world_history_events e
 WHERE e.timeline_id=$timeline AND e.is_complete=1 AND e.phase='completed' AND e.source='bannerlord_native'
@@ -32,7 +32,7 @@ ORDER BY e.sequence DESC LIMIT 200;", new Dictionary<string, object> { ["timelin
                 foreach (var row in rows)
                 {
                     string id = ReadString(row, "event_id", "");
-                    var own = Program.QueryWorldHistoryEntities(connection, id).Where(x => ReadString(x, "kingdom_id", "") == kingdom).ToList();
+                    var own = WorldSimulationService.QueryWorldHistoryEntities(connection, id).Where(x => ReadString(x, "kingdom_id", "") == kingdom).ToList();
                     Func<string, bool> role = word => own.Any(x => ReadString(x, "role", "").IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0);
                     string context = ReignPatronageRules.PublicNativeHistoryContext(ReadString(row, "event_type", ""),
                         role("winner"), role("released_prisoner"), role("killed victim"), role("new owner"));

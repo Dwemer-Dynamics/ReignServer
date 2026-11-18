@@ -8,7 +8,7 @@ using System.Xml.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const int RelationshipSimulationCensusVersion = 1;
         private const int RelationshipSimulationModelVersion = 4;
@@ -81,7 +81,7 @@ namespace ReignBetaServer
                     {
                         XElement town = settlement.Descendants("Town").FirstOrDefault();
                         if (town == null) continue;
-                        string clanId = RemoveObjectPrefix((string)settlement.Attribute("owner"));
+                        string clanId = CharactersService.RemoveObjectPrefix((string)settlement.Attribute("owner"));
                         if (!string.IsNullOrWhiteSpace(clanId))
                         {
                             int fiefCount;
@@ -90,7 +90,7 @@ namespace ReignBetaServer
                         }
                         if (string.Equals((string)town.Attribute("is_castle"), "true", StringComparison.OrdinalIgnoreCase)) continue;
                         XElement clan;
-                        string kingdomId = clans.TryGetValue(clanId, out clan) ? RemoveObjectPrefix((string)clan.Attribute("super_faction")) : "";
+                        string kingdomId = clans.TryGetValue(clanId, out clan) ? CharactersService.RemoveObjectPrefix((string)clan.Attribute("super_faction")) : "";
                         if (string.IsNullOrWhiteSpace(kingdomId)) continue;
                         List<Dictionary<string, object>> cityRows;
                         if (!citiesByKingdom.TryGetValue(kingdomId, out cityRows))
@@ -101,7 +101,7 @@ namespace ReignBetaServer
                         cityRows.Add(new Dictionary<string, object>
                         {
                             ["settlementId"] = (string)settlement.Attribute("id"),
-                            ["name"] = CleanGameText((string)settlement.Attribute("name"))
+                            ["name"] = CharactersService.CleanGameText((string)settlement.Attribute("name"))
                         });
                     }
                 }
@@ -124,22 +124,22 @@ namespace ReignBetaServer
                         XElement hero;
                         if (string.IsNullOrWhiteSpace(id) || id.Equals("main_hero", StringComparison.OrdinalIgnoreCase) || !heroNodes.TryGetValue(id, out hero)) continue;
                         bool alive = !string.Equals((string)hero.Attribute("alive"), "false", StringComparison.OrdinalIgnoreCase);
-                        double age = ParseDouble((string)npc.Attribute("age"));
+                        double age = CharactersService.ParseDouble((string)npc.Attribute("age"));
                         if (!alive || age < 18d || heroRows.Any(x => ReadString(x, "heroStringId", "").Equals(id, StringComparison.OrdinalIgnoreCase))) continue;
-                        string clanId = RemoveObjectPrefix((string)hero.Attribute("faction"));
+                        string clanId = CharactersService.RemoveObjectPrefix((string)hero.Attribute("faction"));
                         XElement clan;
                         clans.TryGetValue(clanId, out clan);
-                        string kingdomId = RemoveObjectPrefix((string)clan?.Attribute("super_faction"));
-                        string cultureId = RemoveObjectPrefix((string)npc.Attribute("culture"));
+                        string kingdomId = CharactersService.RemoveObjectPrefix((string)clan?.Attribute("super_faction"));
+                        string cultureId = CharactersService.RemoveObjectPrefix((string)npc.Attribute("culture"));
                         Dictionary<string, object> nativeTraits = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                         foreach (string key in new[] { "valor", "generosity", "honor", "mercy", "calculating" }) nativeTraits[key] = 0;
                         foreach (XElement trait in npc.Descendants("Trait"))
                         {
                             string key = ((string)trait.Attribute("id") ?? "").ToLowerInvariant();
-                            if (nativeTraits.ContainsKey(key)) nativeTraits[key] = ClampTrait(ParseInt((string)trait.Attribute("value")));
+                            if (nativeTraits.ContainsKey(key)) nativeTraits[key] = Program.ClampTrait(ParseInt((string)trait.Attribute("value")));
                         }
-                        Dictionary<string, object> skills = ResolveCatalogNativeSkills(npc, skillSets);
-                        string homeSettlementId = RemoveObjectPrefix((string)clan?.Attribute("initial_home_settlement"));
+                        Dictionary<string, object> skills = CharactersService.ResolveCatalogNativeSkills(npc, skillSets);
+                        string homeSettlementId = CharactersService.RemoveObjectPrefix((string)clan?.Attribute("initial_home_settlement"));
                         XElement kingdom;
                         kingdoms.TryGetValue(kingdomId, out kingdom);
                         int clanTier = ParseInt((string)clan?.Attribute("tier"));
@@ -152,7 +152,7 @@ namespace ReignBetaServer
                         heroRows.Add(new Dictionary<string, object>
                         {
                             ["heroStringId"] = id, ["characterObjectId"] = id,
-                            ["name"] = CleanGameText((string)npc.Attribute("name")), ["age"] = age,
+                            ["name"] = CharactersService.CleanGameText((string)npc.Attribute("name")), ["age"] = age,
                             ["isAlive"] = true, ["isPrisoner"] = false, ["isLord"] = true, ["isNotable"] = false, ["isWanderer"] = false,
                             ["isFemale"] = string.Equals((string)npc.Attribute("is_female"), "true", StringComparison.OrdinalIgnoreCase),
                             ["cultureId"] = cultureId, ["clanId"] = clanId, ["kingdomId"] = kingdomId,
@@ -161,12 +161,12 @@ namespace ReignBetaServer
                             ["clanGold"] = clanGold, ["gold"] = clanGold * 0.10d, ["influence"] = influence,
                             ["leadership"] = leadership, ["partyStrength"] = 80d + leadership * 1.2d,
                             ["clanStrength"] = 180d + clanTier * 160d + fiefCount * 120d,
-                            ["visibleStatusScore"] = ClampDouble(clanTier * 12d + fiefCount * 6d + (kingdom != null && RemoveObjectPrefix((string)kingdom.Attribute("owner")).Equals(id, StringComparison.OrdinalIgnoreCase) ? 18d : 0d), 0d, 100d),
-                            ["spouseId"] = RemoveObjectPrefix((string)hero.Attribute("spouse")),
-                            ["fatherId"] = RemoveObjectPrefix((string)hero.Attribute("father")),
-                            ["motherId"] = RemoveObjectPrefix((string)hero.Attribute("mother")),
+                            ["visibleStatusScore"] = Program.ClampDouble(clanTier * 12d + fiefCount * 6d + (kingdom != null && CharactersService.RemoveObjectPrefix((string)kingdom.Attribute("owner")).Equals(id, StringComparison.OrdinalIgnoreCase) ? 18d : 0d), 0d, 100d),
+                            ["spouseId"] = CharactersService.RemoveObjectPrefix((string)hero.Attribute("spouse")),
+                            ["fatherId"] = CharactersService.RemoveObjectPrefix((string)hero.Attribute("father")),
+                            ["motherId"] = CharactersService.RemoveObjectPrefix((string)hero.Attribute("mother")),
                             ["currentSettlementId"] = homeSettlementId, ["currentSettlementKingdomId"] = kingdomId,
-                            ["isRuler"] = kingdom != null && RemoveObjectPrefix((string)kingdom.Attribute("owner")).Equals(id, StringComparison.OrdinalIgnoreCase),
+                            ["isRuler"] = kingdom != null && CharactersService.RemoveObjectPrefix((string)kingdom.Attribute("owner")).Equals(id, StringComparison.OrdinalIgnoreCase),
                             ["traits"] = nativeTraits, ["skills"] = skills, ["source"] = sourceLabel, ["sourceModule"] = moduleId
                         });
                         added++;
@@ -185,9 +185,9 @@ namespace ReignBetaServer
                         .OrderBy(x => ReadString(x, "settlementId", ""), StringComparer.OrdinalIgnoreCase).ToList();
                     return new Dictionary<string, object>
                     {
-                        ["kingdomId"] = pair.Key, ["name"] = CleanGameText((string)pair.Value.Attribute("name")),
-                        ["cultureId"] = RemoveObjectPrefix((string)pair.Value.Attribute("culture")),
-                        ["leaderId"] = RemoveObjectPrefix((string)pair.Value.Attribute("owner")),
+                        ["kingdomId"] = pair.Key, ["name"] = CharactersService.CleanGameText((string)pair.Value.Attribute("name")),
+                        ["cultureId"] = CharactersService.RemoveObjectPrefix((string)pair.Value.Attribute("culture")),
+                        ["leaderId"] = CharactersService.RemoveObjectPrefix((string)pair.Value.Attribute("owner")),
                         ["cityIds"] = cityRows.Select(x => ReadString(x, "settlementId", "")).ToList(), ["cities"] = cityRows
                     };
                 }).Where(x => heroRows.Any(hero => ReadString(hero, "kingdomId", "").Equals(ReadString(x, "kingdomId", ""), StringComparison.OrdinalIgnoreCase))).ToList();
@@ -195,14 +195,14 @@ namespace ReignBetaServer
                 List<Dictionary<string, object>> clanRows = clans.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Select(pair => new Dictionary<string, object>
                 {
                     ["fiefCount"] = fiefCountsByClan.ContainsKey(pair.Key) ? fiefCountsByClan[pair.Key] : 0,
-                    ["clanId"] = pair.Key, ["name"] = CleanGameText((string)pair.Value.Attribute("name")),
-                    ["kingdomId"] = RemoveObjectPrefix((string)pair.Value.Attribute("super_faction")),
-                    ["cultureId"] = RemoveObjectPrefix((string)pair.Value.Attribute("culture")),
+                    ["clanId"] = pair.Key, ["name"] = CharactersService.CleanGameText((string)pair.Value.Attribute("name")),
+                    ["kingdomId"] = CharactersService.RemoveObjectPrefix((string)pair.Value.Attribute("super_faction")),
+                    ["cultureId"] = CharactersService.RemoveObjectPrefix((string)pair.Value.Attribute("culture")),
                     ["tier"] = ParseInt((string)pair.Value.Attribute("tier")),
                     ["renown"] = ParseInt((string)pair.Value.Attribute("tier")) * 225d + (fiefCountsByClan.ContainsKey(pair.Key) ? fiefCountsByClan[pair.Key] : 0) * 90d,
                     ["gold"] = 50000d + ParseInt((string)pair.Value.Attribute("tier")) * 60000d + (fiefCountsByClan.ContainsKey(pair.Key) ? fiefCountsByClan[pair.Key] : 0) * 85000d,
                     ["influence"] = ParseInt((string)pair.Value.Attribute("tier")) * 100d + (fiefCountsByClan.ContainsKey(pair.Key) ? fiefCountsByClan[pair.Key] : 0) * 75d,
-                    ["leaderId"] = RemoveObjectPrefix((string)pair.Value.Attribute("owner")),
+                    ["leaderId"] = CharactersService.RemoveObjectPrefix((string)pair.Value.Attribute("owner")),
                     ["memberIds"] = heroRows.Where(x => ReadString(x, "clanId", "").Equals(pair.Key, StringComparison.OrdinalIgnoreCase)).Select(x => ReadString(x, "heroStringId", "")).ToList()
                 }).Where(x => ReadStringList(x, "memberIds").Count > 0).ToList();
 
@@ -222,7 +222,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static string FindRelationshipSimulationModulesRoot()
+        internal static string FindRelationshipSimulationModulesRoot()
         {
             string configured = Environment.GetEnvironmentVariable("REIGN_BANNERLORD_MODULES") ?? "";
             if (Directory.Exists(Path.Combine(configured, "SandBox", "ModuleData"))) return Path.GetFullPath(configured);
@@ -244,12 +244,12 @@ namespace ReignBetaServer
 
         private static string RelationshipSimulationRoot()
         {
-            return Path.Combine(DataDir, "relationship_simulations");
+            return Path.Combine(Program.DataDir, "relationship_simulations");
         }
 
         private static string RelationshipSimulationRunDirectory(string runId)
         {
-            return Path.Combine(RelationshipSimulationRoot(), SafePathSegment(runId, "run"));
+            return Path.Combine(RelationshipSimulationRoot(), Program.SafePathSegment(runId, "run"));
         }
 
         private static Dictionary<string, object> RelationshipSimulationCensusStatusApi(Dictionary<string, object> payload)
@@ -369,7 +369,7 @@ namespace ReignBetaServer
                 StartedUtc = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture)
             };
 
-            Dictionary<string, Dictionary<string, object>> library = LoadCharacterProfileLibrary();
+            Dictionary<string, Dictionary<string, object>> library = CharactersService.LoadCharacterProfileLibrary();
             foreach (Dictionary<string, object> row in ReadDictionaryList(census, "heroes"))
             {
                 string id = ReadFirstString(row, "heroStringId", "heroId", "id");
@@ -382,11 +382,11 @@ namespace ReignBetaServer
                     Dictionary<string, object> facts = ReadDictionary(shipped, "sourceFacts") ?? new Dictionary<string, object>();
                     foreach (KeyValuePair<string, object> item in facts) if (!data.ContainsKey(item.Key)) data[item.Key] = item.Value;
                 }
-                Dictionary<string, object> storedProfile = ReadJsonObject(CharacterFile(campaignId, id, "profile.json"));
+                Dictionary<string, object> storedProfile = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "profile.json"));
                 foreach (KeyValuePair<string, object> item in storedProfile) if (!data.ContainsKey(item.Key)) data[item.Key] = item.Value;
-                Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId, id, "traits.json"));
+                Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "traits.json"));
                 if (traits.Count == 0 && library.TryGetValue(id, out shipped)) traits = ReadDictionary(shipped, "traits") ?? new Dictionary<string, object>();
-                if (traits.Count == 0) traits = BuildTraitDocument(data);
+                if (traits.Count == 0) traits = CharactersService.BuildTraitDocument(data);
                 Dictionary<string, object> foundations = ReadDictionary(traits, "foundationTraits") ?? new Dictionary<string, object>();
                 data["foundationTraits"] = foundations;
                 double visibleAttractiveness = RelationshipVisibleAttractiveness(data, traits);
@@ -590,7 +590,7 @@ namespace ReignBetaServer
                 double desired = ReadDouble(equilibrium, facet, current);
                 double gap = desired - current;
                 if (Math.Abs(gap) < 0.5d) continue;
-                double delta = ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
+                double delta = Program.ClampDouble(gap * 0.02d * exposureWeight, -0.50d, 0.50d);
                 if (Math.Abs(delta) < 0.00001d) continue;
                 relation.Facets[facet] = ClampRelationship(current + delta);
                 changes[facet] = delta;
@@ -668,7 +668,7 @@ namespace ReignBetaServer
             RelationshipSimulationStoryThread thread=RelationshipSimulationStory(run,subject,target,kind,day,true);
             double current=EffectiveStoryIntensity(thread.Intensity,kind,thread.Route,thread.LastEventDay,day);
             string priorStage=StoryStage(kind,current);
-            thread.Intensity=ClampDouble(current+delta,0d,100d);
+            thread.Intensity=Program.ClampDouble(current+delta,0d,100d);
             if(!string.IsNullOrWhiteSpace(route))thread.Route=route;
             if(!string.IsNullOrWhiteSpace(motiveChannel))thread.MotiveChannel=motiveChannel;
             thread.LastEventDay=day;
@@ -902,7 +902,7 @@ namespace ReignBetaServer
                     ["target"] = target.Data
                 }
             };
-            Dictionary<string, object> opportunity = CalculatePerceivedOpportunity(actor.Data, characteristics, opportunityPayload, new Dictionary<string, object> { ["identityState"] = "known" });
+            Dictionary<string, object> opportunity = Program.CalculatePerceivedOpportunity(actor.Data, characteristics, opportunityPayload, new Dictionary<string, object> { ["identityState"] = "known" });
             bool closeKin = RelationshipSimulationCloseKin(actor, target);
             bool suitable = ReadBool(actor.Data, "isFemale", false) != ReadBool(target.Data, "isFemale", false) && !closeKin;
             Dictionary<string, object> payload = new Dictionary<string, object>
@@ -933,7 +933,7 @@ namespace ReignBetaServer
                     ["lastEventDay"] = romanceThread.LastEventDay
                 };
             }
-            return CalculateRomanticPosture("simulation:" + run.RunId, actorId, targetId, actor.Data, characteristics,
+            return Program.CalculateRomanticPosture("simulation:" + run.RunId, actorId, targetId, actor.Data, characteristics,
                 relationshipContext,
                 new Dictionary<string, object> { ["facets"] = spouseFacets }, opportunity, payload, "autonomous_relationship", "A private autonomous social opportunity.");
         }
@@ -997,7 +997,7 @@ namespace ReignBetaServer
             int maxDelta = impact == "transformative" ? 60 : impact == "major" ? 30 : 10;
             Dictionary<string, object> raw = ReadDictionary(evaluation, "facetDeltas") ?? new Dictionary<string, object>();
             foreach (string facet in raw.Keys.Where(x => RelationshipFacetKeys.Contains(x, StringComparer.OrdinalIgnoreCase) && Math.Abs(ReadDouble(raw, x, 0d)) > 0.001d).Take(8))
-                relation.Facets[facet] = ClampRelationship(relation.Facets[facet] + ClampDouble(ReadDouble(raw, facet, 0d), -maxDelta, maxDelta));
+                relation.Facets[facet] = ClampRelationship(relation.Facets[facet] + Program.ClampDouble(ReadDouble(raw, facet, 0d), -maxDelta, maxDelta));
             int nativeDelta = ReadInt(evaluation, "nativeRelationDelta", 0);
             if (nativeDelta != 0)
             {
@@ -1030,7 +1030,7 @@ namespace ReignBetaServer
                 RelationshipSimulationHero leader = run.Heroes[leaderId];
                 List<RelationshipSimulationHero> members = run.Heroes.Values.Where(x => ReadString(x.Data, "clanId", "").Equals(clanId, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(ReadString(x.Data, "spouseId", ""))).ToList();
                 double urgency = MarriageUrgency(clan, leader.Data, members.Select(x => x.Data).ToList());
-                double chance = ClampDouble(0.01d + 0.04d * urgency, 0.01d, 0.05d);
+                double chance = Program.ClampDouble(0.01d + 0.04d * urgency, 0.01d, 0.05d);
                 if (members.Count == 0 || StableUnit(run.Seed.ToString(CultureInfo.InvariantCulture) + "|marriage|" + period + "|" + leaderId) >= chance) continue;
                 RelationshipSimulationHero best = null, other = null;
                 Dictionary<string, object> bestOtherClan = null;
@@ -1411,8 +1411,8 @@ namespace ReignBetaServer
             string directory = RelationshipSimulationRunDirectory(run.RunId);
             Directory.CreateDirectory(directory);
             Dictionary<string, object> status = RelationshipSimulationStatusDictionary(run, "trust", "");
-            WriteJsonObject(Path.Combine(directory, "status.json"), status);
-            WriteJsonObject(Path.Combine(RelationshipSimulationRoot(), "latest.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Path.Combine(directory, "status.json"), status);
+            Program.WriteJsonObject(Path.Combine(RelationshipSimulationRoot(), "latest.json"), new Dictionary<string, object>
             {
                 ["runId"] = run.RunId, ["campaignId"] = run.CampaignId, ["state"] = run.State,
                 ["statusPath"] = Path.Combine(directory, "status.json"), ["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture)
@@ -1423,7 +1423,7 @@ namespace ReignBetaServer
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object> { ["id"] = id, ["passed"] = passed, ["summary"] = summary });
-            Dictionary<string, object> traits = CoreTraitKeys.ToDictionary(x => x, x => (object)0, StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> traits = CharactersService.CoreTraitKeys.ToDictionary(x => x, x => (object)0, StringComparer.OrdinalIgnoreCase);
             List<Dictionary<string, object>> heroes = new List<Dictionary<string, object>>();
             for (int i = 0; i < 12; i++)
             {

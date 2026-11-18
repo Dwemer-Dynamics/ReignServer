@@ -21,7 +21,7 @@ namespace ReignBetaServer
         {
             ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
 VALUES($key,$a,$b,$ab,$ba,1,1,1) ON CONFLICT(pair_key) DO UPDATE SET affinity_a_to_b=excluded.affinity_a_to_b,affinity_b_to_a=excluded.affinity_b_to_a;",
-                GossipFields("key", AmbientPairKey(a, b), "a", a, "b", b, "ab", aToB, "ba", bToA));
+                GossipFields("key", RelationshipsService.AmbientPairKey(a, b), "a", a, "b", b, "ab", aToB, "ba", bToA));
         }
         private static string GossipTestSeed(string prefix, Func<string, bool> predicate)
         {
@@ -58,7 +58,7 @@ VALUES($key,$a,$b,$ab,$ba,1,1,1) ON CONFLICT(pair_key) DO UPDATE SET affinity_a_
             }
             var liveLease = ConversationLeaseFixture();
             check("conversation_lease_live_heartbeat_renews_exact_command", TryRenewPersonalGossipConversationLease(liveLease.Run, liveLease.Runtime, leaseNow, true)
-                && ParseLiveTestUtc(ReadString(FirstLiveTestCommandInSequence(liveLease.Run), "leaseExpiresUtc", "")) == leaseNow.AddSeconds(45), null);
+                && WorldSimulationService.ParseLiveTestUtc(ReadString(WorldSimulationService.FirstLiveTestCommandInSequence(liveLease.Run), "leaseExpiresUtc", "")) == leaseNow.AddSeconds(45), null);
             check("conversation_lease_requires_arm_and_exact_native_owner", LeaseRejected((r, t) => { }, false)
                 && LeaseRejected((r, t) => t["gameInstanceId"] = "other") && LeaseRejected((r, t) => t["activeRunId"] = "other")
                 && LeaseRejected((r, t) => t["campaignId"] = "other") && LeaseRejected((r, t) => t["busy"] = false)
@@ -69,23 +69,23 @@ VALUES($key,$a,$b,$ab,$ba,1,1,1) ON CONFLICT(pair_key) DO UPDATE SET affinity_a_
                 && LeaseRejected((r, t) => ReadDictionary(t, "saveSync")["timelineId"] = "other")
                 && LeaseRejected((r, t) => ReadDictionary(t, "nativeSave")["isSaving"] = true)
                 && LeaseRejected((r, t) => ReadDictionary(r, "enrollment")["recoveryCheckpointVerified"] = false), null);
-            check("conversation_lease_never_revives_expiry_or_other_work", LeaseRejected((r, t) => FirstLiveTestCommandInSequence(r)["leaseExpiresUtc"] = leaseNow.ToString("o"))
+            check("conversation_lease_never_revives_expiry_or_other_work", LeaseRejected((r, t) => WorldSimulationService.FirstLiveTestCommandInSequence(r)["leaseExpiresUtc"] = leaseNow.ToString("o"))
                 && LeaseRejected((r, t) => r["status"] = "cancelled") && LeaseRejected((r, t) => r["mode"] = "individual_chat")
-                && LeaseRejected((r, t) => ReadDictionary(FirstLiveTestCommandInSequence(r), "testCase")["phase"] = "prepare")
-                && LeaseRejected((r, t) => FirstLiveTestCommandInSequence(r).Remove("leaseStartedUtc"))
-                && LeaseRejected((r, t) => FirstLiveTestCommandInSequence(r)["leaseId"] = ""), null);
+                && LeaseRejected((r, t) => ReadDictionary(WorldSimulationService.FirstLiveTestCommandInSequence(r), "testCase")["phase"] = "prepare")
+                && LeaseRejected((r, t) => WorldSimulationService.FirstLiveTestCommandInSequence(r).Remove("leaseStartedUtc"))
+                && LeaseRejected((r, t) => WorldSimulationService.FirstLiveTestCommandInSequence(r)["leaseId"] = ""), null);
             var deadlineLease = ConversationLeaseFixture();
-            FirstLiveTestCommandInSequence(deadlineLease.Run)["timeoutSeconds"] = 140;
+            WorldSimulationService.FirstLiveTestCommandInSequence(deadlineLease.Run)["timeoutSeconds"] = 140;
             check("conversation_lease_original_deadline_caps_renewal", TryRenewPersonalGossipConversationLease(deadlineLease.Run, deadlineLease.Runtime, leaseNow, true)
-                && ParseLiveTestUtc(ReadString(FirstLiveTestCommandInSequence(deadlineLease.Run), "leaseExpiresUtc", "")) == leaseNow.AddSeconds(20)
-                && LeaseRejected((r, t) => FirstLiveTestCommandInSequence(r)["timeoutSeconds"] = 120), null);
-            check("conversation_lease_avoids_unnecessary_writes", LeaseRejected((r, t) => FirstLiveTestCommandInSequence(r)["leaseExpiresUtc"] = leaseNow.AddSeconds(30).ToString("o")), null);
+                && WorldSimulationService.ParseLiveTestUtc(ReadString(WorldSimulationService.FirstLiveTestCommandInSequence(deadlineLease.Run), "leaseExpiresUtc", "")) == leaseNow.AddSeconds(20)
+                && LeaseRejected((r, t) => WorldSimulationService.FirstLiveTestCommandInSequence(r)["timeoutSeconds"] = 120), null);
+            check("conversation_lease_avoids_unnecessary_writes", LeaseRejected((r, t) => WorldSimulationService.FirstLiveTestCommandInSequence(r)["leaseExpiresUtc"] = leaseNow.AddSeconds(30).ToString("o")), null);
             var probeLease = ConversationLeaseFixture();
-            ReadDictionary(FirstLiveTestCommandInSequence(probeLease.Run), "testCase")["phase"] = "composition_probe";
+            ReadDictionary(WorldSimulationService.FirstLiveTestCommandInSequence(probeLease.Run), "testCase")["phase"] = "composition_probe";
             probeLease.Runtime["activeMode"] = "personal_gossip";
             ReadDictionary(probeLease.Run, "enrollment")["allowProviderCalls"] = true;
             check("composition_probe_lease_requires_exact_owned_mode", TryRenewPersonalGossipConversationLease(probeLease.Run, probeLease.Runtime, leaseNow, true)
-                && LeaseRejected((r, t) => ReadDictionary(FirstLiveTestCommandInSequence(r), "testCase")["phase"] = "composition_probe"), null);
+                && LeaseRejected((r, t) => ReadDictionary(WorldSimulationService.FirstLiveTestCommandInSequence(r), "testCase")["phase"] = "composition_probe"), null);
             bool AcceptsGossipCase(Dictionary<string, object> value)
             {
                 try { ValidatePersonalGossipTestCase(value); return true; }
@@ -470,11 +470,11 @@ VALUES($id,$campaign,'source','player','in_person','closed',1,1,$day,$day,'[""so
                 string localId = GossipTestSeed("local_", id => GossipRoll(id, "share") <= 85);
                 using (var c = OpenCampaignConnection(campaign))
                 {
-                    bool hadSchema = TableExists(c, "personal_gossip_messages");
+                    bool hadSchema = WorldSimulationService.TableExists(c, "personal_gossip_messages");
                     var emptyReadiness = PersonalGossipStatusApi(new Dictionary<string, string> { ["campaignId"] = campaign, ["deliveryOnly"] = "true" });
                     check("readiness_is_readonly_and_handles_uninitialized_campaign", ReadBool(emptyReadiness, "ok", false)
-                        && ReadInt(emptyReadiness, "pendingComposition", -1) == 0 && TableExists(c, "personal_gossip_messages") == hadSchema, null);
-                    EnsurePersonalGossipSchema(c); EnsureMbtiRelationshipSchema(c); EnsureCategorizedMemorySchema(c); EnsureMemoryPrecisionSchema(c);
+                        && ReadInt(emptyReadiness, "pendingComposition", -1) == 0 && WorldSimulationService.TableExists(c, "personal_gossip_messages") == hadSchema, null);
+                    EnsurePersonalGossipSchema(c); RelationshipsService.EnsureMbtiRelationshipSchema(c); EnsureCategorizedMemorySchema(c); EnsureMemoryPrecisionSchema(c);
                     EnsureGossipTestSchema(c);
                     using (var activationTransaction = c.BeginTransaction())
                     {
@@ -882,7 +882,7 @@ FROM personal_gossip_messages WHERE message_id=$original;", GossipFields("copy",
                 using (var c = OpenCampaignConnection(campaign))
                 {
                     GossipTestPair(c, "source", "target", 60, 60);
-                    EnsureConversationRelationshipSchema(c);
+                    RelationshipsService.EnsureConversationRelationshipSchema(c);
                     GossipAcceptPresence(c, presence(50));
                     foreach (int sign in new[] { -1, 0, 1 })
                     {
@@ -1044,7 +1044,7 @@ VALUES($id,$campaign,'main',$exchange,'source','player',5,'applied',1);", Gossip
                     var anonymousNight = new Dictionary<string, object>(falseNight) { ["body"] = "The armed stranger spent the night with me, Rhagaea." };
                     check("malicious_unknown_player_uses_only_accessible_label", ValidatePersonalGossipComposition(c, anonymousMalice, ReviewedFixture(anonymousMalice, anonymousNight), false)
                         && !Json.Serialize(PersonalGossipCompositionBrief(anonymousMalice)).Contains("HiddenCanonicalName"), null);
-                    EnsureIdentitySchema(c);
+                    CharactersService.EnsureIdentitySchema(c);
                     var hiddenCanonical = GossipFields("heroStringId", "player", "name", "SecretCanonicalName");
                     var unidentified = GossipPlayerReference(c, "source", "player", hiddenCanonical, GossipFields());
                     consultation["playerName"] = ReadString(unidentified, "label", "");
@@ -1074,21 +1074,21 @@ VALUES('source','player','claimed','SecretCanonicalName','TravelingAlias'),('tar
                     ExecuteSql(c, "DELETE FROM acquaintances WHERE subject_id='player';");
                     foreach (string profile in new[] { "excitable", "reserved", "honest_loyal", "vengeful" })
                     {
-                        var foundation = CoreTraitKeys.ToDictionary(k => k, _ => (object)0);
+                        var foundation = CharactersService.CoreTraitKeys.ToDictionary(k => k, _ => (object)0);
                         foundation["courage"] = 1; foundation["mercy"] = -1; foundation["generosity"] = 2;
                         var profileTraits = GossipFields("foundationTraits", foundation);
-                        EnsureTraitPercentageData(profileTraits, "profile_fixture");
+                        CharactersService.EnsureTraitPercentageData(profileTraits, "profile_fixture");
                         ApplyPersonalGossipTraitProfile(profileTraits, profile);
                         var expected = new Dictionary<string, object>(ReadDictionary(profileTraits, "traitPercentages"));
-                        MarkEditorFoundationTraitsCurrent(profileTraits);
-                        EnsureTraitPercentageData(profileTraits, "profile_fixture");
-                        EnsureTraitPercentageData(profileTraits, "profile_fixture");
+                        CharactersService.MarkEditorFoundationTraitsCurrent(profileTraits);
+                        CharactersService.EnsureTraitPercentageData(profileTraits, "profile_fixture");
+                        CharactersService.EnsureTraitPercentageData(profileTraits, "profile_fixture");
                         check("fixed_profile_survives_normalization_" + profile, expected.All(p => ReadInt(ReadDictionary(profileTraits, "traitPercentages"), p.Key, -1) == Convert.ToInt32(p.Value))
                             && ReadInt(ReadDictionary(profileTraits, "foundationTraits"), "courage", 0) == 1
                             && ReadInt(ReadDictionary(profileTraits, "foundationTraits"), "mercy", 0) == -1
                             && ReadInt(ReadDictionary(profileTraits, "foundationTraits"), "generosity", 0) == 2, null);
                         SavePersonalGossipTraitProfile(c, campaign, "profile_fixture", profileTraits);
-                        var openedProfile = MaterializeCanonicalProfile(campaign, "profile_fixture", GossipFields("heroStringId", "profile_fixture", "name", "Profile Fixture"), GossipFields(), false, false);
+                        var openedProfile = CharactersService.MaterializeCanonicalProfile(campaign, "profile_fixture", GossipFields("heroStringId", "profile_fixture", "name", "Profile Fixture"), GossipFields(), false, false);
                         var afterOpen = ReadJsonObject(CharacterFile(campaign, "profile_fixture", "traits.json"));
                         check("fixed_profile_survives_canonical_open_" + profile, ReadString(openedProfile, "status", "") == "editor_authoritative"
                             && expected.All(p => ReadInt(ReadDictionary(afterOpen, "traitPercentages"), p.Key, -1) == Convert.ToInt32(p.Value))
@@ -1097,23 +1097,23 @@ VALUES('source','player','claimed','SecretCanonicalName','TravelingAlias'),('tar
                     // Reproduce the native failure: a sparse shipped character has
                     // constructed/trait files but no expanded narrative before editing.
                     string editedHero = "lord_1_37";
-                    var shippedEditorProfile = LoadCharacterProfileLibrary()[editedHero];
-                    var editorRuntime = DeepCloneProfileDictionary(ReadDictionary(shippedEditorProfile, "sourceFacts"));
+                    var shippedEditorProfile = CharactersService.LoadCharacterProfileLibrary()[editedHero];
+                    var editorRuntime = CharactersService.DeepCloneProfileDictionary(ReadDictionary(shippedEditorProfile, "sourceFacts"));
                     editorRuntime["heroStringId"] = editedHero;
                     editorRuntime["narrativeVersion"] = 5;
                     WriteJsonObject(CharacterFile(campaign, editedHero, "profile.json"), editorRuntime);
                     WriteJsonObject(CharacterFile(campaign, editedHero, "constructed.json"), GossipFields("ok", true, "status", "canonical_ready"));
                     foreach (string profile in new[] { "excitable", "reserved", "honest_loyal", "vengeful" })
                     {
-                        var editedTraits = GossipFields("foundationTraits", CoreTraitKeys.ToDictionary(k => k, _ => (object)0));
-                        EnsureTraitPercentageData(editedTraits, editedHero);
+                        var editedTraits = GossipFields("foundationTraits", CharactersService.CoreTraitKeys.ToDictionary(k => k, _ => (object)0));
+                        CharactersService.EnsureTraitPercentageData(editedTraits, editedHero);
                         ApplyPersonalGossipTraitProfile(editedTraits, profile);
                         var expected = new Dictionary<string, object>(ReadDictionary(editedTraits, "traitPercentages"));
                         SavePersonalGossipTraitProfile(c, campaign, editedHero, editedTraits);
                         var ready = EnsureCharacterConstructed(campaign, editedHero, editorRuntime, "gossip_fixture_first_contact_test");
                         var afterContact = ReadJsonObject(CharacterFile(campaign, editedHero, "traits.json"));
                         check("fixed_profile_full_first_contact_ready_" + profile, IsCharacterConstructionReady(ready)
-                            && NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaign, editedHero, "narrative.json")))
+                            && CharactersService.NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaign, editedHero, "narrative.json")))
                             && expected.All(p => ReadInt(ReadDictionary(afterContact, "traitPercentages"), p.Key, -1) == Convert.ToInt32(p.Value))
                             && QuerySql(c, "SELECT command_id FROM character_editor_native_commands WHERE hero_id=$hero;", GossipFields("hero", editedHero)).Count == 0, ready);
                     }

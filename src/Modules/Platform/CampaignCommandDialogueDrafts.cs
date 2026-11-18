@@ -124,7 +124,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool ShouldRouteCampaignCommandDraft(string campaignId,
+        internal static bool ShouldRouteCampaignCommandDraft(string campaignId,
             Dictionary<string, object> payload, Dictionary<string, object> hero, string playerText)
         {
             if (SpeakerInPlayerParty(payload, hero)) return false;
@@ -195,7 +195,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static List<string> CampaignCommandMissingDetails(Dictionary<string, object> candidate,
+        internal static List<string> CampaignCommandMissingDetails(Dictionary<string, object> candidate,
             string playerText)
         {
             List<string> missing = new List<string>();
@@ -239,19 +239,19 @@ namespace ReignBetaServer
             return missing.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        private static bool CampaignCommandObjectiveNeedsSettlement(string objective)
+        internal static bool CampaignCommandObjectiveNeedsSettlement(string objective)
         {
             return new[] { "move", "patrol", "scout_report", "form_army", "raid", "besiege_capture",
                 "defend", "relieve_siege" }.Contains(objective, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static bool CampaignCommandObjectiveNeedsParty(string objective)
+        internal static bool CampaignCommandObjectiveNeedsParty(string objective)
         {
             return new[] { "escort", "join_army", "engage_party" }.Contains(objective,
                 StringComparer.OrdinalIgnoreCase);
         }
 
-        private static string CanonicalCampaignCommandObjective(string value)
+        internal static string CanonicalCampaignCommandObjective(string value)
         {
             string normalized = (value ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
             switch (normalized)
@@ -274,7 +274,7 @@ namespace ReignBetaServer
                 + ". Once you clarify that, I will repeat the whole order back to you before I act.";
         }
 
-        private static string BuildCampaignCommandReadback(Dictionary<string, object> draft, bool final)
+        internal static string BuildCampaignCommandReadback(Dictionary<string, object> draft, bool final)
         {
             Dictionary<string, object> candidate = ReadDictionary(draft, "candidate")
                 ?? new Dictionary<string, object>();
@@ -359,7 +359,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static bool IsUnqualifiedCampaignCommandConfirmation(string playerText)
+        internal static bool IsUnqualifiedCampaignCommandConfirmation(string playerText)
         {
             string normalized = NormalizeCampaignCommandControlPhrase(playerText);
             return new[] { "yes", "yes thats right", "yes thats correct", "yes go", "yes go ahead",
@@ -369,7 +369,7 @@ namespace ReignBetaServer
                 .Contains(normalized, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static bool IsCampaignCommandDraftCancellation(string playerText)
+        internal static bool IsCampaignCommandDraftCancellation(string playerText)
         {
             string normalized = NormalizeCampaignCommandControlPhrase(playerText);
             return new[] { "cancel", "cancel it", "never mind", "nevermind", "forget it",
@@ -405,14 +405,14 @@ namespace ReignBetaServer
             return false;
         }
 
-        private static string CampaignCommandPlanHash(Dictionary<string, object> candidate)
+        internal static string CampaignCommandPlanHash(Dictionary<string, object> candidate)
         {
             string canonical = Json.Serialize(ReadDictionary(candidate, "terms") ?? new Dictionary<string, object>());
             using (SHA256 sha = SHA256.Create())
                 return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(canonical)).Select(x => x.ToString("x2")));
         }
 
-        private static Dictionary<string, object> CampaignCommandCloneDictionary(Dictionary<string, object> value)
+        internal static Dictionary<string, object> CampaignCommandCloneDictionary(Dictionary<string, object> value)
         {
             return TryParseJsonObject(Json.Serialize(value ?? new Dictionary<string, object>()))
                 ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);

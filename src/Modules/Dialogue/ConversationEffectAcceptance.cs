@@ -72,7 +72,7 @@ namespace ReignBetaServer
             Dictionary<string, object> privateDrinkArgs = null;
             bool privateDrinkReplay = false;
             string acceptedHash = PromptHash(reply ?? "");
-            lock (CampaignRelationshipWriteLock(campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(campaign))
             using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaign) : null)
             {
                 var connection = existingConnection ?? ownedConnection;

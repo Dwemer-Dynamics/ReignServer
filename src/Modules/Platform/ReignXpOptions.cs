@@ -38,10 +38,10 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static Dictionary<string, object> ReignXpOptionsForClient()
+        internal static Dictionary<string, object> ReignXpOptionsForClient()
             => ReignXpOptionsForClient(LoadSettings());
 
-        private static Dictionary<string, object> ReignXpOptionsForClient(Dictionary<string, object> settings)
+        internal static Dictionary<string, object> ReignXpOptionsForClient(Dictionary<string, object> settings)
         {
             double multiplier;
             try { multiplier = Convert.ToDouble(settings["reignXpMultiplier"], CultureInfo.InvariantCulture); }
@@ -72,7 +72,7 @@ namespace ReignBetaServer
             return result;
         }
 
-        private static string ReignXpOptionsHtml() => @"
+        internal static string ReignXpOptionsHtml() => @"
     <section id='options' class='page'>
       <style>
         :is(#options,#npclivesdiagnostics) .xpOptions{max-width:760px;background:#121211;color:#C5BDAF;border:1px solid #7E6A4D;padding:24px}
@@ -113,7 +113,7 @@ namespace ReignBetaServer
       </div>
 " + CorrespondenceOptionsHtml() + BanterOptionsHtml() + PlayerApproachOptionsHtml() + NpcLivesOptionsHtml() + WarEconomyOptionsHtml() + RulerOptionsHtml() + AnnouncementOptionsHtml() + PersonalGossipOptionsHtml() + @"    </section>";
 
-        private static string ReignXpOptionsScript() => @"
+        internal static string ReignXpOptionsScript() => @"
     ids.push('reignXpEnabled','reignXpMultiplier');
     boolIds.add('reignXpEnabled');
     const reignXpCategoryIds=['reignXpConversationMultiplier','reignXpSocialCharmMultiplier','reignXpSocialBonusMultiplier','reignXpPetitionMultiplier'];

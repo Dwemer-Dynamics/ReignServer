@@ -96,7 +96,7 @@ namespace ReignBetaServer
             var unknownIdentity = TestDict("knowsIdentity", false, "canonicalNameAllowed", false,
                 "usableName", "the traveler", "safeLabel", "the traveler");
             var projected = BuildConversationNaturalnessContext("Hello.", false, privateNameHistory, "npc", "Mira", null,
-                text => SanitizePromptForIdentity(text, "Hello.", "TrueName", unknownIdentity));
+                text => CharactersService.SanitizePromptForIdentity(text, "Hello.", "TrueName", unknownIdentity));
             Check("ledger_uses_observer_identity_projection", !ReadString(projected, "prompt", "").Contains("TrueName", StringComparison.Ordinal)
                 && ReadString(projected, "prompt", "").Contains("traveler", StringComparison.Ordinal), projected);
 

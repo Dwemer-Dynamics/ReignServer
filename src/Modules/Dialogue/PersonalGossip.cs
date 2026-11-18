@@ -53,8 +53,8 @@ CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(t
             TryParseJsonObject(ReadString(GossipClock(c, timeline), "snapshot_json", "{}")) ?? new Dictionary<string, object>();
 
         private static string GossipClockEpoch(ReignDbConnection c) => PersonalGossipClockBoot + ":"
-            + Interlocked.Read(ref CampaignReplacementGeneration).ToString(CultureInfo.InvariantCulture) + ":"
-            + (TableExists(c, "memory_precision_state") ? ReadString(QuerySql(c,
+            + Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration).ToString(CultureInfo.InvariantCulture) + ":"
+            + (WorldSimulationService.TableExists(c, "memory_precision_state") ? ReadString(QuerySql(c,
                 "SELECT restore_generation FROM memory_precision_state WHERE state_id='current';").FirstOrDefault(), "restore_generation", "") : "");
 
         private static Dictionary<string, object> GossipPlayerReference(ReignDbConnection c, string observer, string player,
@@ -63,8 +63,8 @@ CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(t
             var context = new Dictionary<string, object>(payload ?? new Dictionary<string, object>());
             context["canonicalName"] = ReadString(main, "name", "");
             context["subject"] = ReadDictionary(payload, "playerIdentity") ?? main;
-            var row = TableExists(c, "acquaintances") ? ReadAcquaintance(c, observer, player) : null;
-            var view = BuildIdentityView(row, context);
+            var row = WorldSimulationService.TableExists(c, "acquaintances") ? CharactersService.ReadAcquaintance(c, observer, player) : null;
+            var view = CharactersService.BuildIdentityView(row, context);
             return GossipFields("label", ReadString(view, "usableName", "the stranger"),
                 "identityState", ReadString(view, "identityState", "encountered_unknown"),
                 "named", ReadBool(view, "knowsIdentity", false), "originalObserverId", observer);
@@ -74,8 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(t
             string observer, string player, bool originalEncounter)
         {
             if (originalEncounter && GossipSameId(ReadString(reference, "originalObserverId", ""), observer)) return true;
-            if (!ReadBool(reference, "named", false) || !TableExists(c, "acquaintances")) return false;
-            var view = BuildIdentityView(ReadAcquaintance(c, observer, player), new Dictionary<string, object>());
+            if (!ReadBool(reference, "named", false) || !WorldSimulationService.TableExists(c, "acquaintances")) return false;
+            var view = CharactersService.BuildIdentityView(CharactersService.ReadAcquaintance(c, observer, player), new Dictionary<string, object>());
             return ReadBool(view, "knowsIdentity", false) && string.Equals(ReadString(reference, "label", ""),
                 ReadString(view, "usableName", ""), StringComparison.OrdinalIgnoreCase);
         }
@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_gossip_history_owner ON personal_gossip_history(t
                 || !ReadBool(snapshot, "rosterComplete", false)
                 || !double.IsFinite(day) || !double.IsFinite(captured) || day < 0 || Math.Abs(day - captured) > 1d / 1440
                 || GossipTimeline(snapshot) != timeline || ReadDictionaryList(snapshot, "people").Count > 8192) return false;
-            if (ActiveWorldHistoryTimeline(c) != timeline) return false;
+            if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) return false;
             // A clock proof belongs to this process and exact restored campaign generation.
             // Reject an old in-flight pump before it can advance the replacement's clock.
             string epoch = ReadString(payload, "gossipClockEpoch", "");
@@ -108,7 +108,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             if (string.IsNullOrWhiteSpace(campaign)) return GossipFields("ok", false, "error", "Campaign is required.");
             if (!ReadBool(PersonalGossipSettings(), "enabled", true)) return GossipFields("ok", true, "enabled", false);
             int delivered;
-            using (EnterCampaignWorkLock(GossipGate(campaign)))
+            using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
             using (var c = OpenCampaignConnection(campaign))
             {
                 EnsurePersonalGossipSchema(c);
@@ -124,8 +124,8 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             Dictionary<string, object> observerProfile, Dictionary<string, object> subjectProfile)
         {
             var row = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                GossipFields("pair", AmbientPairKey(observer, subject))).FirstOrDefault();
-            return row == null ? InitialReignAffinity(observerProfile, subjectProfile)
+                GossipFields("pair", RelationshipsService.AmbientPairKey(observer, subject))).FirstOrDefault();
+            return row == null ? RelationshipsService.InitialReignAffinity(observerProfile, subjectProfile)
                 : ReputationService.EffectiveDirectionalAffinity(row, GossipSameId(ReadString(row, "hero_a_id", ""), observer));
         }
 
@@ -133,12 +133,12 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
             Dictionary<string, object> a, Dictionary<string, object> b)
         {
             if (GossipFamily(a, b)) return true;
-            if (TableExists(c, "acquaintances") && QuerySql(c,
+            if (WorldSimulationService.TableExists(c, "acquaintances") && QuerySql(c,
                 "SELECT subject_id FROM acquaintances WHERE observer_id=$a AND subject_id=$b AND identity_state='verified' LIMIT 1;",
                 GossipFields("a", observer, "b", target)).Count > 0) return true;
             // Persisted social contact, unlike a raw native relation, establishes a known pair.
             return QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                GossipFields("pair", AmbientPairKey(observer, target))).Count > 0;
+                GossipFields("pair", RelationshipsService.AmbientPairKey(observer, target))).Count > 0;
         }
 
         private static List<string> GossipMentionedIds(string spoken, Dictionary<string, object> speaker,
@@ -203,7 +203,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET world_day=excluded.world_day,snapshot_jso
 
         private static double GossipConversationDelta(ReignDbConnection c, string timeline, string session, string speaker, string player)
         {
-            if (!TableExists(c, "conversation_relationship_receipts")) return 0;
+            if (!WorldSimulationService.TableExists(c, "conversation_relationship_receipts")) return 0;
             var row = QuerySql(c, @"SELECT COALESCE(SUM(final_delta),0) AS delta FROM conversation_relationship_receipts r
 WHERE r.observer_id=$speaker AND r.target_id=$player AND (r.timeline_id=$timeline OR r.timeline_id='')
 AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.session_id=$session AND t.exchange_id=r.exchange_id);",
@@ -219,7 +219,7 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
             {
                 if (ReadBool(payload, "officialMemoryFirewall", false) || string.IsNullOrWhiteSpace(speaker)
                     || string.IsNullOrWhiteSpace(player) || !ReadBool(PersonalGossipSettings(), "enabled", true)) return;
-                using (EnterCampaignWorkLock(GossipGate(campaign)))
+                using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
                 using (var c = OpenCampaignConnection(campaign))
                 {
                     EnsurePersonalGossipSchema(c);
@@ -349,12 +349,12 @@ AND r.status='applied' AND EXISTS(SELECT 1 FROM conversation_turns t WHERE t.ses
             && signal.TryGetValue("promisedSecrecy", out object promised) && promised is bool
             && signal.TryGetValue("ownCompromising", out object compromising) && compromising is bool;
 
-        private static void PersonalGossipRelationshipApplied(string campaign, Dictionary<string, object> payload)
+        internal static void PersonalGossipRelationshipApplied(string campaign, Dictionary<string, object> payload)
         {
             try
             {
                 if (!ReadBool(PersonalGossipSettings(), "enabled", true)) return;
-                using (EnterCampaignWorkLock(GossipGate(campaign)))
+                using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
                 using (var c = OpenCampaignConnection(campaign))
                 {
                     EnsurePersonalGossipSchema(c);
@@ -572,7 +572,7 @@ AND (m.created_day>$day OR t.session_id=$session);", GossipFields("timeline", ti
                 // Confidence owners need not be living, available recipients. A
                 // persisted bond remains relevant when its owner is off this roster.
                 bool knownBond = person != null || QuerySql(c, "SELECT pair_key FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
-                    GossipFields("pair", AmbientPairKey(GossipHeroId(self), id))).Count > 0;
+                    GossipFields("pair", RelationshipsService.AmbientPairKey(GossipHeroId(self), id))).Count > 0;
                 return knownBond ? Math.Max(0, GossipAffinity(c, GossipHeroId(self), id, self, person)) : 0; }).DefaultIfEmpty(0).Max();
 
         private static void InsertPersonalGossipMessage(ReignDbConnection c, Dictionary<string, object> data, string id, bool reply)

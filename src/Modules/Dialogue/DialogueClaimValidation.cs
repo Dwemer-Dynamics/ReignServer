@@ -399,7 +399,7 @@ namespace ReignBetaServer
                 receipt["semanticAccuracyCertified"] = false;
                 if (!valid) Interlocked.Exchange(ref DialogueClaimHelperUnavailableUntil, DateTime.UtcNow.AddSeconds(30).Ticks);
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is CampaignRequestReplacedException))
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is PersistenceService.CampaignRequestReplacedException))
             {
                 receipt["status"] = "helper_unavailable"; receipt["errorType"] = ex.GetType().Name;
                 Interlocked.Exchange(ref DialogueClaimHelperUnavailableUntil, DateTime.UtcNow.AddSeconds(30).Ticks);
@@ -434,7 +434,7 @@ namespace ReignBetaServer
                 "coverage", "none", "candidateCount", 0);
             string qualified;
             try { settings ??= LoadSettings(); qualified = QualifiedMemoryExtractorHash(settings); }
-            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is CampaignRequestReplacedException))
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is PersistenceService.CampaignRequestReplacedException))
             { receipt["status"] = "configuration_unavailable"; receipt["errorType"] = ex.GetType().Name; return receipt; }
             if (qualified.Length == 0 && DialogueClaimExtractorReplay.Value == null) return receipt;
             if (text.Length == 0 || text.Length > 2400) { receipt["status"] = "input_limit"; return receipt; }
@@ -477,7 +477,7 @@ namespace ReignBetaServer
                 // canonical actors or introduce corrections without local proof.
                 if (!valid) Interlocked.Exchange(ref DialogueClaimExtractorUnavailableUntil, DateTime.UtcNow.AddSeconds(30).Ticks);
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is CampaignRequestReplacedException))
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !(ex is PersistenceService.CampaignRequestReplacedException))
             {
                 receipt["status"] = "helper_unavailable"; receipt["errorType"] = ex.GetType().Name;
                 Interlocked.Exchange(ref DialogueClaimExtractorUnavailableUntil, DateTime.UtcNow.AddSeconds(30).Ticks);

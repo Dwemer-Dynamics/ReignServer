@@ -270,7 +270,7 @@ AND attempt_number=1;";
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignDirectory(campaignId));
             }
 
             return checks;

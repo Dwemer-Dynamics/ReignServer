@@ -62,7 +62,7 @@ An open ledger is a record of accepted links, not proof of silence. Later addres
                 speaker = id == "current_npc" ? owner : peer;
                 text = id == "current_npc" ? reply : ReadFirstString(payload, "playerText", "text", "message");
                 if (speaker.Length == 0 || !string.Equals(requestedSpeaker, speaker, StringComparison.OrdinalIgnoreCase)) return null;
-                if (TableExists(connection, "conversation_turns"))
+                if (WorldSimulationService.TableExists(connection, "conversation_turns"))
                     row = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND speaker_id=$speaker
 AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                         TestDict("event", eventId, "speaker", speaker, "text", text)).FirstOrDefault();
@@ -71,7 +71,7 @@ AND text=$text AND status='active' ORDER BY turn_order DESC LIMIT 1;",
                 if (row == null && id == "current_player")
                     row = ObservedGroupPlayerInput(connection, payload, owner, speaker, text);
             }
-            else if (id.Length > 0 && TableExists(connection, "conversation_turns"))
+            else if (id.Length > 0 && WorldSimulationService.TableExists(connection, "conversation_turns"))
             {
                 row = QuerySql(connection, "SELECT * FROM conversation_turns WHERE turn_id=$id AND status='active';", TestDict("id", id)).FirstOrDefault();
                 // Some writers cite the exchange event ID displayed beside a turn.

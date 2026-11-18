@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private const int LiveTestSchemaVersion = 2;
         private const int LiveTestDefaultArmMinutes = 30;
@@ -16,8 +16,8 @@ namespace ReignBetaServer
         // legitimately stretch the native polling interval. Keep liveness
         // aligned with the controller's existing 90-second crash boundary so
         // a recently received heartbeat is not rejected between native ticks.
-        private const int LiveTestHeartbeatFreshSeconds = 90;
-        private const int LiveTestLeaseSeconds = 45;
+        internal const int LiveTestHeartbeatFreshSeconds = 90;
+        internal const int LiveTestLeaseSeconds = 45;
         private static readonly object LiveTestLock = new object();
         private static readonly HashSet<string> LiveTestModes = new HashSet<string>(
             new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip" },
@@ -61,7 +61,7 @@ namespace ReignBetaServer
             new[] { "completed", "failed", "cancelled", "interrupted" },
             StringComparer.OrdinalIgnoreCase);
 
-        private static Dictionary<string, object> LiveTestArmApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestArmApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!string.Equals(ReadString(payload, "confirmation", ""), "arm", StringComparison.OrdinalIgnoreCase))
@@ -77,19 +77,19 @@ namespace ReignBetaServer
                 ["expiresUtc"] = expires.ToString("o"),
                 ["requestedBy"] = ReadString(payload, "requestedBy", "ReignLiveTest")
             };
-            lock (LiveTestLock) WriteJsonObject(LiveTestArmPath(), arm);
+            lock (LiveTestLock) Program.WriteJsonObject(LiveTestArmPath(), arm);
             return new Dictionary<string, object>
             {
                 ["ok"] = true, ["armed"] = true, ["armId"] = arm["armId"], ["expiresUtc"] = arm["expiresUtc"]
             };
         }
 
-        private static Dictionary<string, object> LiveTestRuntimeApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> LiveTestRuntimeApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string campaignId = query.TryGetValue("campaignId", out string requested) ? requested : "";
             Dictionary<string, object> runtime = LoadLiveTestRuntime(campaignId);
-            Dictionary<string, object> arm = ReadJsonObject(LiveTestArmPath());
+            Dictionary<string, object> arm = Program.ReadJsonObject(LiveTestArmPath());
             bool armed = IsLiveTestArmed(arm);
             string runtimeCampaign = ReadString(runtime, "campaignId", campaignId);
             Dictionary<string, object> run = string.IsNullOrWhiteSpace(runtimeCampaign) ? null : FindActiveLiveTestRun(runtimeCampaign);
@@ -108,7 +108,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> LiveTestHeartbeatApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestHeartbeatApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
@@ -125,7 +125,7 @@ namespace ReignBetaServer
                     && !string.Equals(currentInstance, gameInstanceId, StringComparison.OrdinalIgnoreCase)
                     && CompareLiveTestGameInstanceOrder(gameInstanceId, currentInstance) < 0)
                 {
-                    Dictionary<string, object> currentArm = ReadJsonObject(LiveTestArmPath());
+                    Dictionary<string, object> currentArm = Program.ReadJsonObject(LiveTestArmPath());
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false,
@@ -149,10 +149,10 @@ namespace ReignBetaServer
 
                 payload["schemaVersion"] = LiveTestSchemaVersion;
                 payload["receivedUtc"] = DateTimeOffset.UtcNow.ToString("o");
-                WriteJsonObject(LiveTestRuntimePath(campaignId), payload);
-                WriteJsonObject(LiveTestLatestRuntimePath(), payload);
-                Dictionary<string, object> arm = ReadJsonObject(LiveTestArmPath());
-                if (TryRenewPersonalGossipConversationLease(active, payload, DateTimeOffset.UtcNow, IsLiveTestArmed(arm)))
+                Program.WriteJsonObject(LiveTestRuntimePath(campaignId), payload);
+                Program.WriteJsonObject(LiveTestLatestRuntimePath(), payload);
+                Dictionary<string, object> arm = Program.ReadJsonObject(LiveTestArmPath());
+                if (Program.TryRenewPersonalGossipConversationLease(active, payload, DateTimeOffset.UtcNow, IsLiveTestArmed(arm)))
                     SaveLiveTestRun(active);
                 return new Dictionary<string, object>
                 {
@@ -184,7 +184,7 @@ namespace ReignBetaServer
             return stamp.All(char.IsDigit) ? stamp : "";
         }
 
-        private static Dictionary<string, object> LiveTestTargetSearchApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestTargetSearchApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
@@ -256,14 +256,14 @@ namespace ReignBetaServer
             return started;
         }
 
-        private static Dictionary<string, object> LiveTestRunStartApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestRunStartApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (payload.ContainsKey("schemaVersion") && !new[] { 1, LiveTestSchemaVersion }.Contains(ReadInt(payload, "schemaVersion", LiveTestSchemaVersion)))
                 return LiveTestError("Unsupported live-test schemaVersion. Expected 1 or " + LiveTestSchemaVersion.ToString(CultureInfo.InvariantCulture) + ".");
             string campaignId = ReadString(payload, "campaignId", "");
             if (string.IsNullOrWhiteSpace(campaignId)) return LiveTestError("campaignId is required.");
-            if (!IsLiveTestArmed(ReadJsonObject(LiveTestArmPath()))) return LiveTestError("The live-test bridge is not armed or its arm window expired.");
+            if (!IsLiveTestArmed(Program.ReadJsonObject(LiveTestArmPath()))) return LiveTestError("The live-test bridge is not armed or its arm window expired.");
             Dictionary<string, object> runtime = LoadLiveTestRuntime(campaignId);
             if (!IsFreshLiveTestRuntime(runtime)) return LiveTestError("No fresh loaded-game heartbeat exists for this campaign.");
             if (ReadBool(ReadDictionary(runtime, "saveSync"), "alignmentPending", false)) return LiveTestError("Save Sync alignment is still pending.");
@@ -336,7 +336,7 @@ namespace ReignBetaServer
                     ["gauntletRunId"] = ReadString(payload, "gauntletRunId", ""),
                     ["caseInstanceId"] = ReadString(payload, "caseInstanceId", ""),
                     ["gauntletCorrelationId"] = ReadString(payload, "correlationId", ""),
-                    ["buildVersion"] = CurrentConversationBuildVersion(),
+                    ["buildVersion"] = Program.CurrentConversationBuildVersion(),
                     ["seed"] = ReadLong(payload, "seed", 0),
                     ["presentation"] = NormalizeLiveTestPresentation(ReadString(payload, "presentation", "headless")),
                     ["effects"] = NormalizeLiveTestEffects(ReadString(payload, "effects", "guarded")),
@@ -390,7 +390,7 @@ namespace ReignBetaServer
             return steps.All(step => allowed.Contains(ReadString(step, "operation", "")));
         }
 
-        private static Dictionary<string, object> LiveTestCommandEnqueueApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestCommandEnqueueApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
@@ -416,7 +416,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> LiveTestRunPauseApi(Dictionary<string, object> payload, bool resume)
+        internal static Dictionary<string, object> LiveTestRunPauseApi(Dictionary<string, object> payload, bool resume)
         {
             payload = payload ?? new Dictionary<string, object>();
             lock (LiveTestLock)
@@ -467,7 +467,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> LiveTestRunCancelApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestRunCancelApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             lock (LiveTestLock)
@@ -488,7 +488,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> LiveTestRunStatusApi(Dictionary<string, string> query, bool includeEvidence)
+        internal static Dictionary<string, object> LiveTestRunStatusApi(Dictionary<string, string> query, bool includeEvidence)
         {
             query = query ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : ReadString(LoadLiveTestRuntime(""), "campaignId", "");
@@ -501,12 +501,12 @@ namespace ReignBetaServer
             return response;
         }
 
-        private static Dictionary<string, object> LiveTestGamePollApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestGamePollApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "");
             string instanceId = ReadString(payload, "gameInstanceId", "");
-            if (!IsLiveTestArmed(ReadJsonObject(LiveTestArmPath()))) return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = false };
+            if (!IsLiveTestArmed(Program.ReadJsonObject(LiveTestArmPath()))) return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = false };
             lock (LiveTestLock)
             {
                 Dictionary<string, object> run = FindActiveLiveTestRun(campaignId);
@@ -560,7 +560,7 @@ namespace ReignBetaServer
             return ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) <= now;
         }
 
-        private static Dictionary<string, object> FirstLiveTestCommandInSequence(
+        internal static Dictionary<string, object> FirstLiveTestCommandInSequence(
             Dictionary<string, object> run)
         {
             return ReadDictionaryList(run, "commands").FirstOrDefault(command =>
@@ -624,12 +624,12 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> LiveTestGameAckApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestGameAckApi(Dictionary<string, object> payload)
         {
             return UpdateLiveTestCommandFromGame(payload, false);
         }
 
-        private static Dictionary<string, object> LiveTestGameResultApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> LiveTestGameResultApi(Dictionary<string, object> payload)
         {
             return UpdateLiveTestCommandFromGame(payload, true);
         }
@@ -666,9 +666,9 @@ namespace ReignBetaServer
                 if (result)
                 {
                     command["result"] = fatalInfrastructureFailure
-                        ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = LimitText(reportedError, 2000) }
+                        ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = Program.LimitText(reportedError, 2000) }
                         : ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
-                    command["error"] = fatalInfrastructureFailure ? LimitText(reportedError, 2000) : ReadString(payload, "error", "");
+                    command["error"] = fatalInfrastructureFailure ? Program.LimitText(reportedError, 2000) : ReadString(payload, "error", "");
                     command["correlationIds"] = ReadStringList(payload, "correlationIds");
                     if (fatalInfrastructureFailure)
                     {
@@ -677,7 +677,7 @@ namespace ReignBetaServer
                         List<Dictionary<string, object>> infrastructureFailures = ReadDictionaryList(run, "infrastructureFailures");
                         infrastructureFailures.Add(new Dictionary<string, object>
                         {
-                            ["commandId"] = commandId, ["error"] = LimitText(reportedError, 2000),
+                            ["commandId"] = commandId, ["error"] = Program.LimitText(reportedError, 2000),
                             ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                         });
                         run["infrastructureFailures"] = infrastructureFailures;
@@ -757,7 +757,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> row = new Dictionary<string, object>
                 {
                     ["commandId"] = commandId, ["assertion"] = name, ["expected"] = expected,
-                    ["passed"] = passed, ["evidence"] = LimitText(evidence, 1200),
+                    ["passed"] = passed, ["evidence"] = Program.LimitText(evidence, 1200),
                     ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                 };
                 rows.Add(row);
@@ -776,7 +776,7 @@ namespace ReignBetaServer
                     {
                         ["commandId"] = commandId, ["assertion"] = name,
                         ["error"] = "Live interaction assertion failed: " + name,
-                        ["evidence"] = LimitText(evidence, 1200), ["critical"] = criticalFailure,
+                        ["evidence"] = Program.LimitText(evidence, 1200), ["critical"] = criticalFailure,
                         ["utc"] = DateTimeOffset.UtcNow.ToString("o")
                     });
                 }
@@ -893,11 +893,11 @@ namespace ReignBetaServer
                         ?? ReadDictionary(reply, "dynamicCharacteristicsStore")
                         ?? new Dictionary<string, object>();
                     string text = FirstNonEmpty(ReadString(reply, "text", ""), ReadString(raw, "reply", ""));
-                    bool reiteratesInjected = injectedCharacteristics.Any(line => HasDynamicTextEvidence(line, text));
+                    bool reiteratesInjected = injectedCharacteristics.Any(line => CharactersService.HasDynamicTextEvidence(line, text));
                     if (ReadInt(store, "storedCount", 0) <= 0
-                        && ReplyLikelyIntroducesDynamicCharacteristic(text)
+                        && CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(text)
                         && !reiteratesInjected)
-                        uncaptured.Add(LimitText(text, 240));
+                        uncaptured.Add(Program.LimitText(text, 240));
                 }
                 record("requiresDynamicCharacteristicIntegrity", true, uncaptured.Count == 0,
                     uncaptured.Count == 0
@@ -915,7 +915,7 @@ namespace ReignBetaServer
                     List<string> activeDomains = ReadStringList(brief, "activeDomains");
                     bool romanceRelevant = activeDomains.Contains("romance", StringComparer.OrdinalIgnoreCase);
                     string visible = FirstNonEmpty(ReadString(reply, "text", ""), ReadString(raw, "reply", ""));
-                    bool romanticLanguage = ConversationReplyContainsRomanticAction(visible);
+                    bool romanticLanguage = Program.ConversationReplyContainsRomanticAction(visible);
                     bool romanticDetected = ReadBool(motiveOutcome, "romanticActionDetected", false);
                     return ReadStringList(brief, "goals").Count > 0
                         && ReadStringList(brief, "constraints").Count > 0
@@ -961,7 +961,7 @@ namespace ReignBetaServer
                             && observerTier >= 0 && observerTier <= 6
                             && targetTier >= 0 && targetTier <= 6
                             && delta == targetTier - observerTier
-                            && tierBand.Equals(RelativeClanTierBand(delta), StringComparison.OrdinalIgnoreCase);
+                            && tierBand.Equals(Program.RelativeClanTierBand(delta), StringComparison.OrdinalIgnoreCase);
                         int expectedObserverTier = ReadInt(
                             requested,
                             "expectedObserverClanTier",
@@ -1227,7 +1227,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> data = ReadDictionary(row, "data") ?? new Dictionary<string, object>();
                     characteristicLines.AddRange(LiveTestDynamicCharacteristicPromptLines(data));
                 }
-                bool recalled = characteristicLines.Any(line => HasDynamicTextEvidence(line, combined));
+                bool recalled = characteristicLines.Any(line => CharactersService.HasDynamicTextEvidence(line, combined));
                 record("requiresDynamicCharacteristicRecall", true, recalled,
                     "Injected Dynamic Characteristic lines=" + characteristicLines.Count
                     + "; grounded recall=" + recalled);
@@ -1250,12 +1250,12 @@ namespace ReignBetaServer
                 int activeCount = 0;
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(ReadString(run, "campaignId", "")))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(ReadString(run, "campaignId", "")))
                     {
-                        EnsureDynamicCharacteristicsSchema(connection);
+                        CharactersService.EnsureDynamicCharacteristicsSchema(connection);
                         foreach (string heroId in heroIds)
                         {
-                            Dictionary<string, object> count = QuerySql(connection,
+                            Dictionary<string, object> count = Program.QuerySql(connection,
                                 "SELECT COUNT(*) AS count FROM dynamic_characteristics WHERE owner_id=$owner AND status='active';",
                                 new Dictionary<string, object> { ["owner"] = heroId }).FirstOrDefault();
                             activeCount = Math.Max(activeCount, ReadInt(count, "count", 0));
@@ -1265,12 +1265,12 @@ namespace ReignBetaServer
                 catch (Exception ex)
                 {
                     record("requiresDynamicCharacteristicOverflowSelection", minimumActive, false,
-                        "Could not inspect active Dynamic Characteristics: " + LimitText(ex.Message, 500));
+                        "Could not inspect active Dynamic Characteristics: " + Program.LimitText(ex.Message, 500));
                     activeCount = -1;
                 }
                 if (activeCount >= 0)
                 {
-                    bool grounded = characteristicLines.Any(line => HasDynamicTextEvidence(line, combined));
+                    bool grounded = characteristicLines.Any(line => CharactersService.HasDynamicTextEvidence(line, combined));
                     record("requiresDynamicCharacteristicOverflowSelection", minimumActive,
                         activeCount >= minimumActive && characteristicLines.Count > 0 && grounded,
                         "Active characteristics=" + activeCount + "; injected selected lines="
@@ -1544,7 +1544,7 @@ namespace ReignBetaServer
                         return fieldsMatch
                             && authorityInternallyConsistent
                             && !staleLabel
-                            && !VerifiedIdentityGroundingContradiction(
+                            && !Program.VerifiedIdentityGroundingContradiction(
                                 parsed,
                                 new Dictionary<string, object>
                                 {
@@ -1595,7 +1595,7 @@ namespace ReignBetaServer
                         int observed = ReadInt(conduct,
                             "defianceTier", -1);
                         return ReadString(posture, "model", "")
-                                == PoliticalRiskModel
+                                == Program.PoliticalRiskModel
                             && maximum >= 0 && observed >= 0
                             && observed <= maximum
                             && ReadStringList(conduct,
@@ -1701,7 +1701,7 @@ namespace ReignBetaServer
                     .Select(text => new
                     {
                         Text = text,
-                        Claims = VisibleReplyClaimsCompletedWorldAction(
+                        Claims = Program.VisibleReplyClaimsCompletedWorldAction(
                             text, out string match),
                         Match = match
                     })
@@ -1722,7 +1722,7 @@ namespace ReignBetaServer
             if (failures.Any(row => string.Equals(ReadString(row, "commandId", ""), commandId, StringComparison.OrdinalIgnoreCase)))
             {
                 foreach (string correlationId in ReadStringList(command, "correlationIds"))
-                    ScheduleReplayCorpusCapture(ReadString(run, "campaignId", ""), correlationId);
+                    Program.ScheduleReplayCorpusCapture(ReadString(run, "campaignId", ""), correlationId);
             }
         }
 
@@ -1816,38 +1816,38 @@ namespace ReignBetaServer
                 int relatedScenes;
                 int rollingArcs;
                 int rollingArcSources;
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    session = QuerySql(connection,
+                    session = Program.QuerySql(connection,
                         "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                     string storedSummaryId = ReadString(session, "scene_summary_id", "");
-                    summary = QuerySql(connection,
+                    summary = Program.QuerySql(connection,
                         "SELECT * FROM summaries WHERE summary_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault();
-                    turnCount = ReadInt(QuerySql(connection,
+                    turnCount = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM conversation_turns WHERE session_id=$id AND status='active';",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    distinctExchanges = ReadInt(QuerySql(connection,
+                    distinctExchanges = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(DISTINCT exchange_id) count FROM conversation_turns WHERE session_id=$id AND status='active' AND exchange_id<>'';",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
-                    sourceLinks = ReadInt(QuerySql(connection,
+                    sourceLinks = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault(), "count", 0);
-                    ftsRows = ReadInt(QuerySql(connection,
+                    ftsRows = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault(), "count", 0);
-                    embeddingJobs = ReadInt(QuerySql(connection,
+                    embeddingJobs = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM embedding_jobs WHERE source_type='summary' AND source_id=$id;",
                         new Dictionary<string, object> { ["id"] = storedSummaryId }).FirstOrDefault(), "count", 0);
-                    consolidationJobs = ReadInt(QuerySql(connection,
+                    consolidationJobs = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_background_jobs WHERE job_type='memory_consolidation' AND session_id=$id;",
                         new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault(), "count", 0);
 
                     string ownerId = ReadString(summary, "owner_id", "");
                     string playerId = ReadString(session, "player_id", "");
                     string lane = ReadString(summary, "memory_lane", "");
-                    relatedScenes = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM summaries
+                    relatedScenes = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM summaries
 WHERE owner_id=$owner AND summary_type='scene' AND status='active' AND memory_lane=$lane
 AND ($player='' OR participants_json LIKE $playerLike);",
                         new Dictionary<string, object>
@@ -1855,7 +1855,7 @@ AND ($player='' OR participants_json LIKE $playerLike);",
                             ["owner"] = ownerId, ["lane"] = lane, ["player"] = playerId,
                             ["playerLike"] = "%" + playerId + "%"
                         }).FirstOrDefault(), "count", 0);
-                    Dictionary<string, object> arc = QuerySql(connection, @"SELECT summary_id FROM summaries
+                    Dictionary<string, object> arc = Program.QuerySql(connection, @"SELECT summary_id FROM summaries
 WHERE owner_id=$owner AND summary_type='arc' AND status='active' AND memory_lane=$lane
 AND ($player='' OR participants_json LIKE $playerLike)
 ORDER BY updated_ts DESC LIMIT 1;",
@@ -1866,20 +1866,20 @@ ORDER BY updated_ts DESC LIMIT 1;",
                         }).FirstOrDefault();
                     string arcId = ReadString(arc, "summary_id", "");
                     rollingArcs = string.IsNullOrWhiteSpace(arcId) ? 0 : 1;
-                    rollingArcSources = ReadInt(QuerySql(connection,
+                    rollingArcSources = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) count FROM memory_sources WHERE document_type='summary' AND document_id=$id AND source_type='summary';",
                         new Dictionary<string, object> { ["id"] = arcId }).FirstOrDefault(), "count", 0);
                 }
 
-                List<string> participants = TextListFromJson(ReadString(session, "participants_json", "[]"));
+                List<string> participants = Program.TextListFromJson(ReadString(session, "participants_json", "[]"));
                 string player = ReadString(session, "player_id", "");
                 List<string> nonPlayerParticipants = participants
                     .Where(id => !string.IsNullOrWhiteSpace(id)
                         && !id.Equals(player, StringComparison.OrdinalIgnoreCase))
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                List<string> knownBy = TextListFromJson(ReadString(summary, "known_by_json", "[]"));
+                List<string> knownBy = Program.TextListFromJson(ReadString(summary, "known_by_json", "[]"));
                 string summaryId = ReadString(summary, "summary_id", "");
-                bool semanticEnabled = ReadBool(LoadSettings(), "enableSemanticMemory", true);
+                bool semanticEnabled = ReadBool(Program.LoadSettings(), "enableSemanticMemory", true);
                 Dictionary<string, object> memoryResult = ReadDictionary(result, "memory")
                     ?? new Dictionary<string, object>();
                 Dictionary<string, object> arcResult = ReadDictionary(memoryResult, "arc")
@@ -1911,7 +1911,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
                     && summary != null
                     && summaryId.Equals(reportedSummaryId, StringComparison.OrdinalIgnoreCase)
                     && ReadString(summary, "summary_type", "").Equals("scene", StringComparison.OrdinalIgnoreCase)
-                    && MemoryLaneIds.Contains(ReadString(summary, "memory_lane", ""), StringComparer.OrdinalIgnoreCase)
+                    && Program.MemoryLaneIds.Contains(ReadString(summary, "memory_lane", ""), StringComparer.OrdinalIgnoreCase)
                     && turnCount > 0
                     && ReadInt(summary, "event_count", 0) == distinctExchanges
                     && sourceLinks >= turnCount + 1
@@ -1947,7 +1947,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
             }
             catch (Exception ex)
             {
-                evidence = "Memory artifact inspection failed: " + LimitText(ex.Message, 900);
+                evidence = "Memory artifact inspection failed: " + Program.LimitText(ex.Message, 900);
                 return false;
             }
         }
@@ -1983,7 +1983,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
             try
             {
                 List<Dictionary<string, object>> qualificationRuns =
-                    LoadConversationReadinessRuns(campaignId, qualificationId);
+                    Program.LoadConversationReadinessRuns(campaignId, qualificationId);
                 List<string> sessionIds = qualificationRuns
                     .SelectMany(item => ReadDictionaryList(item, "commands"))
                     .Where(item =>
@@ -1999,7 +1999,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
                     return false;
                 }
 
-                Dictionary<string, object> settings = LoadSettings();
+                Dictionary<string, object> settings = Program.LoadSettings();
                 bool semanticEnabled = ReadBool(settings, "enableSemanticMemory", true);
                 int minimumItems = Math.Max(2, Math.Min(20,
                     ReadInt(settings, "memoryConsolidationMinItems", 4)));
@@ -2010,13 +2010,13 @@ ORDER BY updated_ts DESC LIMIT 1;",
                 int eligibleConsolidations = 0;
                 int verifiedConsolidations = 0;
 
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    EnsureMemoryBackgroundWorkSchema(connection);
-                    EnsureSemanticMemorySchema(connection);
+                    Program.EnsureMemoryBackgroundWorkSchema(connection);
+                    Program.EnsureSemanticMemorySchema(connection);
                     foreach (string sessionId in sessionIds)
                     {
-                        Dictionary<string, object> session = QuerySql(connection,
+                        Dictionary<string, object> session = Program.QuerySql(connection,
                             "SELECT * FROM conversation_sessions WHERE session_id=$id LIMIT 1;",
                             new Dictionary<string, object> { ["id"] = sessionId }).FirstOrDefault();
                         string sceneId = ReadString(session, "scene_summary_id", "");
@@ -2026,7 +2026,7 @@ ORDER BY updated_ts DESC LIMIT 1;",
                             continue;
                         }
                         summaryIds.Add(sceneId);
-                        List<Dictionary<string, object>> jobs = QuerySql(connection, @"SELECT * FROM memory_background_jobs
+                        List<Dictionary<string, object>> jobs = Program.QuerySql(connection, @"SELECT * FROM memory_background_jobs
 WHERE job_type='memory_consolidation' AND session_id=$session ORDER BY owner_id;",
                             new Dictionary<string, object> { ["session"] = sessionId });
                         jobCount += jobs.Count;
@@ -2040,11 +2040,11 @@ WHERE job_type='memory_consolidation' AND session_id=$session ORDER BY owner_id;
                             {
                                 errors.Add(sessionId + "/" + ownerId + ": consolidation job " + status
                                     + (string.IsNullOrWhiteSpace(ReadString(job, "last_error", ""))
-                                        ? "" : " (" + LimitText(ReadString(job, "last_error", ""), 160) + ")"));
+                                        ? "" : " (" + Program.LimitText(ReadString(job, "last_error", ""), 160) + ")"));
                                 continue;
                             }
 
-                            int sourceEventCount = ReadInt(QuerySql(connection, @"SELECT COUNT(DISTINCT m.event_id) count
+                            int sourceEventCount = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(DISTINCT m.event_id) count
 FROM memories m JOIN conversation_turns t ON t.event_id=m.event_id
 WHERE t.session_id=$session AND m.owner_id=$owner AND m.event_id<>'';",
                                 new Dictionary<string, object>
@@ -2053,7 +2053,7 @@ WHERE t.session_id=$session AND m.owner_id=$owner AND m.event_id<>'';",
                                 }).FirstOrDefault(), "count", 0);
                             if (sourceEventCount < minimumItems) continue;
                             eligibleConsolidations++;
-                            Dictionary<string, object> middle = QuerySql(connection, @"SELECT * FROM summaries
+                            Dictionary<string, object> middle = Program.QuerySql(connection, @"SELECT * FROM summaries
 WHERE scope=$scope AND owner_id=$owner AND summary_type='middle_term'
 ORDER BY updated_ts DESC LIMIT 1;",
                                 new Dictionary<string, object>
@@ -2070,28 +2070,28 @@ ORDER BY updated_ts DESC LIMIT 1;",
                                 TryParseJsonObject(ReadString(middle, "payload_json", "{}"))
                                 ?? new Dictionary<string, object>();
                             List<string> sourceMemoryIds = ReadStringList(middlePayload, "sourceMemoryIds");
-                            int memoryLinks = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
+                            int memoryLinks = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
 WHERE document_type='summary' AND document_id=$id AND source_type='memory';",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int eventLinks = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
+                            int eventLinks = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
 WHERE document_type='summary' AND document_id=$id AND source_type='event';",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int unconsolidated = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count
+                            int unconsolidated = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count
 FROM memory_sources s JOIN memories m ON m.memory_id=s.source_id
 WHERE s.document_type='summary' AND s.document_id=$id AND s.source_type='memory'
 AND m.status<>'consolidated';",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int fts = ReadInt(QuerySql(connection,
+                            int fts = ReadInt(Program.QuerySql(connection,
                                 "SELECT COUNT(*) count FROM summary_fts WHERE summary_id=$id;",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
-                            int embeddingJobs = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM embedding_jobs
+                            int embeddingJobs = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM embedding_jobs
 WHERE source_type='summary' AND source_id=$id;",
                                 new Dictionary<string, object> { ["id"] = middleId }).FirstOrDefault(), "count", 0);
                             bool valid = ReadInt(middle, "event_count", 0) >= minimumItems
-                                && TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count >= minimumItems
+                                && Program.TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count >= minimumItems
                                 && sourceMemoryIds.Count > 0
                                 && memoryLinks == sourceMemoryIds.Count
-                                && eventLinks == TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count
+                                && eventLinks == Program.TextListFromJson(ReadString(middle, "source_events_json", "[]")).Count
                                 && unconsolidated == 0
                                 && fts == 1
                                 && (!semanticEnabled
@@ -2115,11 +2115,11 @@ WHERE source_type='summary' AND source_id=$id;",
                     List<string> sceneIds = summaryIds
                         .Where(id => id.StartsWith("scene_", StringComparison.OrdinalIgnoreCase))
                         .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                    foreach (Dictionary<string, object> arc in QuerySql(connection,
+                    foreach (Dictionary<string, object> arc in Program.QuerySql(connection,
                         "SELECT summary_id FROM summaries WHERE summary_type='arc' AND status='active';"))
                     {
                         string arcId = ReadString(arc, "summary_id", "");
-                        int matchedSources = ReadInt(QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
+                        int matchedSources = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) count FROM memory_sources
 WHERE document_type='summary' AND document_id=$id AND source_type='summary'
 AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" + index)) + ");",
                             sceneIds.Select((id, index) => new KeyValuePair<string, object>(
@@ -2131,7 +2131,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
 
                 summaryIds = summaryIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 Dictionary<string, object> semantic = semanticEnabled
-                    ? WaitForNpcDialogueAuditEmbeddings(campaignId, summaryIds, 12000)
+                    ? Program.WaitForNpcDialogueAuditEmbeddings(campaignId, summaryIds, 12000)
                     : new Dictionary<string, object>
                     {
                         ["disabled"] = true, ["expected"] = summaryIds.Count,
@@ -2162,12 +2162,12 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             catch (Exception ex)
             {
                 evidence = "Qualification memory completion inspection failed: "
-                    + LimitText(ex.Message, 900);
+                    + Program.LimitText(ex.Message, 900);
                 return false;
             }
         }
 
-        private static bool LiveTestReplyRecognizesIdentity(
+        internal static bool LiveTestReplyRecognizesIdentity(
             Dictionary<string, object> reply,
             string expectedName,
             string expectedState,
@@ -2310,7 +2310,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return true;
         }
 
-        private static List<string> LiveTestDynamicCharacteristicPromptLines(
+        internal static List<string> LiveTestDynamicCharacteristicPromptLines(
             Dictionary<string, object> promptData)
         {
             List<string> lines = new List<string>();
@@ -2409,13 +2409,13 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             {
                 try
                 {
-                    using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                    using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
-                        EnsureConversationRelationshipSchema(connection);
-                        EnsureWorldHistoryLieDetectionSchema(connection);
+                        RelationshipsService.EnsureConversationRelationshipSchema(connection);
+                        Program.EnsureWorldHistoryLieDetectionSchema(connection);
                         foreach (KeyValuePair<string, List<Dictionary<string, object>>> occurrence in auditByReceipt)
                         {
-                            Dictionary<string, object> stored = QuerySql(connection,
+                            Dictionary<string, object> stored = Program.QuerySql(connection,
                                 "SELECT * FROM conversation_relationship_receipts WHERE receipt_id=$id LIMIT 1;",
                                 new Dictionary<string, object> { ["id"] = occurrence.Key }).FirstOrDefault();
                             if (stored == null)
@@ -2423,7 +2423,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                                 errors.Add("Receipt " + occurrence.Key + " was absent from authoritative campaign storage.");
                                 continue;
                             }
-                            Dictionary<string, object> receipt = ConversationReceiptResponse(
+                            Dictionary<string, object> receipt = RelationshipsService.ConversationReceiptResponse(
                                 stored, occurrence.Value.All(row => ReadBool(row, "idempotent", false)));
                             receipt["auditOccurrenceCount"] = occurrence.Value.Count;
                             receipt["auditNonIdempotentCount"] = occurrence.Value.Count(row => !ReadBool(row, "idempotent", false));
@@ -2431,7 +2431,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                             string lieCheckId = ReadString(receipt, "lieCheckId", "");
                             if (!string.IsNullOrWhiteSpace(lieCheckId))
                             {
-                                Dictionary<string, object> lie = QuerySql(connection,
+                                Dictionary<string, object> lie = Program.QuerySql(connection,
                                     "SELECT * FROM world_history_lie_checks WHERE lie_check_id=$id LIMIT 1;",
                                     new Dictionary<string, object> { ["id"] = lieCheckId }).FirstOrDefault();
                                 string outcome = ReadString(lie, "outcome", "").ToLowerInvariant();
@@ -2461,7 +2461,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                             string benefitId = ReadString(receipt, "benefitEventId", "");
                             if (!string.IsNullOrWhiteSpace(benefitId))
                             {
-                                Dictionary<string, object> benefit = QuerySql(connection,
+                                Dictionary<string, object> benefit = Program.QuerySql(connection,
                                     "SELECT * FROM conversation_relationship_benefits WHERE benefit_id=$id LIMIT 1;",
                                     new Dictionary<string, object> { ["id"] = benefitId }).FirstOrDefault();
                                 receipt["benefitLedger"] = benefit == null
@@ -2486,7 +2486,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 }
                 catch (Exception ex)
                 {
-                    errors.Add("Could not reconcile authoritative relationship storage: " + LimitText(ex.Message, 400));
+                    errors.Add("Could not reconcile authoritative relationship storage: " + Program.LimitText(ex.Message, 400));
                 }
             }
 
@@ -2653,7 +2653,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
 
             foreach (IGrouping<string, Dictionary<string, object>> nativePair in receipts.GroupBy(receipt =>
                 ReadString(receipt, "exchangeId", "") + "|"
-                + AmbientPairKey(
+                + RelationshipsService.AmbientPairKey(
                     ReadString(receipt, "observerHeroStringId", ""),
                     ReadString(receipt, "targetHeroStringId", "")),
                 StringComparer.OrdinalIgnoreCase))
@@ -2968,9 +2968,9 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             long totalDurationMs = 0, providerDurationMs = 0;
             try
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
-                    EnsureSharedRelationshipHistorySchema(connection);
+                    RelationshipsService.EnsureSharedRelationshipHistorySchema(connection);
                     foreach (Dictionary<string, object> reply in replies
                         ?? new List<Dictionary<string, object>>())
                     {
@@ -3010,7 +3010,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                         if (!string.Equals(
                                 ReadString(envelope,
                                     "npcRelationshipPromptBlockHash", ""),
-                                PromptHash(relationshipBlock),
+                                Program.PromptHash(relationshipBlock),
                                 StringComparison.OrdinalIgnoreCase))
                             errors.Add("relationship prompt proof hash mismatch: "
                                 + correlationId);
@@ -3065,7 +3065,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                                 target, "sharedRelationshipHistoryIds"))
                             {
                                 historyIds.Add(historyId);
-                                Dictionary<string, object> row = QuerySql(connection,
+                                Dictionary<string, object> row = Program.QuerySql(connection,
                                     "SELECT * FROM shared_relationship_history_chapters WHERE history_id=$id LIMIT 1;",
                                     new Dictionary<string, object> { ["id"] = historyId })
                                     .FirstOrDefault();
@@ -3090,7 +3090,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                                         promptedChapterOrdinals[pairKey] = ordinals;
                                     }
                                     ordinals.Add(chapterOrdinal);
-                                    Dictionary<string, object> chemistry = QuerySql(
+                                    Dictionary<string, object> chemistry = Program.QuerySql(
                                         connection,
                                         "SELECT affinity_a_to_b,affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                                         new Dictionary<string, object>
@@ -3139,7 +3139,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             }
             catch (Exception ex)
             {
-                errors.Add("inspection exception: " + LimitText(ex.Message, 600));
+                errors.Add("inspection exception: " + Program.LimitText(ex.Message, 600));
             }
 
             if (expectedMode == "cold" && (providerCalls < 1 || generated + fallback < 1))
@@ -3216,7 +3216,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return newest >= 2 && ordinals.Any(value => value < newest);
         }
 
-        private static List<Dictionary<string, object>> CollectLiveTestCommandAuditEvidence(
+        internal static List<Dictionary<string, object>> CollectLiveTestCommandAuditEvidence(
             Dictionary<string, object> run, Dictionary<string, object> command)
         {
             List<Dictionary<string, object>> evidence = new List<Dictionary<string, object>>();
@@ -3224,7 +3224,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             foreach (string correlation in ReadStringList(command, "correlationIds")
                 .Where(value => !string.IsNullOrWhiteSpace(value)))
             {
-                Dictionary<string, object> audit = AuditQuery(new Dictionary<string, string>
+                Dictionary<string, object> audit = Program.AuditQuery(new Dictionary<string, string>
                 {
                     ["campaignId"] = ReadString(run, "campaignId", ""),
                     ["correlationId"] = correlation,
@@ -3240,7 +3240,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return evidence;
         }
 
-        private static bool LiveTestRepliesShowGroupAwareness(List<Dictionary<string, object>> replies)
+        internal static bool LiveTestRepliesShowGroupAwareness(List<Dictionary<string, object>> replies)
         {
             if (replies == null || replies.Count < 2) return false;
             for (int index = 1; index < replies.Count; index++)
@@ -3337,7 +3337,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 {
                     string leftText = ReadString(active[left], "text", "");
                     string rightText = ReadString(active[right], "text", "");
-                    double similarity = RoleplayTextSimilarity(
+                    double similarity = Program.RoleplayTextSimilarity(
                         leftText, rightText);
                     if (similarity < 0.72d) continue;
                     evidence = FirstNonEmpty(
@@ -3398,23 +3398,23 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && current.Length > 0 && baseline.Length > 0 && !string.Equals(current, baseline, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool NpcLivesEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
+        internal static bool NpcLivesEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
         {
             if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_npc_lives"
                 || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
-            var contract = CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            var contract = Program.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
             return StructuredActionEnrollmentValid(contract, campaignId);
         }
 
-        private static bool PersonalGossipEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
+        internal static bool PersonalGossipEnrollmentValid(Dictionary<string, object> enrollment, string campaignId)
         {
             if (enrollment == null || ReadString(enrollment, "source", "") != "reign_mcp_personal_gossip"
                 || !ReadBool(enrollment, "recoveryCheckpointVerified", false)) return false;
-            var contract = CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
+            var contract = Program.CloneDictionary(enrollment); contract["source"] = "reign_mcp_structured_actions";
             return StructuredActionEnrollmentValid(contract, campaignId);
         }
 
-        private static Dictionary<string, object> NormalizeLiveTestCommand(Dictionary<string, object> run, Dictionary<string, object> input)
+        internal static Dictionary<string, object> NormalizeLiveTestCommand(Dictionary<string, object> run, Dictionary<string, object> input)
         {
             input = input ?? new Dictionary<string, object>();
             if (input.ContainsKey("schemaVersion") && !new[] { 1, LiveTestSchemaVersion }.Contains(ReadInt(input, "schemaVersion", LiveTestSchemaVersion))) return null;
@@ -3433,7 +3433,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     || string.IsNullOrWhiteSpace(ReadString(input, "probeId", ""))
                     || ReadString(input, "probeId", "").Length > 128
                     || ReadString(input, "expectedSaveName", "") != ReadString(enrollment, "disposableSaveName", "")) return null;
-                var scope = CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
+                var scope = Program.CloneDictionary(enrollment); scope["source"] = "reign_mcp_structured_actions";
                 if (!StructuredActionEnrollmentValid(scope, ReadString(run, "campaignId", ""))) return null;
                 // No caller-selected duration, raw clock value or action is admitted.
                 if (input.ContainsKey("minutes") || input.ContainsKey("days") || input.ContainsKey("ticks")) return null;
@@ -3556,7 +3556,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return command;
         }
 
-        private static List<Dictionary<string, object>> NormalizeLiveTestScenarioCommands(
+        internal static List<Dictionary<string, object>> NormalizeLiveTestScenarioCommands(
             Dictionary<string, object> run, Dictionary<string, object> payload)
         {
             List<Dictionary<string, object>> commands = new List<Dictionary<string, object>>();
@@ -3630,14 +3630,14 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return result;
         }
 
-        private static List<Dictionary<string, object>> CollectLiveTestAuditEvidence(Dictionary<string, object> run)
+        internal static List<Dictionary<string, object>> CollectLiveTestAuditEvidence(Dictionary<string, object> run)
         {
             string campaignId = ReadString(run, "campaignId", "");
             List<Dictionary<string, object>> evidence = new List<Dictionary<string, object>>();
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string correlation in ReadDictionaryList(run, "commands").SelectMany(x => ReadStringList(x, "correlationIds")).Where(x => !string.IsNullOrWhiteSpace(x)))
             {
-                Dictionary<string, object> audit = AuditQuery(new Dictionary<string, string> { ["campaignId"] = campaignId, ["correlationId"] = correlation, ["limit"] = "500", ["oldestFirst"] = "true" });
+                Dictionary<string, object> audit = Program.AuditQuery(new Dictionary<string, string> { ["campaignId"] = campaignId, ["correlationId"] = correlation, ["limit"] = "500", ["oldestFirst"] = "true" });
                 foreach (Dictionary<string, object> row in ReadDictionaryList(audit, "entries"))
                 {
                     if (seen.Add(ReadString(row, "auditId", Guid.NewGuid().ToString("N")))) evidence.Add(row);
@@ -3647,7 +3647,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
+        internal static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (id, passed, summary) => results.Add(new Dictionary<string, object>
@@ -3682,18 +3682,18 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && ReadString(normalizedShip, "partyId", "") == "real-npc-party"
                 && ReadString(normalizedShip, "settlementId", "") == "friendly-port"
                 && ReadString(normalizedShip, "campaignTestRunId", "") == "owned-run";
-            var wrongShipRun = CloneDictionary(economyRun); wrongShipRun["mode"] = "individual_chat";
-            var wrongShipInput = CloneDictionary(shipFunding); wrongShipInput["mode"] = "individual_chat";
+            var wrongShipRun = Program.CloneDictionary(economyRun); wrongShipRun["mode"] = "individual_chat";
+            var wrongShipInput = Program.CloneDictionary(shipFunding); wrongShipInput["mode"] = "individual_chat";
             bool shipRejectsMode = NormalizeLiveTestCommand(wrongShipRun, shipFunding) == null
                 && NormalizeLiveTestCommand(economyRun, wrongShipInput) == null;
             bool shipRejectsMissing = true;
             foreach (string required in new[] { "partyId", "settlementId", "campaignTestRunId", "expectedSaveName" })
             {
-                var incomplete = CloneDictionary(shipFunding); incomplete.Remove(required);
+                var incomplete = Program.CloneDictionary(shipFunding); incomplete.Remove(required);
                 shipRejectsMissing &= NormalizeLiveTestCommand(economyRun, incomplete) == null;
                 foreach (string blank in new[] { "", "   " })
                 {
-                    var empty = CloneDictionary(shipFunding); empty[required] = blank;
+                    var empty = Program.CloneDictionary(shipFunding); empty[required] = blank;
                     shipRejectsMissing &= NormalizeLiveTestCommand(economyRun, empty) == null;
                 }
             }
@@ -3767,7 +3767,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             var structuredRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "structured_actions", ["enrollment"] = structuredEnrollment };
             var structuredInput = new Dictionary<string, object> { ["operation"] = "structured_action_test", ["enrollment"] = new Dictionary<string, object>() };
             var structuredCommand = NormalizeLiveTestCommand(structuredRun, structuredInput);
-            var lifeEnrollment = CloneDictionary(structuredEnrollment);
+            var lifeEnrollment = Program.CloneDictionary(structuredEnrollment);
             lifeEnrollment["source"] = "reign_mcp_npc_lives"; lifeEnrollment["recoveryCheckpointVerified"] = true;
             var lifeRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "npc_lives", ["enrollment"] = lifeEnrollment };
             var lifeInput = TestDict("operation", "npc_lives_test", "enrollment", TestDict("source", "forged"));
@@ -3776,7 +3776,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && NormalizeLiveTestCommand(fakeRun, lifeInput) == null, "NPC native checks inherit enrollment from their isolated run.");
             lifeEnrollment["recoveryCheckpointVerified"] = false;
             add("npc_lives_checkpoint", NormalizeLiveTestCommand(lifeRun, lifeInput) == null, "Native combat controls require a retained recovery checkpoint.");
-            var gossipEnrollment = CloneDictionary(structuredEnrollment);
+            var gossipEnrollment = Program.CloneDictionary(structuredEnrollment);
             gossipEnrollment["source"] = "reign_mcp_personal_gossip"; gossipEnrollment["recoveryCheckpointVerified"] = true;
             var gossipRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "personal_gossip", ["enrollment"] = gossipEnrollment };
             var gossipInput = TestDict("operation", "personal_gossip_test", "enrollment", TestDict("source", "forged"));
@@ -3788,23 +3788,23 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             gossipEnrollment["recoveryCheckpointVerified"] = true; gossipEnrollment["disposableSaveName"] = "Baseline";
             add("personal_gossip_baseline", NormalizeLiveTestCommand(gossipRun, gossipInput) == null, "Protected baseline cannot be enrolled as gossip Current.");
             bool badPhase = false;
-            try { ValidatePersonalGossipTestCase(TestDict("caseId", "self", "phase", "snapshot", "draws", TestDict("share", 1))); }
+            try { Program.ValidatePersonalGossipTestCase(TestDict("caseId", "self", "phase", "snapshot", "draws", TestDict("share", 1))); }
             catch (ArgumentException) { badPhase = true; }
             add("personal_gossip_wrong_phase", badPhase, "Observation cannot smuggle fixture controls.");
-            add("personal_gossip_draw_default", GossipDecisionRoll(TestDict(), "self", "share") == GossipRoll("self", "share")
-                && GossipDecisionDraw(TestDict(), "self", "friendly_recipient") == GossipDraw("self", "friendly_recipient"), "No fixture preserves the exact production draw.");
-            add("personal_gossip_saved_control", GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 1))), "self", "share") == 1
-                && GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 0))), "self", "share") == GossipRoll("self", "share"), "Only bounded persisted stage values are accepted.");
+            add("personal_gossip_draw_default", Program.GossipDecisionRoll(TestDict(), "self", "share") == Program.GossipRoll("self", "share")
+                && Program.GossipDecisionDraw(TestDict(), "self", "friendly_recipient") == Program.GossipDraw("self", "friendly_recipient"), "No fixture preserves the exact production draw.");
+            add("personal_gossip_saved_control", Program.GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 1))), "self", "share") == 1
+                && Program.GossipDecisionRoll(TestDict("operatorTestControls", TestDict("draws", TestDict("share", 0))), "self", "share") == Program.GossipRoll("self", "share"), "Only bounded persisted stage values are accepted.");
             var gossipNow = DateTimeOffset.UtcNow;
             var gossipJournal = TestDict("activeSaveName", "Current", "gameInstanceId", "one", "restoreGeneration", 0L, "memoryRestoreGeneration", "before");
             var gossipRuntime = TestDict("activeSaveName", "Current", "gameInstanceId", "one");
-            add("personal_gossip_control_generation", GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow, gossipNow)
-                && !GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "after", gossipNow, gossipNow)
-                && !GossipTestControlsMatch(gossipJournal, gossipRuntime, 1, "before", gossipNow, gossipNow),
+            add("personal_gossip_control_generation", Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow, gossipNow)
+                && !Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "after", gossipNow, gossipNow)
+                && !Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 1, "before", gossipNow, gossipNow),
                 "A server restart cannot resurrect uncaptured controls after a persisted restore, even if the process counter returns to zero.");
-            add("personal_gossip_control_scope", !GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Baseline", "gameInstanceId", "one"), 0, "before", gossipNow, gossipNow)
-                && !GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Current", "gameInstanceId", "other"), 0, "before", gossipNow, gossipNow)
-                && !GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow.AddHours(-13), gossipNow),
+            add("personal_gossip_control_scope", !Program.GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Baseline", "gameInstanceId", "one"), 0, "before", gossipNow, gossipNow)
+                && !Program.GossipTestControlsMatch(gossipJournal, TestDict("activeSaveName", "Current", "gameInstanceId", "other"), 0, "before", gossipNow, gossipNow)
+                && !Program.GossipTestControlsMatch(gossipJournal, gossipRuntime, 0, "before", gossipNow.AddHours(-13), gossipNow),
                 "Captured saved decisions are separate; uncaptured controls expire and cannot cross Current or native instance.");
             add("structured_action_enrollment", structuredCommand != null && ReferenceEquals(structuredCommand["enrollment"], structuredEnrollment)
                 && NormalizeLiveTestCommand(fakeRun, structuredInput) == null,
@@ -3929,7 +3929,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     }
                 };
             Dictionary<string, object> sanitizedRelationshipAudit =
-                SanitizeAuditValue(relationshipAuditFixture, 0)
+                Program.SanitizeAuditValue(relationshipAuditFixture, 0)
                     as Dictionary<string, object>;
             Dictionary<string, object> sanitizedRelationshipEnvelope =
                 ReadDictionary(sanitizedRelationshipAudit, "promptEnvelope");
@@ -4087,25 +4087,25 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             add("clock_probe_enrolled", clockAccepted != null && ReferenceEquals(clockAccepted["enrollment"], clockEnrollment), "Clock diagnostic keeps the verified run enrollment.");
             foreach (string key in new[] { "source", "campaignId", "timelineId", "campaignTestRunId", "disposableSaveName", "protectedBaselineSaveName", "recoveryCheckpointVerified" })
             {
-                var invalidEnrollment = CloneDictionary(clockEnrollment); invalidEnrollment.Remove(key);
-                var invalidRun = CloneDictionary(clockRun); invalidRun["enrollment"] = invalidEnrollment;
+                var invalidEnrollment = Program.CloneDictionary(clockEnrollment); invalidEnrollment.Remove(key);
+                var invalidRun = Program.CloneDictionary(clockRun); invalidRun["enrollment"] = invalidEnrollment;
                 add("clock_probe_missing_" + key, NormalizeLiveTestCommand(invalidRun, clockStep) == null, "Missing clock enrollment evidence is rejected.");
             }
             foreach (string key in new[] { "minutes", "days", "ticks" })
             {
-                var invalidStep = CloneDictionary(clockStep); invalidStep[key] = 1;
+                var invalidStep = Program.CloneDictionary(clockStep); invalidStep[key] = 1;
                 add("clock_probe_duration_" + key, NormalizeLiveTestCommand(clockRun, invalidStep) == null, "The bounded clock probe cannot select an arbitrary time jump.");
             }
             foreach (string key in new[] { "confirmation", "probeId", "expectedSaveName", "profile" })
             {
-                var invalidStep = CloneDictionary(clockStep); invalidStep[key] = "";
+                var invalidStep = Program.CloneDictionary(clockStep); invalidStep[key] = "";
                 add("clock_probe_invalid_" + key, NormalizeLiveTestCommand(clockRun, invalidStep) == null, "Missing clock operation identity is rejected.");
             }
-            var baselineEnrollment = CloneDictionary(clockEnrollment); baselineEnrollment["disposableSaveName"] = "Baseline";
-            var baselineRun = CloneDictionary(clockRun); baselineRun["enrollment"] = baselineEnrollment;
-            var baselineStep = CloneDictionary(clockStep); baselineStep["expectedSaveName"] = "Baseline";
+            var baselineEnrollment = Program.CloneDictionary(clockEnrollment); baselineEnrollment["disposableSaveName"] = "Baseline";
+            var baselineRun = Program.CloneDictionary(clockRun); baselineRun["enrollment"] = baselineEnrollment;
+            var baselineStep = Program.CloneDictionary(clockStep); baselineStep["expectedSaveName"] = "Baseline";
             add("clock_probe_protected_baseline", NormalizeLiveTestCommand(baselineRun, baselineStep) == null, "The immutable baseline cannot become a clock fixture.");
-            var wrongClockMode = CloneDictionary(clockRun); wrongClockMode["mode"] = "correspondence";
+            var wrongClockMode = Program.CloneDictionary(clockRun); wrongClockMode["mode"] = "correspondence";
             add("clock_probe_letters_rejected", NormalizeLiveTestCommand(wrongClockMode, clockStep) == null, "The diagnostic never runs in correspondence.");
             add("checkpoint_contract", LiveTestOperations.Contains("checkpoint"), "Versioned scenarios can pause at an explicit reload-safe checkpoint.");
             Dictionary<string, object> legacy = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object>
@@ -4216,24 +4216,24 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 && LiveTestGameInstanceTimestamp("game-20260724163141-anything") == "20260724163141",
                 "A fresh newer campaign host owns the heartbeat lease; delayed heartbeats from an older overlapping launch cannot replace it or interrupt its commands.");
             add("readiness_gates",
-                ConversationReadinessGates.ContainsKey("structural_pipeline")
-                && ConversationReadinessGates.Values.All(gate => gate.Item1 <= 40)
-                && ConversationReadinessGates["structural_pipeline"].Item1 == 40
-                && Math.Abs(ConversationReadinessGates["structural_pipeline"].Item2 - 1d) < 0.0001
-                && ConversationReadinessGates.ContainsKey("dynamic_characteristics")
-                && ConversationReadinessGates["dynamic_characteristics"].Item2 >= 0.95
-                && ConversationReadinessGates.ContainsKey("clan_tier_recognition")
-                && ConversationReadinessGates["clan_tier_recognition"].Item1 == 30
-                && ConversationReadinessGates.ContainsKey("manipulation_capabilities")
-                && ConversationReadinessGates["manipulation_capabilities"].Item1 == 40,
+                Program.ConversationReadinessGates.ContainsKey("structural_pipeline")
+                && Program.ConversationReadinessGates.Values.All(gate => gate.Item1 <= 40)
+                && Program.ConversationReadinessGates["structural_pipeline"].Item1 == 40
+                && Math.Abs(Program.ConversationReadinessGates["structural_pipeline"].Item2 - 1d) < 0.0001
+                && Program.ConversationReadinessGates.ContainsKey("dynamic_characteristics")
+                && Program.ConversationReadinessGates["dynamic_characteristics"].Item2 >= 0.95
+                && Program.ConversationReadinessGates.ContainsKey("clan_tier_recognition")
+                && Program.ConversationReadinessGates["clan_tier_recognition"].Item1 == 30
+                && Program.ConversationReadinessGates.ContainsKey("manipulation_capabilities")
+                && Program.ConversationReadinessGates["manipulation_capabilities"].Item1 == 40,
                 "Readiness promotion requires the declared fixed samples and deterministic or 95-percent pass gates, including 30 clan-tier probes.");
             add("readiness_completed_run_eligibility",
-                ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "completed" })
-                && !ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "running" })
-                && ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "cancelled" })
-                && ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "interrupted" })
-                && ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "failed" })
-                && !ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "running" }),
+                Program.ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "completed" })
+                && !Program.ConversationReadinessRunIsCompleted(new Dictionary<string, object> { ["status"] = "running" })
+                && Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "cancelled" })
+                && Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "interrupted" })
+                && Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "failed" })
+                && !Program.ConversationReadinessRunIsTerminalFailure(new Dictionary<string, object> { ["status"] = "running" }),
                 "Only completed qualification runs contribute samples; cancelled, interrupted, and failed runs remain explicit clean-window failures.");
             List<Dictionary<string, object>> judgeExpected = new List<Dictionary<string, object>>
             {
@@ -4243,12 +4243,12 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             List<Dictionary<string, object>> judgeRecovered = new List<Dictionary<string, object>>();
             HashSet<string> judgeExpectedIds = new HashSet<string>(
                 new[] { "C1", "C2" }, StringComparer.OrdinalIgnoreCase);
-            MergeConversationReadinessJudgeCases(judgeRecovered,
+            Program.MergeConversationReadinessJudgeCases(judgeRecovered,
                 new[] { new Dictionary<string, object> { ["caseId"] = "C2", ["personalityConsistency"] = 0.9d } },
                 judgeExpectedIds);
             List<Dictionary<string, object>> judgeMissing =
-                MissingConversationReadinessJudgeCases(judgeExpected, judgeRecovered);
-            MergeConversationReadinessJudgeCases(judgeRecovered,
+                Program.MissingConversationReadinessJudgeCases(judgeExpected, judgeRecovered);
+            Program.MergeConversationReadinessJudgeCases(judgeRecovered,
                 new[] { new Dictionary<string, object> { ["caseId"] = "C1", ["personalityConsistency"] = 0.95d } },
                 judgeExpectedIds);
             add("readiness_judge_partial_batch_recovery",
@@ -4270,11 +4270,11 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 new Dictionary<string, object> { ["commandId"] = "categorized", ["assertion"] = "personalityRubric", ["passed"] = true }
             };
             add("readiness_assertions_are_category_specific",
-                !ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "dynamic_characteristics")
-                && ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "personality_consistency"),
+                !Program.ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "dynamic_characteristics")
+                && Program.ConversationReadinessCommandPassed(categorizedCommand, categorizedAssertions, new List<Dictionary<string, object>>(), "personality_consistency"),
                 "A Dynamic Characteristics miss does not incorrectly lower the personality score or another unrelated readiness category.");
             add("readiness_blinded_rubric_is_mandatory",
-                !ConversationReadinessCommandPassed(categorizedCommand,
+                !Program.ConversationReadinessCommandPassed(categorizedCommand,
                     categorizedAssertions.Where(row => !ReadString(row, "assertion", "")
                         .Equals("personalityRubric", StringComparison.OrdinalIgnoreCase)).ToList(),
                     new List<Dictionary<string, object>>(), "personality_consistency"),
@@ -4290,28 +4290,28 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     }
                 };
             add("readiness_relationship_history_rubric_is_mandatory",
-                !ConversationReadinessCommandPassed(
+                !Program.ConversationReadinessCommandPassed(
                     categorizedCommand,
                     relationshipHistoryAssertions,
                     new List<Dictionary<string, object>>(),
                     "shared_relationship_history"),
                 "Shared Relationship History cannot promote from structural prompt evidence alone when its blinded quality and privacy rubric is absent.");
             add("dynamic_characteristic_integrity_distinguishes_refusal",
-                !ReplyLikelyIntroducesDynamicCharacteristic(
+                !CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(
                     "No. I am not a well you draw from. State your business or go.")
-                && !ReplyLikelyIntroducesDynamicCharacteristic(
+                && !CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(
                     "I mentioned no preference. You want me to sit and tell you what I like and dislike, but I will not trade personal details with you.")
-                && !ReplyLikelyIntroducesDynamicCharacteristic(
+                && !CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(
                     "You ask about my preferences as though I keep a ledger of personal tastes for unaffiliated strangers. I do not owe you a preference.")
-                && ReplyLikelyIntroducesDynamicCharacteristic(
+                && CharactersService.ReplyLikelyIntroducesDynamicCharacteristic(
                     "I cannot stand courtiers who talk around a thing instead of through it."),
                 "Qualification permits direct, metalinguistic, and counterfactual refusals while still detecting an unstored explicit stable preference or aversion.");
-            List<Dictionary<string, object>> inferredKeepsake = NormalizeDynamicCharacteristicWrites(
+            List<Dictionary<string, object>> inferredKeepsake = CharactersService.NormalizeDynamicCharacteristicWrites(
                 new Dictionary<string, object>(), "lord_6_12",
                 new Dictionary<string, object> { ["name"] = "Abagai" },
                 new Dictionary<string, object>(),
                 "I keep a river stone. Smooth, grey, fits in the palm. I picked it up from a council tent when I was seventeen and have carried it since.");
-            List<Dictionary<string, object>> quotedPlayerKeepsake = NormalizeDynamicCharacteristicWrites(
+            List<Dictionary<string, object>> quotedPlayerKeepsake = CharactersService.NormalizeDynamicCharacteristicWrites(
                 new Dictionary<string, object>(), "lord_6_12",
                 new Dictionary<string, object> { ["name"] = "Abagai" },
                 new Dictionary<string, object>(),
@@ -4325,16 +4325,16 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 "An explicit NPC-owned keepsake receives a minimal grounded companion write, while a quoted player-owned keepsake is not misattributed."
                 + " inferred=" + Json.Serialize(inferredKeepsake) + " quoted=" + Json.Serialize(quotedPlayerKeepsake));
             add("dynamic_characteristic_recall_accepts_grounded_paraphrase",
-                HasDynamicTextEvidence(
+                CharactersService.HasDynamicTextEvidence(
                     "Abalytos has a strong aversion to people who verbally label their own generosity or fairness before acting, seeing it as calculated self-interest.",
                     "Abalytos calls it an aversion: when people tell him they are fair before they have acted, he stops listening to what they say and watches what they take.")
-                && HasDynamicTextEvidence(
+                && CharactersService.HasDynamicTextEvidence(
                     "As a child, Abagai formed the habit of checking a saddle's girth strap before every mount, after a boy she knew was killed when his loose girth caused him to fall under his horse at age seven. The habit persists into adulthood as a principle against dying carelessly.",
                     "Then my saddle strap. I told you the strap was loose and I was not getting on.")
-                && !HasDynamicTextEvidence(
+                && !CharactersService.HasDynamicTextEvidence(
                     "Abalytos keeps a small clay disc from his betrothal.",
                     "Abalytos discussed roads, garrisons, and nearby parties.")
-                && !HasDynamicTextEvidence(
+                && !CharactersService.HasDynamicTextEvidence(
                     "As a child, Abagai formed the habit of checking a saddle's girth strap before every mount, after a boy she knew was killed when his loose girth caused him to fall under his horse at age seven.",
                     "A childhood habit may persist for years, but I will not offer a personal detail."),
                 "Dynamic Characteristic recall accepts visibly grounded grammatical and terse provenance-rich paraphrases without accepting unrelated or generic personal-history language.");
@@ -4415,7 +4415,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                         }
                 };
             add("political_authority_assertion_fixture_is_grounded",
-                !VerifiedIdentityGroundingContradiction(
+                !Program.VerifiedIdentityGroundingContradiction(
                     LiveTestCurrentModelOutput(
                         ReadDictionary(
                             authorityEvidenceReply,
@@ -4449,7 +4449,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             };
             add("political_authority_accepts_settlement_room_headings",
                 groundedRoomHeadings.All(reply =>
-                    !VerifiedIdentityGroundingContradiction(
+                    !Program.VerifiedIdentityGroundingContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] = reply
@@ -4457,7 +4457,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                         verifiedAuthorityContext)),
                 "A heading that names the verified settlement remains grounded when a room or sub-location follows a dash or comma.");
             add("political_authority_rejects_conflicting_settlement_heading",
-                VerifiedIdentityGroundingContradiction(
+                Program.VerifiedIdentityGroundingContradiction(
                     new Dictionary<string, object>
                     {
                         ["reply"] =
@@ -4466,13 +4466,13 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                     verifiedAuthorityContext),
                 "A heading that unambiguously names a different settlement still contradicts the verified current location.");
             add("political_authority_accepts_no_one_as_zero_wars",
-                !ContainsContradictoryCurrentWarCount(
+                !Program.ContainsContradictoryCurrentWarCount(
                     "Battania is at war with the Western Empire; fen Niabar is at war with no one.",
                     0)
-                && !ContainsContradictoryCurrentWarCount(
+                && !Program.ContainsContradictoryCurrentWarCount(
                     "Fen Niabar is at war with none.",
                     0)
-                && ContainsContradictoryCurrentWarCount(
+                && Program.ContainsContradictoryCurrentWarCount(
                     "Fen Niabar is at war with one kingdom.",
                     0),
                 "Natural zero-war phrases must not be parsed as one war, while a real one-war contradiction still fails.");
@@ -4483,7 +4483,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             historicalIdentityEnvelope["conversationSceneState"] =
                 "Earlier in this scene, before the introduction, the observer called the player the armed stranger and could not verify a sovereign office.";
             add("political_authority_assertion_ignores_historical_input_context",
-                !VerifiedIdentityGroundingContradiction(
+                !Program.VerifiedIdentityGroundingContradiction(
                     LiveTestCurrentModelOutput(
                         historicalIdentityEnvelope),
                     new Dictionary<string, object>
@@ -4493,7 +4493,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                                 historicalIdentityEnvelope,
                                 "identityView")
                     })
-                && VerifiedIdentityGroundingContradiction(
+                && Program.VerifiedIdentityGroundingContradiction(
                     new Dictionary<string, object>
                     {
                         ["reply"] =
@@ -4949,7 +4949,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 giftValid && leverageValid && giftErrors.Count == 0 && leverageErrors.Count == 0,
                 "The named recipient owns the durable benefit, witnesses retain independent proportionate reactions, and a later coercive demand links and diminishes appreciation.");
 
-            string sourceRoot = FindVerificationSourceRoot();
+            string sourceRoot = Program.FindVerificationSourceRoot();
             string clientSourceRoot = string.IsNullOrWhiteSpace(sourceRoot) ? "" : Path.Combine(sourceRoot, "ReignBeta");
             Func<string, string> serverSourcePath = fileName => string.IsNullOrWhiteSpace(sourceRoot)
                 ? "" : VerificationSourceLocator.ResolveUnique(Path.Combine(sourceRoot, "ReignServer"), fileName, "src");
@@ -5538,7 +5538,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 || normalized.Contains("invalid api key");
         }
 
-        private static bool IsLiveTestArmed(Dictionary<string, object> arm) { return ParseLiveTestUtc(ReadString(arm, "expiresUtc", "")) > DateTimeOffset.UtcNow; }
+        internal static bool IsLiveTestArmed(Dictionary<string, object> arm) { return ParseLiveTestUtc(ReadString(arm, "expiresUtc", "")) > DateTimeOffset.UtcNow; }
         private static bool ShouldInterruptLiveTestRunForInstance(Dictionary<string, object> run, string gameInstanceId)
         {
             if (run == null || string.IsNullOrWhiteSpace(gameInstanceId)
@@ -5548,26 +5548,26 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             return !string.IsNullOrWhiteSpace(activeInstance)
                 && !string.Equals(activeInstance, gameInstanceId, StringComparison.OrdinalIgnoreCase);
         }
-        private static bool IsFreshLiveTestRuntime(Dictionary<string, object> runtime) { return runtime != null && runtime.Count > 0 && ParseLiveTestUtc(ReadString(runtime, "receivedUtc", "")) >= DateTimeOffset.UtcNow.AddSeconds(-LiveTestHeartbeatFreshSeconds); }
-        private static DateTimeOffset ParseLiveTestUtc(string value) { return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed) ? parsed.ToUniversalTime() : DateTimeOffset.MinValue; }
-        private static string LiveTestRoot() { return Path.Combine(TestsDir, "live-interaction"); }
-        private static string LiveTestArmPath() { return Path.Combine(LiveTestRoot(), "arm.json"); }
+        internal static bool IsFreshLiveTestRuntime(Dictionary<string, object> runtime) { return runtime != null && runtime.Count > 0 && ParseLiveTestUtc(ReadString(runtime, "receivedUtc", "")) >= DateTimeOffset.UtcNow.AddSeconds(-LiveTestHeartbeatFreshSeconds); }
+        internal static DateTimeOffset ParseLiveTestUtc(string value) { return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed) ? parsed.ToUniversalTime() : DateTimeOffset.MinValue; }
+        private static string LiveTestRoot() { return Path.Combine(Program.TestsDir, "live-interaction"); }
+        internal static string LiveTestArmPath() { return Path.Combine(LiveTestRoot(), "arm.json"); }
         private static string LiveTestLatestRuntimePath() { return Path.Combine(LiveTestRoot(), "runtime-latest.json"); }
-        private static string LiveTestRuntimePath(string campaignId) { return Path.Combine(LiveTestRoot(), "runtime", SafePathSegment(campaignId, "unknown") + ".json"); }
-        private static string LiveTestRunsRoot(string campaignId) { return CampaignFile(campaignId, "tests", "live-interaction", "runs"); }
-        private static string LiveTestActiveRunPath(string campaignId) { return CampaignFile(campaignId, "tests", "live-interaction", "active-run.json"); }
-        private static string LiveTestRunPath(string campaignId, string runId) { return Path.Combine(LiveTestRunsRoot(campaignId), SafePathSegment(runId, "run") + ".json"); }
-        private static Dictionary<string, object> LoadLiveTestRuntime(string campaignId) { return string.IsNullOrWhiteSpace(campaignId) ? ReadJsonObject(LiveTestLatestRuntimePath()) : ReadJsonObject(LiveTestRuntimePath(campaignId)); }
-        private static Dictionary<string, object> LoadLiveTestRun(string campaignId, string runId) { return string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(runId) ? new Dictionary<string, object>() : ReadJsonObject(LiveTestRunPath(campaignId, runId)); }
-        private static void SaveLiveTestRun(Dictionary<string, object> run)
+        private static string LiveTestRuntimePath(string campaignId) { return Path.Combine(LiveTestRoot(), "runtime", Program.SafePathSegment(campaignId, "unknown") + ".json"); }
+        internal static string LiveTestRunsRoot(string campaignId) { return Program.CampaignFile(campaignId, "tests", "live-interaction", "runs"); }
+        private static string LiveTestActiveRunPath(string campaignId) { return Program.CampaignFile(campaignId, "tests", "live-interaction", "active-run.json"); }
+        private static string LiveTestRunPath(string campaignId, string runId) { return Path.Combine(LiveTestRunsRoot(campaignId), Program.SafePathSegment(runId, "run") + ".json"); }
+        internal static Dictionary<string, object> LoadLiveTestRuntime(string campaignId) { return string.IsNullOrWhiteSpace(campaignId) ? Program.ReadJsonObject(LiveTestLatestRuntimePath()) : Program.ReadJsonObject(LiveTestRuntimePath(campaignId)); }
+        internal static Dictionary<string, object> LoadLiveTestRun(string campaignId, string runId) { return string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(runId) ? new Dictionary<string, object>() : Program.ReadJsonObject(LiveTestRunPath(campaignId, runId)); }
+        internal static void SaveLiveTestRun(Dictionary<string, object> run)
         {
             string campaignId = ReadString(run, "campaignId", "");
             string runId = ReadString(run, "runId", "");
-            WriteJsonObject(LiveTestRunPath(campaignId, runId), run);
+            Program.WriteJsonObject(LiveTestRunPath(campaignId, runId), run);
             string indexPath = LiveTestActiveRunPath(campaignId);
             if (!LiveTestTerminalRunStates.Contains(ReadString(run, "status", "")))
             {
-                WriteJsonObject(indexPath, new Dictionary<string, object>
+                Program.WriteJsonObject(indexPath, new Dictionary<string, object>
                 {
                     ["runId"] = runId,
                     ["status"] = ReadString(run, "status", ""),
@@ -5575,7 +5575,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
                 });
                 return;
             }
-            Dictionary<string, object> indexed = ReadJsonObject(indexPath);
+            Dictionary<string, object> indexed = Program.ReadJsonObject(indexPath);
             if (ReadString(indexed, "runId", "").Equals(
                     runId, StringComparison.OrdinalIgnoreCase))
             {
@@ -5588,13 +5588,13 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             string root = LiveTestRunsRoot(campaignId);
             if (!Directory.Exists(root)) return null;
             string path = Directory.GetFiles(root, "*.json", SearchOption.TopDirectoryOnly).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-            return string.IsNullOrWhiteSpace(path) ? null : ReadJsonObject(path);
+            return string.IsNullOrWhiteSpace(path) ? null : Program.ReadJsonObject(path);
         }
 
         private static Dictionary<string, object> FindActiveLiveTestRun(string campaignId)
         {
             string indexPath = LiveTestActiveRunPath(campaignId);
-            Dictionary<string, object> indexed = ReadJsonObject(indexPath);
+            Dictionary<string, object> indexed = Program.ReadJsonObject(indexPath);
             string indexedRunId = ReadString(indexed, "runId", "");
             if (string.IsNullOrWhiteSpace(indexedRunId)
                 && ReadBool(indexed, "scanComplete", false))
@@ -5622,10 +5622,10 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
             }
             foreach (string path in Directory.GetFiles(root, "*.json", SearchOption.TopDirectoryOnly).OrderByDescending(File.GetLastWriteTimeUtc))
             {
-                Dictionary<string, object> run = ReadJsonObject(path);
+                Dictionary<string, object> run = Program.ReadJsonObject(path);
                 if (!LiveTestTerminalRunStates.Contains(ReadString(run, "status", "")))
                 {
-                    WriteJsonObject(indexPath, new Dictionary<string, object>
+                    Program.WriteJsonObject(indexPath, new Dictionary<string, object>
                     {
                         ["runId"] = ReadString(run, "runId", ""),
                         ["status"] = ReadString(run, "status", ""),
@@ -5640,7 +5640,7 @@ AND source_id IN (" + string.Join(",", sceneIds.Select((id, index) => "$scene" +
 
         private static void WriteIdleLiveTestRunIndex(string indexPath)
         {
-            WriteJsonObject(indexPath, new Dictionary<string, object>
+            Program.WriteJsonObject(indexPath, new Dictionary<string, object>
             {
                 ["runId"] = string.Empty,
                 ["status"] = "idle",

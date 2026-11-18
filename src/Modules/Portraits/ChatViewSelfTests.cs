@@ -152,7 +152,7 @@ VALUES('view_session',$campaign,'npc0','player','open',1,1,'[""player"",""npc0""
                 request["timelineId"] = "main";
                 string pendingKey = campaign + "|pending_contract";
                 ChatViewWorkers.TryAdd(pendingKey, new System.Threading.Tasks.TaskCompletionSource<bool>().Task);
-                try { Check("save_sync_waits_for_pending_image", ReadString(Program.SaveSyncRegisterCore(TestDict("campaignId", campaign, "savePointId", "pending")), "result", "") == "chat_view_pending"); }
+                try { Check("save_sync_waits_for_pending_image", ReadString(PersistenceService.SaveSyncRegisterCore(TestDict("campaignId", campaign, "savePointId", "pending")), "result", "") == "chat_view_pending"); }
                 finally { ChatViewWorkers.TryRemove(pendingKey, out _); }
                 job["status"] = "generating";
                 Check("interrupted_provider_not_replayed", ReadString(ChatViewResponse(campaign, job, false), "status", "") == "uncertain");

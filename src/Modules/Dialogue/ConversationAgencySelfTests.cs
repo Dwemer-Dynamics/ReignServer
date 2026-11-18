@@ -350,11 +350,11 @@ namespace ReignBetaServer
             var warningPayload = TestDict("conversationAgencyReceipt", TestDict("updates", new List<Dictionary<string, object>> { TestDict("pressure", 1) }));
             var warningAssessments = new List<Dictionary<string, object>>();
             ApplyAgencyRelationshipAssessment(warningAssessments, warningPayload, "npc", "player");
-            var neutralResult = ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "timelineId", "agency_timeline", "exchangeId", "agency_warning",
+            var neutralResult = RelationshipsService.ConversationRelationshipEvaluateApi(TestDict("campaignId", campaign, "timelineId", "agency_timeline", "exchangeId", "agency_warning",
                 "mode", "party_chat", "playerHeroStringId", "player", "assessments", warningAssessments, "participants", new[] { "npc", "player" },
                 "speakerResults", new List<Dictionary<string, object>> { TestDict("ok", true, "heroStringId", "npc", "participation", "speak", "reply", "My answer is still no.") }));
             add("warning_cannot_gain_relation_through_party_fallback", ReadDictionaryList(neutralResult, "nativeChanges").Count == 0, neutralResult);
-            var replayParty = CompleteSequentialPartyRelationshipAssessments(TestDict("speakerResults", new List<Dictionary<string, object>> {
+            var replayParty = RelationshipsService.CompleteSequentialPartyRelationshipAssessments(TestDict("speakerResults", new List<Dictionary<string, object>> {
                 TestDict("ok", true, "replayed", true, "heroStringId", "npc", "participation", "speak", "reply", "My answer is still no.") }),
                 new List<Dictionary<string, object>>(), "player", "replayed_agency_turn");
             add("replayed_reply_cannot_farm_party_reactions", replayParty.Count == 0, replayParty);
@@ -364,23 +364,23 @@ namespace ReignBetaServer
                 var staleLetter = AgencyTestReply(AgencyTestProposal(AgencyTestContext()));
                 staleLetter["motiveDecision"] = TestDict("conversationAgency", context);
                 bool rolledBack = false;
-                try { InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "stale_parent", "", "", 20, 21, staleLetter); }
+                try { RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "stale_parent", "", "", 20, 21, staleLetter); }
                 catch { rolledBack = true; }
                 add("stale_letter_and_negotiation_roll_back_together", rolledBack && QuerySql(connection, "SELECT letter_id FROM letters;").Count == before, null);
                 var letter = AgencyTestReply(AgencyTestProposal(context)); letter["motiveDecision"] = TestDict("conversationAgency", context); letter["agencyTurnId"] = "mail_parent";
-                var sent = InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
-                var resent = InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
+                var sent = RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
+                var resent = RelationshipsService.InsertLetter(connection, "npc", "Noble", "player", "Traveler", "My household matters to me.", "npc_reply", "test", "parent", "", "", 20, 21, letter);
                 add("letter_retry_does_not_duplicate_or_escalate", ReadBool(resent, "replayed", false) && ReadString(sent, "letterId", "") == ReadString(resent, "letterId", "")
                     && ReadInt(ReadConversationNegotiations(connection, "agency_timeline", "npc", "player").Single(), "revision", 0) == 2, resent);
                 context["records"] = ReadConversationNegotiations(connection, "agency_timeline", "npc", "player");
             }
-            var point = SaveSyncTestPointPayload(campaign, "agency_snapshot", 20d, "Agency isolated snapshot");
+            var point = PersistenceService.SaveSyncTestPointPayload(campaign, "agency_snapshot", 20d, "Agency isolated snapshot");
             point["timelineId"] = "agency_timeline";
-            var registered = SaveSyncRegisterApi(point);
+            var registered = PersistenceService.SaveSyncRegisterApi(point);
             using (var connection = OpenCampaignConnection(campaign))
                 CommitConversationAgency(connection, AgencyTestReply(AgencyTestProposal(context)), context, "future_pressure");
-            MarkSaveSyncActiveStateDirty(campaign);
-            var restored = SaveSyncLoadApi(point, false);
+            PersistenceService.MarkSaveSyncActiveStateDirty(campaign);
+            var restored = PersistenceService.SaveSyncLoadApi(point, false);
             using (var connection = OpenCampaignConnection(campaign))
                 add("save_sync_restores_refusal_revision_and_receipts", ReadBool(registered, "ok", false) && ReadBool(restored, "ok", false)
                     && ReadInt(ReadConversationNegotiations(connection, "agency_timeline", "npc", "player").Single(), "revision", 0) == 2

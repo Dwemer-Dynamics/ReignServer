@@ -248,7 +248,7 @@ AND status='active' ORDER BY turn_order LIMIT 16;", TestDict("session", session,
         // Only the accepted-turn path calls this writer. The quote is checked against
         // that exact reply, ownership is server supplied, and revisions reject stale
         // parallel preparations. No native action or relationship score is replayed.
-        private static Dictionary<string, object> StoreAcceptedConversationContinuity(
+        internal static Dictionary<string, object> StoreAcceptedConversationContinuity(
             ReignDbConnection connection, Dictionary<string, object> payload, string ownerId, string peerId,
             string eventId, string acceptedReply, List<Dictionary<string, object>> writes, long ts)
         {
@@ -408,7 +408,7 @@ VALUES($id,$record,$event,$revision,$payload,$ts);", new Dictionary<string, obje
         {
             var ids = records.Where(row => ReadString(row, "kind", "") == "episode")
                 .Select(row => ReadString(row, "source_turn_id", "")).Where(id => id.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
-            if (ids.Length == 0 || !TableExists(connection, "conversation_turns"))
+            if (ids.Length == 0 || !WorldSimulationService.TableExists(connection, "conversation_turns"))
                 return new Dictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
             return QuerySql(connection, @"SELECT turn.* FROM conversation_turns turn
 JOIN jsonb_array_elements_text(CAST($ids AS jsonb)) requested ON requested.value=turn.turn_id
@@ -446,7 +446,7 @@ WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
                 + string.Join(" […] ", quotes) + " Use current engine state for present conditions.";
         }
 
-        private static string BuildProtectedConversationContinuity(string campaignId, string heroId,
+        internal static string BuildProtectedConversationContinuity(string campaignId, string heroId,
             Dictionary<string, object> payload, Dictionary<string, object> state, string suppliedContext = "",
             List<Dictionary<string, object>> priorLines = null, Func<string> projectTranscript = null,
             bool structuredMessages = false)
@@ -459,7 +459,7 @@ WHERE turn.speaker_id=$owner AND turn.role='npc' AND turn.status='active';",
             string timeline = ContinuityTimeline(payload);
             var sourceIds = new List<string>();
             if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
-                text.AppendLine(TryBuildCharacterLifeStatePrompt(campaignId, heroId, peer, payload, sourceIds));
+                text.AppendLine(CharactersService.TryBuildCharacterLifeStatePrompt(campaignId, heroId, peer, payload, sourceIds));
             var agency = ReadDictionary(payload, "conversationAgencyContext");
             if (!string.IsNullOrWhiteSpace(campaignId) && !string.IsNullOrWhiteSpace(heroId))
             using (var persistentConnection = OpenCampaignConnection(campaignId))
@@ -606,7 +606,7 @@ ORDER BY CASE WHEN kind='relationship' THEN 0 WHEN kind='agenda' THEN 1 ELSE 2 E
             var parameters = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timeline,
                 ["observer"] = observer, ["peer"] = peer, ["day"] = worldDay };
             var text = new StringBuilder();
-            var intimacy = TableExists(connection, "court_social_signal_evidence") ? QuerySql(connection, @"SELECT * FROM court_social_signal_evidence
+            var intimacy = WorldSimulationService.TableExists(connection, "court_social_signal_evidence") ? QuerySql(connection, @"SELECT * FROM court_social_signal_evidence
 WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("court_social_signal_evidence") + @" AND accepted=1 AND signal_type='sexual_intimacy_completed'
 AND ((speaker_id=$observer AND target_id=$peer) OR (speaker_id=$peer AND target_id=$observer))
 ORDER BY created_ts ASC;", parameters) : new List<Dictionary<string, object>>();
@@ -625,7 +625,7 @@ ORDER BY created_ts ASC;", parameters) : new List<Dictionary<string, object>>();
                         .Append("; accepted quote: ").AppendLine(ReadString(row, "supporting_quote", ""));
                 }
             }
-            var milestones = TableExists(connection, "relationship_milestones") ? QuerySql(connection, @"SELECT * FROM relationship_milestones
+            var milestones = WorldSimulationService.TableExists(connection, "relationship_milestones") ? QuerySql(connection, @"SELECT * FROM relationship_milestones
 WHERE subject_id=$observer AND target_id=$peer AND status='active' ORDER BY stability DESC,updated_ts DESC;", parameters) : new List<Dictionary<string, object>>();
             foreach (var row in milestones)
             {
@@ -636,7 +636,7 @@ WHERE subject_id=$observer AND target_id=$peer AND status='active' ORDER BY stab
                     .Append("; original source=").Append(ReadString(row, "created_event_id", ""))
                     .Append("; latest source=").AppendLine(ReadString(row, "last_event_id", ""));
             }
-            var receipts = TableExists(connection, "conversation_relationship_receipts") ? QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
+            var receipts = WorldSimulationService.TableExists(connection, "conversation_relationship_receipts") ? QuerySql(connection, @"SELECT * FROM conversation_relationship_receipts
 WHERE campaign_id=$campaign AND " + MemorySourceTimelineSql("conversation_relationship_receipts") + @" AND observer_id=$observer AND target_id=$peer
 AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", parameters) : new List<Dictionary<string, object>>();
             var protectedExchanges = priorLines?.Count > 0 && projectTranscript != null && receipts.Count > 0
@@ -659,7 +659,7 @@ AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", paramet
             // personal memories still have an accepted source in this exact pair's
             // history. Ordinary topical retrieval used to discard them after a
             // summary replaced the active rows, losing quiet care and closeness.
-            bool hasAcceptedHistory = TableExists(connection, "conversation_turns") && TableExists(connection, "conversation_sessions");
+            bool hasAcceptedHistory = WorldSimulationService.TableExists(connection, "conversation_turns") && WorldSimulationService.TableExists(connection, "conversation_sessions");
             var historyAccess = new KnowledgeAccessContext { NpcId = observer, TimelineId = timeline, WorldDay = worldDay,
                 AsOfAcceptedSequence = readAccess?.AsOfAcceptedSequence ?? long.MaxValue,
                 AsOfTimestamp = readAccess?.AsOfTimestamp ?? long.MaxValue };
@@ -670,7 +670,7 @@ AND status='applied' AND severity_tier<>'routine' ORDER BY created_ts;", paramet
             bool HeardByPair(Dictionary<string, object> turn) =>
                 PrecisionTurnVisible(turn, observer, null) && PrecisionTurnVisible(turn, peer, null);
 
-            var sharedMemories = hasAcceptedHistory && TableExists(connection, "memories") ? QuerySql(connection, @"SELECT m.*,t.turn_id AS accepted_turn_id,t.world_day AS accepted_world_day,
+            var sharedMemories = hasAcceptedHistory && WorldSimulationService.TableExists(connection, "memories") ? QuerySql(connection, @"SELECT m.*,t.turn_id AS accepted_turn_id,t.world_day AS accepted_world_day,
 t.session_id AS accepted_session_id FROM memories m JOIN conversation_turns t ON t.event_id=m.event_id
 JOIN conversation_sessions s ON s.session_id=t.session_id
 WHERE m.owner_id=$observer AND m.status IN ('active','consolidated') AND t.speaker_id=$observer
@@ -900,7 +900,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 && NormalizePromptSegment(record.Text).Contains("\n" + attributed + "\n", StringComparison.Ordinal));
         }
 
-        private sealed class ContinuityPromptRecord
+        internal sealed class ContinuityPromptRecord
         {
             public string SourceId;
             public string Kind;
@@ -947,7 +947,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             }).Where(s => s.Length > 0));
         }
 
-        private static List<ContinuityPromptRecord> ContinuityPromptRecords(string text, bool newest)
+        internal static List<ContinuityPromptRecord> ContinuityPromptRecords(string text, bool newest)
         {
             string normalized = (text ?? "").Replace("\r\n", "\n").Trim();
             if (normalized.Length == 0) return new List<ContinuityPromptRecord>();
@@ -1011,7 +1011,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
             return string.Join("\n\n", retained.OrderBy(r => r.Order).Select(r => r.Text));
         }
 
-        private static void FinalizeContinuityPromptBudget(PromptEnvelope envelope, Dictionary<string, object> payload,
+        internal static void FinalizeContinuityPromptBudget(PromptEnvelope envelope, Dictionary<string, object> payload,
             Dictionary<string, object> capacityPolicy = null)
         {
             if (ReadDictionary(payload, "sharedActivityEvidence") is { } activityEvidence)
@@ -1086,7 +1086,7 @@ AND (lower(t.text) LIKE '%kiss%' OR lower(t.text) LIKE '%intima%' OR lower(t.tex
                 string source = ReadString(record, textKey, "");
                 string originalHash = ReadString(record, hashKey, "");
                 if (source.Length == 0 || PromptHash(source) != originalHash) return;
-                string projected = NormalizePromptSegment(SanitizePromptForIdentity(source, playerText, canonicalName, identityView));
+                string projected = NormalizePromptSegment(CharactersService.SanitizePromptForIdentity(source, playerText, canonicalName, identityView));
                 record["identityProjectionSourceHash"] = originalHash;
                 record["identityProjection"] = "observer_identity_and_prompt_whitespace";
                 record[textKey] = projected;

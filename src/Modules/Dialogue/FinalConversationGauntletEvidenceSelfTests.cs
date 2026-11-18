@@ -142,7 +142,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                TryDeleteDirectory(CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(CampaignDirectory(campaignId));
             }
             return checks;
         }

@@ -66,7 +66,7 @@ namespace ReignBetaServer
                     : Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
                 if (traitDocument.Count == 0 && !string.IsNullOrWhiteSpace(heroId))
                 {
-                    Dictionary<string, Dictionary<string, object>> profiles = Program.LoadCharacterProfileLibrary();
+                    Dictionary<string, Dictionary<string, object>> profiles = CharactersService.LoadCharacterProfileLibrary();
                     if (profiles.TryGetValue(heroId, out Dictionary<string, object> profile))
                     {
                         traitDocument = ReadDictionary(profile, "traits") ?? new Dictionary<string, object>();
@@ -93,12 +93,12 @@ namespace ReignBetaServer
                     ?? new Dictionary<string, object>();
                 if (flirtatiousness < 0 && foundation.ContainsKey("flirtatiousness"))
                 {
-                    flirtatiousness = Program.StableTraitPercentage(heroId, "flirtatiousness", Program.TraitInt(foundation, "flirtatiousness"));
+                    flirtatiousness = CharactersService.StableTraitPercentage(heroId, "flirtatiousness", Program.TraitInt(foundation, "flirtatiousness"));
                     source += "+stable_percentage_fallback";
                 }
                 if (confidence < 0 && foundation.ContainsKey("confidence"))
                 {
-                    confidence = Program.StableTraitPercentage(heroId, "confidence", Program.TraitInt(foundation, "confidence"));
+                    confidence = CharactersService.StableTraitPercentage(heroId, "confidence", Program.TraitInt(foundation, "confidence"));
                     source += "+stable_percentage_fallback";
                 }
             }

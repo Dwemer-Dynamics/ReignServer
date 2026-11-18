@@ -289,7 +289,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
                     || ReadStringList(candidate, "enemies").Contains(rebelKingdomId, StringComparer.OrdinalIgnoreCase)) continue;
                 string rulerId = ReadString(candidate, "rulerHeroId", "");
                 if (string.IsNullOrWhiteSpace(rulerId)) continue;
-                int friendship = ReadInt(Program.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
+                int friendship = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                     rebelRulerId, rulerId, "rebellion_backing_eligibility"), "effectiveAttitude", 0);
                 if (friendship < 30) continue;
                 Dictionary<string, object> military = BuildBackingMilitaryEvidence(kingdoms,
@@ -321,9 +321,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND movement_id=$movement 
             Dictionary<string, object> militaryEvidence = ReadDictionary(selected, "military");
             string askedKingdomId = ReadString(askedKingdom, "kingdomId", "");
             string askedRulerId = ReadString(askedKingdom, "rulerHeroId", "");
-            int askedToRebel = ReadInt(Program.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
+            int askedToRebel = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                 askedRulerId, rebelRulerId, "rebellion_backing_opposed_rebel"), "effectiveAttitude", 0);
-            int askedToParent = ReadInt(Program.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
+            int askedToParent = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId, timelineId,
                 askedRulerId, parentRulerId, "rebellion_backing_opposed_parent"), "effectiveAttitude", 0);
             int dayKey = (int)Math.Floor(worldDay);
             int rebelRoll = DiplomacyService.StableRulerD100(campaignId, timelineId, dayKey, movementId + "|opposed|rebel");
@@ -516,26 +516,26 @@ ORDER BY attempt_index DESC LIMIT 1;", new Dictionary<string, object>
                 .Count(id => !id.Equals(rebelKingdomId,
                     StringComparison.OrdinalIgnoreCase));
             int warPressurePoints = Math.Min(2, parentOtherWars);
-            int attitude = ReadInt(Program.ResolveRulerDiplomaticAttitude(connection,
+            int attitude = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                     campaignId, timelineId, parentRulerId, rebelRulerId,
                     "rebellion_independence_recognition"),
                 "effectiveAttitude", 0);
             int relationshipPoints = attitude >= 50 ? 2
                 : attitude >= 20 ? 1 : attitude <= -50 ? -2
                 : attitude <= -20 ? -1 : 0;
-            Dictionary<string, object> parentProfile = Program.LoadDirectorHeroProfile(
+            Dictionary<string, object> parentProfile = RelationshipsService.LoadDirectorHeroProfile(
                 campaignId, parentRulerId, parentKingdom);
             Dictionary<string, object> parentTraitDocument = ReadDictionary(
                 parentProfile, "traits") ?? parentProfile;
-            Program.EnsureTraitPercentageData(parentTraitDocument, parentRulerId);
+            CharactersService.EnsureTraitPercentageData(parentTraitDocument, parentRulerId);
             int parentJudgment = ReadInt(ReadDictionary(parentTraitDocument,
                 "courtVirtues") ?? new Dictionary<string, object>(),
                 "judgment", 50);
-            int parentPragmatism = Program.PersonalityTraitPercentage(
+            int parentPragmatism = CharactersService.PersonalityTraitPercentage(
                 parentTraitDocument, "pragmatism");
-            int parentMercy = Program.PersonalityTraitPercentage(parentTraitDocument,
+            int parentMercy = CharactersService.PersonalityTraitPercentage(parentTraitDocument,
                 "mercy");
-            int parentPride = Program.PersonalityTraitPercentage(parentTraitDocument,
+            int parentPride = CharactersService.PersonalityTraitPercentage(parentTraitDocument,
                 "pride");
             int personalityPoints = (parentPragmatism >= 70 ? 2 : 0)
                 + (parentMercy >= 70 ? 1 : 0)
@@ -859,7 +859,7 @@ VALUES($transition,$movement,$day,$from,$to,'game_state_mirror',$actor,$payload,
         {
             string leaderId = ReadString(clan, "leaderHeroId", "");
             string rulerId = ReadString(ruler, "leaderHeroId", "");
-            Dictionary<string, object> politicalAttitude = Program.ResolveEffectiveAttitude(
+            Dictionary<string, object> politicalAttitude = RelationshipsService.ResolveEffectiveAttitude(
                 connection, campaignId, timelineId, leaderId, rulerId,
                 "rebellion_candidate");
             int personalAffinity = ReadInt(politicalAttitude, "personalAffinity", 0);
@@ -1694,7 +1694,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
                     && RebellionPrivateReportEligible(true, 10, 61, 0)
                     && RebellionPrivateReportEligible(true, 10, 0, 1),
                 "private reporting requires the NPC's own sovereign, relation +10, and either Loyalty 61 or positive Honor");
-            Dictionary<string, object> mergedMailProfile = Program.MergeCorrespondenceRecipientProfile(
+            Dictionary<string, object> mergedMailProfile = RelationshipsService.MergeCorrespondenceRecipientProfile(
                 new Dictionary<string, object>
                 {
                     ["heroStringId"] = "mail_lord", ["name"] = "stale name",
@@ -1718,7 +1718,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
                         }
                     })
                 }, "mail_lord");
-            Dictionary<string, object> rejectedMailProfile = Program.MergeCorrespondenceRecipientProfile(
+            Dictionary<string, object> rejectedMailProfile = RelationshipsService.MergeCorrespondenceRecipientProfile(
                 new Dictionary<string, object>
                 {
                     ["heroStringId"] = "mail_lord", ["name"] = "Persisted Lord"
@@ -1792,7 +1792,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
                 ["recipient"] = dialogueHero
             };
             List<Dictionary<string, object>> correspondencePledge =
-                Program.BuildRebellionLetterReplyCandidates(correspondencePayload,
+                RelationshipsService.BuildRebellionLetterReplyCandidates(correspondencePayload,
                     new Dictionary<string, object>
                     {
                         ["body"] = "Give me your final pledge by letter to support my planned rebellion against our ruler."
@@ -1803,7 +1803,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
                         ["actionGate"] = acceptedActionGate
                     }, "player", "ruler");
             List<Dictionary<string, object>> correspondenceRefusal =
-                Program.BuildRebellionLetterReplyCandidates(correspondencePayload,
+                RelationshipsService.BuildRebellionLetterReplyCandidates(correspondencePayload,
                     new Dictionary<string, object>
                     {
                         ["body"] = "Give me your final answer by letter: will your clan support my planned rebellion against our ruler, or refuse me?"
@@ -1814,7 +1814,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
                         ["actionGate"] = finalRefusalActionGate
                     }, "player", "ruler");
             List<Dictionary<string, object>> correspondenceReport =
-                Program.BuildRebellionLetterReplyCandidates(correspondencePayload,
+                RelationshipsService.BuildRebellionLetterReplyCandidates(correspondencePayload,
                     new Dictionary<string, object>
                     {
                         ["body"] = "Give me your final answer by letter: will your clan support my planned rebellion against our ruler, or refuse me?"
@@ -1924,7 +1924,7 @@ WHERE campaign_id=$campaign AND action_id=$action;", new Dictionary<string, obje
             string campaignId, string timelineId, string subjectId,
             string targetId, int nativeRelation)
         {
-            Dictionary<string, object> attitude = Program.ResolveEffectiveAttitude(connection,
+            Dictionary<string, object> attitude = RelationshipsService.ResolveEffectiveAttitude(connection,
                 campaignId, timelineId, subjectId, targetId,
                 "rebellion_alignment");
             int directional = ReadBool(attitude, "hasPair", false)

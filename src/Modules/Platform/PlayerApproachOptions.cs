@@ -5,13 +5,13 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static PlayerApproachOptions ReadPlayerApproachOptions(Dictionary<string, object> settings = null)
+        internal static PlayerApproachOptions ReadPlayerApproachOptions(Dictionary<string, object> settings = null)
         {
             settings ??= LoadSettings();
             return new PlayerApproachOptions(key => ReadBool(settings, key, true));
         }
 
-        private static string ValidatePlayerApproachOptions(Dictionary<string, object> incoming)
+        internal static string ValidatePlayerApproachOptions(Dictionary<string, object> incoming)
         {
             if (incoming != null) foreach (string key in PlayerApproachOptions.SettingKeys)
                 if (incoming.TryGetValue(key, out object value) && !(value is bool))
@@ -19,7 +19,7 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static Dictionary<string, object> PlayerApproachOptionsForClient(Dictionary<string, object> settings)
+        internal static Dictionary<string, object> PlayerApproachOptionsForClient(Dictionary<string, object> settings)
         {
             var result = new Dictionary<string, object>();
             var options = ReadPlayerApproachOptions(settings);

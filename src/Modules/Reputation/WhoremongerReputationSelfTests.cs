@@ -38,7 +38,7 @@ namespace ReignBetaServer
                 "Repeated built-in catalog migrations preserve the feature's explicit 30-day duration.", archetype);
 
             foreach (string id in new[] { "wm_player", "wm_refresh", "wm_late", "wm_spouse", "wm_npc", "wm_missing" })
-                Program.UpsertIdentityRosterHero(connection, new Dictionary<string, object>
+                CharactersService.UpsertIdentityRosterHero(connection, new Dictionary<string, object>
                 {
                     ["heroStringId"] = id, ["name"] = id, ["isAlive"] = true, ["isAdult"] = true,
                     ["isPlayer"] = id == "wm_player" || id == "wm_refresh" || id == "wm_late", ["clanTier"] = 1,
@@ -58,8 +58,8 @@ namespace ReignBetaServer
             bool conflict = false;
             try { RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_player", fourthId, "town_a", 3.5d); }
             catch (InvalidDataException) { conflict = true; }
-            var standing = Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
-            var spouse = Program.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
+            var standing = RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
+            var spouse = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
             add("whoremonger_cross_town_receipt_and_spouse_rumor",
                 ReadInt(fourth, "visitCount", 0) == 4 && ReadBool(fourth, "exposed", false)
                 && ReadDouble(fourth, "chance", 0) == .1d && Json.Serialize(fourth) == Json.Serialize(replay)
@@ -69,8 +69,8 @@ namespace ReignBetaServer
 
             string fifthId = WhoremongerTestReceipt(campaignId, timeline, "wm_player", "visit:", .2d, true, true);
             var fifth = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_player", fifthId, "town_a", 4.5d);
-            standing = Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
-            spouse = Program.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
+            standing = RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player");
+            spouse = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing);
             add("whoremonger_promotion_replaces_penalty",
                 ReadInt(fifth, "streakCount", 0) == 2 && ReadBool(fifth, "promoted", false)
                 && ReadDouble(fifth, "promotionChance", 0) == .3d
@@ -83,7 +83,7 @@ namespace ReignBetaServer
             Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_player", "profile.json"), new Dictionary<string, object>());
             Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_spouse", "profile.json"), new Dictionary<string, object>());
             add("whoremonger_current_spouse_recalculation",
-                ReadInt(Program.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing), "value", 0) == -8,
+                ReadInt(RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timeline, "wm_spouse", "wm_player", standing), "value", 0) == -8,
                 "Ending the marriage immediately removes the spouse substitution without mutating the personal relation.", null);
 
             Dictionary<string, object> latest = fifth;
@@ -103,7 +103,7 @@ namespace ReignBetaServer
             add("whoremonger_exact_reset_preserves_reputation",
                 ReadInt(before, "visit_count", 0) == 13 && ReadInt(resetState, "visit_count", -1) == 0
                 && ReadInt(restarted, "visitCount", 0) == 1 && ReadDouble(restarted, "chance", -1) == 0d
-                && ReadInt(Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player"), "standing_value", 0) == -8,
+                && ReadInt(RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_player"), "standing_value", 0) == -8,
                 "At exactly 30 inactive days all visit and promotion stacks reset while established reputation remains.", restarted);
 
             for (int n = 1; n <= 3; n++)
@@ -113,7 +113,7 @@ namespace ReignBetaServer
             string failedRefresh = WhoremongerTestReceipt(campaignId, timeline, "wm_refresh", "visit:", .2d, false, null);
             var refresh = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_refresh", failedRefresh, "town_b", 33.25d);
             ExpireWhoremongerActivity(connection, campaignId, timeline, 34.25d);
-            var activeRefresh = Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh");
+            var activeRefresh = RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh");
             string nextRefresh = WhoremongerTestReceipt(campaignId, timeline, "wm_refresh", "visit:", .3d, true, false);
             var continuedPromotion = RegisterWhoremongerVisit(connection, campaignId, timeline, "wm_refresh", nextRefresh, "town_a", 55.25d);
             ExpireWhoremongerActivity(connection, campaignId, timeline, 85.25d);
@@ -122,7 +122,7 @@ namespace ReignBetaServer
                 && ReadInt(activeRefresh, "standing_value", 0) == -5
                 && ReadInt(continuedPromotion, "streakCount", 0) == 2
                 && !ReadBool(continuedPromotion, "promoted", true)
-                && ReadInt(Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh"), "standing_value", -1) == 0,
+                && ReadInt(RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_refresh"), "standing_value", -1) == 0,
                 "A failed exposure refreshes the rumor and retains promotion progress even when successful exposures are more than 30 days apart.", refresh);
 
             Program.WriteJsonObject(Program.CharacterFile(campaignId, "wm_npc", "traits.json"), new Dictionary<string, object>
@@ -140,7 +140,7 @@ namespace ReignBetaServer
                 ReadBool(npc, "exposed", false) && ReadDouble(npc, "chance", 0) == .25d
                 && !ReadBool(npcFailed, "exposed", true)
                 && ReadDouble(npcFailed, "inactivityDeadline", 0) == 31.25d
-                && ReadInt(Program.ReadPublicStandingRow(connection, campaignId, timeline, "wm_npc"), "standing_value", -1) == 0,
+                && ReadInt(RelationshipsService.ReadPublicStandingRow(connection, campaignId, timeline, "wm_npc"), "standing_value", -1) == 0,
                 "NPCs roll immediately without visit ramp; failed town entries never refresh their successful-exposure deadline.", npcFailed);
             npcPayload["isTown"] = false;
             var nonTown = RegisterWhoremongerNpcEntry(connection, campaignId, timeline, "village_entry", "wm_npc", 40, npcPayload, false);
@@ -233,7 +233,7 @@ VALUES('stalled_npc_recovery',$campaign,$timeline,'','',0,0,'{}',0,'',1);",
                 {
                     ["campaign"] = campaignId, ["timeline"] = lateTimeline
                 });
-            Program.EnsureWorldHistorySchema(connection);
+            WorldSimulationService.EnsureWorldHistorySchema(connection);
             EnsureSocialSubjectWorkSchema(connection);
             Program.ExecuteSql(connection, @"INSERT INTO world_history_events(
 event_id,campaign_id,timeline_id,sequence,world_day,event_type,subject_id,created_utc)

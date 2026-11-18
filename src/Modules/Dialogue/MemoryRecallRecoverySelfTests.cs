@@ -369,7 +369,7 @@ namespace ReignBetaServer
                 var lines = recentLines.Select(CloneDictionary).ToList();
                 if (route == "letter") foreach (var line in lines) { line["channel"] = "correspondence"; line["direction"] = "exchanged"; }
                 string Transcript(List<Dictionary<string, object>> rows) => FormatContinuityTranscript(rows, route == "event"
-                    ? group => FormatEventLinesForObserver(group, recentPayload, "npc", knownPlayer) : FormatDialogueForPrompt);
+                    ? group => CharactersService.FormatEventLinesForObserver(group, recentPayload, "npc", knownPlayer) : FormatDialogueForPrompt);
                 string transcript = Transcript(lines);
                 var context = CloneDictionary(recentPayload); BindRecent(context, transcript, lines);
                 Check("recent_only_source_conflict_" + route, ContextConflict(context));
@@ -406,7 +406,7 @@ namespace ReignBetaServer
                     Check("typed_speaker_alias_accepts_current_" + route + "_" + speakerKey, ContextConflict(currentAlias));
                 }
                 var stranger = TestDict("canonicalNameAllowed", false, "usableName", "the stranger");
-                string ProjectIdentity(string text) => SanitizePromptForIdentity(text, "", "Mira", stranger);
+                string ProjectIdentity(string text) => CharactersService.SanitizePromptForIdentity(text, "", "Mira", stranger);
                 var anonymousLines = lines.Select(CloneDictionary).ToList(); anonymousLines[0]["text"] = original + " Mira brought him home.";
                 string rawAnonymous = Transcript(anonymousLines), projectedAnonymous = ProjectIdentity(rawAnonymous);
                 var anonymous = CloneDictionary(recentPayload);
@@ -801,7 +801,7 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$ts,
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                TryDeleteDirectory(StrictCampaignDirectory(campaign));
+                PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign));
             }
             return results;
         }
@@ -895,7 +895,7 @@ VALUES($id,$session,$id,$order,$exchange,$role,$speaker,$speaker,$text,$day,$day
                 }
             }
             catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_growth_exception", "passed", false, "summary", LimitText(ex.ToString(), 2200))); }
-            finally { ReignPostgreSqlStorage.DropCampaign(campaign); TryDeleteDirectory(StrictCampaignDirectory(campaign)); }
+            finally { ReignPostgreSqlStorage.DropCampaign(campaign); PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign)); }
             return results;
         }
 
@@ -971,7 +971,7 @@ VALUES('history',$campaign,'npc','player','closed',1,2,'[""npc"",""player""]','{
                 }
             }
             catch (Exception ex) { results.Add(TestDict("caseId", "memory_recall_revision_exception", "passed", false, "summary", LimitText(ex.ToString(), 2200))); }
-            finally { ReignPostgreSqlStorage.DropCampaign(campaign); TryDeleteDirectory(StrictCampaignDirectory(campaign)); }
+            finally { ReignPostgreSqlStorage.DropCampaign(campaign); PersistenceService.TryDeleteDirectory(PersistenceService.StrictCampaignDirectory(campaign)); }
             return results;
         }
     }

@@ -142,7 +142,7 @@ VALUES($run,'pc-1','ADV-001','corr-1','dialogue','model-a',1,1,
                 add(
                     "blinded_review_pack_contains_production_dialogue",
                     reviewItems.Count == 1
-                        && ReadObjectList(
+                        && CharactersService.ReadObjectList(
                             reviewItems[0], "transcript").Count == 2,
                     "Review selections contain actual dialogue and never empty placeholder transcripts.");
                 Dictionary<string, object> exported =

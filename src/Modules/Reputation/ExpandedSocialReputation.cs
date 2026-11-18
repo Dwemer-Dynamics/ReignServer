@@ -74,7 +74,7 @@ namespace ReignBetaServer
                     Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(expirationConnection);
-                    Program.EnsureWorldTestTelemetrySchema(expirationConnection);
+                    WorldSimulationService.EnsureWorldTestTelemetrySchema(expirationConnection);
                     Dictionary<string, object> latest = Program.QuerySql(
                         expirationConnection, @"SELECT MAX(e.world_day) AS world_day
 FROM world_history_events e
@@ -169,7 +169,7 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
         {
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                Program.EnsureWorldHistorySchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsureSocialReputationSchema(connection);
                 EnsureSocialSubjectWorkSchema(connection);
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -509,7 +509,7 @@ ORDER BY e.sequence,e.event_id;",
                             + DeterministicSocialId(string.Join("|",
                                 campaignId, timelineId, subjectId,
                                 batchEventIds.First(), batchEventIds.Last()));
-                        Program.RecordWorldTestCounterSchemaReady(connection,
+                        WorldSimulationService.RecordWorldTestCounterSchemaReady(connection,
                             campaignId, timelineId,
                             (int)Math.Floor(lastWorldDay + 0.000001d),
                             "rumors", telemetryKey, batchTelemetry);
@@ -765,7 +765,7 @@ AND NOT EXISTS (SELECT 1 FROM social_outcome_receipts r
                     bool processedAny = false;
                     using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                     {
-                        Program.EnsureWorldHistorySchema(connection);
+                        WorldSimulationService.EnsureWorldHistorySchema(connection);
                         EnsureSocialReputationSchema(connection);
                         pending = Program.QuerySql(connection, @"
 SELECT e.event_id,e.world_day,e.event_type,e.summary,e.payload_json

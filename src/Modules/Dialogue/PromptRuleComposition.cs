@@ -123,7 +123,7 @@ namespace ReignBetaServer
         {
             if (profile != null && profile.TryGetValue("isLord", out object value)
                 && bool.TryParse(Convert.ToString(value), out bool isLord)) return isLord;
-            if (profile != null && UsesCommonerRolePrompt(profile)) return false;
+            if (profile != null && CharactersService.UsesCommonerRolePrompt(profile)) return false;
             return null;
         }
 

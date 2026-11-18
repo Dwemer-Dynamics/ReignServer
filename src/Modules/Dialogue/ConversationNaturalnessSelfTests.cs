@@ -76,10 +76,10 @@ namespace ReignBetaServer
             };
             var document = TestDict("active", rows);
             string unchanged = Json.Serialize(document);
-            string hobbies = FormatDynamicCharacteristicsForPrompt(document, "What hobbies do you enjoy?");
+            string hobbies = CharactersService.FormatDynamicCharacteristicsForPrompt(document, "What hobbies do you enjoy?");
             add("captured_generated_rhetoric_quarantined", !hobbies.Contains("counting stops") && hobbies.Contains("shadow puppets"), hobbies);
-            add("relevance_does_not_fill_with_unrelated_memories", FormatDynamicCharacteristicsForPrompt(document, apology) == "", null);
-            add("literal_habit_recall_survives", FormatDynamicCharacteristicsForPrompt(document, "What was your first habit?").Contains("blue lamps"), null);
+            add("relevance_does_not_fill_with_unrelated_memories", CharactersService.FormatDynamicCharacteristicsForPrompt(document, apology) == "", null);
+            add("literal_habit_recall_survives", CharactersService.FormatDynamicCharacteristicsForPrompt(document, "What was your first habit?").Contains("blue lamps"), null);
             add("projection_does_not_mutate_saved_character", Json.Serialize(document) == unchanged, null);
             add("unknown_authored_provenance_preserved", !IsGeneratedConversationRhetoric(TestDict("text", generatedA, "provenance", "authored")), null);
             const string hobbyA = "Gavene carves small wooden horses beside the cedar window every quiet evening.";
@@ -100,14 +100,14 @@ namespace ReignBetaServer
                 TestDict("text", "Gavene hopes to light the shuttered room and make it a home.", "category", "aspiration"),
                 TestDict("text", "Gavene believes hospitality means giving a tired guest somewhere quiet to rest.", "category", "personal_value")
             });
-            add("childhood_recall_uses_category_even_without_exact_words", FormatDynamicCharacteristicsForPrompt(recalled, "Tell me about your childhood.").Contains("mend baskets"), null);
-            add("aversion_recall_understands_dislike", FormatDynamicCharacteristicsForPrompt(recalled, "What do you dislike?").Contains("spiders"), null);
-            add("aspiration_recall_understands_want", FormatDynamicCharacteristicsForPrompt(recalled, "What do you really want?").Contains("shuttered room"), null);
-            add("values_recall_understands_principles", FormatDynamicCharacteristicsForPrompt(recalled, "What are your principles?").Contains("hospitality"), null);
+            add("childhood_recall_uses_category_even_without_exact_words", CharactersService.FormatDynamicCharacteristicsForPrompt(recalled, "Tell me about your childhood.").Contains("mend baskets"), null);
+            add("aversion_recall_understands_dislike", CharactersService.FormatDynamicCharacteristicsForPrompt(recalled, "What do you dislike?").Contains("spiders"), null);
+            add("aspiration_recall_understands_want", CharactersService.FormatDynamicCharacteristicsForPrompt(recalled, "What do you really want?").Contains("shuttered room"), null);
+            add("values_recall_understands_principles", CharactersService.FormatDynamicCharacteristicsForPrompt(recalled, "What are your principles?").Contains("hospitality"), null);
 
             var profile = TestDict("name", speaker, "heroStringId", "fixture_gavene");
             var payload = TestDict("worldDay", 1d, "playerHeroStringId", "fixture_player", "mode", "dialogue");
-            Func<string, string, List<Dictionary<string, object>>> normalize = (text, topic) => NormalizeDynamicCharacteristicWrites(
+            Func<string, string, List<Dictionary<string, object>>> normalize = (text, topic) => CharactersService.NormalizeDynamicCharacteristicWrites(
                 TestDict("dynamicCharacteristicWrites", new List<Dictionary<string, object>> { TestDict("text", text, "category", "habit", "topicKey", topic) }), "fixture_gavene", profile, payload, text);
             var rhetoricalWrite = normalize(generatedA, "counting_people");
             add("new_rhetorical_self_story_rejected", rhetoricalWrite.Count == 1 && ReadString(rhetoricalWrite[0], "status", "") == "rejected", rhetoricalWrite);
@@ -115,14 +115,14 @@ namespace ReignBetaServer
             var financialWrite = normalize(financialValue, "fair_grain_prices");
             add("literal_financial_characterization_is_preserved", financialWrite.Count == 1 && ReadString(financialWrite[0], "status", "") == "active", financialWrite);
             var financialMemory = TestDict("active", new List<Dictionary<string, object>> { TestDict("text", financialValue, "category", "personal_value", "provenance", "npc_generated_personal_history") });
-            add("literal_financial_memory_reaches_relevant_prompt", FormatDynamicCharacteristicsForPrompt(financialMemory, "What do you think about grain prices?").Contains("fair prices for grain"), null);
+            add("literal_financial_memory_reaches_relevant_prompt", CharactersService.FormatDynamicCharacteristicsForPrompt(financialMemory, "What do you think about grain prices?").Contains("fair prices for grain"), null);
             add("figurative_price_is_still_filtered", IsConversationCharacteristicRhetoric("Gavene charges a price for every apology and keeps a ledger of answers."), null);
             var firstWrite = normalize(hobbyA, "wooden_horses");
             var secondWrite = normalize(hobbyB, "evening_carving");
             string campaign = "naturalness_test_" + Guid.NewGuid().ToString("N");
             UpsertCharacterProfile(campaign, profile);
-            StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", firstWrite, payload, TestDict("exchangeId", "original"), "event_original", "dialogue", "", 1, new[] { "fixture_gavene" });
-            var duplicateStore = StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", secondWrite, payload, TestDict("exchangeId", "paraphrase"), "event_paraphrase", "dialogue", "", 2, new[] { "fixture_gavene" });
+            CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", firstWrite, payload, TestDict("exchangeId", "original"), "event_original", "dialogue", "", 1, new[] { "fixture_gavene" });
+            var duplicateStore = CharactersService.StoreDynamicCharacteristicWrites(campaign, "fixture_gavene", secondWrite, payload, TestDict("exchangeId", "paraphrase"), "event_paraphrase", "dialogue", "", 2, new[] { "fixture_gavene" });
             var persisted = ReadJsonObject(CharacterFile(campaign, "fixture_gavene", "dynamic_characteristics.json"));
             add("paraphrase_write_retains_original_and_rejection_evidence", ReadInt(duplicateStore, "rejectedCount", 0) == 1
                 && ReadDictionaryList(persisted, "active").Count == 1 && ReadDictionaryList(persisted, "rejected").Count == 1
@@ -142,10 +142,10 @@ namespace ReignBetaServer
             results.AddRange(RunAcceptedItemGiftRoutingSelfTests());
             results.AddRange(RunDialogueActionReliabilitySelfTests());
             results.AddRange(RunActionAvailabilityRoutingSelfTests());
-            results.AddRange(RunDynamicCharacteristicsSelfTests());
+            results.AddRange(CharactersService.RunDynamicCharacteristicsSelfTests());
             results.AddRange(RunMemorySpecialistIndexSelfTests());
             results.AddRange(RunLateInteractionMemorySelfTests());
-            results.AddRange(RunCharacterLifeStateSelfTests());
+            results.AddRange(CharactersService.RunCharacterLifeStateSelfTests());
             return results;
         }
 

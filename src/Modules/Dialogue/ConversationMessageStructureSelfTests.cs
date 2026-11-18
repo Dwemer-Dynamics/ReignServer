@@ -28,7 +28,7 @@ namespace ReignBetaServer
                 Func<string, string> projection = null, Dictionary<string, object> stage = null)
             {
                 Func<List<Dictionary<string, object>>, string> render = eventMode
-                    ? group => FormatEventLinesForObserver(group, eventPayload, "npc", identity) : FormatDialogueForPrompt;
+                    ? group => CharactersService.FormatEventLinesForObserver(group, eventPayload, "npc", identity) : FormatDialogueForPrompt;
                 string transcript = FormatContinuityTranscript(rows, render);
                 var slots = CreateConversationTemplateSlots(sourceTemplate, "history");
                 var values = new Dictionary<string, string> { ["scene"] = "The stables. Not the tavern. Town resident is not a party member.",
@@ -74,7 +74,7 @@ namespace ReignBetaServer
                 Check("no_old_mechanical_output_replayed_" + route, history.All(m => !ReadString(m, "content", "").Contains("memoryWrites"))
                     && Content(envelope).Contains("NEXT response must obey the complete current JSON output contract"));
                 var payload = new Dictionary<string, object>();
-                string transcript = FormatContinuityTranscript(lines, eventMode ? group => FormatEventLinesForObserver(group, eventPayload, "npc", identity) : FormatDialogueForPrompt);
+                string transcript = FormatContinuityTranscript(lines, eventMode ? group => CharactersService.FormatEventLinesForObserver(group, eventPayload, "npc", identity) : FormatDialogueForPrompt);
                 CaptureRequiredPromptEvidence(payload, "canonicalTranscript", transcript);
                 payload["continuityEvidence"] = TestDict("sourceIds", new[] { "p1", "n1", "n2", "p2" }, "requiredContent", CapturedRequiredPromptEvidence(payload));
                 FinalizeContinuityPromptBudget(envelope, payload);

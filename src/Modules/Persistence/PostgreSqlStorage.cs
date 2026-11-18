@@ -137,7 +137,7 @@ namespace ReignBetaServer
 
         public static NpgsqlConnection OpenCampaignConnection(string campaignId)
         {
-            Program.ThrowIfCampaignRequestReplaced();
+            PersistenceService.ThrowIfCampaignRequestReplaced();
             EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             string schema = CampaignSchemaName(normalizedCampaignId);
@@ -431,7 +431,7 @@ SET schema_name=excluded.schema_name,
 
         public static void RestoreCampaignSnapshot(string campaignId, string savePointId)
         {
-            Program.InvalidateWaitingCampaignRequests();
+            PersistenceService.InvalidateWaitingCampaignRequests();
             EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);
@@ -863,13 +863,13 @@ SELECT current_database(),current_user,
 
         public static void DropCampaign(string campaignId)
         {
-            Program.InvalidateWaitingCampaignRequests();
+            PersistenceService.InvalidateWaitingCampaignRequests();
             EnsureInfrastructure();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             RegisteredCampaignSchemas.TryRemove(normalizedCampaignId,
                 out byte ignoredRegistration);
             Program.InvalidateCampaignSchemaCaches(normalizedCampaignId);
-            Program.InvalidateRelationshipPairStateCache(
+            RelationshipsService.InvalidateRelationshipPairStateCache(
                 normalizedCampaignId);
             string campaignSchema = CampaignSchemaName(normalizedCampaignId);
             List<string> snapshotSchemas = new List<string>();

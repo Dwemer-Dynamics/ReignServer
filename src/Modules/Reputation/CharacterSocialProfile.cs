@@ -268,7 +268,7 @@ ORDER BY acquired_day DESC,updated_ts DESC;",
 
         private static double ResolveCharacterSocialWorldDay(ReignDbConnection connection, string campaignId, string timelineId)
         {
-            double day = Program.LatestKnownWorldDay(connection, campaignId);
+            double day = WorldSimulationService.LatestKnownWorldDay(connection, campaignId);
             if (Program.QuerySql(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_test_native_heartbeats';").Any())
                 day = Math.Max(day, ReadDouble(Program.QuerySql(connection,
                     "SELECT MAX(world_day) AS day FROM world_test_native_heartbeats WHERE timeline_id=$timeline;",

@@ -83,8 +83,8 @@ namespace ReignBetaServer
                 string prompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false);
                 var politicalBlocks = heroes.Select(h => {
                     string id = CharacterIdFrom(h); var traits = ReadJsonObject(CharacterFile(campaign, id, "traits.json"));
-                    return RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
-                        TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(EnsurePoliticalProfile(campaign, id, h, traits)))));
+                    return CharactersService.RequiredPoliticalPrompt(id, h, TestDict("traits", traits, "politicalProfile",
+                        TryParseJsonObject(System.Text.Json.JsonSerializer.Serialize(CharactersService.EnsurePoliticalProfile(campaign, id, h, traits)))));
                 }).ToList();
                 string protectedPrompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false, out int politicalCharacters);
                 Check("complete_political_context_has_exact_separate_allowance", politicalCharacters == politicalBlocks.Sum(block => block.Length + Environment.NewLine.Length)
@@ -107,7 +107,7 @@ namespace ReignBetaServer
                     && pairCues.All(row => ReadString(row, "address", "") == "usually omit" && ReadString(row, "formalAddress", "") == ""
                         && !ReadBool(row, "nameKnown", true))
                     && !peerPrompt.Contains("my lady") && !peerPrompt.Contains("my lord"));
-                UpsertVerifiedIdentity(c, heroes[1], heroes[0], "banter_fixture", "", 20d, "banter_fixture");
+                CharactersService.UpsertVerifiedIdentity(c, heroes[1], heroes[0], "banter_fixture", "", 20d, "banter_fixture");
                 string knownPrompt = BuildBanterPrompt(c, campaign, heroes, "travel|the wind", options, new(), TestDict(), false);
                 var knownCue = knownPrompt.Split('\n').Select(line => TryParseJsonObject(line.Trim())).First(row => row != null && ReadString(row, "toward", "") == "noble");
                 Check("known_name_optional_ruler_address_and_directed_identity", ReadBool(knownCue, "nameKnown", false)

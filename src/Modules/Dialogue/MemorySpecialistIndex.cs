@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_specialist_topics ON memory_specialist_sou
             EnsureLateInteractionMemorySchema(connection);
         }
 
-        private static string MemorySpecialistSourceHash(Dictionary<string, object> source) => PromptHash(CanonicalJson(
+        internal static string MemorySpecialistSourceHash(Dictionary<string, object> source) => PromptHash(CanonicalJson(
             new[] { "turn_id", "session_id", "exchange_id", "role", "speaker_id", "speaker_name", "text", "participants_json", "payload_json", "status", "world_day", "ts", "turn_order", "accepted_sequence" }
                 .ToDictionary(k => k, k => source != null && source.TryGetValue(k, out var value) ? value : null)));
 
@@ -203,7 +203,7 @@ AND t.xmin::text=$revision;", TestDict("id", source["turn_id"], "hash", MemorySp
         private static List<Dictionary<string, object>> FindMemorySpecialistTurns(ReignDbConnection connection, MemoryQueryPlan plan,
             KnowledgeAccessContext access, int limit, int maximumPages, bool requirePlayerSource)
         {
-            if (!TableExists(connection, "memory_specialist_sources")) return new List<Dictionary<string, object>>();
+            if (!WorldSimulationService.TableExists(connection, "memory_specialist_sources")) return new List<Dictionary<string, object>>();
             var topics = MemorySpecialistQueryTopics(plan.Query);
             var ids = plan.ExplicitEntities.Distinct(StringComparer.Ordinal).ToList();
             if (topics.Count == 0 && ids.Count == 0) return new List<Dictionary<string, object>>();
@@ -243,7 +243,7 @@ JOIN conversation_sessions s ON s.session_id=t.session_id WHERE i.schema_version
                 List<Dictionary<string, object>> sources;
                 using (var connection = OpenCampaignConnection(campaign))
                 {
-                    if (!TableExists(connection, "memory_specialist_sources")) return;
+                    if (!WorldSimulationService.TableExists(connection, "memory_specialist_sources")) return;
                     string missing = @"SELECT t.*,t.xmin::text AS source_revision FROM conversation_turns t LEFT JOIN memory_specialist_sources i ON t.turn_id=i.turn_id
 WHERE t.status='active' AND t.text<>'' AND (i.turn_id IS NULL OR i.schema_version<>$schema OR i.source_revision<>t.xmin::text)";
                     var args = TestDict("schema", MemorySpecialistIndexSchema, "limit", Math.Max(1, Math.Min(256, limit)));
@@ -282,14 +282,14 @@ ORDER BY i.updated_ts,t.accepted_sequence,t.turn_id LIMIT 4;",
                 }
                 using (var connection = OpenCampaignConnection(campaign))
                 {
-                    string timeline = ActiveWorldHistoryTimeline(connection);
+                    string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
                     var native = QuerySql(connection, "SELECT MAX(world_day) AS day FROM world_history_events WHERE timeline_id=$timeline;", TestDict("timeline", timeline)).FirstOrDefault();
                     var latest = QuerySql(connection, "SELECT speaker_id,MAX(world_day) AS day FROM conversation_turns WHERE status='active' AND role='npc' GROUP BY speaker_id ORDER BY MAX(ts) DESC LIMIT 16;");
                     foreach (var row in latest)
                     {
                         if (PriorityBackgroundWorkShouldYield()) break;
                         string owner = ReadString(row, "speaker_id", "");
-                        RefreshCharacterLifeProjection(campaign, owner, new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline,
+                        CharactersService.RefreshCharacterLifeProjection(campaign, owner, new KnowledgeAccessContext { NpcId = owner, TimelineId = timeline,
                             WorldDay = Math.Max(ReadDouble(row, "day", 0), ReadDouble(native, "day", 0)), AsOfTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
                     }
                 }

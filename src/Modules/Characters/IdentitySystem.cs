@@ -10,11 +10,11 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         internal static void EnsureIdentitySchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS acquaintances (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS acquaintances (
 observer_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,
 identity_state TEXT NOT NULL DEFAULT 'encountered_unknown',
@@ -34,9 +34,9 @@ last_recognition_encounter_id TEXT NOT NULL DEFAULT '',
 payload_json TEXT NOT NULL DEFAULT '{}',
 updated_ts INTEGER NOT NULL DEFAULT 0,
 PRIMARY KEY(observer_id,subject_id));");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_subject ON acquaintances(subject_id,identity_state);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_observer ON acquaintances(observer_id,identity_state);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_evidence (
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_subject ON acquaintances(subject_id,identity_state);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_acquaintances_observer ON acquaintances(observer_id,identity_state);");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_evidence (
 evidence_id TEXT PRIMARY KEY,
 observer_id TEXT NOT NULL,
 subject_id TEXT NOT NULL,
@@ -50,55 +50,55 @@ confidence REAL NOT NULL DEFAULT 0,
 world_day REAL NOT NULL DEFAULT 0,
 payload_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL DEFAULT 0);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_evidence_pair ON identity_evidence(observer_id,subject_id,created_ts DESC);");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_roster (
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_evidence_pair ON identity_evidence(observer_id,subject_id,created_ts DESC);");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS identity_roster (
 hero_id TEXT PRIMARY KEY,canonical_name TEXT NOT NULL DEFAULT '',clan_id TEXT NOT NULL DEFAULT '',
 kingdom_id TEXT NOT NULL DEFAULT '',is_lord INTEGER NOT NULL DEFAULT 0,is_ruler INTEGER NOT NULL DEFAULT 0,
 family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0);");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_alive", "INTEGER NOT NULL DEFAULT 1");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_adult", "INTEGER NOT NULL DEFAULT 1");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_player", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "sex", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "identity_roster", "clan_tier", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "current_charm", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "occupation", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_notable", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_wanderer", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_clan_leader", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "is_mercenary_clan", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_id", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_name", "TEXT NOT NULL DEFAULT ''");
-            EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_day", "REAL NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_probability", "REAL NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_roll", "REAL NOT NULL DEFAULT -1");
-            EnsureDatabaseColumn(connection, "acquaintances", "recognition_rule_version", "INTEGER NOT NULL DEFAULT 0");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_clan ON identity_roster(clan_id,hero_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_kingdom ON identity_roster(kingdom_id,is_lord,hero_id);");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_alive", "INTEGER NOT NULL DEFAULT 1");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_adult", "INTEGER NOT NULL DEFAULT 1");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_player", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "sex", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "clan_tier", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "current_charm", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "occupation", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_notable", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_wanderer", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_clan_leader", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "is_mercenary_clan", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_id", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "identity_roster", "governor_settlement_name", "TEXT NOT NULL DEFAULT ''");
+            Program.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_day", "REAL NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_probability", "REAL NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "acquaintances", "last_recognition_roll", "REAL NOT NULL DEFAULT -1");
+            Program.EnsureDatabaseColumn(connection, "acquaintances", "recognition_rule_version", "INTEGER NOT NULL DEFAULT 0");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_clan ON identity_roster(clan_id,hero_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_identity_roster_kingdom ON identity_roster(kingdom_id,is_lord,hero_id);");
             EnsureCompactIdentityEvidencePayloads(connection);
         }
 
         private static void EnsureCompactIdentityEvidencePayloads(ReignDbConnection connection)
         {
             const int version = 2;
-            int current = ReadInt(QuerySql(connection,
+            int current = ReadInt(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='identity_payload_compaction_version' LIMIT 1;")
                 .FirstOrDefault(), "value", 0);
             if (current >= version) return;
-            ExecuteSql(connection, "BEGIN IMMEDIATE;");
+            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
             try
             {
                 // Evidence rows are the canonical provenance store. Keeping the
                 // same request envelope on the acquaintance summary row doubled
                 // it without adding any authoritative state.
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "UPDATE acquaintances SET payload_json='{}' WHERE payload_json<>'{}';");
-                foreach (Dictionary<string, object> row in QuerySql(connection,
+                foreach (Dictionary<string, object> row in Program.QuerySql(connection,
                     "SELECT evidence_id,payload_json FROM identity_evidence WHERE length(payload_json)>2048;"))
                 {
                     Dictionary<string, object> payload =
                         TryParseJsonObject(ReadString(row, "payload_json", ""))
                         ?? new Dictionary<string, object>();
-                    ExecuteSql(connection,
+                    Program.ExecuteSql(connection,
                         "UPDATE identity_evidence SET payload_json=$payload WHERE evidence_id=$id;",
                         new Dictionary<string, object>
                         {
@@ -106,16 +106,16 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                             ["payload"] = Json.Serialize(CompactIdentityEvidencePayload(payload))
                         });
                 }
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_payload_compaction_version',$version);",
                     new Dictionary<string, object> { ["version"] = version.ToString(CultureInfo.InvariantCulture) });
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                ExecuteSql(connection, "COMMIT;");
+                Program.ExecuteSql(connection, "COMMIT;");
             }
             catch
             {
-                try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                 throw;
             }
         }
@@ -133,14 +133,14 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
             {
                 string value = ReadString(payload, key, "");
                 if (!string.IsNullOrWhiteSpace(value))
-                    compact[key] = LimitText(value, key.EndsWith("Text", StringComparison.OrdinalIgnoreCase)
+                    compact[key] = Program.LimitText(value, key.EndsWith("Text", StringComparison.OrdinalIgnoreCase)
                         || key == "text" || key == "message" ? 1200 : 160);
             }
             Dictionary<string, object> subject = ReadDictionary(payload, "subject");
             if (subject != null && !string.IsNullOrWhiteSpace(ReadString(subject, "name", "")))
                 compact["subject"] = new Dictionary<string, object>
                 {
-                    ["name"] = LimitText(ReadString(subject, "name", ""), 160)
+                    ["name"] = Program.LimitText(ReadString(subject, "name", ""), 160)
                 };
             foreach (string key in new[] { "groupTranscript", "transcript" })
             {
@@ -156,14 +156,14 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                         if (string.IsNullOrWhiteSpace(text)) continue;
                         rows.Add(new Dictionary<string, object>
                         {
-                            ["role"] = LimitText(ReadString(row, "role", ""), 32),
-                            ["text"] = LimitText(text, 1200)
+                            ["role"] = Program.LimitText(ReadString(row, "role", ""), 32),
+                            ["text"] = Program.LimitText(text, 1200)
                         });
                     }
                     else
                     {
                         string text = item?.ToString() ?? "";
-                        if (!string.IsNullOrWhiteSpace(text)) rows.Add(LimitText(text, 1200));
+                        if (!string.IsNullOrWhiteSpace(text)) rows.Add(Program.LimitText(text, 1200));
                     }
                 }
                 if (rows.Count > 12) rows = rows.Skip(rows.Count - 12).ToList();
@@ -172,13 +172,13 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
             return compact;
         }
 
-        private static Dictionary<string, object> IdentitySynchronizeApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> IdentitySynchronizeApi(Dictionary<string, object> payload)
         {
             var syncTimer = System.Diagnostics.Stopwatch.StartNew();
             var syncPhases = new Dictionary<string, object>();
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<Dictionary<string, object>> heroes = ReadDictionaryList(payload, "heroes")
                 .Where(x => !string.IsNullOrWhiteSpace(IdentityHeroId(x)) && ReadBool(x, "isAlive", true))
@@ -187,8 +187,8 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                 .ToList();
             string fingerprint = FirstNonEmpty(ReadString(payload, "rosterFingerprint", ""), ComputeIdentityRosterFingerprint(heroes));
             string expectedPortraitRosterFingerprint = ReadString(payload, "portraitRosterFingerprint", "");
-            Dictionary<string, object> savedPortraitRoster = ReadJsonObject(
-                CampaignFile(campaignId, "portrait_roster.json"));
+            Dictionary<string, object> savedPortraitRoster = Program.ReadJsonObject(
+                Program.CampaignFile(campaignId, "portrait_roster.json"));
             string savedPortraitRosterFingerprint = ReadString(savedPortraitRoster, "rosterFingerprint", "");
             bool portraitRosterSyncRequired = !string.IsNullOrWhiteSpace(expectedPortraitRosterFingerprint)
                 && !string.Equals(
@@ -205,58 +205,58 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
             int migrated = 0;
             Dictionary<string, object> storageRepair = new Dictionary<string, object>();
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 syncPhases["prepareAndConnectMs"] = syncTimer.ElapsedMilliseconds;
                 var phaseTimer = System.Diagnostics.Stopwatch.StartNew();
                 // Run bounded-storage migrations from the same roster synchronization that occurs
                 // after a campaign is loaded. This repairs older oversized databases before the
                 // next native save asks Save Sync to snapshot them.
-                EnsureAmbientRelationshipSchema(connection);
+                RelationshipsService.EnsureAmbientRelationshipSchema(connection);
                 EnsureIdentitySchema(connection);
-                string previousFingerprint = ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_roster_fingerprint' LIMIT 1;").FirstOrDefault(), "value", "");
+                string previousFingerprint = ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_roster_fingerprint' LIMIT 1;").FirstOrDefault(), "value", "");
                 bool rosterChanged = !string.Equals(previousFingerprint, fingerprint, StringComparison.Ordinal);
                 Dictionary<string, Dictionary<string, object>> byId = heroes.ToDictionary(IdentityHeroId, x => x, StringComparer.OrdinalIgnoreCase);
                 storageRepair = ReconcileSyntheticIdentityRows(connection, heroes);
                 if (rosterChanged)
                 {
-                    var previousRoster = QuerySql(connection, "SELECT * FROM identity_roster;");
+                    var previousRoster = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
                     var historicalBatch = PrepareHistoricalIdentityBatch(previousRoster, heroes);
                     syncPhases["historicalPrepareMs"] = phaseTimer.ElapsedMilliseconds;
                     phaseTimer.Restart();
-                    ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                    Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                     syncPhases["transactionWaitMs"] = phaseTimer.ElapsedMilliseconds;
                     phaseTimer.Restart();
                     try
                     {
                         // Another census may have committed while preparation ran.
                         // Rebase against its roster under the existing transaction lock.
-                        string lockedFingerprint = ReadString(QuerySql(connection,
+                        string lockedFingerprint = ReadString(Program.QuerySql(connection,
                             "SELECT value FROM schema_meta WHERE key='identity_roster_fingerprint' LIMIT 1;")
                             .FirstOrDefault(), "value", "");
                         if (!string.Equals(previousFingerprint, lockedFingerprint, StringComparison.Ordinal))
                         {
-                            previousRoster = QuerySql(connection, "SELECT * FROM identity_roster;");
+                            previousRoster = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
                             historicalBatch = PrepareHistoricalIdentityBatch(previousRoster, heroes);
                         }
                         WriteHistoricalIdentityBatch(connection, historicalBatch, worldDay,
                             DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                         syncPhases["historicalRows"] = historicalBatch.Count;
                         syncPhases["historicalWriteCommands"] = (historicalBatch.Count + 999) / 1000;
-                        ExecuteSql(connection, "DELETE FROM identity_roster;");
+                        Program.ExecuteSql(connection, "DELETE FROM identity_roster;");
                         long rosterTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                         // The roster was just cleared, so the existing batch writer
                         // persists the same rows/timestamps without thousands of
                         // command preparations and round trips under the campaign lock.
                         UpsertIdentityRosterHeroesBatch(connection, heroes, rosterTs);
-                        ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_roster_fingerprint',$value);", new Dictionary<string, object> { ["value"] = fingerprint });
-                        ExecuteSql(connection, "COMMIT;");
+                        Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_roster_fingerprint',$value);", new Dictionary<string, object> { ["value"] = fingerprint });
+                        Program.ExecuteSql(connection, "COMMIT;");
                         syncPhases["rosterTransactionMs"] = phaseTimer.ElapsedMilliseconds;
                         phaseTimer.Restart();
                     }
                     catch
                     {
-                        try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                        try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                         throw;
                     }
                     ReputationService.EnsureSocialReputationSchema(connection);
@@ -265,12 +265,12 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                     // processing. Recomputing every lord here made first startup
                     // perform thousands of empty relationship lookups before the
                     // initial save could flush World History.
-                    bool hasCourtPopularityState = ReadInt(QuerySql(connection,
+                    bool hasCourtPopularityState = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM court_dynamic_reputation_metrics WHERE domain='popularity' LIMIT 1;")
                         .FirstOrDefault(), "count", 0) > 0;
                     var popularitySubjects = hasCourtPopularityState
                         ? SelectIdentityPopularitySubjects(connection, previousRoster,
-                            QuerySql(connection, "SELECT * FROM identity_roster;")) : new List<string>();
+                            Program.QuerySql(connection, "SELECT * FROM identity_roster;")) : new List<string>();
                     syncPhases["popularitySubjects"] = popularitySubjects.Count;
                     int courtPopularityChanges = ReputationService.RecomputeCourtPopularityReputationsBatch(connection, campaignId,
                         ReadString(payload, "timelineId", "main"), popularitySubjects, worldDay,
@@ -290,7 +290,7 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                 syncPhases["publicStandingMs"] = phaseTimer.ElapsedMilliseconds;
                 phaseTimer.Restart();
                 Dictionary<string, object> politicalRelationships =
-                    ReconcilePoliticalRelationshipNetwork(connection, campaignId,
+                    RelationshipsService.ReconcilePoliticalRelationshipNetwork(connection, campaignId,
                         ReadString(payload, "timelineId", "main"), worldDay,
                         rosterChanged ? "identity_roster_changed" : "identity_roster_verified",
                         ReadBool(payload, "deferRelationshipProjection", false));
@@ -323,7 +323,7 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
                 result["portraitRosterFingerprint"] = savedPortraitRosterFingerprint;
                 result["financeCensus"] = financeCensus;
                 result["performance"] = syncPhases;
-                WriteAudit(campaignId, correlationId, "server", "identity", "identity.synchronized", "", "", "", "completed", 0, "Directional identity network synchronized.", result);
+                Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.synchronized", "", "", "", "completed", 0, "Directional identity network synchronized.", result);
                 return result;
             }
         }
@@ -331,20 +331,20 @@ family_ids_json TEXT NOT NULL DEFAULT '[]',updated_ts INTEGER NOT NULL DEFAULT 0
         private static Dictionary<string, object> ReconcileSyntheticIdentityRows(ReignDbConnection connection, List<Dictionary<string, object>> heroes)
         {
             const int repairVersion = 3;
-            int currentVersion = ReadInt(QuerySql(connection,
+            int currentVersion = ReadInt(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='identity_synthetic_repair_version' LIMIT 1;").FirstOrDefault(), "value", 0);
             if (currentVersion >= repairVersion)
                 return new Dictionary<string, object> { ["applied"] = false, ["version"] = currentVersion };
 
-            long evidenceBefore = ReadLong(QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
-            long acquaintancesBefore = ReadLong(QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
-            ExecuteSql(connection, "BEGIN IMMEDIATE;");
+            long evidenceBefore = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
+            long acquaintancesBefore = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
+            Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
             try
             {
                 string syntheticSources = "'same_clan','immediate_family','same_kingdom_nobility','realm_sovereign','ruler_network','live_same_realm_sovereign'";
-                ExecuteSql(connection, @"DELETE FROM identity_evidence
+                Program.ExecuteSql(connection, @"DELETE FROM identity_evidence
 WHERE source IN (" + syntheticSources + @");");
-                ExecuteSql(connection, @"UPDATE acquaintances SET
+                Program.ExecuteSql(connection, @"UPDATE acquaintances SET
 identity_state=CASE WHEN claimed_name<>'' THEN 'claimed' ELSE 'encountered_unknown' END,
 verification_source=CASE WHEN claimed_name<>'' THEN 'preserved_explicit_claim' ELSE 'recognition_required_after_rule_v3' END,
 source_entity_id='',confidence=CASE WHEN claimed_name<>'' THEN 0.6 ELSE 0 END,
@@ -357,7 +357,7 @@ AND NOT EXISTS (
     AND e.source NOT IN (" + syntheticSources + @")
     AND e.evidence_type='verified'
 );");
-                ExecuteSql(connection, @"DELETE FROM acquaintances
+                Program.ExecuteSql(connection, @"DELETE FROM acquaintances
 WHERE verification_source IN (" + syntheticSources + @")
 AND encounter_count=0
 AND claimed_name=''
@@ -366,19 +366,19 @@ AND NOT EXISTS (
     WHERE e.observer_id=acquaintances.observer_id AND e.subject_id=acquaintances.subject_id
     AND e.source NOT IN (" + syntheticSources + @")
 );");
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_synthetic_repair_version',$version);",
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_synthetic_repair_version',$version);",
                     new Dictionary<string, object> { ["version"] = repairVersion.ToString(CultureInfo.InvariantCulture) });
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                ExecuteSql(connection, "COMMIT;");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
+                Program.ExecuteSql(connection, "COMMIT;");
             }
             catch
             {
-                try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                 throw;
             }
 
-            long evidenceAfter = ReadLong(QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
-            long acquaintancesAfter = ReadLong(QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
+            long evidenceAfter = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM identity_evidence;").FirstOrDefault(), "count", 0);
+            long acquaintancesAfter = ReadLong(Program.QuerySql(connection, "SELECT COUNT(*) AS count FROM acquaintances;").FirstOrDefault(), "count", 0);
             return new Dictionary<string, object>
             {
                 ["applied"] = true,
@@ -391,7 +391,7 @@ AND NOT EXISTS (
 
         private static bool TryCompactCampaignDatabase(ReignDbConnection connection)
         {
-            if (!string.Equals(ReadString(QuerySql(connection,
+            if (!string.Equals(ReadString(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='campaign_compaction_required' LIMIT 1;").FirstOrDefault(), "value", ""), "1", StringComparison.Ordinal))
                 return false;
             try
@@ -401,9 +401,9 @@ AND NOT EXISTS (
                 // VACUUM here monopolized SQLite for minutes on a fresh campaign.
                 // Keep startup maintenance bounded; retired pages can be reused by
                 // SQLite and Save Sync already snapshots through the backup API.
-                ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
-                ExecuteSql(connection, "PRAGMA optimize;");
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','0');");
+                Program.ExecuteSql(connection, "PRAGMA wal_checkpoint(PASSIVE);");
+                Program.ExecuteSql(connection, "PRAGMA optimize;");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','0');");
                 return true;
             }
             catch
@@ -419,7 +419,7 @@ AND NOT EXISTS (
             string heroId = IdentityHeroId(hero);
             if (string.IsNullOrWhiteSpace(heroId)) return;
             HashSet<string> family = IdentityFamilyIds(hero);
-            ExecuteSql(connection, @"INSERT INTO identity_roster(
+            Program.ExecuteSql(connection, @"INSERT INTO identity_roster(
 hero_id,canonical_name,clan_id,kingdom_id,is_lord,is_ruler,family_ids_json,is_alive,is_adult,is_player,sex,clan_tier,current_charm,
 occupation,is_notable,is_wanderer,is_clan_leader,is_mercenary_clan,governor_settlement_id,governor_settlement_name,updated_ts)
 VALUES($hero,$name,$clan,$kingdom,$lord,$ruler,$family,$alive,$adult,$player,$sex,$tier,$charm,
@@ -452,7 +452,7 @@ governor_settlement_id=$governorId,governor_settlement_name=$governorName,update
                 });
         }
 
-        private static void UpsertIdentityRosterHeroesBatch(
+        internal static void UpsertIdentityRosterHeroesBatch(
             ReignDbConnection connection,
             IEnumerable<Dictionary<string, object>> heroes,
             long ts)
@@ -505,7 +505,7 @@ governor_settlement_id=$governorId,governor_settlement_name=$governorName,update
                     ["ts"] = ts
                 };
             }).ToList();
-            ExecutePostgreSqlJsonCommand(connection, @"
+            RelationshipsService.ExecutePostgreSqlJsonCommand(connection, @"
 WITH x AS (
     SELECT * FROM jsonb_to_recordset(@rows) AS r(
         hero text,name text,clan text,kingdom text,lord integer,
@@ -566,7 +566,7 @@ IS DISTINCT FROM
        excluded.is_clan_leader,excluded.is_mercenary_clan,
        excluded.governor_settlement_id,
        excluded.governor_settlement_name);",
-                PostgreSqlRelationshipRowsJson(rows));
+                RelationshipsService.PostgreSqlRelationshipRowsJson(rows));
         }
 
         private static HashSet<string> IdentityFamilyIds(Dictionary<string, object> hero)
@@ -580,12 +580,12 @@ IS DISTINCT FROM
             return family;
         }
 
-        private static void PreserveDepartingImplicitKnowledge(
+        internal static void PreserveDepartingImplicitKnowledge(
             ReignDbConnection connection,
             List<Dictionary<string, object>> nextHeroes,
             double worldDay, long? fixedTimestamp = null)
         {
-            List<Dictionary<string, object>> previous = QuerySql(connection, "SELECT * FROM identity_roster;");
+            List<Dictionary<string, object>> previous = Program.QuerySql(connection, "SELECT * FROM identity_roster;");
             if (previous.Count == 0) return;
             Dictionary<string, Dictionary<string, object>> next = (nextHeroes ?? new List<Dictionary<string, object>>())
                 .Where(x => !string.IsNullOrWhiteSpace(IdentityHeroId(x)))
@@ -621,7 +621,7 @@ IS DISTINCT FROM
         {
             string source = ImplicitIdentitySource(observer, subject);
             if (string.IsNullOrWhiteSpace(source)) return;
-            ExecuteSql(connection, @"INSERT INTO acquaintances(
+            Program.ExecuteSql(connection, @"INSERT INTO acquaintances(
 observer_id,subject_id,identity_state,canonical_name,verification_source,confidence,first_met_day,last_met_day,updated_ts)
 VALUES($observer,$subject,'verified',$name,'historical_group_identity',1,$day,$day,$ts)
 ON CONFLICT(observer_id,subject_id) DO UPDATE SET
@@ -651,9 +651,9 @@ WHERE acquaintances.identity_state<>'verified';",
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId)
                 || observerId.Equals(subjectId, StringComparison.OrdinalIgnoreCase)) return "";
             HashSet<string> observerFamily = new HashSet<string>(
-                TextListFromJson(ReadString(observer, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
+                Program.TextListFromJson(ReadString(observer, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
             HashSet<string> subjectFamily = new HashSet<string>(
-                TextListFromJson(ReadString(subject, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
+                Program.TextListFromJson(ReadString(subject, "family_ids_json", "[]")), StringComparer.OrdinalIgnoreCase);
             if (observerFamily.Contains(subjectId) || subjectFamily.Contains(observerId)) return "immediate_family";
             string observerClan = ReadString(observer, "clan_id", "");
             if (!string.IsNullOrWhiteSpace(observerClan)
@@ -707,7 +707,7 @@ WHERE acquaintances.identity_state<>'verified';",
             return "";
         }
 
-        private static Dictionary<string, object> IdentityEncounterApi(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> IdentityEncounterApi(Dictionary<string, object> payload,
             ContextualSelfIntroductionDecision contextualIntroduction = null)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -715,14 +715,14 @@ WHERE acquaintances.identity_state<>'verified';",
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId", "npcId", "speakerHeroStringId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId", "playerHeroStringId");
             string encounterId = FirstNonEmpty(ReadFirstString(payload, "encounterId", "conversationSessionId", "sessionId", "eventId"), "encounter_" + Guid.NewGuid().ToString("N"));
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observerHeroStringId and subjectHeroStringId are required." };
 
             Dictionary<string, object> observer = ReadDictionary(payload, "observer") ?? new Dictionary<string, object> { ["heroStringId"] = observerId };
             Dictionary<string, object> subject = ReadDictionary(payload, "subject") ?? new Dictionary<string, object> { ["heroStringId"] = subjectId, ["name"] = ReadString(payload, "canonicalName", "") };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
                 Dictionary<string, object> stored =
@@ -761,7 +761,7 @@ WHERE acquaintances.identity_state<>'verified';",
                 }
                 else if (newEncounter)
                 {
-                    ExecuteSql(connection, @"UPDATE acquaintances SET last_met_day=$day,encounter_count=encounter_count+1,last_encounter_id=$encounter,updated_ts=$ts WHERE observer_id=$observer AND subject_id=$subject;",
+                    Program.ExecuteSql(connection, @"UPDATE acquaintances SET last_met_day=$day,encounter_count=encounter_count+1,last_encounter_id=$encounter,updated_ts=$ts WHERE observer_id=$observer AND subject_id=$subject;",
                         IdentitySqlArgs(observerId, subjectId, worldDay, encounterId));
                     existing = ReadAcquaintance(connection, observerId, subjectId);
                 }
@@ -835,7 +835,7 @@ WHERE acquaintances.identity_state<>'verified';",
                     && ReadString(row, "verification_source", "") == "self_introduction"
                     && AuthoritativeIntroductionSource(ReadString(row, "claimed_name", ""), subject).Length > 0)
                 {
-                    Dictionary<string, object> priorEvidence = QuerySql(connection,
+                    Dictionary<string, object> priorEvidence = Program.QuerySql(connection,
                         "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject AND source='self_introduction' AND evidence_type='claimed_identity' ORDER BY created_ts DESC LIMIT 1;",
                         new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId }).FirstOrDefault();
                     Dictionary<string, object> priorPayload = TryParseJsonObject(ReadString(priorEvidence, "payload_json", ""));
@@ -884,13 +884,13 @@ WHERE acquaintances.identity_state<>'verified';",
                     ["liveImplicitRecognitionSource"] =
                         liveImplicitSource,
                     ["identityRosterAvailable"] =
-                        QuerySql(connection,
+                        Program.QuerySql(connection,
                             "SELECT COUNT(*) AS count FROM identity_roster;")
                             .Select(rowValue =>
                                 ReadLong(rowValue, "count", 0))
                             .FirstOrDefault() > 0
                 };
-                WriteAudit(campaignId, correlationId, "server", "identity", "identity.encounter", observerId, "", encounterId, "completed", 0, "Identity view resolved for encounter.", response);
+                Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.encounter", observerId, "", encounterId, "completed", 0, "Identity view resolved for encounter.", response);
                 return response;
             }
         }
@@ -956,7 +956,7 @@ WHERE acquaintances.identity_state<>'verified';",
                 ? "recognized"
                 : "not_recognized";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"UPDATE acquaintances SET
+            Program.ExecuteSql(connection, @"UPDATE acquaintances SET
 recognition_attempts=recognition_attempts+1,
 last_recognition_result=$result,
 last_recognition_encounter_id=$encounter,
@@ -1105,7 +1105,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return mantissa / (double)(1UL << 53);
         }
 
-        private static Dictionary<string, object> IdentityIntroductionApi(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> IdentityIntroductionApi(Dictionary<string, object> payload,
             ReignDbConnection existingConnection = null)
         {
             payload = payload ?? new Dictionary<string, object>();
@@ -1113,16 +1113,16 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
             string introducerId = ReadFirstString(payload, "introducerHeroStringId", "introducerId");
-            string claimedName = LimitText(ReadFirstString(payload, "claimedName", "name"), 80);
-            string canonicalName = LimitText(ReadString(payload, "canonicalName", ""), 80);
+            string claimedName = Program.LimitText(ReadFirstString(payload, "claimedName", "name"), 80);
+            string canonicalName = Program.LimitText(ReadString(payload, "canonicalName", ""), 80);
             string kind = ReadString(payload, "kind", string.IsNullOrWhiteSpace(introducerId) || string.Equals(introducerId, subjectId, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party");
             string encounterId = ReadFirstString(payload, "encounterId", "conversationSessionId", "eventId");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId) || string.IsNullOrWhiteSpace(claimedName))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer, subject, and claimedName are required." };
 
-            using (ReignDbConnection ownedConnection = existingConnection == null ? OpenCampaignConnection(campaignId) : null)
+            using (ReignDbConnection ownedConnection = existingConnection == null ? Program.OpenCampaignConnection(campaignId) : null)
             {
                 ReignDbConnection connection = existingConnection ?? ownedConnection;
                 bool verified = false;
@@ -1151,19 +1151,19 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 Dictionary<string, object> view = BuildIdentityView(ReadAcquaintance(connection, observerId, subjectId), payload);
                 // The conversation's accepted-unit receipt owns audit visibility
                 // until its outer transaction commits.
-                if (existingConnection == null) WriteAudit(campaignId, correlationId, "server", "identity", "identity.introduction", observerId, "", encounterId, "completed", 0, verified ? "Trusted introduction verified identity." : "Claimed identity recorded.", view);
+                if (existingConnection == null) Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.introduction", observerId, "", encounterId, "completed", 0, verified ? "Trusted introduction verified identity." : "Claimed identity recorded.", view);
                 return new Dictionary<string, object> { ["ok"] = true, ["verified"] = verified, ["identityView"] = view };
             }
         }
 
-        private static Dictionary<string, object> IdentityQueryApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> IdentityQueryApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", LatestCampaignId());
+            string campaignId = ReadString(payload, "campaignId", Program.LatestCampaignId());
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
             int limit = Math.Max(1, Math.Min(2000, ReadInt(payload, "limit", 500)));
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 List<string> clauses = new List<string>();
                 Dictionary<string, object> args = new Dictionary<string, object> { ["limit"] = limit };
@@ -1180,41 +1180,41 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 }
                 else
                 {
-                    rows = QuerySql(connection, "SELECT * FROM acquaintances" + where + " ORDER BY updated_ts DESC LIMIT $limit;", args);
+                    rows = Program.QuerySql(connection, "SELECT * FROM acquaintances" + where + " ORDER BY updated_ts DESC LIMIT $limit;", args);
                 }
                 List<Dictionary<string, object>> evidence = observerId.Length > 0 && subjectId.Length > 0
-                    ? QuerySql(connection, "SELECT * FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject ORDER BY created_ts DESC LIMIT 200;", new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId })
+                    ? Program.QuerySql(connection, "SELECT * FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject ORDER BY created_ts DESC LIMIT 200;", new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId })
                     : new List<Dictionary<string, object>>();
                 return new Dictionary<string, object> { ["ok"] = true, ["campaignId"] = campaignId, ["acquaintances"] = rows, ["evidence"] = evidence };
             }
         }
 
-        private static Dictionary<string, object> IdentityResetApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> IdentityResetApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!ReadBool(payload, "testMode", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Identity reset is available only in beta test mode." };
             string campaignId = ReadString(payload, "campaignId", "default");
             string observerId = ReadFirstString(payload, "observerHeroStringId", "observerId");
             string subjectId = ReadFirstString(payload, "subjectHeroStringId", "subjectId");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(subjectId)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "observer and subject are required." };
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> args = new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId };
-                ExecuteSql(connection, "DELETE FROM acquaintances WHERE observer_id=$observer AND subject_id=$subject;", args);
-                ExecuteSql(connection, "DELETE FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject;", args);
+                Program.ExecuteSql(connection, "DELETE FROM acquaintances WHERE observer_id=$observer AND subject_id=$subject;", args);
+                Program.ExecuteSql(connection, "DELETE FROM identity_evidence WHERE observer_id=$observer AND subject_id=$subject;", args);
             }
-            WriteAudit(campaignId, correlationId, "server", "identity", "identity.reset", observerId, "", "", "completed", 0, "Identity knowledge reset for beta testing.", new Dictionary<string, object> { ["observerId"] = observerId, ["subjectId"] = subjectId });
+            Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.reset", observerId, "", "", "completed", 0, "Identity knowledge reset for beta testing.", new Dictionary<string, object> { ["observerId"] = observerId, ["subjectId"] = subjectId });
             return new Dictionary<string, object> { ["ok"] = true, ["observerId"] = observerId, ["subjectId"] = subjectId };
         }
 
-        private static Dictionary<string, object> IdentityDebugKnowEveryoneApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> IdentityDebugKnowEveryoneApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             if (!ReadBool(payload, "testMode", false)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Know-everyone is available only in beta test mode." };
 
             string campaignId = ReadString(payload, "campaignId", "default");
-            string correlationId = EnsureCorrelationId(payload);
+            string correlationId = Program.EnsureCorrelationId(payload);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             Dictionary<string, object> observer = ReadDictionary(payload, "observer") ?? new Dictionary<string, object>
             {
@@ -1235,9 +1235,9 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             int upgraded = 0;
             int unchanged = 0;
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, "BEGIN IMMEDIATE;");
+                Program.ExecuteSql(connection, "BEGIN IMMEDIATE;");
                 try
                 {
                     foreach (Dictionary<string, object> hero in heroes)
@@ -1247,11 +1247,11 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                         else if (result == "upgraded") upgraded++;
                         else unchanged++;
                     }
-                    ExecuteSql(connection, "COMMIT;");
+                    Program.ExecuteSql(connection, "COMMIT;");
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK;"); } catch { }
                     throw;
                 }
             }
@@ -1267,11 +1267,11 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 ["upgraded"] = upgraded,
                 ["unchanged"] = unchanged
             };
-            WriteAudit(campaignId, correlationId, "server", "identity", "identity.debug.know_everyone", observerId, "", "", "completed", 0, "Player debug identity knowledge populated.", resultPayload);
+            Program.WriteAudit(campaignId, correlationId, "server", "identity", "identity.debug.know_everyone", observerId, "", "", "completed", 0, "Player debug identity knowledge populated.", resultPayload);
             return resultPayload;
         }
 
-        private static Dictionary<string, object> ResolvePromptIdentity(Dictionary<string, object> payload,
+        internal static Dictionary<string, object> ResolvePromptIdentity(Dictionary<string, object> payload,
             string observerId, string mode, string fallbackEncounterId,
             IEnumerable<Dictionary<string, object>> canonicalTranscript = null,
             Func<Dictionary<string, object>, Dictionary<string, object>> introductionResponder = null)
@@ -1318,7 +1318,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             Dictionary<string, object> encounter = new Dictionary<string, object>
             {
                 ["campaignId"] = ReadString(payload, "campaignId", "default"),
-                ["correlationId"] = EnsureCorrelationId(payload),
+                ["correlationId"] = Program.EnsureCorrelationId(payload),
                 ["observerHeroStringId"] = observerId,
                 ["subjectHeroStringId"] = subjectId,
                 ["encounterId"] = encounterId,
@@ -1353,13 +1353,13 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 encounter, response, canonicalTranscript, introductionResponder);
             if (contextual != null)
             {
-                ThrowIfCampaignRequestReplaced();
+                PersistenceService.ThrowIfCampaignRequestReplaced();
                 response = IdentityEncounterApi(encounter, contextual);
             }
             return ReadDictionary(response, "identityView") ?? BuildIdentityView(null, encounter);
         }
 
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             EnsureObserverParticipantIdentityViews(
                 string campaignId,
                 Dictionary<string, object> payload,
@@ -1383,7 +1383,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 return existing;
 
             List<Dictionary<string, object>> profiles =
-                MergedInteractionParticipantProfiles(payload);
+                Program.MergedInteractionParticipantProfiles(payload);
             string playerId = ReadFirstString(
                 payload,
                 "playerHeroStringId",
@@ -1391,7 +1391,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 "playerId");
             Dictionary<string, object> observer =
                 profiles.FirstOrDefault(profile =>
-                    CharacterIdFrom(profile).Equals(
+                    Program.CharacterIdFrom(profile).Equals(
                         observerId ?? "",
                         StringComparison.OrdinalIgnoreCase))
                 ?? ReadDictionary(payload, "speaker")
@@ -1401,14 +1401,14 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     ["heroStringId"] = observerId ?? ""
                 };
             string encounterId = FirstNonEmpty(
-                GroupConversationSessionId(payload),
+                Program.GroupConversationSessionId(payload),
                 ReadFirstString(
                     payload,
                     "conversationSessionId",
                     "sessionId",
                     "eventId"),
                 "group_identity_"
-                    + EnsureCorrelationId(payload));
+                    + Program.EnsureCorrelationId(payload));
             Dictionary<string, object> nativeBase =
                 ReadDictionary(
                     payload,
@@ -1418,7 +1418,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 new List<Dictionary<string, object>>();
             foreach (Dictionary<string, object> subject in profiles)
             {
-                string subjectId = CharacterIdFrom(subject);
+                string subjectId = Program.CharacterIdFrom(subject);
                 if (string.IsNullOrWhiteSpace(subjectId)
                     || subjectId.Equals(
                         observerId ?? "",
@@ -1446,7 +1446,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                             ["campaignId"] =
                                 campaignId ?? "default",
                             ["correlationId"] =
-                                EnsureCorrelationId(payload),
+                                Program.EnsureCorrelationId(payload),
                             ["observerHeroStringId"] =
                                 observerId ?? "",
                             ["subjectHeroStringId"] =
@@ -1517,7 +1517,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 ?? new Dictionary<string, object>();
         }
 
-        private static string ObserverSafeParticipantName(
+        internal static string ObserverSafeParticipantName(
             Dictionary<string, object> payload,
             string observerId,
             string subjectId,
@@ -1539,7 +1539,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 "an unidentified participant");
         }
 
-        private static string FormatEventLinesForObserver(
+        internal static string FormatEventLinesForObserver(
             List<Dictionary<string, object>> eventLines,
             Dictionary<string, object> payload,
             string observerId,
@@ -1632,7 +1632,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 : builder.ToString().TrimEnd();
         }
 
-        private static void RecordPresentNpcSelfIntroduction(
+        internal static void RecordPresentNpcSelfIntroduction(
             string campaignId,
             Dictionary<string, object> payload,
             string speakerId,
@@ -1649,14 +1649,14 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     StringComparison.OrdinalIgnoreCase))
                 return;
             List<Dictionary<string, object>> profiles =
-                MergedInteractionParticipantProfiles(payload);
+                Program.MergedInteractionParticipantProfiles(payload);
             string playerId = ReadFirstString(
                 payload,
                 "playerHeroStringId",
                 "mainHeroStringId",
                 "playerId");
             List<string> observers = profiles
-                .Select(CharacterIdFrom)
+                .Select(Program.CharacterIdFrom)
                 .Concat(new[] { playerId })
                 .Where(id => !string.IsNullOrWhiteSpace(id)
                     && !id.Equals(
@@ -1666,7 +1666,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 .ToList();
             Dictionary<string, object> subject =
                 profiles.FirstOrDefault(profile =>
-                    CharacterIdFrom(profile).Equals(
+                    Program.CharacterIdFrom(profile).Equals(
                         speakerId ?? "",
                         StringComparison.OrdinalIgnoreCase))
                 ?? new Dictionary<string, object>
@@ -1681,13 +1681,13 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     {
                         ["campaignId"] = campaignId ?? "default",
                         ["correlationId"] =
-                            EnsureCorrelationId(payload),
+                            Program.EnsureCorrelationId(payload),
                         ["observerHeroStringId"] = observerId,
                         ["subjectHeroStringId"] =
                             speakerId ?? "",
                         ["observer"] =
                             profiles.FirstOrDefault(profile =>
-                                CharacterIdFrom(profile).Equals(
+                                Program.CharacterIdFrom(profile).Equals(
                                     observerId,
                                     StringComparison.OrdinalIgnoreCase))
                             ?? new Dictionary<string, object>
@@ -1712,7 +1712,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             }
         }
 
-        private static string BuildIdentityPromptBlock(Dictionary<string, object> identityView)
+        internal static string BuildIdentityPromptBlock(Dictionary<string, object> identityView)
         {
             identityView = identityView ?? new Dictionary<string, object>();
             StringBuilder builder = new StringBuilder();
@@ -1965,7 +1965,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return builder.ToString().TrimEnd();
         }
 
-        private static string SanitizePromptForIdentity(string prompt, string latestPlayerText, string canonicalName, Dictionary<string, object> identityView)
+        internal static string SanitizePromptForIdentity(string prompt, string latestPlayerText, string canonicalName, Dictionary<string, object> identityView)
         {
             prompt = prompt ?? string.Empty;
             identityView = identityView ?? new Dictionary<string, object>();
@@ -2117,7 +2117,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             return prompt;
         }
 
-        private static List<Dictionary<string, object>> ApplyIdentityIntroductionWrites(string campaignId,
+        internal static List<Dictionary<string, object>> ApplyIdentityIntroductionWrites(string campaignId,
             Dictionary<string, object> payload, Dictionary<string, object> parsed, string encounterId,
             string speakerId, string playerId, string playerText, string acceptedReply,
             IEnumerable<string> hearingAudience, ReignDbConnection connection)
@@ -2128,7 +2128,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             if (writes.Count == 0) return results;
             HashSet<string> present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string id in ReadStringList(payload, "activeHeroIds")) present.Add(id);
-            foreach (Dictionary<string, object> attendee in ReadDictionaryList(payload, "attendees")) present.Add(CharacterIdFrom(attendee));
+            foreach (Dictionary<string, object> attendee in ReadDictionaryList(payload, "attendees")) present.Add(Program.CharacterIdFrom(attendee));
             present.Add(ReadFirstString(payload, "speakerHeroStringId", "heroStringId"));
             present.Add(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId"));
             present.RemoveWhere(string.IsNullOrWhiteSpace);
@@ -2141,7 +2141,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                 string name = ReadFirstString(write, "claimedName", "name");
                 string quote = ReadFirstString(write, "supportingQuote", "evidenceQuote");
                 string spoken = introducer == speakerId ? acceptedReply : introducer == playerId ? playerText : "";
-                bool audibleQuote = ReadDictionaryList(ProjectConversationNarration(spoken, introducer, observer), "spans")
+                bool audibleQuote = ReadDictionaryList(Program.ProjectConversationNarration(spoken, introducer, observer), "spans")
                     .Any(span => ReadString(span, "kind", "") == "spoken_statement"
                         && ReadString(span, "text", "").Contains(quote, StringComparison.Ordinal));
                 if (!heard.Contains(observer) || quote.Length < 8 || quote.Length > 600 || name.Length > 80
@@ -2166,7 +2166,7 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
                     ["kind"] = string.Equals(introducer, subject, StringComparison.OrdinalIgnoreCase) ? "self" : "third_party",
                     ["encounterId"] = encounterId,
                     ["worldDay"] = ReadDouble(payload, "worldDay", 0d),
-                    ["correlationId"] = EnsureCorrelationId(payload)
+                    ["correlationId"] = Program.EnsureCorrelationId(payload)
                 };
                 results.Add(IdentityIntroductionApi(request, connection));
             }
@@ -2180,10 +2180,10 @@ AND COALESCE(last_recognition_encounter_id,'')<>$encounter;",
             Dictionary<string, object> existing = ReadStoredAcquaintance(connection, observerId, subjectId);
             string result = existing == null ? "created" : IdentityStateVerified(existing) ? "unchanged" : "upgraded";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            List<string> aliases = existing == null ? new List<string>() : TextListFromJson(ReadString(existing, "aliases_json", "[]"));
+            List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string claimed = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(claimed) && !aliases.Contains(claimed, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimed);
-            ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,verification_source,source_entity_id,confidence,first_met_day,last_met_day,updated_ts)
+            Program.ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,verification_source,source_entity_id,confidence,first_met_day,last_met_day,updated_ts)
 VALUES($observer,$subject,'verified',$canonical,$claimed,$aliases,$source,$sourceEntity,1,$day,$day,$ts)
 ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state='verified',canonical_name=CASE WHEN excluded.canonical_name<>'' THEN excluded.canonical_name ELSE acquaintances.canonical_name END,aliases_json=excluded.aliases_json,verification_source=excluded.verification_source,source_entity_id=excluded.source_entity_id,confidence=1,updated_ts=excluded.updated_ts;",
                 new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName, ["claimed"] = claimed, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["ts"] = ts });
@@ -2203,14 +2203,14 @@ ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state='verified',cano
                 }
                 return;
             }
-            List<string> aliases = existing == null ? new List<string>() : TextListFromJson(ReadString(existing, "aliases_json", "[]"));
+            List<string> aliases = existing == null ? new List<string>() : Program.TextListFromJson(ReadString(existing, "aliases_json", "[]"));
             string prior = existing == null ? "" : ReadString(existing, "claimed_name", "");
             if (!string.IsNullOrWhiteSpace(prior) && !aliases.Contains(prior, StringComparer.OrdinalIgnoreCase)) aliases.Add(prior);
             if (!aliases.Contains(claimedName, StringComparer.OrdinalIgnoreCase)) aliases.Add(claimedName);
             aliases = PruneAmbiguousAddressAliases(connection, observerId, subjectId, aliases, claimedName);
             string state = aliases.Any(alias => !NormalizeIdentityName(alias).Equals(NormalizeIdentityName(claimedName), StringComparison.OrdinalIgnoreCase)) ? "disputed" : "claimed";
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,verification_source,source_entity_id,confidence,first_met_day,last_met_day,last_encounter_id,payload_json,updated_ts)
+            Program.ExecuteSql(connection, @"INSERT INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,claimed_name,aliases_json,verification_source,source_entity_id,confidence,first_met_day,last_met_day,last_encounter_id,payload_json,updated_ts)
 VALUES($observer,$subject,$state,$canonical,$claimed,$aliases,$source,$sourceEntity,0.6,$day,$day,$encounter,$payload,$ts)
 ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state=$state,canonical_name=CASE WHEN acquaintances.canonical_name='' THEN excluded.canonical_name ELSE acquaintances.canonical_name END,claimed_name=$claimed,aliases_json=$aliases,verification_source=$source,source_entity_id=$sourceEntity,confidence=0.6,last_met_day=$day,last_encounter_id=CASE WHEN $encounter<>'' THEN $encounter ELSE acquaintances.last_encounter_id END,payload_json=$payload,updated_ts=$ts;",
                 new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["state"] = state, ["canonical"] = canonicalName ?? "", ["claimed"] = claimedName, ["aliases"] = Json.Serialize(aliases), ["source"] = source ?? "", ["sourceEntity"] = sourceEntityId ?? "", ["day"] = worldDay, ["encounter"] = encounterId ?? "", ["payload"] = "{}", ["ts"] = ts });
@@ -2228,7 +2228,7 @@ ON CONFLICT(observer_id,subject_id) DO UPDATE SET identity_state=$state,canonica
                     result.Add(alias);
                     continue;
                 }
-                List<Dictionary<string, object>> evidence = QuerySql(connection, @"SELECT evidence_type,claimed_name,source,payload_json FROM identity_evidence
+                List<Dictionary<string, object>> evidence = Program.QuerySql(connection, @"SELECT evidence_type,claimed_name,source,payload_json FROM identity_evidence
 WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDER BY created_ts;",
                     new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["alias"] = alias });
                 bool supported = evidence.Any(row =>
@@ -2257,7 +2257,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
             return result;
         }
 
-        private static Dictionary<string, object> BuildIdentityView(Dictionary<string, object> row, Dictionary<string, object> context)
+        internal static Dictionary<string, object> BuildIdentityView(Dictionary<string, object> row, Dictionary<string, object> context)
         {
             string state = row == null ? "encountered_unknown" : ReadString(row, "identity_state", "encountered_unknown");
             string claimed = row == null ? "" : ReadString(row, "claimed_name", "");
@@ -2444,7 +2444,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                     diplomacy, "playerEnemyKingdoms");
             string subjectId = IdentityHeroId(subject);
             string observerId = IdentityHeroId(observer);
-            string encounterMode = NormalizeLookup(
+            string encounterMode = Program.NormalizeLookup(
                 ReadString(context, "mode", ""));
             bool institutionalEncounter =
                 ReadBool(context, "officialAudience", false)
@@ -2692,7 +2692,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
             };
         }
 
-        private static List<string> SovereignFormalAddresses(
+        internal static List<string> SovereignFormalAddresses(
             Dictionary<string, object> subject)
         {
             bool female = ReadBool(subject, "isFemale", false)
@@ -2734,7 +2734,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
             if (ReadBool(hero, "isWanderer",
                     ReadInt(hero, "is_wanderer", 0) != 0))
                 roles.Add("wanderer");
-            string occupation = NormalizeLookup(
+            string occupation = Program.NormalizeLookup(
                 ReadString(hero, "occupation", ""));
             if (roles.Count == 0)
             {
@@ -2764,7 +2764,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
         private static string DeriveSceneIdentityLabel(Dictionary<string, object> context)
         {
             string supplied = ReadFirstString(context, "visibleLabel", "sceneLabel", "unknownLabel");
-            if (!string.IsNullOrWhiteSpace(supplied)) return LimitText(supplied, 80);
+            if (!string.IsNullOrWhiteSpace(supplied)) return Program.LimitText(supplied, 80);
             Dictionary<string, object> appearance = ReadDictionary(context, "appearance") ?? ReadDictionary(ReadDictionary(context, "subject"), "appearance") ?? new Dictionary<string, object>();
             string status = ReadString(appearance, "visibleStatusLabel", "").ToLowerInvariant();
             string mode = ReadString(context, "mode", "").ToLowerInvariant();
@@ -2777,7 +2777,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
             return "the stranger";
         }
 
-        private static bool IdentityIntroductionAnswerExpected(Dictionary<string, object> payload)
+        internal static bool IdentityIntroductionAnswerExpected(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             List<string> candidateNpcLines = ReadDictionaryList(payload, "groupTranscript")
@@ -2800,14 +2800,14 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
             }
 
             string latestNpcLine = candidateNpcLines.LastOrDefault() ?? "";
-            return ContainsAny(latestNpcLine.ToLowerInvariant(),
+            return Program.ContainsAny(latestNpcLine.ToLowerInvariant(),
                 "what is your name", "what's your name", "who are you", "what are you called",
                 "tell me your name", "give me your name", "state your name", "introduce yourself",
                 "not introduced yourself", "not yet introduced yourself", "not yet introduced themselves",
                 "have not introduced yourself", "haven't introduced yourself");
         }
 
-        private static string ExtractSelfIntroducedName(
+        internal static string ExtractSelfIntroducedName(
             string text,
             bool allowNameFirstAnswer = false,
             string canonicalName = "")
@@ -2875,7 +2875,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND claimed_name=$alias ORDE
                 ?? new Dictionary<string, object>();
             if (sourcePayload.Count == 0)
             {
-                Dictionary<string, object> evidence = QuerySql(connection, @"SELECT payload_json
+                Dictionary<string, object> evidence = Program.QuerySql(connection, @"SELECT payload_json
 FROM identity_evidence
 WHERE observer_id=$observer AND subject_id=$subject
 ORDER BY created_ts DESC LIMIT 1;",
@@ -2900,7 +2900,7 @@ ORDER BY created_ts DESC LIMIT 1;",
                 return false;
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"UPDATE acquaintances SET identity_state='encountered_unknown',claimed_name='',aliases_json='[]',
+            Program.ExecuteSql(connection, @"UPDATE acquaintances SET identity_state='encountered_unknown',claimed_name='',aliases_json='[]',
 verification_source='quarantined_ambiguous_name_first_address',source_entity_id='',confidence=0,payload_json=$payload,updated_ts=$ts
 WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verified';",
                 new Dictionary<string, object>
@@ -2921,7 +2921,7 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
         internal static Dictionary<string, object> ReadAcquaintance(ReignDbConnection connection, string observerId, string subjectId)
         {
             Dictionary<string, object> stored = ReadStoredAcquaintance(connection, observerId, subjectId);
-            List<Dictionary<string, object>> roster = QuerySql(connection,
+            List<Dictionary<string, object>> roster = Program.QuerySql(connection,
                 "SELECT * FROM identity_roster WHERE hero_id=$observer OR hero_id=$subject;",
                 new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId });
             Dictionary<string, object> observer = roster.FirstOrDefault(x =>
@@ -2953,14 +2953,14 @@ WHERE observer_id=$observer AND subject_id=$subject AND identity_state<>'verifie
             string observerId,
             string subjectId)
         {
-            return QuerySql(connection,
+            return Program.QuerySql(connection,
                 "SELECT * FROM acquaintances WHERE observer_id=$observer AND subject_id=$subject LIMIT 1;",
                 new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId }).FirstOrDefault();
         }
 
         private static void InsertUnknownAcquaintance(ReignDbConnection connection, string observerId, string subjectId, string canonicalName, string encounterId, double worldDay, Dictionary<string, object> payload)
         {
-            ExecuteSql(connection, @"INSERT OR IGNORE INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,first_met_day,last_met_day,encounter_count,last_encounter_id,payload_json,updated_ts)
+            Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO acquaintances(observer_id,subject_id,identity_state,canonical_name,first_met_day,last_met_day,encounter_count,last_encounter_id,payload_json,updated_ts)
 VALUES($observer,$subject,'encountered_unknown',$canonical,$day,$day,1,$encounter,$payload,$ts);", new Dictionary<string, object>
             {
                 ["observer"] = observerId, ["subject"] = subjectId, ["canonical"] = canonicalName ?? "", ["day"] = worldDay,
@@ -2970,7 +2970,7 @@ VALUES($observer,$subject,'encountered_unknown',$canonical,$day,$day,1,$encounte
 
         private static void AddIdentityEvidence(ReignDbConnection connection, string observerId, string subjectId, string evidenceType, string claimedName, string canonicalName, string source, string sourceEntityId, string encounterId, double confidence, double worldDay, Dictionary<string, object> payload)
         {
-            ExecuteSql(connection, @"INSERT INTO identity_evidence(evidence_id,observer_id,subject_id,evidence_type,claimed_name,canonical_name,source,source_entity_id,encounter_id,confidence,world_day,payload_json,created_ts)
+            Program.ExecuteSql(connection, @"INSERT INTO identity_evidence(evidence_id,observer_id,subject_id,evidence_type,claimed_name,canonical_name,source,source_entity_id,encounter_id,confidence,world_day,payload_json,created_ts)
 VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$encounter,$confidence,$day,$payload,$ts);", new Dictionary<string, object>
             {
                 ["id"] = "identity_" + Guid.NewGuid().ToString("N"), ["observer"] = observerId, ["subject"] = subjectId, ["type"] = evidenceType,
@@ -2982,9 +2982,9 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
 
         private static int MigrateLegacyIdentityKnowledge(ReignDbConnection connection, Dictionary<string, Dictionary<string, object>> heroes, double worldDay, string correlationId)
         {
-            if (string.Equals(ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_legacy_dialogue_migrated' LIMIT 1;").FirstOrDefault(), "value", ""), "1", StringComparison.Ordinal)) return 0;
+            if (string.Equals(ReadString(Program.QuerySql(connection, "SELECT value FROM schema_meta WHERE key='identity_legacy_dialogue_migrated' LIMIT 1;").FirstOrDefault(), "value", ""), "1", StringComparison.Ordinal)) return 0;
             int count = 0;
-            foreach (Dictionary<string, object> session in QuerySql(connection, "SELECT DISTINCT npc_id,player_id FROM conversation_sessions WHERE status<>'deleted' AND npc_id<>'' AND player_id<>'';"))
+            foreach (Dictionary<string, object> session in Program.QuerySql(connection, "SELECT DISTINCT npc_id,player_id FROM conversation_sessions WHERE status<>'deleted' AND npc_id<>'' AND player_id<>'';"))
             {
                 string observerId = ReadString(session, "npc_id", ""), subjectId = ReadString(session, "player_id", "");
                 if (!heroes.TryGetValue(subjectId, out Dictionary<string, object> subject)) continue;
@@ -2993,7 +2993,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 UpsertClaimedIdentity(connection, observerId, subjectId, ReadString(subject, "name", ""), ReadString(subject, "name", ""), "legacy_dialogue_migration", subjectId, "", worldDay, new Dictionary<string, object> { ["correlationId"] = correlationId });
                 count++;
             }
-            ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_legacy_dialogue_migrated','1');");
+            Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('identity_legacy_dialogue_migrated','1');");
             return count;
         }
 
@@ -3002,7 +3002,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             return new Dictionary<string, object> { ["observer"] = observerId, ["subject"] = subjectId, ["day"] = worldDay, ["encounter"] = encounterId ?? "", ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
         }
 
-        private static string IdentityHeroId(Dictionary<string, object> hero)
+        internal static string IdentityHeroId(Dictionary<string, object> hero)
         {
             return ReadFirstString(hero, "heroStringId", "heroId", "id");
         }
@@ -3050,7 +3050,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 candidates.Add(canonicalName + " " + qualifier);
             }
             List<Dictionary<string, object>> others =
-                MergedInteractionParticipantProfiles(payload)
+                Program.MergedInteractionParticipantProfiles(payload)
                 .Concat(new[] { ReadDictionary(payload, "observer") })
                 .Where(profile => profile != null
                     && !IdentityHeroId(profile).Equals(subjectId,
@@ -3092,7 +3092,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             return "";
         }
 
-        private static string NormalizeIdentityName(string value)
+        internal static string NormalizeIdentityName(string value)
         {
             return Regex.Replace((value ?? "").Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD), @"[^\p{L}\p{N}]+", " ").Trim();
         }
@@ -3114,7 +3114,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static List<Dictionary<string, object>> RunIdentitySubsystemSelfTests()
+        internal static List<Dictionary<string, object>> RunIdentitySubsystemSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
@@ -3130,11 +3130,11 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
             });
 
             string campaignId = "__identity_self_test_" + Guid.NewGuid().ToString("N");
-            string campaignPath = CampaignDirectory(campaignId);
+            string campaignPath = Program.CampaignDirectory(campaignId);
             string courtCampaignId = campaignId + "_court";
-            string courtCampaignPath = CampaignDirectory(courtCampaignId);
+            string courtCampaignPath = Program.CampaignDirectory(courtCampaignId);
             string introductionCampaignId = campaignId + "_introduction";
-            string introductionCampaignPath = CampaignDirectory(introductionCampaignId);
+            string introductionCampaignPath = Program.CampaignDirectory(introductionCampaignId);
             try
             {
                 Dictionary<string, object> player = IdentityTestHero("player", "Aeric", "player_clan", "south", true, false);
@@ -3142,10 +3142,10 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 // The prompt adapter observes a court at day 50 and persists its own
                 // live roster context. Keep it separate from the day-10 roster fixture.
                 AddCourtAudienceIdentityTests(courtCampaignId, add);
-                using (ReignDbConnection isolationConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection isolationConnection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureIdentitySchema(isolationConnection);
-                    int priorRosterRows = ReadInt(QuerySql(isolationConnection,
+                    int priorRosterRows = ReadInt(Program.QuerySql(isolationConnection,
                         "SELECT COUNT(*) AS count FROM identity_roster;").FirstOrDefault(), "count", -1);
                     add("court_audience_fixture_isolated", priorRosterRows == 0,
                         "The persisted court prompt fixture leaves the separate roster campaign empty.",
@@ -3168,7 +3168,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     ["heroes"] = roster
                 };
                 Dictionary<string, object> sync = IdentitySynchronizeApi(syncPayload);
-                WriteJsonObject(Path.Combine(campaignPath, "portrait_roster.json"), new Dictionary<string, object>
+                Program.WriteJsonObject(Path.Combine(campaignPath, "portrait_roster.json"), new Dictionary<string, object>
                 {
                     ["version"] = 2,
                     ["campaignId"] = campaignId,
@@ -3228,17 +3228,17 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 add("ruler_network_requires_identification", IdentityTestState(campaignId, "ruler", "foreign") == "" && IdentityTestState(campaignId, "foreign", "ruler") == "", "Ruler status does not create omniscient identity knowledge in either direction.", null);
                 add("same_clan_and_family", IdentityTestState(campaignId, "player", "clanmate") == "verified" && IdentityTestState(campaignId, "player", "child") == "verified" && IdentityTestState(campaignId, "child", "player") == "verified", "Same-clan and immediate-family safety rules verify identity.", null);
                 add("synchronization_idempotent", ReadBool(sync, "rosterChanged", false) && !ReadBool(secondSync, "rosterChanged", true), "An unchanged roster fingerprint does not rebuild the network.", secondSync);
-                using (ReignDbConnection storageConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection storageConnection = Program.OpenCampaignConnection(campaignId))
                 {
-                    int storedSyntheticPairs = ReadInt(QuerySql(storageConnection,
+                    int storedSyntheticPairs = ReadInt(Program.QuerySql(storageConnection,
                         "SELECT COUNT(*) AS count FROM acquaintances WHERE verification_source IN ('same_clan','immediate_family','same_kingdom_nobility','ruler_network');").FirstOrDefault(), "count", -1);
-                    int rosterRows = ReadInt(QuerySql(storageConnection,
+                    int rosterRows = ReadInt(Program.QuerySql(storageConnection,
                         "SELECT COUNT(*) AS count FROM identity_roster;").FirstOrDefault(), "count", -1);
                     add("compact_roster_storage", storedSyntheticPairs == 0 && rosterRows == roster.Count,
                         "Automatic clan and immediate-family knowledge is derived from one roster row per hero instead of an O(N-squared) pair matrix.",
                         new Dictionary<string, object> { ["storedSyntheticPairs"] = storedSyntheticPairs, ["rosterRows"] = rosterRows });
                     HashSet<string> chemistryIndexes = new HashSet<string>(
-                        QuerySql(storageConnection,
+                        Program.QuerySql(storageConnection,
                             "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='relationship_pair_chemistry';")
                             .Select(row => ReadString(row, "name", "")),
                         StringComparer.OrdinalIgnoreCase);
@@ -3570,7 +3570,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                         == "authoritative_qualified_self_introduction",
                     "The exact name-first feast introduction verifies identity before the first NPC response.",
                     nameFirstEncounter);
-                using (ReignDbConnection nameFirstConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection nameFirstConnection = Program.OpenCampaignConnection(campaignId))
                     add("name_first_social_event_persists",
                         IdentityStateVerified(ReadAcquaintance(
                             nameFirstConnection, "name_first_observer", "main_hero")),
@@ -3616,7 +3616,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 civic["kingdomId"] = "conqueror";
                 add("civic_conquest_recalculates", !ReadBool(ReadDictionary(BuildIdentityView(null, civicContext), "authorityView"),
                     "publicOfficeKnown", true), "A realm mismatch cannot confer civic authority.", null);
-                using (ReignDbConnection introductionConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection introductionConnection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureIdentitySchema(introductionConnection);
                     UpsertClaimedIdentity(introductionConnection, "ochivos", "main_hero", "Michael", "Michael Howarton", "self_introduction", "main_hero", "legacy_intro", 49d,
@@ -3626,25 +3626,25 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     ["campaignId"] = campaignId, ["observer"] = ochivos, ["subject"] = michael,
                     ["observerHeroStringId"] = "ochivos", ["subjectHeroStringId"] = "main_hero",
                     ["encounterId"] = "qualified_reconciliation", ["worldDay"] = 50d });
-                using (ReignDbConnection reopenedIntroductionConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection reopenedIntroductionConnection = Program.OpenCampaignConnection(campaignId))
                 {
                     var savedIntroduction = ReadAcquaintance(reopenedIntroductionConnection, "ochivos", "main_hero");
                     add("qualified_claim_reconciliation_persists", IdentityStateVerified(savedIntroduction)
                         && ReadString(savedIntroduction, "verification_source", "") == "authoritative_qualified_self_introduction_reconciled",
                         "An evidence-backed legacy introduction is verified on encounter and survives a fresh database connection.", reconciledEncounter);
-                    add("qualified_claim_keeps_original_evidence", QuerySql(reopenedIntroductionConnection,
+                    add("qualified_claim_keeps_original_evidence", Program.QuerySql(reopenedIntroductionConnection,
                         "SELECT evidence_id FROM identity_evidence WHERE observer_id='ochivos' AND subject_id='main_hero' AND source='self_introduction';").Count > 0,
                         "Reconciliation appends verification without deleting the original claim evidence.", null);
                 }
                 add("marvonara_false_claims_are_rejected",
-                    VerifiedPoliticalAuthorityContradiction(
+                    Program.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
                                 "A sovereign at war on twelve fronts walks into my hall."
                         },
                         marvonaraIdentity)
-                    && !VerifiedPoliticalAuthorityContradiction(
+                    && !Program.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -3654,21 +3654,21 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     "False local ownership and an inflated current-war count trigger repair, while a grounded observer-relative acknowledgment passes.",
                     null);
                 add("cumulative_roles_and_conversation_venue_are_enforced",
-                    VerifiedPoliticalAuthorityContradiction(
+                    Program.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
                                 "You are a king. That makes you a ruler, not a lord."
                         },
                         marvonaraIdentity)
-                    && VerifiedPoliticalAuthorityContradiction(
+                    && Program.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
                                 "1084 Winter — Amitatys\n\nThis is Amitatys, not your clan's city."
                         },
                         marvonaraIdentity)
-                    && !VerifiedPoliticalAuthorityContradiction(
+                    && !Program.VerifiedPoliticalAuthorityContradiction(
                         new Dictionary<string, object>
                         {
                             ["reply"] =
@@ -4043,7 +4043,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                         "player") == "",
                     "A shared transcript reveals a same-clan participant but withholds an unidentified NPC's canonical name without creating reverse-direction knowledge.",
                     observerSafeTranscript);
-                UpdateSharedGroupConversationState(
+                Program.UpdateSharedGroupConversationState(
                     campaignId,
                     groupIdentityPayload,
                     "foreign",
@@ -4052,7 +4052,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     "identity_group_session",
                     100);
                 string safeCachedSpeaker =
-                    BuildSharedGroupConversationPrompt(
+                    Program.BuildSharedGroupConversationPrompt(
                         campaignId,
                         groupIdentityPayload,
                         "player",
@@ -4235,7 +4235,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                     string.IsNullOrWhiteSpace(ExtractSelfIntroducedName("Menor, I am giving you this silver cup as a sincere gift."))
                     && ExtractSelfIntroducedName("Osarios, Im actually here for the tournament.", true) == "Osarios",
                     "A name-first address to an NPC cannot rename the player; name-first answers remain available only when an NPC actually requested the player's identity.", null);
-                using (ReignDbConnection identityConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection identityConnection = Program.OpenCampaignConnection(campaignId))
                 {
                     UpsertClaimedIdentity(identityConnection, "alias_cleanup_observer", "player", "Aeric", "Menor", "self_introduction", "player",
                         "legacy_address_encounter", 11d, new Dictionary<string, object>
@@ -4251,9 +4251,9 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 });
                 Dictionary<string, object> repairedAliasView = ReadDictionary(repairedAlias, "identityView") ?? new Dictionary<string, object>();
                 List<string> repairedAliases;
-                using (ReignDbConnection identityConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection identityConnection = Program.OpenCampaignConnection(campaignId))
                 {
-                    repairedAliases = TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
+                    repairedAliases = Program.TextListFromJson(ReadString(ReadStoredAcquaintance(identityConnection, "alias_cleanup_observer", "player"), "aliases_json", "[]"));
                 }
                 add("explicit_name_repairs_legacy_address_alias", ReadString(repairedAliasView, "identityState", "") == "verified"
                     && ReadString(repairedAliasView, "usableName", "") == "Aeric"
@@ -4272,7 +4272,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
                 add("prompt_privacy_sanitization", !sanitized.Contains("PROFILE: Aeric") && !sanitized.Contains("MEMORY: Aeric") && sanitized.Contains("LATEST: My name is Aeric."), "Canonical names are removed from prompt context while the latest explicit introduction remains visible.", sanitized);
 
                 using (ReignDbConnection identityConnection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     UpsertVerifiedIdentity(
                         identityConnection, ruler, foreign,
@@ -4390,7 +4390,7 @@ VALUES($id,$observer,$subject,$type,$claimed,$canonical,$source,$sourceEntity,$e
         {
             try
             {
-                string root = Path.GetFullPath(CampaignsRoot()) + Path.DirectorySeparatorChar;
+                string root = Path.GetFullPath(Program.CampaignsRoot()) + Path.DirectorySeparatorChar;
                 string target = Path.GetFullPath(campaignPath ?? "");
                 if (target.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(target).StartsWith("__identity_self_test_", StringComparison.OrdinalIgnoreCase) && Directory.Exists(target))
                 {

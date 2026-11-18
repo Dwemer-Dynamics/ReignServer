@@ -19,9 +19,9 @@ namespace ReignBetaServer
                 using var c = Program.OpenCampaignConnection(campaign);
                 // Commit schema readiness before rollback-based comparisons.
                 EnsureSocialReputationSchema(c);
-                Program.EnsureIdentitySchema(c);
+                CharactersService.EnsureIdentitySchema(c);
                 EnsurePublicStandingSchema(c);
-                Program.EnsureWorldTestTelemetrySchema(c);
+                WorldSimulationService.EnsureWorldTestTelemetrySchema(c);
                 EnsureRulerFavorContactSchema(c);
                 foreach (double day in new[] { 99d, 100d, 101d })
                 {

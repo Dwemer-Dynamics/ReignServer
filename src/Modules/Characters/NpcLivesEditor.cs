@@ -7,7 +7,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static readonly object NpcStoryEditorLock = new();
         private static Dictionary<string, object> NpcStoryEditorApi(string operation, Dictionary<string, object> p)
@@ -30,7 +30,7 @@ namespace ReignBetaServer
                     int expected = ReadInt(p, "expectedVersion", 0);
                     if ((prior?.Version ?? 0) != expected) throw new InvalidOperationException("This definition changed. Reload it before saving.");
                     if (definition.Version != expected + 1) throw new InvalidOperationException("Use version " + (expected + 1) + " for this revision.");
-                    string path = Path.Combine(DataDir, "npc-lives-stories.json");
+                    string path = Path.Combine(Program.DataDir, "npc-lives-stories.json");
                     var edits = File.Exists(path) ? Json.Deserialize<List<NpcStoryDefinition>>(File.ReadAllText(path, Encoding.UTF8)) : new List<NpcStoryDefinition>();
                     edits.RemoveAll(d => d.Id == definition.Id); edits.Add(definition);
                     string staged = path + ".new";
@@ -43,7 +43,7 @@ namespace ReignBetaServer
                 { return TestDict("ok", false, "error", ex.Message); }
             }
         }
-        private static string NpcStoryEditorHtml() => @"<details class='xpOptions' style='margin-top:24px'>
+        internal static string NpcStoryEditorHtml() => @"<details class='xpOptions' style='margin-top:24px'>
 <summary>Personal story editor</summary>
 <p class='xpHelp'>Edit prompts, objectives, locations, rewards and lasting facts. Saved revisions apply to future instances. Current stories retain their accepted content.</p>
 <button type='button' onclick='loadNpcStoryEditor()'>Load catalogue</button>
@@ -55,7 +55,7 @@ namespace ReignBetaServer
 <button type='button' onclick='exportNpcStoryEditor()'>Export definition</button>
 <label>Import definition<input type='file' accept='application/json,.json' onchange='importNpcStoryEditor(this.files[0])'></label>
 <pre id='npcStoryPreview' style='white-space:pre-wrap'></pre><p id='npcStoryEditorStatus' role='status' aria-live='polite'></p></details>";
-        private static string NpcStoryEditorScript() => @"
+        internal static string NpcStoryEditorScript() => @"
 let npcStoryDefinitions=[],npcStoryExpectedVersion=0;
 async function npcStoryEditorCall(operation,payload){const r=await fetch('/npc-lives/'+operation,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Story editor unavailable.');return j;}
 function npcStoryEditorStatus(text){document.getElementById('npcStoryEditorStatus').textContent=text;}

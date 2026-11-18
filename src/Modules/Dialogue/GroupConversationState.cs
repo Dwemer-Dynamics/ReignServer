@@ -9,7 +9,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string GroupConversationParticipationGuidance =
+        internal const string GroupConversationParticipationGuidance =
             "PARTICIPATION DECISION: Decide for yourself whether to speak or remain quiet using your personality, relationships, goals, remembered invitations and commitments, current setting, observable player actions and actual attributed contributions. "
             + "Being present or addressed is an opportunity, not a duty to fill a reply. Quiet or reserved people may take initiative when they have a personal reason. "
             + "Narrated arrival or movement is meaningful scene input even without a spoken question. You may welcome someone, follow through on your own invitation, introduce a relevant subject or advance the scene naturally without waiting to be asked. "
@@ -54,7 +54,7 @@ ts INTEGER NOT NULL);" );
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_group_contributions_beat ON group_conversation_contributions(session_id,scene_turn_id,ts);");
         }
 
-        private static string GroupConversationSessionId(Dictionary<string, object> payload)
+        internal static string GroupConversationSessionId(Dictionary<string, object> payload)
         {
             return FirstNonEmpty(ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"),
                 ReadFirstString(payload, "eventId", "socialEventId"), ReadString(payload, "sceneTurnId", ""));
@@ -71,7 +71,7 @@ ts INTEGER NOT NULL);" );
                 // present player profile in the same observer/audience contract.
                 .Concat(ReadDictionaryList(payload,"participantProfiles")
                     .Where(p=>ReadString(p,"role","").Equals("player",StringComparison.OrdinalIgnoreCase))
-                    .Select(IdentityHeroId))
+                    .Select(CharactersService.IdentityHeroId))
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
@@ -84,7 +84,7 @@ ts INTEGER NOT NULL);" );
                 || GroupConversationParticipantIds(payload).Count >= 3;
         }
 
-        private static string BuildSharedGroupConversationPrompt(string campaignId, Dictionary<string, object> payload,
+        internal static string BuildSharedGroupConversationPrompt(string campaignId, Dictionary<string, object> payload,
             string currentSpeakerId, List<Dictionary<string, object>> recentLines, string newestText)
         {
             if (!IsSharedGroupConversation(payload)) return "";
@@ -131,7 +131,7 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
                     ReadString(stored, "last_speaker_id", "");
                 builder.AppendLine(
                     "Last contributing speaker: "
-                    + ObserverSafeParticipantName(
+                    + CharactersService.ObserverSafeParticipantName(
                         payload,
                         currentSpeakerId,
                         lastSpeakerId,
@@ -158,7 +158,7 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
             {
                 string speech = ObserverConversationText(ReadString(contribution, "text", ""),
                     ReadString(contribution, "speaker_id", ""), currentSpeakerId);
-                builder.Append("Delivered by ").Append(ObserverSafeParticipantName(payload, currentSpeakerId,
+                builder.Append("Delivered by ").Append(CharactersService.ObserverSafeParticipantName(payload, currentSpeakerId,
                     ReadString(contribution, "speaker_id", ""), ReadString(contribution, "speaker_name", "")))
                     .Append(" [").Append(ReadString(contribution, "validation_status", "legacy_unknown")).Append("]: ");
                 bool alreadyQuoted = (recentLines ?? new List<Dictionary<string, object>>()).Any(r => ReadString(r, "text", "") == speech);
@@ -179,7 +179,7 @@ AND " + MemoryJsonContainsSql("audience_json", "$observer") + " ORDER BY deliver
             Dictionary<string, object> payload, string observer, string player, string text)
         {
             string id = GroupPlayerInputEventId(payload);
-            if (id.Length == 0 || !IsSharedGroupConversation(payload) || !TableExists(connection, "conversation_turns")) return null;
+            if (id.Length == 0 || !IsSharedGroupConversation(payload) || !WorldSimulationService.TableExists(connection, "conversation_turns")) return null;
             var row = QuerySql(connection, @"SELECT * FROM conversation_turns WHERE event_id=$event AND session_id=$session
 AND exchange_id=$beat AND speaker_id=$player AND role='player' AND text=$text AND status='active' ORDER BY turn_order LIMIT 1;",
                 TestDict("event", id, "session", GroupConversationSessionId(payload),
@@ -204,7 +204,7 @@ AND exchange_id=$beat AND speaker_id=$player AND role='player' AND text=$text AN
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
             using var connection = OpenCampaignConnection(campaign);
             var input = ObservedGroupPlayerInput(connection, payload, observer, player, playerText);
-            if (input == null || !TableExists(connection, "group_conversation_contributions")) return null;
+            if (input == null || !WorldSimulationService.TableExists(connection, "group_conversation_contributions")) return null;
             var delivered = QuerySql(connection, @"SELECT contribution_id,speaker_id,delivery_order FROM group_conversation_contributions
 WHERE session_id=$session AND scene_turn_id=$beat AND role='npc' AND text<>''
 AND validation_status IN ('accepted_speech','visible_failed_repair')
@@ -220,11 +220,11 @@ AND timeline_id=$timeline AND world_day<=$day AND " + MemoryJsonContainsSql("aud
                 "inputIsNotANewAnswerToListedContributions", true);
         }
 
-        private static void UpdateSharedGroupConversationState(string campaignId, Dictionary<string, object> payload,
+        internal static void UpdateSharedGroupConversationState(string campaignId, Dictionary<string, object> payload,
             string npcId, string npcName, string reply, string sessionId, long ts, string acceptedEventId = "")
         {
             if (!IsSharedGroupConversation(payload) || string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(reply)) return;
-            RecordPresentNpcSelfIntroduction(
+            CharactersService.RecordPresentNpcSelfIntroduction(
                 campaignId,
                 payload,
                 npcId,

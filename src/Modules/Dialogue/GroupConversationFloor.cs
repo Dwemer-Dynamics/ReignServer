@@ -10,7 +10,7 @@ namespace ReignBetaServer
         // Provider-free ordering and retry binding only. Every present NPC gets
         // a contextual writer opportunity; personality and scene context guide
         // the writer's speech-or-quiet decision, never a mechanical prefilter.
-        private static Dictionary<string, object> GroupConversationFloorApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> GroupConversationFloorApi(Dictionary<string, object> payload)
         {
             string contribution = ReadString(payload, "contributionId", "");
             if (contribution.Length > 0) payload["sceneTurnId"] = contribution;
@@ -123,8 +123,8 @@ namespace ReignBetaServer
             string approachId = ReadString(payload, "approachRequestId", "");
             if (opening && approachId.Length > 0)
             {
-                EnsurePlayerApproachSchema(connection);
-                var invitation = ApproachState(connection, timeline, "request:" + approachId);
+                RelationshipsService.EnsurePlayerApproachSchema(connection);
+                var invitation = RelationshipsService.ApproachState(connection, timeline, "request:" + approachId);
                 var invited = ReadDictionaryList(invitation, "heroes").Select(h => ReadString(h, "heroId", "")).ToList();
                 if (ReadString(invitation, "status", "") != "accepted" || ReadString(invitation, "playerId", "") != player
                     || invited.Count != active.Count || invited.Except(active).Any())

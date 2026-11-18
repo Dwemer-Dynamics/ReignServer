@@ -616,7 +616,7 @@ WHERE t.session_id=$session AND m.owner_id=$npc AND m.status<>'consolidated';",
             return evidence;
         }
 
-        private static Dictionary<string, object> WaitForNpcDialogueAuditEmbeddings(string campaignId, List<string> summaryIds, int timeoutMs)
+        internal static Dictionary<string, object> WaitForNpcDialogueAuditEmbeddings(string campaignId, List<string> summaryIds, int timeoutMs)
         {
             summaryIds = (summaryIds ?? new List<string>()).Where(id => !string.IsNullOrWhiteSpace(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();

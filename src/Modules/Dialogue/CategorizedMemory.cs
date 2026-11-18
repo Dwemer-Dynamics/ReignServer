@@ -12,7 +12,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static void EnsureCategorizedMemorySchema(ReignDbConnection connection)
+        internal static void EnsureCategorizedMemorySchema(ReignDbConnection connection)
         {
             EnsureDatabaseColumn(connection, "events", "event_category", "TEXT NOT NULL DEFAULT ''");
             EnsureDatabaseColumn(connection, "events", "event_subtype", "TEXT NOT NULL DEFAULT ''");
@@ -55,7 +55,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_memory_sources_source ON memory_sources(source_type,source_id);");
         }
 
-        private static void RunCategorizedMemoryMigration(ReignDbConnection connection, string campaignId)
+        internal static void RunCategorizedMemoryMigration(ReignDbConnection connection, string campaignId)
         {
             Dictionary<string, object> applied = QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='categorized_memory_v1' LIMIT 1;").FirstOrDefault();
@@ -217,7 +217,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             };
         }
 
-        private static Dictionary<string, object> BuildConversationTurnStoragePayload(
+        internal static Dictionary<string, object> BuildConversationTurnStoragePayload(
             Dictionary<string, object> source, int originalCharacters = 0)
         {
             source = source ?? new Dictionary<string, object>();
@@ -350,7 +350,7 @@ PRIMARY KEY(document_type,document_id,source_type,source_id));");
             return compact;
         }
 
-        private static string SerializeConversationTurnStoragePayload(Dictionary<string, object> source)
+        internal static string SerializeConversationTurnStoragePayload(Dictionary<string, object> source)
         {
             const int hardLimitCharacters = 16384;
             Dictionary<string, object> compact = BuildConversationTurnStoragePayload(source);
@@ -512,7 +512,7 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
             }
         }
 
-        private static void RebuildCategorizedSearchIndexes(ReignDbConnection connection)
+        internal static void RebuildCategorizedSearchIndexes(ReignDbConnection connection)
         {
             ExecuteSql(connection, "DELETE FROM memory_fts;");
             foreach (Dictionary<string, object> row in QuerySql(connection, "SELECT * FROM memories WHERE status='active';"))
@@ -531,7 +531,7 @@ VALUES($id,$campaign,$npc,'',$channel,'closed',$start,$end,$start_day,$end_day,'
             }
         }
 
-        private static Dictionary<string, object> ConversationStartApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> ConversationStartApi(Dictionary<string, object> payload)
         {
             // Serialize session-start retries before closing interrupted sessions.
             // A retry must never replace or close the session it just created.
@@ -609,10 +609,10 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             {
                 var session = QuerySql(connection, "SELECT payload_json FROM conversation_sessions WHERE session_id=$id;", TestDict("id", sessionId)).FirstOrDefault();
                 string timeline = ContinuityTimeline(GossipJson(session));
-                if (timeline == ActiveWorldHistoryTimeline(connection))
+                if (timeline == WorldSimulationService.ActiveWorldHistoryTimeline(connection))
                 {
                     finished["communicationCampaignId"] = campaignId; finished["communicationTimelineId"] = timeline;
-                    finished["communicationGeneration"] = NpcLivesGeneration(connection);
+                    finished["communicationGeneration"] = CharactersService.NpcLivesGeneration(connection);
                     finished["communicationHostReservations"] = CommunicationHostWork(connection, timeline);
                 }
             }
@@ -639,7 +639,7 @@ VALUES($id,$campaign,$npc,$player,$channel,'open',$ts,0,$day,0,$location,$partic
             return new Dictionary<string, object> { ["ok"] = true, ["recoveredCount"] = recovered.Count, ["sessions"] = recovered };
         }
 
-        private static Dictionary<string, object> FinishConversationSession(string campaignId, string sessionId, string reason, bool interrupted, double worldDay, long ts)
+        internal static Dictionary<string, object> FinishConversationSession(string campaignId, string sessionId, string reason, bool interrupted, double worldDay, long ts)
         {
             Dictionary<string, object> session;
             List<Dictionary<string, object>> turns;
@@ -770,7 +770,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
             };
         }
 
-        private static Dictionary<string, object> StoreConversationExchange(string campaignId, Dictionary<string, object> request,
+        internal static Dictionary<string, object> StoreConversationExchange(string campaignId, Dictionary<string, object> request,
             string npcId, string playerId, string playerName, string npcName, string playerText, string reply, string eventId, long ts,
             Action<string> acceptanceBoundary = null, ConversationSourceAcceptance acceptance = null)
         {
@@ -843,7 +843,7 @@ close_reason=$reason WHERE session_id=$id;", new Dictionary<string, object>
                 playerText, reply, eventId, ts, "party_chat", "", acceptance: acceptance);
         }
 
-        private static Dictionary<string, object> StoreSocialEventConversationExchange(
+        internal static Dictionary<string, object> StoreSocialEventConversationExchange(
             string campaignId,
             Dictionary<string, object> request,
             string npcId,
@@ -1072,7 +1072,7 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
             "[Dialogue validation could not be completed."
         };
 
-        private static bool IsTechnicalConversationNotice(string text)
+        internal static bool IsTechnicalConversationNotice(string text)
         {
             string reply = text ?? "";
             foreach (string notice in TechnicalConversationNoticePrefixes)
@@ -1088,7 +1088,7 @@ VALUES($turn,$session,$event,$ordinal,$exchange,$role,$speaker_id,$speaker_name,
                 new Dictionary<string, object> { ["id"] = turnId, ["text"] = text ?? "", ["speaker"] = speaker ?? "", ["participants"] = participants ?? "", ["channel"] = channel ?? "" });
         }
 
-        private static void StoreCorrespondenceTurn(string campaignId, string npcId, string playerId, Dictionary<string, object> letter, double worldDay)
+        internal static void StoreCorrespondenceTurn(string campaignId, string npcId, string playerId, Dictionary<string, object> letter, double worldDay)
         {
             string letterId = ReadFirstString(letter, "letter_id", "letterId");
             string text = ReadFirstString(letter, "body", "text");
@@ -1353,7 +1353,7 @@ ON CONFLICT(summary_id) DO UPDATE SET summary=$summary,payload_json=$payload,upd
             if (exchangeIds.Count == 0) return evidence;
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureConversationRelationshipSchema(connection);
+                RelationshipsService.EnsureConversationRelationshipSchema(connection);
                 foreach (string exchangeId in exchangeIds)
                 {
                     List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT r.receipt_id,r.exchange_id,r.observer_id,r.target_id,r.lie_check_id,r.created_ts,

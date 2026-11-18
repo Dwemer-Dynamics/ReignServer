@@ -8,7 +8,7 @@ using Npgsql;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class PersistenceService
     {
         private static Dictionary<string, object> SaveSyncLoadPostgreSql(
             Dictionary<string, object> payload,
@@ -83,7 +83,7 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> manifest =
-                ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
+                Program.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
             if (!ReadString(manifest, "campaignId", "")
                     .Equals(campaignId, StringComparison.OrdinalIgnoreCase)
                 || !ReadString(manifest, "fingerprint", "")
@@ -157,13 +157,13 @@ namespace ReignBetaServer
                 // source is compared with its snapshot row; the no-op marker is
                 // not permission to include arbitrary current/foreign history.
                 bool memorySourcesInitialized = false;
-                using (var memoryConnection = OpenCampaignConnection(campaignId))
+                using (var memoryConnection = Program.OpenCampaignConnection(campaignId))
                 {
-                    var memoryContext = RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
+                    var memoryContext = Program.RestoredMemorySourceContext(memoryConnection, ReadString(point, "timelineId", ""));
                     if (ReadString(memoryContext, "save_point_id", "") != savePointId
-                        || ReadString(memoryContext, "legacy_recovery_version", "") != LegacyMemoryRecoveryVersion)
+                        || ReadString(memoryContext, "legacy_recovery_version", "") != Program.LegacyMemoryRecoveryVersion)
                     {
-                        InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId, loadSessionId);
+                        Program.InitializeVerifiedSnapshotMemorySources(campaignId, point, postgresSnapshotPointId, loadSessionId);
                         result["memorySourceAccess"] = "verified_snapshot_membership_initialized";
                         memorySourcesInitialized = true;
                     }
@@ -177,16 +177,16 @@ namespace ReignBetaServer
                 {
                     try
                     {
-                        BindVerifiedNoOpLoadSession(campaignId, savePointId, postgresSnapshotPointId, loadSessionId);
+                        Program.BindVerifiedNoOpLoadSession(campaignId, savePointId, postgresSnapshotPointId, loadSessionId);
                         MarkSaveSyncActiveStateClean(campaignId, point);
                     }
                     catch (Exception ex) when (!(ex is CampaignRequestReplacedException) && !(ex is OperationCanceledException))
                     {
-                        LogOperational("save_sync.load_proof_bind_failed", TestDict("campaignId", campaignId,
+                        Program.LogOperational("save_sync.load_proof_bind_failed", TestDict("campaignId", campaignId,
                             "savePointId", savePointId, "error", ex.GetType().Name));
                     }
                 }
-                string noOpProofGeneration = TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
+                string noOpProofGeneration = Program.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
                 if (noOpProofGeneration.Length > 0) result["restoreGeneration"] = noOpProofGeneration;
                 timer.Stop();
                 result["durationMs"] = timer.ElapsedMilliseconds;
@@ -260,10 +260,10 @@ namespace ReignBetaServer
                         "Injected Save Sync failure after installing campaign assets.");
 
                 ClearSaveSyncCaches(campaignId);
-                AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
+                Program.AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
                 MarkSaveSyncActiveStateClean(campaignId, point);
                 // Echoed only when the context is bound to this exact load; never fails the load.
-                string rollbackProofGeneration = TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
+                string rollbackProofGeneration = Program.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
                 if (rollbackProofGeneration.Length > 0) result["restoreGeneration"] = rollbackProofGeneration;
                 timer.Stop();
                 result["result"] = "rolled_back";

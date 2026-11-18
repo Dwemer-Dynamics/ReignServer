@@ -7,9 +7,9 @@ using ReignBeta.Family;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
-        private static List<Dictionary<string, object>> RunStartingChildrenTests()
+        internal static List<Dictionary<string, object>> RunStartingChildrenTests()
         {
             var results = new List<Dictionary<string, object>>();
             Action<string, Func<object>> test = (id, run) =>
@@ -161,7 +161,7 @@ namespace ReignBetaServer
             });
             test("native_initialization_and_catalog_contract", () =>
             {
-                string root = FindVerificationSourceRoot();
+                string root = Program.FindVerificationSourceRoot();
                 string clientRoot = Path.Combine(root, "ReignBeta");
                 string adapter = VerificationSourceLocator.ReadClientSourceText(clientRoot);
                 string adapterScoped = VerificationSourceLocator.ReadClientTypeSourceText(clientRoot, "ReignStartingChildrenCampaignBehavior");

@@ -5,7 +5,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static bool NpcLivesFixtureAuthorized(Dictionary<string, object> p, Dictionary<string, object> run,
             Dictionary<string, object> runtime, Dictionary<string, object> arm)
@@ -15,8 +15,8 @@ namespace ReignBetaServer
             var command = ReadDictionaryList(run, "commands").SingleOrDefault(c => ReadString(c, "commandId", "") == ReadString(p, "commandId", ""));
             var supplied = ReadDictionary(p, "testCase"); var recorded = ReadDictionary(command, "testCase");
             var saveSync = ReadDictionary(runtime, "saveSync");
-            return campaign.Length > 0 && instance.Length > 0 && IsLiveTestArmed(arm) && IsFreshLiveTestRuntime(runtime)
-                && NpcLivesEnrollmentValid(enrollment, campaign) && ReadString(run, "mode", "") == "npc_lives"
+            return campaign.Length > 0 && instance.Length > 0 && WorldSimulationService.IsLiveTestArmed(arm) && WorldSimulationService.IsFreshLiveTestRuntime(runtime)
+                && WorldSimulationService.NpcLivesEnrollmentValid(enrollment, campaign) && ReadString(run, "mode", "") == "npc_lives"
                 && new[] { "running", "queued" }.Contains(ReadString(run, "status", ""))
                 && ReadString(run, "runId", "") == ReadString(p, "runId", "") && ReadString(run, "campaignId", "") == campaign
                 && ReadString(run, "gameInstanceId", "") == instance && ReadString(runtime, "gameInstanceId", "") == instance
@@ -25,7 +25,7 @@ namespace ReignBetaServer
                 && ReadBool(saveSync, "ready", false) && !ReadBool(saveSync, "alignmentPending", true)
                 && ReadString(saveSync, "timelineId", "") == ReadString(enrollment, "timelineId", "")
                 && !ReadBool(ReadDictionary(runtime, "nativeSave"), "isSaving", true)
-                && ContinuityTimeline(p) == ReadString(enrollment, "timelineId", "")
+                && Program.ContinuityTimeline(p) == ReadString(enrollment, "timelineId", "")
                 && ReadString(p, "activeSaveName", "") == ReadString(enrollment, "disposableSaveName", "")
                 && ReadString(p, "timeMode", "") == "Stop" && !ReadBool(p, "nativeSaveInProgress", true)
                 && command != null && ReadString(command, "operation", "") == "npc_lives_test"
@@ -33,15 +33,15 @@ namespace ReignBetaServer
                 && new[] { "leased", "accepted", "running" }.Contains(ReadString(command, "status", ""))
                 && ReadString(p, "leaseId", "").Length > 0
                 && ReadString(command, "leaseId", "") == ReadString(p, "leaseId", "")
-                && ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) > DateTimeOffset.UtcNow
+                && WorldSimulationService.ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) > DateTimeOffset.UtcNow
                 && supplied.Count > 0 && CanonicalJson(supplied) == CanonicalJson(recorded)
                 && ReadString(supplied, "phase", "") == "prepare";
         }
         private static string PrepareNpcLivesFixture(ReignDbConnection c, NpcLivesState state,
             Dictionary<string, object> p, NpcLivesOptions options, double day)
         {
-            if (!NpcLivesFixtureAuthorized(p, LoadLiveTestRun(state.CampaignId, ReadString(p, "runId", "")),
-                LoadLiveTestRuntime(state.CampaignId), ReadJsonObject(LiveTestArmPath())))
+            if (!NpcLivesFixtureAuthorized(p, WorldSimulationService.LoadLiveTestRun(state.CampaignId, ReadString(p, "runId", "")),
+                WorldSimulationService.LoadLiveTestRuntime(state.CampaignId), Program.ReadJsonObject(WorldSimulationService.LiveTestArmPath())))
                 throw new InvalidOperationException("An exact armed native NPC Lives command lease and disposable Current are required for invitation setup.");
             var test = ReadDictionary(p, "testCase");
             string hero = ReadString(test, "heroId", ""), player = ReadFirstString(p, "playerId", "playerHeroStringId"), party = ReadString(p, "partyId", "");
@@ -66,7 +66,7 @@ namespace ReignBetaServer
                 ReadString(p, "locationId", ""), ReadString(test, "locationId", ""));
             if (invitationKind == "leave")
             {
-                var traits = ReadJsonObject(CharacterFile(state.CampaignId, hero, "traits.json"));
+                var traits = Program.ReadJsonObject(Program.CharacterFile(state.CampaignId, hero, "traits.json"));
                 var candidate = new NpcLifeCandidate { HeroId = hero,
                     Affinity = NpcLivesAffinity(c, hero, player, ReadInt(member, "nativeRelation", 0)),
                     Honor = NarrativePersonalityScore(traits, member, "honor"), Compassion = NarrativePersonalityScore(traits, member, "compassion"),
@@ -81,8 +81,8 @@ namespace ReignBetaServer
         private static string PrepareNpcLivesLeaveInvitation(NpcLivesState state, NpcStoryDefinition definition,
             NpcLifeCandidate npc, IReadOnlyList<NpcStoryLocation> locations, string current, string fixture, double day)
         {
-            string operation = "npc_leave_fixture:" + fixture, id = "leave_fixture_" + PromptHash(fixture).Substring(0, 32);
-            string hash = PromptHash(CanonicalJson(TestDict("hero", npc.HeroId, "template", definition.Id, "version", definition.Version)));
+            string operation = "npc_leave_fixture:" + fixture, id = "leave_fixture_" + Program.PromptHash(fixture).Substring(0, 32);
+            string hash = Program.PromptHash(CanonicalJson(TestDict("hero", npc.HeroId, "template", definition.Id, "version", definition.Version)));
             if (state.OperationReceipts.TryGetValue(operation, out var prior))
             {
                 if (prior != hash || !state.Leaves.Any(l => l.Id == id)) throw new InvalidOperationException("This leave setup identity has different terms.");
@@ -100,7 +100,7 @@ namespace ReignBetaServer
                 Honor = npc.Honor, Compassion = npc.Compassion, DutyPressure = npc.DutyPressure,
                 Urgency = 1 + (int)(NpcLivesEngine.Draw(fixture + "|urgency") * 3),
                 Purpose = definition.Title + ": " + definition.Phases[0].Objectives.Last().Instruction,
-                DestinationId = location, AbsenceDays = absence, ProposalId = "proposal_" + PromptHash(id + "|1").Substring(0, 32) };
+                DestinationId = location, AbsenceDays = absence, ProposalId = "proposal_" + Program.PromptHash(id + "|1").Substring(0, 32) };
             state.Leaves.Add(leave); state.OperationReceipts[operation] = hash;
             return id;
         }
@@ -117,8 +117,8 @@ namespace ReignBetaServer
         private static string PrepareNpcLivesStoryInvitation(NpcLivesState state, NpcStoryDefinition definition, int chapter,
             string hero, IReadOnlyList<NpcStoryLocation> locations, string current, string fixture, double day)
         {
-            string operation = "npc_fixture:" + fixture, id = "story_fixture_" + PromptHash(fixture).Substring(0, 32);
-            string hash = PromptHash(CanonicalJson(TestDict("hero", hero, "template", definition.Id, "version", definition.Version, "chapter", chapter)));
+            string operation = "npc_fixture:" + fixture, id = "story_fixture_" + Program.PromptHash(fixture).Substring(0, 32);
+            string hash = Program.PromptHash(CanonicalJson(TestDict("hero", hero, "template", definition.Id, "version", definition.Version, "chapter", chapter)));
             if (state.OperationReceipts.TryGetValue(operation, out var prior))
             {
                 if (prior != hash || !state.Stories.Any(s => s.Id == id)) throw new InvalidOperationException("This invitation setup identity has different terms.");
@@ -132,7 +132,7 @@ namespace ReignBetaServer
             if (location.Length == 0) throw new InvalidOperationException("The authored chapter has no available native destination.");
             var story = new NpcStoryInstance { Id = id, HeroId = hero, Definition = Json.Deserialize<NpcStoryDefinition>(Json.Serialize(definition)),
                 PhaseIndex = chapter, LocationId = location, LocationName = locations.FirstOrDefault(l => l.Id == location)?.Name ?? "",
-                StartedDay = day, Status = "invited", ProposalId = "proposal_" + PromptHash(id + "|1").Substring(0, 32) };
+                StartedDay = day, Status = "invited", ProposalId = "proposal_" + Program.PromptHash(id + "|1").Substring(0, 32) };
             // This is explicit operator setup, never evidence of natural scheduling,
             // earlier completed chapters, player agreement or earned progress.
             state.Stories.Add(story); state.Character(hero).PendingStoryId = id;

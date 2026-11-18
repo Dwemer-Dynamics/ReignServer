@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_continuity_branch_record ON memory_continu
                 "source", sourceGeneration, "session", loadSessionId ?? "");
             foreach (var entry in SnapshotMemoryKeys)
             {
-                if (!TableExists(connection, entry.Key)) continue;
+                if (!WorldSimulationService.TableExists(connection, entry.Key)) continue;
                 if (snapshotSchema.Length > 0 && ReadString(QuerySql(connection, "SELECT to_regclass($name)::text AS name;",
                     TestDict("name", prefix + entry.Key)).Single(), "name", "").Length == 0) continue;
                 string inherited = priorProof ? SnapshotSourceMembershipSql(entry.Key, "saved", "$timeline", prefix) : "FALSE";
@@ -153,7 +153,7 @@ DELETE FROM memory_restored_sources WHERE restore_generation<>$generation;", par
         // immutable, so this rewrites the same value normally, and it replaces a value left
         // stale by an older server build ("" when the snapshot predates it keeps recovery
         // unproven). One statement; the caller restores the clean Save Sync marker afterwards.
-        private static void BindVerifiedNoOpLoadSession(string campaign, string savePointId, string snapshotPoint, string loadSessionId)
+        internal static void BindVerifiedNoOpLoadSession(string campaign, string savePointId, string snapshotPoint, string loadSessionId)
         {
             using var connection = OpenCampaignConnection(campaign);
             EnsureMemorySnapshotSourceSchema(connection);
@@ -180,7 +180,7 @@ WHERE b.timeline_id=$requested AND " + SnapshotSourceMembershipSql("conversation
                 + " ON CONFLICT(timeline_id,owner_id,source_record_id) DO NOTHING;", TestDict("requested", requested, "recovered", recovered));
         }
 
-        private static void InitializeVerifiedSnapshotMemorySources(string campaign, Dictionary<string, object> point, string snapshotPoint,
+        internal static void InitializeVerifiedSnapshotMemorySources(string campaign, Dictionary<string, object> point, string snapshotPoint,
             string loadSessionId = "")
         {
             using var connection = OpenCampaignConnection(campaign);
@@ -195,7 +195,7 @@ WHERE b.timeline_id=$requested AND " + SnapshotSourceMembershipSql("conversation
             transaction.Commit();
         }
 
-        private static Dictionary<string, object> RestoredMemorySourceContext(ReignDbConnection connection, string timeline) =>
+        internal static Dictionary<string, object> RestoredMemorySourceContext(ReignDbConnection connection, string timeline) =>
             QuerySql(connection, @"SELECT c.* FROM memory_restored_source_context c JOIN memory_precision_state s
 ON c.restore_generation=s.restore_generation AND s.state_id='current' WHERE c.state_id='current' AND c.timeline_id=$timeline;",
                 TestDict("timeline", timeline)).SingleOrDefault();

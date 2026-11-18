@@ -11,71 +11,71 @@ namespace ReignBetaServer
         private static void RegisterWorldSimulationRoutes(ReignRouteTable routes)
         {
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Post("/tests/live/arm", request => LiveTestArmApi(request.JsonBody));
-            routes.Get("/tests/live/runtime", request => LiveTestRuntimeApi(request.Query));
-            routes.Post("/tests/live/targets/search", request => LiveTestTargetSearchApi(request.JsonBody));
-            routes.Post("/tests/live/run/start", request => LiveTestRunStartApi(request.JsonBody));
-            routes.Post("/tests/live/command/enqueue", request => LiveTestCommandEnqueueApi(request.JsonBody));
-            routes.Post("/tests/live/run/pause", request => LiveTestRunPauseApi(request.JsonBody, false));
-            routes.Post("/tests/live/run/resume", request => LiveTestRunPauseApi(request.JsonBody, true));
-            routes.Post("/tests/live/run/cancel", request => LiveTestRunCancelApi(request.JsonBody));
-            routes.Get("/tests/live/run/status", request => LiveTestRunStatusApi(request.Query, false));
-            routes.Get("/tests/live/run/report", request => LiveTestRunStatusApi(request.Query, true));
-            routes.Post("/tests/live/game/heartbeat", request => LiveTestHeartbeatApi(request.JsonBody));
-            routes.Post("/tests/live/game/poll", request => LiveTestGamePollApi(request.JsonBody));
-            routes.Post("/tests/live/game/ack", request => LiveTestGameAckApi(request.JsonBody));
-            routes.Post("/tests/live/game/result", request => LiveTestGameResultApi(request.JsonBody));
-            routes.Get("/tests/campaign-command/manifest", request => CampaignCommandManifestApi(request.Query));
-            routes.Post("/tests/campaign-command/prepare", request => CampaignCommandPrepareApi(request.JsonBody));
-            routes.Post("/tests/campaign-command/save/verify", request => CampaignCommandSaveVerifyApi(request.JsonBody));
-            routes.Post("/tests/campaign-command/profile/result", request => CampaignCommandProfileResultApi(request.JsonBody));
-            routes.Get("/tests/campaign-command/status", request => CampaignCommandStatusApi(request.Query, false));
-            routes.Get("/tests/campaign-command/report", request => CampaignCommandStatusApi(request.Query, true));
-            routes.Get("/tests/campaign-command/replay", request => CampaignCommandReplayApi(request.Query));
-            routes.Post("/tests/campaign-command/resume", request => CampaignCommandResumeApi(request.JsonBody));
-            routes.Post("/tests/campaign-command/cancel", request => CampaignCommandCancelApi(request.JsonBody));
-            routes.Post("/tests/campaign-command/execution", request => CampaignCommandExecutionApi(request.JsonBody));
-            routes.Get("/tests/campaign-command/readiness", request => CampaignCommandReadinessApi(request.Query));
+            routes.Post("/tests/live/arm", request => WorldSimulationService.LiveTestArmApi(request.JsonBody));
+            routes.Get("/tests/live/runtime", request => WorldSimulationService.LiveTestRuntimeApi(request.Query));
+            routes.Post("/tests/live/targets/search", request => WorldSimulationService.LiveTestTargetSearchApi(request.JsonBody));
+            routes.Post("/tests/live/run/start", request => WorldSimulationService.LiveTestRunStartApi(request.JsonBody));
+            routes.Post("/tests/live/command/enqueue", request => WorldSimulationService.LiveTestCommandEnqueueApi(request.JsonBody));
+            routes.Post("/tests/live/run/pause", request => WorldSimulationService.LiveTestRunPauseApi(request.JsonBody, false));
+            routes.Post("/tests/live/run/resume", request => WorldSimulationService.LiveTestRunPauseApi(request.JsonBody, true));
+            routes.Post("/tests/live/run/cancel", request => WorldSimulationService.LiveTestRunCancelApi(request.JsonBody));
+            routes.Get("/tests/live/run/status", request => WorldSimulationService.LiveTestRunStatusApi(request.Query, false));
+            routes.Get("/tests/live/run/report", request => WorldSimulationService.LiveTestRunStatusApi(request.Query, true));
+            routes.Post("/tests/live/game/heartbeat", request => WorldSimulationService.LiveTestHeartbeatApi(request.JsonBody));
+            routes.Post("/tests/live/game/poll", request => WorldSimulationService.LiveTestGamePollApi(request.JsonBody));
+            routes.Post("/tests/live/game/ack", request => WorldSimulationService.LiveTestGameAckApi(request.JsonBody));
+            routes.Post("/tests/live/game/result", request => WorldSimulationService.LiveTestGameResultApi(request.JsonBody));
+            routes.Get("/tests/campaign-command/manifest", request => WorldSimulationService.CampaignCommandManifestApi(request.Query));
+            routes.Post("/tests/campaign-command/prepare", request => WorldSimulationService.CampaignCommandPrepareApi(request.JsonBody));
+            routes.Post("/tests/campaign-command/save/verify", request => WorldSimulationService.CampaignCommandSaveVerifyApi(request.JsonBody));
+            routes.Post("/tests/campaign-command/profile/result", request => WorldSimulationService.CampaignCommandProfileResultApi(request.JsonBody));
+            routes.Get("/tests/campaign-command/status", request => WorldSimulationService.CampaignCommandStatusApi(request.Query, false));
+            routes.Get("/tests/campaign-command/report", request => WorldSimulationService.CampaignCommandStatusApi(request.Query, true));
+            routes.Get("/tests/campaign-command/replay", request => WorldSimulationService.CampaignCommandReplayApi(request.Query));
+            routes.Post("/tests/campaign-command/resume", request => WorldSimulationService.CampaignCommandResumeApi(request.JsonBody));
+            routes.Post("/tests/campaign-command/cancel", request => WorldSimulationService.CampaignCommandCancelApi(request.JsonBody));
+            routes.Post("/tests/campaign-command/execution", request => WorldSimulationService.CampaignCommandExecutionApi(request.JsonBody));
+            routes.Get("/tests/campaign-command/readiness", request => WorldSimulationService.CampaignCommandReadinessApi(request.Query));
 #endif
-            routes.Post("/world-history/ingest-batch", request => WorldHistoryIngestBatchApi(request.JsonBody));
-            routes.Post("/world-history/timeline/open", request => WorldHistoryOpenTimelineApi(request.JsonBody));
-            routes.Get("/world-history/query", request => WorldHistoryQueryApi(request.Query));
-            routes.GetPrefix("/world-history/event/", StringComparison.OrdinalIgnoreCase, request => WorldHistoryEventApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/event/".Length))));
-            routes.GetPrefix("/world-history/correlation/", StringComparison.OrdinalIgnoreCase, request => WorldHistoryCorrelationApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/correlation/".Length))));
-            routes.Post("/world-history/verify", request => WorldHistoryVerifyApi(request.JsonBody));
+            routes.Post("/world-history/ingest-batch", request => WorldSimulationService.WorldHistoryIngestBatchApi(request.JsonBody));
+            routes.Post("/world-history/timeline/open", request => WorldSimulationService.WorldHistoryOpenTimelineApi(request.JsonBody));
+            routes.Get("/world-history/query", request => WorldSimulationService.WorldHistoryQueryApi(request.Query));
+            routes.GetPrefix("/world-history/event/", StringComparison.OrdinalIgnoreCase, request => WorldSimulationService.WorldHistoryEventApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/event/".Length))));
+            routes.GetPrefix("/world-history/correlation/", StringComparison.OrdinalIgnoreCase, request => WorldSimulationService.WorldHistoryCorrelationApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/correlation/".Length))));
+            routes.Post("/world-history/verify", request => WorldSimulationService.WorldHistoryVerifyApi(request.JsonBody));
             routes.Get("/world-history/export", request =>
             {
                 Dictionary<string, string> exportQuery = new Dictionary<string, string>(request.Query, StringComparer.OrdinalIgnoreCase) { ["limit"] = "500" };
-                return WorldHistoryQueryApi(exportQuery);
+                return WorldSimulationService.WorldHistoryQueryApi(exportQuery);
             });
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Post("/world-history/tests", request => RunWorldHistorySelfTests());
+            routes.Post("/world-history/tests", request => WorldSimulationService.RunWorldHistorySelfTests());
 #endif
-            routes.Post("/world-test/heartbeat", request => WorldTestHeartbeatApi(request.JsonBody));
-            routes.Get("/world-test/campaigns", request => WorldTestCampaignsApi(request.Query));
+            routes.Post("/world-test/heartbeat", request => WorldSimulationService.WorldTestHeartbeatApi(request.JsonBody));
+            routes.Get("/world-test/campaigns", request => WorldSimulationService.WorldTestCampaignsApi(request.Query));
             {
-                Func<HttpRequest, object> handler = request => WorldTestOverviewApi(request.Query);
+                Func<HttpRequest, object> handler = request => WorldSimulationService.WorldTestOverviewApi(request.Query);
                 routes.Get("/world-test/overview", handler);
                 routes.Get("/world-test/export", handler);
             }
-            routes.Get("/world-test/details", request => WorldTestDetailsApi(request.Query));
-            routes.Get("/world-test/checkpoints", request => WorldTestCheckpointsApi(request.Query));
-            routes.Get("/world-test/comparison", request => WorldTestComparisonApi(request.Query));
+            routes.Get("/world-test/details", request => WorldSimulationService.WorldTestDetailsApi(request.Query));
+            routes.Get("/world-test/checkpoints", request => WorldSimulationService.WorldTestCheckpointsApi(request.Query));
+            routes.Get("/world-test/comparison", request => WorldSimulationService.WorldTestComparisonApi(request.Query));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Get("/world-test/tests", request => RunWorldTestSelfTests());
+            routes.Get("/world-test/tests", request => WorldSimulationService.RunWorldTestSelfTests());
 #endif
 #if !REIGN_EXCLUDE_COURT
-            routes.Post("/arrests/case/apply", request => ArrestCaseApplyApi(request.JsonBody));
-            routes.Post("/arrests/evidence/evaluate", request => ArrestEvidenceEvaluateApi(request.JsonBody));
+            routes.Post("/arrests/case/apply", request => WorldSimulationService.ArrestCaseApplyApi(request.JsonBody));
+            routes.Post("/arrests/evidence/evaluate", request => WorldSimulationService.ArrestEvidenceEvaluateApi(request.JsonBody));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Post("/arrests/test/contracts", request => ArrestContractReportApi());
+            routes.Post("/arrests/test/contracts", request => WorldSimulationService.ArrestContractReportApi());
 #endif
 #endif
-            routes.Post("/events/social/approaches/roll", request => SocialEventApproachRollApi(request.JsonBody));
-            routes.Post("/events/social/turn", request => RunInteractiveRequest(() => SocialEventTurnApi(request.JsonBody)));
-            routes.Post("/events/social/turn-plan", request => RunInteractiveRequest(() => SocialEventTurnPlanApi(request.JsonBody)));
-            routes.Post("/campaign-commands/report", request => CampaignCommandReportApi(request.JsonBody));
-            routes.Post("/campaign-commands/judge", request => CampaignCommandJudgeApi(request.JsonBody));
+            routes.Post("/events/social/approaches/roll", request => WorldSimulationService.SocialEventApproachRollApi(request.JsonBody));
+            routes.Post("/events/social/turn", request => RunInteractiveRequest(() => WorldSimulationService.SocialEventTurnApi(request.JsonBody)));
+            routes.Post("/events/social/turn-plan", request => RunInteractiveRequest(() => WorldSimulationService.SocialEventTurnPlanApi(request.JsonBody)));
+            routes.Post("/campaign-commands/report", request => WorldSimulationService.CampaignCommandReportApi(request.JsonBody));
+            routes.Post("/campaign-commands/judge", request => WorldSimulationService.CampaignCommandJudgeApi(request.JsonBody));
         }
     }
 }

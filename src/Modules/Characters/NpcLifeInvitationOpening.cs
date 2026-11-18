@@ -5,7 +5,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private sealed class NpcLifeInvitationOpening
         {

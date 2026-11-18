@@ -87,7 +87,7 @@ namespace ReignBetaServer
                 || requests.Select(r => ReadString(r, "characterId", "")).Distinct(StringComparer.Ordinal).Count() != cast.Count)
                 throw new InvalidDataException("Every authored character must have exactly one completed native batch result.");
             string batchHash = Sha256Hex(File.ReadAllBytes(batchPath));
-            string packId = Program.TavernHouseHash(campaign + "|" + catalogHash + "|" + batchHash);
+            string packId = CharactersService.TavernHouseHash(campaign + "|" + catalogHash + "|" + batchHash);
             var sources = new List<PreparedTavernSource>();
             long totalBytes = 0;
             foreach (var row in rows.OrderBy(r => ReadString(r, "castId", ""), StringComparer.Ordinal))
@@ -274,8 +274,8 @@ namespace ReignBetaServer
             return source;
         }
 
-        private static string PreparedTavernFrameHash() => Program.TavernHouseHash(ResidentOutfitRenderContract + "|1536|2048|768|1024|1|0.5|0|preserve_native_outfit|native_authored|v4");
-        private static string PreparedTavernJsonHash(object value) => Program.TavernHouseHash(Json.Serialize(CanonicalPreparedTavernJson(value)));
+        private static string PreparedTavernFrameHash() => CharactersService.TavernHouseHash(ResidentOutfitRenderContract + "|1536|2048|768|1024|1|0.5|0|preserve_native_outfit|native_authored|v4");
+        private static string PreparedTavernJsonHash(object value) => CharactersService.TavernHouseHash(Json.Serialize(CanonicalPreparedTavernJson(value)));
         private static object CanonicalPreparedTavernJson(object value)
         {
             if (value is IDictionary dictionary)

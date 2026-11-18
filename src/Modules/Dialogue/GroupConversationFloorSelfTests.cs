@@ -91,20 +91,20 @@ namespace ReignBetaServer
                 payload["conversationRelationshipChangesEnabled"] = false;
                 payload["idleCounters"] = TestDict("lysa", 2, "taren", 2);
                 payload["participantRequests"] = roster.Select(p => TestDict("speakerHeroStringId", p.Id, "heroStringId", p.Id)).ToList();
-                var eventPreflight = SocialEventTurnPlanApi(payload);
+                var eventPreflight = WorldSimulationService.SocialEventTurnPlanApi(payload);
                 Check("event_preflight_fixes_floor_without_provider", ReadBool(eventPreflight, "ok", false)
                     && ReadInt(eventPreflight, "providerCalls", -1) == 0
                     && ReadStringList(eventPreflight, "responseOrder").Count == 3
                     && ReadStringList(eventPreflight, "responseOrder").First() == "arven");
                 int calls = 0; bool fullAudience = false;
-                var result = SocialEventTurnWithResponder(payload, request => { calls++;
+                var result = WorldSimulationService.SocialEventTurnWithResponder(payload, request => { calls++;
                     fullAudience = ReadStringList(request, "activeHeroIds").Count == 3;
                     bool speak = ReadString(request, "speakerHeroStringId", "") == "arven";
                     return TestDict("ok", true, "reply", speak ? "I would begin at the river." : "", "participation", speak ? "speak" : "quiet"); });
                 Check("event_every_present_writer_can_choose_silence", calls == 3 && ReadBool(result, "completedExchange", false), result);
                 Check("quiet_event_listeners_are_not_removed", fullAudience && ReadStringList(result, "wanderedHeroStringIds").Count == 0
                     && ReadInt(ReadDictionary(result, "nextIdleCounters"), "taren", -1) == 0);
-                Check("event_retry_no_additional_writer", ReadBool(SocialEventTurnWithResponder(payload, _ => throw new InvalidOperationException("Unexpected retry call")), "idempotent", false));
+                Check("event_retry_no_additional_writer", ReadBool(WorldSimulationService.SocialEventTurnWithResponder(payload, _ => throw new InvalidOperationException("Unexpected retry call")), "idempotent", false));
 
                 var quiet = CloneDictionary(payload);
                 quiet["sceneTurnId"] = "floor-quiet"; quiet["turnId"] = "floor-quiet"; quiet["contributionId"] = "floor-quiet";
@@ -154,7 +154,7 @@ namespace ReignBetaServer
                 eventQuiet["sceneTurnId"] = "floor-event-quiet"; eventQuiet["turnId"] = "floor-event-quiet"; eventQuiet["contributionId"] = "floor-event-quiet";
                 eventQuiet["playerText"] = "Nobody needs to answer. The ferry leaves at dawn.";
                 int quietCalls = 0; bool noInventedPriorSpeech = true;
-                var eventQuietResult = SocialEventTurnWithResponder(eventQuiet, request => {
+                var eventQuietResult = WorldSimulationService.SocialEventTurnWithResponder(eventQuiet, request => {
                     quietCalls++;
                     noInventedPriorSpeech &= ReadDictionaryList(request, "groupTurnResponses").Count == 0
                         && !ReadBool(request, "mustAccountForPriorSpeaker", true)
@@ -164,7 +164,7 @@ namespace ReignBetaServer
                     && ReadDictionaryList(eventQuietResult, "participantResults").Count == 3
                     && ReadDictionaryList(eventQuietResult, "participantResults").All(r => ReadString(r, "reply", "") == ""));
                 Check("quiet_queue_does_not_imply_prior_speech", noInventedPriorSpeech);
-                Check("all_quiet_replay_makes_no_new_calls", ReadBool(SocialEventTurnWithResponder(eventQuiet,
+                Check("all_quiet_replay_makes_no_new_calls", ReadBool(WorldSimulationService.SocialEventTurnWithResponder(eventQuiet,
                     _ => throw new InvalidOperationException("Quiet replay called a writer")), "idempotent", false));
 
                 var arrival = CloneDictionary(payload);
@@ -173,7 +173,7 @@ namespace ReignBetaServer
                 arrival["participantRequests"] = roster.Select(p => {
                     var request = CloneDictionary(arrival); request["speakerHeroStringId"] = p.Id; return request; }).ToList();
                 int arrivalCalls = 0; bool arrivalPreserved = true;
-                var arrivalResult = SocialEventTurnWithResponder(arrival, request => {
+                var arrivalResult = WorldSimulationService.SocialEventTurnWithResponder(arrival, request => {
                     arrivalCalls++;
                     arrivalPreserved &= ReadString(request, "playerText", "") == "*Arven and I enter the keep hall together*"
                         && ReadString(request, "sceneContext", "").Contains("remembered invitations and commitments");
@@ -190,7 +190,7 @@ namespace ReignBetaServer
                 wilderness["sceneTurnId"] = "floor-wilderness-1"; wilderness["turnId"] = "floor-wilderness-1"; wilderness["contributionId"] = "floor-wilderness-1";
                 wilderness["playerText"] = "*I look over at her and smile* There is much more to see on our travels.";
                 wilderness["transcript"] = new[] { "Event: Taren watches a fox in the long grass.", "Player: " + ReadString(wilderness, "playerText", "") };
-                var eventPlan = SocialEventTurnPlanApi(wilderness);
+                var eventPlan = WorldSimulationService.SocialEventTurnPlanApi(wilderness);
                 Check("wilderness_first_statement_has_initiator", ReadBool(eventPlan, "ok", false)
                     && ReadStringList(eventPlan, "responseOrder").FirstOrDefault() == "taren"
                     && ReadString(eventPlan, "replyFocusHeroStringId", "") == "taren", eventPlan);
@@ -198,17 +198,17 @@ namespace ReignBetaServer
                 wilderness["participantRequests"] = ReadStringList(eventPlan, "responseOrder").Select(id => {
                     var request = CloneDictionary(wilderness); request["speakerHeroStringId"] = id;
                     request["speaker"] = profiles.First(p => CharacterIdFrom(p) == id); return request; }).ToList();
-                var completed = SocialEventTurnWithResponder(wilderness, request => {
+                var completed = WorldSimulationService.SocialEventTurnWithResponder(wilderness, request => {
                     writers++; return TestDict("ok", true, "reply", "There is much to discover.", "participation", "speak"); });
                 Check("wilderness_selected_writer_delivers_and_retry_does_not_call", writers == ReadStringList(eventPlan, "responseOrder").Count
                     && ReadBool(completed, "completedExchange", false) && ReadDictionaryList(completed, "participantResults")
                         .Any(r => ReadString(r, "heroStringId", "") == "taren" && ReadString(r, "reply", "").Length > 0), completed);
                 int beforeRetry = writers;
-                var eventReplay = SocialEventTurnWithResponder(wilderness, _ => { writers++; throw new InvalidOperationException("Repeated writer"); });
+                var eventReplay = WorldSimulationService.SocialEventTurnWithResponder(wilderness, _ => { writers++; throw new InvalidOperationException("Repeated writer"); });
                 Check("wilderness_retry_keeps_exact_reply", writers == beforeRetry && ReadBool(eventReplay, "idempotent", false));
                 var wait = CloneDictionary(wilderness); wait["sceneTurnId"] = "floor-wilderness-wait"; wait["turnId"] = "floor-wilderness-wait"; wait["contributionId"] = "floor-wilderness-wait";
                 wait["playerText"] = "*I wait for Taren to respond to that.*";
-                Check("wilderness_named_wait_survives_observer_projection", ReadStringList(SocialEventTurnPlanApi(wait), "addressedHeroStringIds").Contains("taren"));
+                Check("wilderness_named_wait_survives_observer_projection", ReadStringList(WorldSimulationService.SocialEventTurnPlanApi(wait), "addressedHeroStringIds").Contains("taren"));
                 var legacy = CloneDictionary(wilderness); legacy["wildernessInitiatorHeroStringId"] = "";
                 legacy["wildernessApproachText"] = "Morning light falls across the road. Taren studies the grass.";
                 Check("legacy_visible_approach_recovers_focus", WildernessConversationReplyFocus(legacy, profiles,
@@ -234,27 +234,27 @@ namespace ReignBetaServer
                     "identityRoster", tavernRoster.Concat(new[] { playerProfile }).ToList(),
                     "requestId", "visit-listener", "playerTurnId", "visit-turn", "speakerHeroStringId", "taren",
                     "playerText", "Only Lysa, tell me about the river.");
-                var visit = NewTavernHouseSession(tavern); visit["status"] = "visiting";
+                var visit = CharactersService.NewTavernHouseSession(tavern); visit["status"] = "visiting";
                 visit["receipt"] = TestDict("participantHeroIds", new[] { "lysa", "taren" });
-                string visitPath = TavernHouseSessionPath(tavern); SaveTavernHouseSession(visitPath, visit);
+                string visitPath = CharactersService.TavernHouseSessionPath(tavern); CharactersService.SaveTavernHouseSession(visitPath, visit);
                 string beforeVisit = File.ReadAllText(visitPath);
-                var visitPlan = TavernHouseTurnPlanApi(tavern);
+                var visitPlan = CharactersService.TavernHouseTurnPlanApi(tavern);
                 Check("tavern_preflight_uses_receipt_audience", ReadBool(visitPlan, "ok", false)
                     && ReadStringList(visitPlan, "responseOrder").SequenceEqual(new[] { "lysa", "taren" })
                     && ReadStringList(visitPlan, "audienceHeroStringIds").OrderBy(x => x).SequenceEqual(new[] { "lysa", "taren" })
                     && ReadInt(visitPlan, "providerCalls", -1) == 0, visitPlan);
                 Check("tavern_preflight_does_not_publish_dialogue_or_terms", File.ReadAllText(visitPath) == beforeVisit);
-                var tavernReplay = TavernHouseTurnPlanApi(tavern);
+                var tavernReplay = CharactersService.TavernHouseTurnPlanApi(tavern);
                 Check("tavern_order_retry_keeps_both_opportunities", ReadBool(tavernReplay, "replayed", false)
                     && ReadStringList(tavernReplay, "responseOrder").SequenceEqual(new[] { "lysa", "taren" }));
                 var absentVisit = CloneDictionary(tavern); absentVisit["speakerHeroStringId"] = "arven";
-                Check("tavern_roster_card_cannot_create_attendance", !ReadBool(TavernHouseTurnPlanApi(absentVisit), "ok", true));
+                Check("tavern_roster_card_cannot_create_attendance", !ReadBool(CharactersService.TavernHouseTurnPlanApi(absentVisit), "ok", true));
             }
             catch (Exception ex) { Check("exception", false, LimitText(ex.ToString(), 2200)); }
             finally
             {
                 ReignPostgreSqlStorage.DropCampaign(campaign);
-                TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaign, "campaign")));
+                PersistenceService.TryDeleteDirectory(Path.Combine(CampaignsRoot(), SafePathSegment(campaign, "campaign")));
             }
             return tests;
         }

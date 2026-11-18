@@ -24,8 +24,8 @@ namespace ReignBetaServer
 
         internal static void EnsureSocialReputationSchema(ReignDbConnection connection)
         {
-            Program.EnsureIdentitySchema(connection);
-            Program.EnsureMbtiRelationshipSchema(connection);
+            CharactersService.EnsureIdentitySchema(connection);
+            RelationshipsService.EnsureMbtiRelationshipSchema(connection);
             MigrateLegacySocialStorage(connection);
             EnsureExpandedSocialReputationSchema(connection);
             EnsurePublicStandingSchema(connection);
@@ -295,7 +295,7 @@ VALUES($revision,$catalog,$ts);", new Dictionary<string, object>
 
         private static void WriteSocialCatalog(string path, Dictionary<string, object> catalog)
         {
-            Program.ThrowIfCampaignRequestReplaced();
+            PersistenceService.ThrowIfCampaignRequestReplaced();
             string directory = Path.GetDirectoryName(path);
             Directory.CreateDirectory(directory);
             string temporary = Path.Combine(directory, "~" + Guid.NewGuid().ToString("N").Substring(0, 8));
@@ -450,7 +450,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
             return result;
         }
 
-        internal static Dictionary<string, object> BuildRelationshipSocialOccurrence(Program.AmbientPairContext pair, int day,
+        internal static Dictionary<string, object> BuildRelationshipSocialOccurrence(RelationshipsService.AmbientPairContext pair, int day,
             string archetypeId, Dictionary<string, object> heroA, Dictionary<string, object> heroB,
             string spouseA, string spouseB, bool forceExposure, bool forcePromotion, string provenance,
             string timelineId = "main")
@@ -510,11 +510,11 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
                         return;
                     }
                     if (worldTestSchemaReady)
-                        Program.RecordWorldTestCounterSchemaReady(connection,
+                        WorldSimulationService.RecordWorldTestCounterSchemaReady(connection,
                             campaignId, timelineId, worldDayKey, "rumors",
                             chunkKey, counters);
                     else
-                        Program.RecordWorldTestCounter(connection, campaignId,
+                        WorldSimulationService.RecordWorldTestCounter(connection, campaignId,
                             timelineId, worldDayKey, "rumors", chunkKey,
                             counters);
                 };
@@ -542,7 +542,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
                     ["eligibleHooks"] = 1,
                     ["disabledArchetypes"] = 1
                 };
-                Program.AddSocialRumorTelemetryDimensions(disabledCounters, archetypeId,
+                WorldSimulationService.AddSocialRumorTelemetryDimensions(disabledCounters, archetypeId,
                     new List<Dictionary<string, object>>(), payload);
                 recordWorldTest(hookKey + "_disabled", disabledCounters);
                 return new Dictionary<string, object> { ["ok"] = true, ["skipped"] = true, ["reason"] = "archetype_disabled_or_missing" };
@@ -569,7 +569,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
                     ["eligibleHooks"] = 1,
                     ["ineligibleParticipants"] = Math.Max(1, ineligibleParticipants)
                 };
-                Program.AddSocialRumorTelemetryDimensions(emptyCounters, archetypeId, participants, payload);
+                WorldSimulationService.AddSocialRumorTelemetryDimensions(emptyCounters, archetypeId, participants, payload);
                 recordWorldTest(hookKey + "_no_participants",
                     emptyCounters);
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "At least one participant is required." };
@@ -609,7 +609,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
                     ["eligibleHooks"] = 1,
                     ["ineligibleParticipants"] = Math.Max(1, ineligibleParticipants)
                 };
-                Program.AddSocialRumorTelemetryDimensions(excludedCounters, archetypeId, participants, payload);
+                WorldSimulationService.AddSocialRumorTelemetryDimensions(excludedCounters, archetypeId, participants, payload);
                 recordWorldTest(hookKey + "_excluded", excludedCounters);
                 return new Dictionary<string, object> { ["ok"] = true, ["skipped"] = true, ["reason"] = "no_eligible_npc_participants" };
             }
@@ -638,7 +638,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
                     ["exposureAttempts"] = 1,
                     ["exposureFailed"] = 1
                 };
-                Program.AddSocialRumorTelemetryDimensions(failedCounters, archetypeId, participants, payload);
+                WorldSimulationService.AddSocialRumorTelemetryDimensions(failedCounters, archetypeId, participants, payload);
                 recordWorldTest("exposure_"
                     + DeterministicSocialId(exposureSeed) + "_failed",
                     failedCounters);
@@ -662,7 +662,7 @@ SELECT tag_id FROM rumor_subject_tags UNION ALL SELECT tag_id FROM character_rep
                     ["exposurePassed"] = 1,
                     ["duplicateSourcesSuppressed"] = 1
                 };
-                Program.AddSocialRumorTelemetryDimensions(duplicateCounters, archetypeId, participants, payload);
+                WorldSimulationService.AddSocialRumorTelemetryDimensions(duplicateCounters, archetypeId, participants, payload);
                 recordWorldTest("exposure_"
                     + DeterministicSocialId(exposureSeed) + "_duplicate",
                     duplicateCounters);
@@ -802,16 +802,16 @@ VALUES($occurrence,$count,$chance,$roll,$promoted,$tags,$ts);",
                     ["promotionFailed"] = promoted || anySharedPromotionRoll ? 0 : 1,
                     ["durableReputationsCreated"] = promotedTags.Count
                 };
-                Program.AddSocialRumorTelemetryDimensions(occurrenceCounters, archetypeId, participants, payload);
-                Program.IncrementWorldTestObjectCounter(occurrenceCounters,
-                    "occurrenceLifetime:" + Program.SocialRumorDurationBucket(expiresDay - worldDay), 1);
+                WorldSimulationService.AddSocialRumorTelemetryDimensions(occurrenceCounters, archetypeId, participants, payload);
+                WorldSimulationService.IncrementWorldTestObjectCounter(occurrenceCounters,
+                    "occurrenceLifetime:" + WorldSimulationService.SocialRumorDurationBucket(expiresDay - worldDay), 1);
                 if (streak != null)
-                    Program.IncrementWorldTestObjectCounter(occurrenceCounters,
-                        "exposureToPromotion:" + Program.SocialRumorDurationBucket(
+                    WorldSimulationService.IncrementWorldTestObjectCounter(occurrenceCounters,
+                        "exposureToPromotion:" + WorldSimulationService.SocialRumorDurationBucket(
                             worldDay - ReadDouble(streak, "last_exposure_day", worldDay)), 1);
                 if (payload.ContainsKey("sourceEventDay"))
-                    Program.IncrementWorldTestObjectCounter(occurrenceCounters,
-                        "eventToExposure:" + Program.SocialRumorDurationBucket(
+                    WorldSimulationService.IncrementWorldTestObjectCounter(occurrenceCounters,
+                        "eventToExposure:" + WorldSimulationService.SocialRumorDurationBucket(
                             worldDay - ReadDouble(payload, "sourceEventDay", worldDay)), 1);
                 bool immediateExpiration = expiresDay <= worldDay + 0.000001d;
                 if (immediateExpiration)
@@ -994,7 +994,7 @@ AND archetype_id=$archetype AND thread_key=$thread AND last_occurrence_id=$id;",
                             ["archetype"] = ReadString(occurrence, "archetype_id", ""), ["thread"] = ReadString(occurrence, "thread_key", ""), ["id"] = occurrenceId
                         });
                     int occurrenceDay = (int)Math.Floor(ReadDouble(occurrence, "world_day", 0d) + 0.000001d);
-                    Program.RecordWorldTestCounter(connection, campaignId, timelineId, occurrenceDay, "rumors",
+                    WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, occurrenceDay, "rumors",
                         "correction_" + occurrenceId,
                         new Dictionary<string, object> { ["corrected"] = 1, ["disproven"] = 1 });
                 Program.ExecuteSql(connection, "COMMIT;");
@@ -1118,7 +1118,7 @@ ORDER BY acquired_day DESC;",
                 item.Remove("snapshot_json");
                 item.Remove("source_occurrence_id");
             }
-            Dictionary<string, object> observerStanding = Program.ResolveObserverPublicStanding(connection,
+            Dictionary<string, object> observerStanding = RelationshipsService.ResolveObserverPublicStanding(connection,
                 campaignId, timelineId, observerId, subjectId);
             return new Dictionary<string, object>
             {
@@ -1200,7 +1200,7 @@ ORDER BY lifecycle_day DESC LIMIT 500;",
             {
                 string subjectId = ReadString(row, "subject_id", "");
                 if (string.IsNullOrWhiteSpace(subjectId) || subjectId.Equals(observerId, StringComparison.OrdinalIgnoreCase)
-                    || !Program.IdentityStateVerified(Program.ReadAcquaintance(connection, observerId, subjectId))) continue;
+                    || !CharactersService.IdentityStateVerified(CharactersService.ReadAcquaintance(connection, observerId, subjectId))) continue;
                 Dictionary<string, object> roster = Program.QuerySql(connection,
                     "SELECT canonical_name FROM identity_roster WHERE hero_id=$id LIMIT 1;",
                     new Dictionary<string, object> { ["id"] = subjectId }).FirstOrDefault();
@@ -1251,10 +1251,10 @@ WHERE status='active' AND occurrence_id IN (SELECT occurrence_id FROM rumor_occu
             {
                 string occurrenceId = ReadString(occurrence, "occurrence_id", "");
                 Dictionary<string, object> counters = new Dictionary<string, object> { ["expired"] = 1 };
-                Program.IncrementWorldTestObjectCounter(counters,
-                    "occurrenceLifetime:" + Program.SocialRumorDurationBucket(
+                WorldSimulationService.IncrementWorldTestObjectCounter(counters,
+                    "occurrenceLifetime:" + WorldSimulationService.SocialRumorDurationBucket(
                         worldDay - ReadDouble(occurrence, "world_day", worldDay)), 1);
-                Program.RecordWorldTestCounter(connection, campaignId, timelineId, expirationDay, "rumors",
+                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, expirationDay, "rumors",
                     "expiration_" + occurrenceId, counters);
             }
             if (affectedSubjects.Count > 0)
@@ -1353,7 +1353,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
             double negative = values.Where(x => x < 0).Sum(x => (double)x);
             double mitigated = positive + negative * (1d - SocialCharmMitigation(subjectCharm));
             double scaled = mitigated * (sameNonEmptyKingdom ? 1d : 0.5d);
-            return Program.RoundAwayFromZero(scaled);
+            return RelationshipsService.RoundAwayFromZero(scaled);
         }
 
         private static Dictionary<string, object> SocialCharmPreview(int charm)
@@ -1534,14 +1534,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AN
                 using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureSocialReputationSchema(connection);
-                    Program.EnsureWorldTestTelemetrySchema(connection);
+                    WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
                     long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                     foreach (Dictionary<string, object> hero in new[]
                     {
                         new Dictionary<string, object> { ["heroStringId"]="married",["name"]="Married",["isAlive"]=true,["isAdult"]=true,["isPlayer"]=false,["isFemale"]=false,["clanTier"]=6,["currentCharm"]=0 },
                         new Dictionary<string, object> { ["heroStringId"]="lover",["name"]="Lover",["isAlive"]=true,["isAdult"]=true,["isPlayer"]=false,["isFemale"]=true,["clanTier"]=1,["currentCharm"]=0 },
                         new Dictionary<string, object> { ["heroStringId"]="player_subject",["name"]="Player",["isAlive"]=true,["isAdult"]=true,["isPlayer"]=true,["isFemale"]=false,["clanTier"]=6,["currentCharm"]=100 }
-                    }) Program.UpsertIdentityRosterHero(connection, hero, ts);
+                    }) CharactersService.UpsertIdentityRosterHero(connection, hero, ts);
                     EnsurePublicStandingForRoster(connection, campaignId, "main", 1d);
                     List<Dictionary<string, object>> initialPublicStanding = Program.QuerySql(connection, @"
 SELECT subject_id,standing_value,revision,last_changed_day,sources_json
@@ -1570,7 +1570,7 @@ ORDER BY subject_id;",
                         };
                     foreach (string observerId in new[] { "married", "lover" })
                     {
-                        Program.UpsertVerifiedIdentity(
+                        CharactersService.UpsertVerifiedIdentity(
                             connection,
                             new Dictionary<string, object>
                             {
@@ -1582,7 +1582,7 @@ ORDER BY subject_id;",
                             "player_subject",
                             1d,
                             "social_scope_test");
-                        string pairKey = Program.AmbientPairKey(observerId, "player_subject");
+                        string pairKey = RelationshipsService.AmbientPairKey(observerId, "player_subject");
                         bool observerIsA = pairKey.StartsWith(observerId + "|",
                             StringComparison.OrdinalIgnoreCase);
                         Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
@@ -1618,9 +1618,9 @@ ORDER BY pair_key;",
                             new Dictionary<string, object>
                             {
                                 ["marriedPair"] =
-                                    Program.AmbientPairKey("married", "player_subject"),
+                                    RelationshipsService.AmbientPairKey("married", "player_subject"),
                                 ["loverPair"] =
-                                    Program.AmbientPairKey("lover", "player_subject")
+                                    RelationshipsService.AmbientPairKey("lover", "player_subject")
                             });
                     ReconcileSocialRelationshipsForSubjects(
                         connection,
@@ -1629,13 +1629,13 @@ ORDER BY pair_key;",
                         new[] { "player_subject" },
                         1d);
                     Dictionary<string, object> globalStanding =
-                        Program.ReadPublicStandingRow(
+                        RelationshipsService.ReadPublicStandingRow(
                             connection,
                             campaignId,
                             "main",
                             "player_subject");
                     Dictionary<string, object> globalMarriedAttitude =
-                        Program.ResolveEffectiveAttitude(
+                        RelationshipsService.ResolveEffectiveAttitude(
                             connection,
                             campaignId,
                             "main",
@@ -1643,7 +1643,7 @@ ORDER BY pair_key;",
                             "player_subject",
                             "social_reputation_self_test");
                     Dictionary<string, object> globalLoverAttitude =
-                        Program.ResolveEffectiveAttitude(
+                        RelationshipsService.ResolveEffectiveAttitude(
                             connection,
                             campaignId,
                             "main",
@@ -1658,13 +1658,13 @@ ORDER BY pair_key;",
                         "player_subject",
                         1d);
                     Dictionary<string, object> targetedStanding =
-                        Program.ReadPublicStandingRow(
+                        RelationshipsService.ReadPublicStandingRow(
                             connection,
                             campaignId,
                             "main",
                             "player_subject");
                     Dictionary<string, object> targetedMarriedAttitude =
-                        Program.ResolveEffectiveAttitude(
+                        RelationshipsService.ResolveEffectiveAttitude(
                             connection,
                             campaignId,
                             "main",
@@ -1681,9 +1681,9 @@ ORDER BY pair_key;",
                             new Dictionary<string, object>
                             {
                                 ["marriedPair"] =
-                                    Program.AmbientPairKey("married", "player_subject"),
+                                    RelationshipsService.AmbientPairKey("married", "player_subject"),
                                 ["loverPair"] =
-                                    Program.AmbientPairKey("lover", "player_subject")
+                                    RelationshipsService.AmbientPairKey("lover", "player_subject")
                             });
                     int copiedProjectionCount = ReadInt(
                         Program.QuerySql(
@@ -1770,7 +1770,7 @@ AND subject_id='player_subject';",
                                     "effectiveAttitude",
                                     int.MinValue)
                         });
-                    Program.AmbientPairContext pair = new Program.AmbientPairContext { PairKey = Program.AmbientPairKey("married", "lover"), HeroAId = "married", HeroBId = "lover" };
+                    RelationshipsService.AmbientPairContext pair = new RelationshipsService.AmbientPairContext { PairKey = RelationshipsService.AmbientPairKey("married", "lover"), HeroAId = "married", HeroBId = "lover" };
                     Dictionary<string, object> first = RegisterSocialOccurrence(connection, campaignId,
                         BuildRelationshipSocialOccurrence(pair, 10, "affair",
                             new Dictionary<string, object> { ["heroStringId"]="married",["spouseId"]="spouse",["clanTier"]=6,["isFemale"]=false },
@@ -1807,14 +1807,14 @@ AND subject_id='player_subject';",
                     Dictionary<string, object> failedExposure =
                         RegisterSocialOccurrence(connection, campaignId, failedExposurePayload);
                     add("world_test_rumor_funnel_counts",
-                        Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "eligibleHooks") == 2
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "exposureAttempts") == 2
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "exposurePassed") == 2
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "duplicateSourcesSuppressed") == 1
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "occurrencesCreated") == 1
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 11, "rumors", "promotionPassed") == 1
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 11, "rumors", "durableReputationsCreated") == 3
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 12, "rumors", "exposureFailed") == 1
+                        WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "eligibleHooks") == 2
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "exposureAttempts") == 2
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "exposurePassed") == 2
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "duplicateSourcesSuppressed") == 1
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "occurrencesCreated") == 1
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 11, "rumors", "promotionPassed") == 1
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 11, "rumors", "durableReputationsCreated") == 3
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 12, "rumors", "exposureFailed") == 1
                         && !ReadBool(failedExposure, "exposed", true),
                         "World Test counts eligible hooks, attempts, passed and failed exposure, duplicate suppression, occurrences, promotion, and durable reputations.",
                         failedExposure);
@@ -1875,7 +1875,7 @@ AND subject_id='player_subject';",
                         "A subject Charm change recalculates negative Public Standing, advances its revision, and records the campaign day.",
                         mitigatedStanding);
 
-                    Program.AmbientPairContext divorcePair = new Program.AmbientPairContext { PairKey = Program.AmbientPairKey("married", "lover"), HeroAId = "married", HeroBId = "lover" };
+                    RelationshipsService.AmbientPairContext divorcePair = new RelationshipsService.AmbientPairContext { PairKey = RelationshipsService.AmbientPairKey("married", "lover"), HeroAId = "married", HeroBId = "lover" };
                     RegisterSocialOccurrence(connection, campaignId, BuildRelationshipSocialOccurrence(divorcePair, 20, "divorce",
                         new Dictionary<string, object> { ["heroStringId"]="married",["isFemale"]=false },
                         new Dictionary<string, object> { ["heroStringId"]="lover",["isFemale"]=true }, "lover", "married", true, true, "They divorced."));
@@ -1893,8 +1893,8 @@ AND subject_id='player_subject';",
                         && Program.QuerySql(connection, "SELECT 1 FROM character_reputations WHERE status='active';").Any(),
                         "Correction deactivates the occurrence and resets its active streak while retaining already-established reputations.", null);
                     add("world_test_rumor_correction_counts",
-                        Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "corrected") == 1
-                        && Program.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "disproven") == 1,
+                        WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "corrected") == 1
+                        && WorldSimulationService.WorldTestCounterValue(connection, campaignId, "main", 10, "rumors", "disproven") == 1,
                         "Correction records bounded funnel counters without changing retained reputation history.", null);
 
                     Func<string, string, string, string, double, bool, Dictionary<string, object>> social =
@@ -1922,11 +1922,11 @@ AND subject_id='player_subject';",
                         ["isLord"] = true, ["isRuler"] = true, ["occupation"] = "Lord", ["kingdomId"] = "kingdom_court",
                         ["clanId"] = "court_subject_clan", ["clanTier"] = 3, ["currentCharm"] = 0
                     };
-                    Program.UpsertIdentityRosterHero(connection, courtSubject, ts);
+                    CharactersService.UpsertIdentityRosterHero(connection, courtSubject, ts);
                     for (int index = 0; index < 50; index++)
                     {
                         string observerId = "court_observer_" + index.ToString("00", CultureInfo.InvariantCulture);
-                        Program.UpsertIdentityRosterHero(connection, new Dictionary<string, object>
+                        CharactersService.UpsertIdentityRosterHero(connection, new Dictionary<string, object>
                         {
                             ["heroStringId"] = observerId, ["name"] = "Court Observer " + index,
                             ["isAlive"] = true, ["isAdult"] = true, ["isPlayer"] = false,
@@ -1934,7 +1934,7 @@ AND subject_id='player_subject';",
                             ["clanId"] = "court_observer_clan_" + index, ["clanTier"] = 2,
                             ["isMercenaryClan"] = false, ["currentCharm"] = 0
                         }, ts);
-                        string pairKey = Program.AmbientPairKey(observerId, "court_subject");
+                        string pairKey = RelationshipsService.AmbientPairKey(observerId, "court_subject");
                         bool observerIsA = pairKey.StartsWith(observerId + "|", StringComparison.OrdinalIgnoreCase);
                         int incoming = index < 30 ? 35 : -35;
                         Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
@@ -2010,7 +2010,7 @@ AND subject_id='court_subject' AND domain='popularity' LIMIT 1;",
                             ["isAdult"]=true,["isLord"]=true,["occupation"]="Lord",["isFemale"]=true,
                             ["kingdomId"]="kingdom_court",["clanTier"]=3
                         }
-                    }) Program.UpsertIdentityRosterHero(connection, hero, ts);
+                    }) CharactersService.UpsertIdentityRosterHero(connection, hero, ts);
 
                     Func<string, string, string, double, bool, Dictionary<string, object>> favored =
                         (subjectId, linkedId, linkedName, day, promote) =>
@@ -2189,7 +2189,7 @@ AND subject_id='unauthorized_judgment_subject' AND tag_id='flirt' LIMIT 1;",
                     const string ingestJudgmentCorrelation =
                         "noble_judgment_ingest_self_test|judgment|court_ingest_subject|incompetent";
                     Dictionary<string, object> ingestJudgment =
-                        Program.WorldHistoryIngestBatchApi(new Dictionary<string, object>
+                        WorldSimulationService.WorldHistoryIngestBatchApi(new Dictionary<string, object>
                         {
                             ["campaignId"] = campaignId,
                             ["timelineId"] = "main",
@@ -2374,7 +2374,7 @@ FROM court_conversation_signal_receipts WHERE campaign_id=$campaign AND session_
                             ["isAdult"]=true,["isLord"]=true,["occupation"]="Lord",["isFemale"]=false,
                             ["kingdomId"]="kingdom_court",["clanTier"]=3
                         }
-                    }) Program.UpsertIdentityRosterHero(connection, hero, ts);
+                    }) CharactersService.UpsertIdentityRosterHero(connection, hero, ts);
                     Program.ExecuteSql(connection, @"DELETE FROM acquaintances
 WHERE (observer_id='group_intro_alpha' AND subject_id='group_intro_beta')
    OR (observer_id='group_intro_beta' AND subject_id='group_intro_alpha');");
@@ -2388,13 +2388,13 @@ WHERE (observer_id='group_intro_alpha' AND subject_id='group_intro_beta')
                         ProcessExplicitGroupConversationIntroductions(connection, "party_chat",
                             "family_group_intro", explicitIntroductionTurns, 29d);
                     Dictionary<string, object> alphaKnowsBeta =
-                        Program.ReadStoredAcquaintance(connection, "group_intro_alpha", "group_intro_beta");
+                        CharactersService.ReadStoredAcquaintance(connection, "group_intro_alpha", "group_intro_beta");
                     Dictionary<string, object> betaKnowsAlpha =
-                        Program.ReadStoredAcquaintance(connection, "group_intro_beta", "group_intro_alpha");
+                        CharactersService.ReadStoredAcquaintance(connection, "group_intro_beta", "group_intro_alpha");
                     add("court_family_chambers_explicit_group_introduction",
                         explicitIntroductions.Count == 2
-                        && Program.IdentityStateVerified(alphaKnowsBeta)
-                        && Program.IdentityStateVerified(betaKnowsAlpha)
+                        && CharactersService.IdentityStateVerified(alphaKnowsBeta)
+                        && CharactersService.IdentityStateVerified(betaKnowsAlpha)
                         && ReadString(alphaKnowsBeta, "verification_source", "") == "explicit_group_introduction"
                         && ReadString(betaKnowsAlpha, "verification_source", "") == "explicit_group_introduction"
                         && ProcessExplicitGroupConversationIntroductions(connection, "in_person",

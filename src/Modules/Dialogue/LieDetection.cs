@@ -11,9 +11,9 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private const string LieFormulaVersion = "reign_historical_lie_v1";
+        internal const string LieFormulaVersion = "reign_historical_lie_v1";
 
-        private static void EnsureWorldHistoryLieDetectionSchema(ReignDbConnection connection)
+        internal static void EnsureWorldHistoryLieDetectionSchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_lie_checks (
 lie_check_id TEXT PRIMARY KEY,episode_key TEXT NOT NULL UNIQUE,claim_check_id TEXT NOT NULL DEFAULT '',campaign_id TEXT NOT NULL,
@@ -33,7 +33,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
             ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_lie_detection_version','1');");
         }
 
-        private static Dictionary<string, object> WorldHistoryLieCheckApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> WorldHistoryLieCheckApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -74,7 +74,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
             }
             if (verification == null && !lookupOnly)
             {
-                var spans = ExtractAssertedWorldHistorySpans(claim);
+                var spans = WorldSimulationService.ExtractAssertedWorldHistorySpans(claim);
                 if (spans.Count != 1)
                     return new Dictionary<string, object> { ["ok"] = true, ["recorded"] = false,
                         ["outcome"] = "not_adjudicable", ["reason"] = spans.Count == 0 ? "no_asserted_claimant_deed" : "multiple_claims_require_separate_evidence",
@@ -85,7 +85,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
                 verifyPayload["claim"] = claim;
                 verifyPayload["claimSourceEvidence"] = spans[0];
             }
-            if (verification == null) verification = WorldHistoryVerifyApi(verifyPayload);
+            if (verification == null) verification = WorldSimulationService.WorldHistoryVerifyApi(verifyPayload);
             if (!ReadBool(verification, "ok", false)) return verification;
 
             // Older game-module builds route every history helper request through the lie-check
@@ -136,7 +136,7 @@ discovered_event_ids_json TEXT NOT NULL DEFAULT '[]',created_ts INTEGER NOT NULL
 
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
-                EnsureWorldHistorySchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsureWorldHistoryLieDetectionSchema(connection);
                 Dictionary<string, object> knowledge = ReadBool(verification, "nativeContextEvidence", false)
                     ? ReadDictionary(verification, "speakerKnowledge") ?? new Dictionary<string, object>()
@@ -400,7 +400,7 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
             };
         }
 
-        private static bool ContradictsNativeCurrentSettlement(string claim, string settlementName)
+        internal static bool ContradictsNativeCurrentSettlement(string claim, string settlementName)
         {
             string normalizedSettlement = NormalizeLookup(settlementName);
             if (string.IsNullOrWhiteSpace(claim) || string.IsNullOrWhiteSpace(normalizedSettlement))
@@ -430,7 +430,7 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
             return false;
         }
 
-        private static bool ContainsConversationDeceptiveIntentEvidence(string claim)
+        internal static bool ContainsConversationDeceptiveIntentEvidence(string claim)
         {
             string q = NormalizeLookup(claim);
             if (string.IsNullOrWhiteSpace(q)) return false;
@@ -447,7 +447,7 @@ WHERE campaign_id=$campaign AND lower(player_id)=lower($target) AND trim(player_
             string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : LatestCampaignId();
             string claimantId = query.ContainsKey("claimantId") ? query["claimantId"] : string.Empty;
             string targetId = query.ContainsKey("targetId") ? query["targetId"] : string.Empty;
-            int limit = Math.Max(1, Math.Min(250, ParseIntInvariant(query.ContainsKey("limit") ? query["limit"] : "", 50)));
+            int limit = Math.Max(1, Math.Min(250, WorldSimulationService.ParseIntInvariant(query.ContainsKey("limit") ? query["limit"] : "", 50)));
             using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistoryLieDetectionSchema(connection);
@@ -496,7 +496,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             catch { return false; }
         }
 
-        private static Dictionary<string, object> DetermineWorldHistoryKnowledge(ReignDbConnection connection, List<string> eventIds, string targetId, string kingdomId, double worldDay)
+        internal static Dictionary<string, object> DetermineWorldHistoryKnowledge(ReignDbConnection connection, List<string> eventIds, string targetId, string kingdomId, double worldDay)
         {
             List<string> firsthand = new List<string>();
             List<string> secondhand = new List<string>();
@@ -510,7 +510,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
                     new Dictionary<string, object> { ["event"] = eventId, ["day"] = worldDay, ["target"] = targetId ?? "", ["kingdom"] = kingdomId ?? "" });
                 bool direct = rules.Any(x => string.Equals(ReadString(x, "audience_type", ""), "entity", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(x, "acquisition_mode", ""), "participant", StringComparison.OrdinalIgnoreCase))
-                    && QueryWorldHistoryEntities(connection, eventId).Any(x => string.Equals(ReadString(x, "entity_id", ""), targetId, StringComparison.OrdinalIgnoreCase)
+                    && WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Any(x => string.Equals(ReadString(x, "entity_id", ""), targetId, StringComparison.OrdinalIgnoreCase)
                         && IsFirsthandWorldHistoryRole(eventType, ReadString(x, "role", "")));
                 List<Dictionary<string, object>> validSecondhandRules = rules.Where(x => !(string.Equals(ReadString(x, "audience_type", ""), "entity", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(ReadString(x, "acquisition_mode", ""), "participant", StringComparison.OrdinalIgnoreCase))).ToList();
@@ -523,7 +523,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
             return new Dictionary<string, object> { ["basis"] = basis, ["eventIds"] = visible, ["firsthandEventIds"] = firsthand, ["secondhandEventIds"] = secondhand, ["acquisitionModes"] = modes.Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
         }
 
-        private static Dictionary<string, object> BuildWorldHistoryKnowledgeSummary(ReignDbConnection connection, List<string> eventIds, string targetId, string kingdomId, double worldDay)
+        internal static Dictionary<string, object> BuildWorldHistoryKnowledgeSummary(ReignDbConnection connection, List<string> eventIds, string targetId, string kingdomId, double worldDay)
         {
             Dictionary<string, object> knowledge = DetermineWorldHistoryKnowledge(connection, eventIds, targetId, kingdomId, worldDay);
             List<string> visibleIds = ReadStringList(knowledge, "eventIds");
@@ -533,7 +533,7 @@ WHERE ($claimant='' OR claimant_id=$claimant) AND ($target='' OR target_id=$targ
                 Dictionary<string, object> row = QuerySql(connection, @"SELECT event_id,event_type,category,phase,world_day,location_id,location_name,summary,dissemination_class
 FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 if (row == null) continue;
-                row["entities"] = QueryWorldHistoryEntities(connection, eventId).Take(12).Select(entity => new Dictionary<string, object>
+                row["entities"] = WorldSimulationService.QueryWorldHistoryEntities(connection, eventId).Take(12).Select(entity => new Dictionary<string, object>
                 {
                     ["entityId"] = ReadString(entity, "entity_id", ""),
                     ["name"] = ReadString(entity, "name_snapshot", ""),
@@ -546,7 +546,7 @@ FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, o
             return knowledge;
         }
 
-        private static bool IsFirsthandWorldHistoryRole(string eventType, string role)
+        internal static bool IsFirsthandWorldHistoryRole(string eventType, string role)
         {
             string normalized = NormalizeLookup(role);
             if (string.IsNullOrWhiteSpace(normalized) || ContainsAny(normalized, "mentioned", "affiliate", "kingdom member", "kingdom affiliation", "clan member", "clan affiliation", "settlement", "item", "troop", "casualty")) return false;
@@ -671,7 +671,7 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             }
         }
 
-        private static List<string> ReconcileWorldHistoryClaimBeliefs(ReignDbConnection connection, string believerId, List<string> selectedEventIds, double worldDay)
+        internal static List<string> ReconcileWorldHistoryClaimBeliefs(ReignDbConnection connection, string believerId, List<string> selectedEventIds, double worldDay)
         {
             EnsureWorldHistoryLieDetectionSchema(connection);
             if (string.IsNullOrWhiteSpace(believerId) || selectedEventIds == null || selectedEventIds.Count == 0) return new List<string>();
@@ -729,7 +729,7 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
             return ReadDouble(row, key, 0d);
         }
 
-        private static List<Dictionary<string, object>> RunLieDetectionAssertions(string campaignId, string timelineId)
+        internal static List<Dictionary<string, object>> RunLieDetectionAssertions(string campaignId, string timelineId)
         {
             List<Dictionary<string, object>> assertions = new List<Dictionary<string, object>>();
             Action<string, bool, string> add = (name, passed, detail) => assertions.Add(new Dictionary<string, object>
@@ -754,18 +754,18 @@ VALUES($id,$lie,$campaign,$timeline,$believer,$claimant,$claim,$normalized,'acce
                 add("source_gate_" + PromptHash(ordinary).Substring(0, 8), ReadString(harmless, "outcome", "") == "not_adjudicable"
                     && !ReadBool(harmless, "recorded", true), "Ordinary, hypothetical, quoted or other-actor wording creates no historical lie/belief: " + ordinary);
             }
-            var splitSource = ExtractAssertedWorldHistorySpans("*I smiled.* I led the battle at Test Field. I am proud of my friends.");
+            var splitSource = WorldSimulationService.ExtractAssertedWorldHistorySpans("*I smiled.* I led the battle at Test Field. I am proud of my friends.");
             add("claim_span_excludes_surrounding_monologue", splitSource.Count == 1
                 && ReadString(splitSource[0], "quote", "") == "I led the battle at Test Field"
                 && ReadInt(splitSource[0], "start", 0) == 12, "Only the asserted actor/action/event span is eligible for lasting claim storage.");
-            add("substring_is_not_leadership", ReadString(ClassifyWorldHistoryClaim("I smiled and settled beside her."), "claimFamily", "") != "leadership", "led inside other words is not a claim.");
-            add("toast_is_not_military_command", ReadString(ClassifyWorldHistoryClaim("I led a toast."), "claimFamily", "") != "leadership", "Whole word led still requires a military object.");
-            add("event_location_must_match", !HistoryClaimMatchesNamedLocation("I led the battle at Different Field.",
+            add("substring_is_not_leadership", ReadString(WorldSimulationService.ClassifyWorldHistoryClaim("I smiled and settled beside her."), "claimFamily", "") != "leadership", "led inside other words is not a claim.");
+            add("toast_is_not_military_command", ReadString(WorldSimulationService.ClassifyWorldHistoryClaim("I led a toast."), "claimFamily", "") != "leadership", "Whole word led still requires a military object.");
+            add("event_location_must_match", !WorldSimulationService.HistoryClaimMatchesNamedLocation("I led the battle at Different Field.",
                 new Dictionary<string, object> { ["location_name"] = "Test Field" }), "A different complete battle cannot contradict the claimed battle.");
-            add("complete_roster_database_integer", HistoryEventRosterComplete(TestDict("is_complete", 1L))
-                && !HistoryEventRosterComplete(TestDict("is_complete", 0L))
-                && !HistoryEventRosterComplete(TestDict()), "PostgreSQL integer flags preserve both complete and incomplete roster semantics.");
-            add("entered_town_is_completed_travel", ExtractAssertedWorldHistorySpans("I entered the town on day one.").Count == 1,
+            add("complete_roster_database_integer", WorldSimulationService.HistoryEventRosterComplete(TestDict("is_complete", 1L))
+                && !WorldSimulationService.HistoryEventRosterComplete(TestDict("is_complete", 0L))
+                && !WorldSimulationService.HistoryEventRosterComplete(TestDict()), "PostgreSQL integer flags preserve both complete and incomplete roster semantics.");
+            add("entered_town_is_completed_travel", WorldSimulationService.ExtractAssertedWorldHistorySpans("I entered the town on day one.").Count == 1,
                 "An asserted completed arrival remains eligible for historical verification and retention checks.");
 
             Dictionary<string, object> genericLookup = WorldHistoryLieCheckApi(new Dictionary<string, object>

@@ -154,7 +154,7 @@ namespace ReignBetaServer
             return provenance == "npc_generated_personal_history" && IsConversationCharacteristicRhetoric(ReadString(row, "text", ""));
         }
 
-        private static bool IsConversationCharacteristicRhetoric(string text)
+        internal static bool IsConversationCharacteristicRhetoric(string text)
         {
             // A merchant's views on grain prices or a soldier's inventory habit can be
             // literal personal characterization. Prefer retaining an uncertain detail.
@@ -162,7 +162,7 @@ namespace ReignBetaServer
             return !materialSubject && IsConversationAccounting(text);
         }
 
-        private static bool DynamicCharacteristicsEquivalent(string left, string right)
+        internal static bool DynamicCharacteristicsEquivalent(string left, string right)
         {
             if (NormalizeLookup(left) == NormalizeLookup(right)) return true;
             // Keep polarity, quantities and changed particulars: lexical similarity alone
@@ -170,12 +170,12 @@ namespace ReignBetaServer
             Func<string, string> qualifiers = text => string.Join("|", Regex.Matches(NormalizeLookup(text),
                 @"\b(?:not|never|no|without|dislike\w*|hate\w*|fear\w*|avoid\w*|\d+)\b").Cast<Match>().Select(m => m.Value).Distinct().OrderBy(x => x));
             if (qualifiers(left) != qualifiers(right)) return false;
-            HashSet<string> a = DynamicEvidenceTerms(left), b = DynamicEvidenceTerms(right);
+            HashSet<string> a = CharactersService.DynamicEvidenceTerms(left), b = CharactersService.DynamicEvidenceTerms(right);
             int common = a.Count(b.Contains);
             return common >= 6 && a.SetEquals(b);
         }
 
-        private static List<Dictionary<string, object>> SelectNaturalDynamicCharacteristics(
+        internal static List<Dictionary<string, object>> SelectNaturalDynamicCharacteristics(
             Dictionary<string, object> document, string relevanceQuery)
         {
             var all = ReadDictionaryList(document, "active")
@@ -197,11 +197,11 @@ namespace ReignBetaServer
             if (Regex.IsMatch(query, @"\b(prefer|favorite|favourite|like best)\b")) requestedCategories.Add("preference");
             if (Regex.IsMatch(query, @"\b(your ambitions|your aspirations|hope for|dream of|what (?:do )?you (?:really )?want)\b")) requestedCategories.Add("aspiration");
             var generic = new HashSet<string>(new[] { "tell", "about", "more", "said", "say", "just", "sorry", "really", "know", "think", "need", "could", "would", "here", "there", "some", "only", "does", "been", "much", "still", "again", "yourself", "first", "earliest", "oldest", "initial", "shared", "meeting", "small" }, StringComparer.OrdinalIgnoreCase);
-            var terms = DynamicEvidenceTerms(query); terms.ExceptWith(generic);
+            var terms = CharactersService.DynamicEvidenceTerms(query); terms.ExceptWith(generic);
             var ranked = all.Select(row =>
             {
                 string category = ReadString(row, "category", "");
-                var searchable = DynamicEvidenceTerms(ReadString(row, "text", "") + " " + ReadFirstString(row, "topic_key", "topicKey").Replace('_', ' '));
+                var searchable = CharactersService.DynamicEvidenceTerms(ReadString(row, "text", "") + " " + ReadFirstString(row, "topic_key", "topicKey").Replace('_', ' '));
                 int matches = terms.Count(searchable.Contains);
                 bool intent = habit ? category == "habit" || category == "skill_practice"
                     : requestedCategories.Contains(category);

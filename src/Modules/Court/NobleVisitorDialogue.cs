@@ -29,7 +29,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> document = Program.ReadJsonObject(Program.CharacterFile(campaignId, id, "traits.json"));
                 Dictionary<string, object> virtues = ReadDictionary(document, "courtVirtues");
                 Dictionary<string, object> percentages = ReadDictionary(document, "traitPercentages");
-                if (virtues == null && percentages != null) virtues = Program.CalculateCourtVirtues(percentages);
+                if (virtues == null && percentages != null) virtues = CharactersService.CalculateCourtVirtues(percentages);
                 int boldness = Math.Max(0, Math.Min(100, ReadInt(virtues, "boldness", 50)));
                 int honor = Math.Max(0, Math.Min(100, ReadInt(virtues, "honor", 50)));
                 if (ReignNobleVisitorRules.CanInitiatePrivateRomance(married, boldness, honor)) permittedInitiators.Add(id);

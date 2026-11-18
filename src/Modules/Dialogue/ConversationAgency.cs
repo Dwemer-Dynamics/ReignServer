@@ -42,10 +42,10 @@ namespace ReignBetaServer
         private static readonly string[] AgencyTopics = { "travel", "allegiance", "property", "service", "political_support", "intimacy", "information", "favor" };
         private static readonly string[] AgencyDispositions = { "cannot", "personal_refusal", "terms_refusal", "undecided", "conditional", "accepted", "accepted_under_duress" };
         private static readonly string[] AgencyObjections = { "capability", "duty", "loyalty", "principle", "risk", "price", "credibility", "relationship" };
-        private static bool AgencyAccepted(string value) => value == "accepted" || value == "accepted_under_duress";
+        internal static bool AgencyAccepted(string value) => value == "accepted" || value == "accepted_under_duress";
         private static bool AgencyRefused(string value) => value == "cannot" || value == "personal_refusal" || value == "terms_refusal";
 
-        private static void EnsureConversationAgencySchema(ReignDbConnection connection)
+        internal static void EnsureConversationAgencySchema(ReignDbConnection connection)
         {
             ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_negotiations (
 record_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL,owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,
@@ -58,7 +58,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
 
         private static List<Dictionary<string, object>> ReadConversationNegotiations(ReignDbConnection connection, string timeline, string owner, string peer)
         {
-            if (!TableExists(connection, "conversation_negotiations")) return new List<Dictionary<string, object>>();
+            if (!WorldSimulationService.TableExists(connection, "conversation_negotiations")) return new List<Dictionary<string, object>>();
             return QuerySql(connection, "SELECT payload_json FROM conversation_negotiations WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer ORDER BY record_id;",
                 new Dictionary<string, object> { ["timeline"] = timeline, ["owner"] = owner, ["peer"] = peer })
                 .Select(row => TryParseJsonObject(ReadString(row, "payload_json", "{}"))).Where(row => row != null).ToList();
@@ -106,15 +106,15 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                         facts["player.knownTournamentWins"] = publicHistory.Select(row => ReadInt(row, "documentedPlayerTournamentWins", 0)).DefaultIfEmpty(0).Max();
                     }
                     // Existing dated shared milestones, not an invented trust counter or the length of today's speech.
-                    facts["relationship.sharedHistory"] = TableExists(connection, "conversation_continuity")
+                    facts["relationship.sharedHistory"] = WorldSimulationService.TableExists(connection, "conversation_continuity")
                         ? QuerySql(connection, "SELECT record_id FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner AND peer_id=$peer AND kind='relationship' AND status<>'invalidated';",
                             new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count : 0;
-                    if (TableExists(connection, "conversation_relationship_receipts"))
+                    if (WorldSimulationService.TableExists(connection, "conversation_relationship_receipts"))
                         facts["relationship.sharedHistory"] = ReadInt(facts, "relationship.sharedHistory", 0)
                             + QuerySql(connection, "SELECT receipt_id FROM conversation_relationship_receipts WHERE timeline_id=$timeline AND observer_id=$owner AND target_id=$peer AND status='applied' AND valence='positive' AND severity_tier<>'routine';",
                                 new Dictionary<string, object> { ["timeline"] = ContinuityTimeline(payload), ["owner"] = owner, ["peer"] = peer }).Count;
                     if (Regex.IsMatch(ReadString(context, "playerText", ""), @"\b(?:blackmail|expose|secret|evidence|scandal|betray|affair)\b", RegexOptions.IgnoreCase)
-                        && TableExists(connection, "memories"))
+                        && WorldSimulationService.TableExists(connection, "memories"))
                     {
                         var knowledge = BuildKnowledgeAccessContext(owner, peer, ReadFirstString(payload, "locationId", "settlementId"), payload);
                         var memories = QuerySql(connection, "SELECT * FROM memories WHERE owner_id=$owner AND world_day<=$day AND status='active' ORDER BY ts DESC LIMIT 32;",
@@ -189,7 +189,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             return "";
         }
 
-        private static bool BindConversationAgencyAuthority(Dictionary<string, object> payload, string command,
+        internal static bool BindConversationAgencyAuthority(Dictionary<string, object> payload, string command,
             Dictionary<string, object> terms, Dictionary<string, object> authority, List<string> errors,
             Dictionary<string, object> action = null)
         {
@@ -479,7 +479,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             return false;
         }
 
-        private static Dictionary<string, object> CommitConversationAgency(ReignDbConnection connection,
+        internal static Dictionary<string, object> CommitConversationAgency(ReignDbConnection connection,
             Dictionary<string, object> parsed, Dictionary<string, object> context, string turnId, bool ownsTransaction = true)
         {
             EnsureConversationAgencySchema(connection);
@@ -544,7 +544,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 && Convert.ToString(fact, CultureInfo.InvariantCulture) == value.Substring(equals + 1).Trim() ? key : value;
         }
 
-        private static bool AgencyContainsExactQuote(string source, string quote)
+        internal static bool AgencyContainsExactQuote(string source, string quote)
         {
             Func<string, string> typography = s => Regex.Replace((s ?? "").Replace('’', '\'').Replace('‘', '\'').Replace('“', '"').Replace('”', '"'), @"\s+", " ").Trim();
             string exact = typography(quote);
@@ -665,7 +665,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             return true;
         }
 
-        private static Dictionary<string, object> VisibleFailedRepairWithoutEffects(Dictionary<string, object> parsed,
+        internal static Dictionary<string, object> VisibleFailedRepairWithoutEffects(Dictionary<string, object> parsed,
             string failureClass = "action_verification")
         {
             var visible = CloneDictionary(parsed);
@@ -776,7 +776,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             return false;
         }
 
-        private static Dictionary<string, object> EnforceConversationAgencyResponse(Dictionary<string, object> llm,
+        internal static Dictionary<string, object> EnforceConversationAgencyResponse(Dictionary<string, object> llm,
             Dictionary<string, object> request, Dictionary<string, object> motive, Dictionary<string, object> payload,
             string campaignId, string correlationId, string mode, string heroId,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null, bool persist = true,
@@ -881,7 +881,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
                 string turn = FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), correlationId);
                 try
                 {
-                    lock (CampaignRelationshipWriteLock(campaignId))
+                    lock (RelationshipsService.CampaignRelationshipWriteLock(campaignId))
                         using (var connection = OpenCampaignConnection(campaignId)) evaluation = CommitConversationAgency(connection, parsed, context, turn);
                 }
                 catch (Exception)
@@ -922,7 +922,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             };
         }
 
-        private static bool ValidateAgencyRepairedResponse(Dictionary<string, object> parsed,
+        internal static bool ValidateAgencyRepairedResponse(Dictionary<string, object> parsed,
             Dictionary<string, object> motive, Dictionary<string, object> payload, Dictionary<string, object> identity,
             List<Dictionary<string, object>> priorLines, string heroId, string heroName, string playerName)
         {
@@ -945,7 +945,7 @@ turn_id TEXT NOT NULL,payload_json TEXT NOT NULL);");
             return true;
         }
 
-        private static void ApplyAgencyRelationshipAssessment(List<Dictionary<string, object>> assessments,
+        internal static void ApplyAgencyRelationshipAssessment(List<Dictionary<string, object>> assessments,
             Dictionary<string, object> payload, string observerId, string playerId)
         {
             var receipt = ReadDictionary(payload, "conversationAgencyReceipt");

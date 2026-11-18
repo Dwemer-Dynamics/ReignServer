@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private const int TraitPercentageModelVersion = 2;
         private const string TraitPercentageModel = "reign_trait_percentages_v2";
@@ -16,7 +16,7 @@ namespace ReignBetaServer
         private const int CourtVirtueNegativeExtremeMaximum = 20;
         private const int CourtVirtuePositiveExtremeMinimum = 80;
 
-        private static readonly string[] CourtVirtueKeys =
+        internal static readonly string[] CourtVirtueKeys =
         {
             "compassion", "boldness", "honor", "loyalty", "responsibility", "courage", "judgment"
         };
@@ -63,7 +63,7 @@ namespace ReignBetaServer
 
         private static void TraitPercentageBand(int modifier, out int minimum, out int maximum)
         {
-            switch (ClampTrait(modifier))
+            switch (Program.ClampTrait(modifier))
             {
                 case -2: minimum=0; maximum=20; break;
                 case -1: minimum=21; maximum=40; break;
@@ -111,10 +111,10 @@ namespace ReignBetaServer
             if(existingVirtues.Count!=CourtVirtueKeys.Length||CourtVirtueKeys.Any(x=>!existingVirtues.ContainsKey(x))||ReadInt(existingVirtueModel,"version",0)!=CourtVirtueModelVersion)changed=true;
             foreach(string key in CoreTraitKeys)
             {
-                int modifier=ClampTrait(TraitInt(foundation,key));
+                int modifier=Program.ClampTrait(Program.TraitInt(foundation,key));
                 TraitPercentageBand(modifier,out int minimum,out int maximum);
                 bool has=percentages.ContainsKey(key);int percentage=ReadInt(percentages,key,int.MinValue);
-                int prior=snapshot.ContainsKey(key)?ClampTrait(ReadInt(snapshot,key,modifier)):modifier;
+                int prior=snapshot.ContainsKey(key)?Program.ClampTrait(ReadInt(snapshot,key,modifier)):modifier;
                 if(!has||percentage==int.MinValue){percentage=StableTraitPercentage(heroId,key,modifier);changed=true;}
                 else if(prior!=modifier){percentage=RemapTraitPercentage(percentage,prior,modifier);changed=true;}
                 else if(percentage<minimum||percentage>maximum){percentage=Math.Max(minimum,Math.Min(maximum,percentage));changed=true;}
@@ -232,7 +232,7 @@ namespace ReignBetaServer
             foreach(string key in CoreTraitKeys)
             {
                 if(!foundation.ContainsKey(key)||!percentages.ContainsKey(key))return false;
-                TraitPercentageBand(TraitInt(foundation,key),out int minimum,out int maximum);int percentage=ReadInt(percentages,key,-1);
+                TraitPercentageBand(Program.TraitInt(foundation,key),out int minimum,out int maximum);int percentage=ReadInt(percentages,key,-1);
                 if(percentage<minimum||percentage>maximum)return false;
             }
             Dictionary<string,object> calculated=CalculateCourtVirtues(percentages);
@@ -290,9 +290,9 @@ namespace ReignBetaServer
             return new Dictionary<string,object>{{"mode",mode},{"tangibleThreat",tangibleThreat},{"initiationRequired",initiationRequired},{"stages",stages},{"passed",passed},{"failedStage",failedStage}};
         }
 
-        private static int RollCourtD100(){byte[] bytes=new byte[4];using(RandomNumberGenerator rng=RandomNumberGenerator.Create())rng.GetBytes(bytes);return 1+(int)(BitConverter.ToUInt32(bytes,0)%100u);}
+        internal static int RollCourtD100(){byte[] bytes=new byte[4];using(RandomNumberGenerator rng=RandomNumberGenerator.Create())rng.GetBytes(bytes);return 1+(int)(BitConverter.ToUInt32(bytes,0)%100u);}
 
-        private static List<Dictionary<string,object>> RunTraitPercentageSelfTests()
+        internal static List<Dictionary<string,object>> RunTraitPercentageSelfTests()
         {
             List<Dictionary<string,object>> rows=new List<Dictionary<string,object>>();Action<string,bool,string,object> add=(id,pass,summary,data)=>rows.Add(new Dictionary<string,object>{{"id","trait_percentages_"+id},{"suite","trait_percentages"},{"passed",pass},{"summary",summary},{"data",data??new Dictionary<string,object>()}});
             Dictionary<string,object> foundation=CoreTraitKeys.ToDictionary(x=>x,x=>(object)0,StringComparer.OrdinalIgnoreCase);foundation["honesty"]=-2;foundation["courage"]=2;foundation["loyalty"]=-1;
@@ -330,11 +330,11 @@ namespace ReignBetaServer
             Dictionary<string,object> safeInitiative=EvaluateCourtInitiativePersonality(doc,new Dictionary<string,object>{{"tangibleThreat",false},{"initiationRequired",true},{"baseChance",50},{"boldnessRoll",1}});List<Dictionary<string,object>> safeStages=ReadDictionaryList(safeInitiative,"stages");add("safe_initiative_uses_boldness",ReadBool(safeInitiative,"passed",false)&&safeStages.Count==1&&ReadString(safeStages[0],"virtue","")=="boldness","Comfortable initiation uses Boldness without a Courage check.",safeInitiative);
             Dictionary<string,object> dangerousInitiative=EvaluateCourtInitiativePersonality(doc,new Dictionary<string,object>{{"tangibleThreat",true},{"initiationRequired",true},{"baseChance",50},{"boldnessRoll",1},{"courageRoll",1}});List<Dictionary<string,object>> dangerousStages=ReadDictionaryList(dangerousInitiative,"stages");add("dangerous_initiative_uses_both",ReadBool(dangerousInitiative,"passed",false)&&dangerousStages.Count==2&&ReadString(dangerousStages[0],"virtue","")=="boldness"&&ReadString(dangerousStages[1],"virtue","")=="courage","Initiating and following through under a tangible threat checks Boldness and then Courage.",dangerousInitiative);
             Dictionary<string,object> existingThreat=EvaluateCourtInitiativePersonality(doc,new Dictionary<string,object>{{"tangibleThreat",true},{"initiationRequired",false},{"baseChance",50},{"courageRoll",1}});List<Dictionary<string,object>> threatStages=ReadDictionaryList(existingThreat,"stages");add("existing_threat_uses_courage",ReadBool(existingThreat,"passed",false)&&threatStages.Count==1&&ReadString(threatStages[0],"virtue","")=="courage","Acting when a tangible threat already exists uses Courage without a Boldness check.",existingThreat);
-            Dictionary<string,object> noApproach=EvaluateSocialEventApproach(60,1), passingApproach=EvaluateSocialEventApproach(80,19), failingApproach=EvaluateSocialEventApproach(80,20);
+            Dictionary<string,object> noApproach=WorldSimulationService.EvaluateSocialEventApproach(60,1), passingApproach=WorldSimulationService.EvaluateSocialEventApproach(80,19), failingApproach=WorldSimulationService.EvaluateSocialEventApproach(80,20);
             add("social_event_boldness_approach",!ReadBool(noApproach,"passed",true)&&ReadInt(noApproach,"chance",1)==0&&ReadBool(passingApproach,"passed",false)&&!ReadBool(failingApproach,"passed",true),"Social-event approaches use Boldness minus 60 and pass only when a 1d100 roll is strictly below that chance.",new Dictionary<string,object>{{"none",noApproach},{"passing",passingApproach},{"failing",failingApproach}});
-            List<string> rankedApproaches=SelectSocialEventApproachIds(new List<Dictionary<string,object>>{new Dictionary<string,object>{{"heroStringId","low"},{"approachScore",65},{"candidateOrder",0}},new Dictionary<string,object>{{"heroStringId","high"},{"approachScore",90},{"candidateOrder",2}},new Dictionary<string,object>{{"heroStringId","middle"},{"approachScore",80},{"candidateOrder",1}}},RollSocialEventD4(2));
+            List<string> rankedApproaches=WorldSimulationService.SelectSocialEventApproachIds(new List<Dictionary<string,object>>{new Dictionary<string,object>{{"heroStringId","low"},{"approachScore",65},{"candidateOrder",0}},new Dictionary<string,object>{{"heroStringId","high"},{"approachScore",90},{"candidateOrder",2}},new Dictionary<string,object>{{"heroStringId","middle"},{"approachScore",80},{"candidateOrder",1}}},WorldSimulationService.RollSocialEventD4(2));
             add("social_event_d4_quota_and_rank",rankedApproaches.SequenceEqual(new[]{"high","middle"}),"A d4 limits social-event approaches to one through four successful NPCs, selected in descending Boldness score order.",rankedApproaches);
-            Dictionary<string,object> normalJoin=EvaluateSocialEventJoin(80,60,19,19),failedJoin=EvaluateSocialEventJoin(80,60,19,20),danceJoin=EvaluateSocialEventJoin(80,40,39,39);
+            Dictionary<string,object> normalJoin=WorldSimulationService.EvaluateSocialEventJoin(80,60,19,19),failedJoin=WorldSimulationService.EvaluateSocialEventJoin(80,60,19,20),danceJoin=WorldSimulationService.EvaluateSocialEventJoin(80,40,39,39);
             add("social_event_double_join_roll",ReadBool(normalJoin,"passed",false)&&!ReadBool(failedJoin,"passed",true)&&ReadBool(danceJoin,"passed",false),"Mid-conversation joins require two strict Boldness rolls and support the opposite-sex dance threshold.",new Dictionary<string,object>{{"normal",normalJoin},{"failed",failedJoin},{"dance",danceJoin}});
             return rows;
         }

@@ -117,7 +117,7 @@ namespace ReignBetaServer
             return OpenAiCompatibleProvider;
         }
 
-        private static bool NormalizeLlmProviderSettings(Dictionary<string, object> settings)
+        internal static bool NormalizeLlmProviderSettings(Dictionary<string, object> settings)
         {
             if (settings == null) return false;
             string before = ReadString(settings, "llmProvider", OpenAiCompatibleProvider);
@@ -658,7 +658,7 @@ namespace ReignBetaServer
             Dictionary<string, object> codexContext, Action<string> contentDelta = null, Func<bool> canceled = null)
         {
             if (UsesCodexSubscription(settings)) return CodexChatCompletionWithRecovery(requestBody, settings, model, codexContext, contentDelta, canceled);
-            return WithCampaignProviderWait(requestType,
+            return PersistenceService.WithCampaignProviderWait(requestType,
                 () => ProviderPostJson(apiUrl, apiKey, outboundJson, settings, cacheRouting, correlationId, requestType, model, contentDelta, canceled));
         }
 
@@ -963,7 +963,7 @@ namespace ReignBetaServer
                 if (mode == "chatgptAuthTokens") mode = "chatgpt";
                 string previous = ReadString(CodexAccount, "type", "");
                 changedMode = signedOut || mode.Length > 0 && previous.Length > 0 && mode != previous;
-                var next = changedMode ? TestDict() : DeepCloneProfileDictionary(CodexAccount);
+                var next = changedMode ? TestDict() : CharactersService.DeepCloneProfileDictionary(CodexAccount);
                 if (!signedOut && mode.Length > 0) next["type"] = mode;
                 if (!signedOut && update.ContainsKey("planType")) next["planType"] = update["planType"];
                 CodexAccount = next;
@@ -983,7 +983,7 @@ namespace ReignBetaServer
             {
                 string previous = CodexAccountIdentityFingerprint(CodexAccount);
                 changed = previous.Length > 0 && previous != CodexAccountIdentityFingerprint(account);
-                CodexAccount = DeepCloneProfileDictionary(account);
+                CodexAccount = CharactersService.DeepCloneProfileDictionary(account);
                 CodexAccountIdentityVerificationRequired = generation != CodexAccountNotificationGeneration;
             }
             if (changed)

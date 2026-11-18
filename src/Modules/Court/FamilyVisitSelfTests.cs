@@ -197,22 +197,22 @@ VALUES($campaign,$timeline,'ruler',$offset,0) ON CONFLICT(campaign_id,timeline_i
 UPDATE relationship_pair_chemistry SET affinity_a_to_b=$affinity WHERE pair_key='adult_family|ruler';
 UPDATE court_family_attention SET neglected=1,decay_finished=0,last_decay_day=10 WHERE campaign_id=$campaign AND timeline_id=$timeline AND hero_id='adult_family';", p);
                 };
-                Func<int> effective = () => ReadInt(Program.ResolveEffectiveAttitude(c, campaign, timeline, "adult_family", "ruler"), "effectiveAttitude", -999);
+                Func<int> effective = () => ReadInt(RelationshipsService.ResolveEffectiveAttitude(c, campaign, timeline, "adult_family", "ruler"), "effectiveAttitude", -999);
                 reset(2, 3); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 11.34, false);
                 int positiveFirst = effective(); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 16.34, false);
                 var positivePair = Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key='adult_family|ruler';").First();
                 add("family_neglect_positive_standing_reaches_actual_zero", positiveFirst == 4 && effective() == 0
                     && ReadInt(positivePair, "affinity_a_to_b", 999) == -3 && ReadInt(positivePair, "affinity_b_to_a", 999) == 17
-                    && Program.PublicStandingValue(c, campaign, timeline, "ruler") == 3,
+                    && RelationshipsService.PublicStandingValue(c, campaign, timeline, "ruler") == 3,
                     "Actual NPC-to-ruler relation drops one per day to zero; positive standing and reverse relation remain unchanged.");
                 reset(5, -3); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 11.34, false);
                 int negativeFirst = effective(); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 16.34, false);
                 add("family_neglect_negative_standing_stops_at_actual_zero", negativeFirst == 1 && effective() == 0
                     && ReadInt(Program.QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key='adult_family|ruler';").First(), "affinity_a_to_b", 999) == 3
-                    && Program.PublicStandingValue(c, campaign, timeline, "ruler") == -3,
+                    && RelationshipsService.PublicStandingValue(c, campaign, timeline, "ruler") == -3,
                     "Negative standing stops decay at actual zero while personal affinity remains positive.");
                 reset(100, 20); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 11.34, false);
-                add("family_neglect_upper_clamp_drops_one_actual_point", effective() == 99 && Program.PublicStandingValue(c, campaign, timeline, "ruler") == 20,
+                add("family_neglect_upper_clamp_drops_one_actual_point", effective() == 99 && RelationshipsService.PublicStandingValue(c, campaign, timeline, "ruler") == 20,
                     "A relation clamped at 100 still falls to 99 on the first day without changing public standing.");
                 reset(-2, -3); AdvanceFamilyAttention(c, campaign, timeline, "ruler", 14.34, false);
                 add("family_neglect_preserves_already_negative_relation", effective() == -5
@@ -226,7 +226,7 @@ UPDATE court_family_attention SET child_relation_owned=1,adult_migrated=0,direct
                 MigrateFamilyChildAttentionRelation(c, campaign, timeline, "adult_family", 18.34);
                 add("family_child_maturity_preserves_actual_zero_with_standing", effective() == 0
                     && ReadInt(ReadFamilyAttention(c, campaign, timeline, "ruler", "adult_family"), "adult_migrated", 0) == 1
-                    && Program.PublicStandingValue(c, campaign, timeline, "ruler") == 3,
+                    && RelationshipsService.PublicStandingValue(c, campaign, timeline, "ruler") == 3,
                     "Child attention migrates once to the same actual adult directional relation, including zero under public standing.");
             }
         }

@@ -28,11 +28,11 @@ input_json TEXT NOT NULL,result_json TEXT NOT NULL,created_ts INTEGER NOT NULL,
 PRIMARY KEY(campaign_id,timeline_id,event_id));");
             Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_whoremonger_inactivity
 ON whoremonger_activity(campaign_id,timeline_id,last_activity_day);");
-            if (Program.TableExists(connection, "social_outcome_receipts"))
+            if (WorldSimulationService.TableExists(connection, "social_outcome_receipts"))
             {
                 List<Dictionary<string, object>> recoveryScopes =
-                    Program.TableExists(connection, "world_history_events")
-                    && Program.TableExists(connection, "social_subject_work_queue")
+                    WorldSimulationService.TableExists(connection, "world_history_events")
+                    && WorldSimulationService.TableExists(connection, "social_subject_work_queue")
                         ? Program.QuerySql(connection, @"SELECT DISTINCT r.campaign_id,r.timeline_id
 FROM social_outcome_receipts r
 JOIN world_history_events e ON e.event_id=r.event_id
@@ -353,7 +353,7 @@ AND last_activity_day+30<=$day;", new Dictionary<string, object>
         // only from it; a missing entry is refused rather than read under FileLock.
         internal static double WhoremongerSpouseStandingAdjustment(string campaignId,
             string observerId, string subjectId, List<Dictionary<string, object>> sources,
-            Program.RelationshipFileSnapshot files = null)
+            RelationshipsService.RelationshipFileSnapshot files = null)
         {
             var entry = sources.FirstOrDefault(IsWhoremongerStandingSource);
             if (entry == null || string.IsNullOrWhiteSpace(observerId) || observerId == subjectId) return 0d;

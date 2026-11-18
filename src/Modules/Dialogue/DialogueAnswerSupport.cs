@@ -285,7 +285,7 @@ namespace ReignBetaServer
             if (AnswerSupportReplyFields.Count(key => ReadString(parsed, key, "").Length > 0) > 1)
                 return TestDict("ok", false, "content", "", "errorCode", "dialogue_answer_support_multiple_reply_aliases");
             string originalReply = ReadFirstString(parsed, AnswerSupportReplyFields);
-            bool originalQuiet = NormalizeSocialEventParticipation(parsed) == "quiet"
+            bool originalQuiet = WorldSimulationService.NormalizeSocialEventParticipation(parsed) == "quiet"
                 && string.IsNullOrWhiteSpace(originalReply);
             var sources = DialogueClaimOriginalSources(payload, prior, speaker);
             var rows = new List<Dictionary<string, object>>();

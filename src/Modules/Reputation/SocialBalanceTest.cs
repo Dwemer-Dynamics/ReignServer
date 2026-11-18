@@ -1175,7 +1175,7 @@ AND archetype_id='affair' AND source_event_id=$event;",
                 Program.TraitPercentageSnapshot(targetTraits);
             Dictionary<string, object> targetVirtues =
                 ReadDictionary(targetTraits, "courtVirtues")
-                ?? Program.CalculateCourtVirtues(targetPercentages);
+                ?? CharactersService.CalculateCourtVirtues(targetPercentages);
             int targetHonor = ReadInt(targetVirtues, "honor", 50);
             int targetLoyalty = ReadInt(targetPercentages, "loyalty", 50);
             bool veryLowHonorAndLoyalty =
@@ -1908,22 +1908,22 @@ ORDER BY tag_id,source_occurrence_id;", new Dictionary<string, object>
                     "current_charm", 0);
                 foreach (string observerId in new[] { favoriteOneId, favoriteTwoId, nonFavoriteId, foreignId })
                 {
-                    string pairKey = Program.AmbientPairKey(observerId, rulerId);
+                    string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
                     pairCountsBefore[observerId] = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
                 }
-                favoriteOneView = Program.ResolveObserverPublicStanding(connection, campaignId,
+                favoriteOneView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId,
                     timelineId, favoriteOneId, rulerId);
-                favoriteTwoView = Program.ResolveObserverPublicStanding(connection, campaignId,
+                favoriteTwoView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId,
                     timelineId, favoriteTwoId, rulerId);
-                nonFavoriteView = Program.ResolveObserverPublicStanding(connection, campaignId,
+                nonFavoriteView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId,
                     timelineId, nonFavoriteId, rulerId);
-                foreignView = Program.ResolveObserverPublicStanding(connection, campaignId,
+                foreignView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId,
                     timelineId, foreignId, rulerId);
                 foreach (string observerId in new[] { favoriteOneId, favoriteTwoId, nonFavoriteId, foreignId })
                 {
-                    string pairKey = Program.AmbientPairKey(observerId, rulerId);
+                    string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
                     pairCountsAfter[observerId] = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
@@ -1933,8 +1933,8 @@ ORDER BY tag_id,source_occurrence_id;", new Dictionary<string, object>
             List<Dictionary<string, object>> standingSources = ReadDictionaryList(standing, "sources");
             List<Dictionary<string, object>> favoringSources = standingSources
                 .Where(IsRulerFavoringStandingSource).ToList();
-            int expectedGlobal = Program.RoundAwayFromZero(-10d * (1d - SocialCharmMitigation(rulerCharm)));
-            int expectedNonFavorite = Program.RoundAwayFromZero(-10d
+            int expectedGlobal = RelationshipsService.RoundAwayFromZero(-10d * (1d - SocialCharmMitigation(rulerCharm)));
+            int expectedNonFavorite = RelationshipsService.RoundAwayFromZero(-10d
                 * (1d - SocialCharmMitigation(rulerCharm))
                 * ReadDouble(nonFavoriteView, "jealousyFactor", 1d));
             HashSet<string> linkedFavorites = new HashSet<string>(reputations.Select(row =>
@@ -2090,7 +2090,7 @@ AND hero_id<>$subject ORDER BY hero_id;", new Dictionary<string, object>
                 {
                     string id = ReadString(row, "hero_id", "");
                     Dictionary<string, object> copy = new Dictionary<string, object>(row);
-                    copy["jealousy"] = Program.RelationshipTraitPercent(Program.ReadJsonObject(
+                    copy["jealousy"] = RelationshipsService.RelationshipTraitPercent(Program.ReadJsonObject(
                         Program.CharacterFile(campaignId, id, "traits.json")), "jealousy");
                     return copy;
                 }).OrderBy(row => ReadDouble(row, "jealousy", 50d))
@@ -2113,24 +2113,24 @@ ORDER BY hero_id LIMIT 1;", new Dictionary<string, object>
                 foreach (string observerId in new[] { lowId, highId, playerId, favoriteId, foreignId }
                     .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    string pairKey = Program.AmbientPairKey(observerId, rulerId);
+                    string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
                     pairCountsBefore[observerId] = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
                 }
-                lowView = Program.ResolveObserverPublicStanding(connection, campaignId, timelineId,
+                lowView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timelineId,
                     lowId, rulerId);
-                highView = Program.ResolveObserverPublicStanding(connection, campaignId, timelineId,
+                highView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timelineId,
                     highId, rulerId);
-                playerView = Program.ResolveObserverPublicStanding(connection, campaignId, timelineId,
+                playerView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timelineId,
                     playerId, rulerId);
-                favoriteView = Program.ResolveObserverPublicStanding(connection, campaignId, timelineId,
+                favoriteView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timelineId,
                     favoriteId, rulerId);
-                foreignView = Program.ResolveObserverPublicStanding(connection, campaignId, timelineId,
+                foreignView = RelationshipsService.ResolveObserverPublicStanding(connection, campaignId, timelineId,
                     foreignId, rulerId);
                 foreach (string observerId in pairCountsBefore.Keys.ToList())
                 {
-                    string pairKey = Program.AmbientPairKey(observerId, rulerId);
+                    string pairKey = RelationshipsService.AmbientPairKey(observerId, rulerId);
                     pairCountsAfter[observerId] = ReadInt(Program.QuerySql(connection,
                         "SELECT COUNT(*) AS count FROM relationship_pair_chemistry WHERE pair_key=$pair;",
                         new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault(), "count", 0);
@@ -2138,7 +2138,7 @@ ORDER BY hero_id LIMIT 1;", new Dictionary<string, object>
             }
 
             double charmMitigation = SocialCharmMitigation(rulerCharm);
-            Func<Dictionary<string, object>, int> expected = view => Program.RoundAwayFromZero(-10d
+            Func<Dictionary<string, object>, int> expected = view => RelationshipsService.RoundAwayFromZero(-10d
                 * (1d - charmMitigation) * ReadDouble(view, "jealousyFactor", 1d));
             bool productionStanding = !string.IsNullOrWhiteSpace(rulerId)
                 && favoriteIds.Count >= 2
@@ -2714,16 +2714,16 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                 if (profile.Count == 0) profile = runtimeProfile;
                 if (traits.Count == 0)
                 {
-                    traits = Program.BuildTraitDocument(runtimeProfile);
+                    traits = CharactersService.BuildTraitDocument(runtimeProfile);
                     traitSource = "deterministic_runtime_projection";
                 }
-                Program.EnsureTraitPercentageData(traits, targetId);
+                CharactersService.EnsureTraitPercentageData(traits, targetId);
                 CourtService.EnsureCourtCharacterData(traits, profile, targetId);
                 Dictionary<string, object> percentages =
                     Program.TraitPercentageSnapshot(traits);
                 Dictionary<string, object> virtues =
                     ReadDictionary(traits, "courtVirtues")
-                    ?? Program.CalculateCourtVirtues(percentages);
+                    ?? CharactersService.CalculateCourtVirtues(percentages);
                 Dictionary<string, object> courtCharacter =
                     ReadDictionary(traits, "courtCharacter")
                     ?? new Dictionary<string, object>();
@@ -2809,7 +2809,7 @@ VALUES($campaign,$timeline,$run,$period,$day,$snapshot,$now);",
                     new Dictionary<string, object> { ["id"] = subjectId }).Count == 0)
                     return SocialBalanceError("Both heroes must exist as living adults in the synchronized identity roster.");
 
-                string pairKey = Program.AmbientPairKey(observerId, subjectId);
+                string pairKey = RelationshipsService.AmbientPairKey(observerId, subjectId);
                 bool observerIsA = pairKey.StartsWith(observerId + "|", StringComparison.OrdinalIgnoreCase);
                 string heroA = observerIsA ? observerId : subjectId;
                 string heroB = observerIsA ? subjectId : observerId;
@@ -2855,7 +2855,7 @@ VALUES($pair,$a,$b,$day,$day,$ts);",
                 if (popularityChanged)
                     ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId,
                         new[] { subjectId }, worldDay);
-                Program.RefreshEffectivePairProjection(connection, campaignId, timelineId,
+                RelationshipsService.RefreshEffectivePairProjection(connection, campaignId, timelineId,
                     Program.QuerySql(connection,
                         "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = pairKey })
@@ -3130,7 +3130,7 @@ ORDER BY subject_id;", parameters);
                 && Math.Abs(favoring.Sum(source => ReadDouble(source, "effectiveContribution", 0d)) - expected) < 0.000001d
                 && favoring.Where(source => !ReadBool(source, "collapsedRepresentative", false))
                     .All(source => Math.Abs(ReadDouble(source, "effectiveContribution", 0d)) < 0.000001d)
-                && ReadInt(standing, "standingValue", int.MinValue) == Program.RoundAwayFromZero(
+                && ReadInt(standing, "standingValue", int.MinValue) == RelationshipsService.RoundAwayFromZero(
                     sources.Sum(source => ReadDouble(source, "effectiveContribution", 0d)));
         }
 

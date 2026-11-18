@@ -6,7 +6,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static List<Dictionary<string, object>> RunTavernHouseRosterTests()
         {
@@ -19,7 +19,7 @@ namespace ReignBetaServer
             }
             Check("authored_native_cast_coverage", () =>
             {
-                string source = FindVerificationSourceRoot();
+                string source = Program.FindVerificationSourceRoot();
                 string path = Path.Combine(source, "ReignBeta", "ModuleData", "reign_tavern_cast.json");
                 Require(File.Exists(path), "The immutable authored cast fixture is missing from the validation artifact.");
                 var catalog = Json.Deserialize<TavernHouseCastCatalog>(File.ReadAllText(path));

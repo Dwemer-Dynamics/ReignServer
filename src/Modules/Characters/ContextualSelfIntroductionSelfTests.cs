@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static Dictionary<string, object> ContextualIntroductionFixture(
             string campaignId, string key, string text)
@@ -79,7 +79,7 @@ namespace ReignBetaServer
                 observedRequest = request;
                 return ContextualIntroductionResponse("self_introduction", "Michael of Howarton", exactQuote);
             });
-            string delivered = NormalizeUnknownIdentityVisibleAddress(
+            string delivered = Program.NormalizeUnknownIdentityVisibleAddress(
                 SanitizePromptForIdentity(correctReply, "", "Michael", identity), identity);
             add("contextual_introduction_constalia_final_reply", calls == 1
                 && ReadBool(identity, "canonicalNameAllowed", false) && delivered == correctReply,
@@ -93,10 +93,10 @@ namespace ReignBetaServer
                     ReadString(row, "text", "").Contains("don't know yours", StringComparison.Ordinal))
                 && ReadInt(observedRequest, "maxTokens", 0) == 768,
                 "The helper receives the actual prior question and current spoken statement without stage directions or a full memory/profile packet.", packet);
-            using (var connection = OpenCampaignConnection(campaignId))
+            using (var connection = Program.OpenCampaignConnection(campaignId))
             {
                 var stored = ReadStoredAcquaintance(connection, "contextual_observer_constalia", "contextual_player");
-                var evidence = QuerySql(connection, "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND evidence_type='contextual_self_introduction';",
+                var evidence = Program.QuerySql(connection, "SELECT payload_json FROM identity_evidence WHERE observer_id=$observer AND evidence_type='contextual_self_introduction';",
                     new Dictionary<string, object> { ["observer"] = "contextual_observer_constalia" });
                 add("contextual_introduction_persists_with_evidence", IdentityStateVerified(stored)
                     && ReadString(stored, "verification_source", "") == "authoritative_qualified_self_introduction_contextual"
@@ -106,7 +106,7 @@ namespace ReignBetaServer
             captured["playerText"] = "Perhaps you heard Michael of Howarton announced at the lists?";
             var subsequent = ResolveContextualIntroductionFixture(captured, request => { calls++; return null; });
             add("contextual_introduction_next_turn_no_helper", calls == 1 && ReadBool(subsequent, "canonicalNameAllowed", false)
-                && NormalizeUnknownIdentityVisibleAddress(SanitizePromptForIdentity(correctReply, "", "Michael", subsequent), subsequent) == correctReply,
+                && Program.NormalizeUnknownIdentityVisibleAddress(SanitizePromptForIdentity(correctReply, "", "Michael", subsequent), subsequent) == correctReply,
                 "Learned identity survives the next prompt and adds no classification call.", null);
 
             int index = 0;
@@ -208,7 +208,7 @@ namespace ReignBetaServer
             aliasCorrection["playerText"] = exactText;
             var correctedAlias = ResolveContextualIntroductionFixture(aliasCorrection,
                 request => ContextualIntroductionResponse("self_introduction", "Michael of Howarton", exactQuote));
-            using (var connection = OpenCampaignConnection(campaignId))
+            using (var connection = Program.OpenCampaignConnection(campaignId))
             {
                 var stored = ReadStoredAcquaintance(connection, "contextual_observer_alias_correction", "contextual_player");
                 add("contextual_introduction_preserves_prior_alias", ReadBool(correctedAlias, "canonicalNameAllowed", false)
@@ -238,9 +238,9 @@ namespace ReignBetaServer
             try
             {
                 ResolveContextualIntroductionFixture(ContextualIntroductionFixture(campaignId, "replaced", exactText),
-                    request => { throw new CampaignRequestReplacedException(); });
+                    request => { throw new PersistenceService.CampaignRequestReplacedException(); });
             }
-            catch (CampaignRequestReplacedException) { replaced = true; }
+            catch (PersistenceService.CampaignRequestReplacedException) { replaced = true; }
             add("contextual_introduction_campaign_replacement", replaced, "Campaign replacement cannot be swallowed as an ordinary classifier failure.", null);
 
             foreach (string mode in new[] { "dialogue", "social_event", "party_chat" })
@@ -260,7 +260,7 @@ namespace ReignBetaServer
                 add("contextual_introduction_scoped_history_" + mode, rightHistory && ReadBool(view, "canonicalNameAllowed", false),
                     "The prompt adapter uses canonical channel history instead of an unrelated client transcript copy.", null);
             }
-            bool isolatedLab = !string.IsNullOrWhiteSpace(CampaignsRootOverride.Value)
+            bool isolatedLab = !string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                 || Environment.GetEnvironmentVariable("REIGN_VALIDATION_MODE") == "1";
             if (isolatedLab)
             {

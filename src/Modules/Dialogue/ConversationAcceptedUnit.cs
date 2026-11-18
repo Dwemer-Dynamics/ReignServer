@@ -6,7 +6,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private delegate Dictionary<string, object> ConversationSourceAcceptance(
+        internal delegate Dictionary<string, object> ConversationSourceAcceptance(
             ReignDbConnection connection, Dictionary<string, object> source);
 
         internal sealed class AcceptedConversationUnit
@@ -30,14 +30,14 @@ namespace ReignBetaServer
                 ReadFirstString(payload, "conversationSessionId", "sessionId", "conversationId"),
                 FirstNonEmpty(ReadFirstString(payload, "sceneTurnId", "turnId", "requestId"), EnsureCorrelationId(payload)))).Substring(0, 32);
 
-        private static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_accepted_units (
+        internal static void EnsureAcceptedConversationUnitSchema(ReignDbConnection connection) => ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conversation_accepted_units (
 unit_id TEXT PRIMARY KEY, response_hash TEXT NOT NULL, restore_generation TEXT NOT NULL,
 receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
 
         // All operations inside the source callback use that SAME connection and
         // transaction. File projections, social incidents and native execution
         // have separate owners; this receipt never claims distributed atomicity.
-        private static Dictionary<string, object> PublishAcceptedConversationUnit(AcceptedConversationUnit unit,
+        internal static Dictionary<string, object> PublishAcceptedConversationUnit(AcceptedConversationUnit unit,
             Func<ConversationSourceAcceptance, Dictionary<string, object>> publishSources, Action<string> boundary = null)
         {
             if (string.IsNullOrWhiteSpace(unit.Generation))
@@ -50,9 +50,9 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
             // successful receipt for a different final response.
             if (!IsSinglePassConversation(unit.Payload) && !groundingFailed && FindCriticalConversationContinuityViolations(finalOpening, unit.Payload, unit.Hero).Count > 0)
                 throw new InvalidOperationException("The final response changed after its grounding check; the original contribution remains saved.");
-            if (!IsSinglePassConversation(unit.Payload) && ApproachOpeningViolations(finalOpening, unit.Payload).Count > 0)
+            if (!IsSinglePassConversation(unit.Payload) && RelationshipsService.ApproachOpeningViolations(finalOpening, unit.Payload).Count > 0)
                 throw new InvalidOperationException("The final spoken approach no longer matches its saved opening evidence.");
-            lock (CampaignRelationshipWriteLock(unit.Campaign))
+            lock (RelationshipsService.CampaignRelationshipWriteLock(unit.Campaign))
             {
                 using (var setup = OpenCampaignConnection(unit.Campaign)) EnsureAcceptedConversationUnitSchema(setup);
                 var exchange = publishSources((connection, source) =>
@@ -117,19 +117,19 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                             unit.EventId, ReadDouble(unit.Payload, "worldDay", 0d), existingConnection: connection)
                         : TestDict("status", "suppressed_by_route", "signals", new List<Dictionary<string, object>>());
                     var introductions = unit.PublishIntroductions && !suppressReplyEffects
-                        ? ApplyIdentityIntroductionWrites(unit.Campaign, unit.Payload, unit.Parsed, session,
+                        ? CharactersService.ApplyIdentityIntroductionWrites(unit.Campaign, unit.Payload, unit.Parsed, session,
                             unit.Hero, unit.Player, unit.PlayerText, unit.Reply, audience, connection)
                         : new List<Dictionary<string, object>>();
                     if (!suppressReplyEffects)
-                        AcceptPregnancyDisclosures(connection, ContinuityTimeline(unit.Payload), unit.Hero, unit.Reply, unit.Parsed,
+                        RelationshipsService.AcceptPregnancyDisclosures(connection, ContinuityTimeline(unit.Payload), unit.Hero, unit.Reply, unit.Parsed,
                             audience, ReadString(sourceRows.LastOrDefault(row => ReadString(row, "speaker_id", "") == unit.Hero), "turn_id", ""),
                             ReadDouble(unit.Payload, "worldDay", 0d));
                     boundary?.Invoke("after_context_effects");
                     string group = unit.GroupConversation || unit.EventType == "dialogue_turn"
                         ? "conversation:" + session
                         : BuildMemoryGroupKey(unit.Payload, unit.Hero, unit.Player, unit.Location, "social_event", unit.Timestamp);
-                    var personalState = ReadNpcLives(connection, unit.Campaign, ContinuityTimeline(unit.Payload));
-                    bool personalMatter = NpcLivesOwnsRelationshipReward(personalState, unit.Hero, unit.Payload);
+                    var personalState = CharactersService.ReadNpcLives(connection, unit.Campaign, ContinuityTimeline(unit.Payload));
+                    bool personalMatter = CharactersService.NpcLivesOwnsRelationshipReward(personalState, unit.Hero, unit.Payload);
                     if (personalMatter) unit.Relationships = new List<Dictionary<string, object>>();
                     // A quiet turn preserves the player's sources and an idempotent
                     // receipt, but supplies no NPC speech or attention evidence.
@@ -141,9 +141,9 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         unit.Participants, unit.RetrievalEligible, unit.Payload, unit.Continuity, connection);
                     boundary?.Invoke("after_memory");
                     var attention = suppressReplyEffects ? TestDict("status", excludedStatus)
-                        : RecordAcceptedPlayerAttention(connection, unit, sourceRows);
+                        : RelationshipsService.RecordAcceptedPlayerAttention(connection, unit, sourceRows);
                     var npcLives = suppressReplyEffects ? TestDict("status", excludedStatus)
-                        : RecordAcceptedNpcLives(connection, unit, sourceRows);
+                        : CharactersService.RecordAcceptedNpcLives(connection, unit, sourceRows);
                     var communications = suppressReplyEffects ? TestDict("status", excludedStatus)
                         : AcceptCommunicationCommitments(connection, unit, source, sourceRows.Concat(
                             ReadStringList(privateExchange, "turnIds").SelectMany(id => QuerySql(connection,
@@ -168,7 +168,7 @@ receipt_json TEXT NOT NULL, created_ts BIGINT NOT NULL);");
                         "effectPayload", TestDict("conversationAgencyReceipt", ReadDictionary(effectPayload, "conversationAgencyReceipt"),
                             "intoxicationReceipt", ReadDictionary(effectPayload, "intoxicationReceipt")));
                     boundary?.Invoke("before_unit_receipt");
-                    receipt["politicalReflection"] = AcceptedPoliticalReflection(unit, suppressReplyEffects);
+                    receipt["politicalReflection"] = CharactersService.AcceptedPoliticalReflection(unit, suppressReplyEffects);
                     // Optional, non-gating: binds the one exact displayed NPC source row.
                     var viewInsertion = unit.ViewInsertionRequested && !suppressReplyEffects && !unit.GroupConversation
                         && !unit.PrivateWhisper && unit.EventType == "dialogue_turn"
@@ -297,7 +297,7 @@ VALUES($session,$campaign,$hero,$player,'private_whisper','open',$ts,$ts,$day,$d
             // First statement of the transaction; disposal rolls back and restores search_path.
             QuerySql(connection, "SELECT set_config('search_path', $path, true) AS path;", TestDict("path", "\"" + schema + "\", reign_meta, public"));
             // Absent prerequisites mean no descriptor can exist; an acknowledgment never creates them.
-            if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => TableExists(connection, table)))
+            if (!new[] { "conversation_turns", "memory_precision_state", "conversation_accepted_units" }.All(table => WorldSimulationService.TableExists(connection, table)))
                 return Reply("unknown", "no_view_insertion_descriptor");
             // A publisher takes this session lock first, and its duplicate insert-or-ignore can
             // still bump the restore fence by statement trigger before it rewrites existing source

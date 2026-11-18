@@ -11,7 +11,7 @@ namespace ReignBetaServer
         private static List<Dictionary<string, object>> RunStructuredActionSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
-            results.AddRange(RunSpouseSeparationSelfTests());
+            results.AddRange(RelationshipsService.RunSpouseSeparationSelfTests());
             void Check(string id, bool pass) => results.Add(TestDict("caseId", "structured_action_" + id, "passed", pass, "summary", id));
             var spouseProposal = TestDict("proposal", TestDict("Clauses", new object[] { TestDict("ActionId", "leave_spouse") }));
             Check("spouse_letter_has_private_consequence_cue", RequestedSpouseSeparationCue(spouseProposal).Contains("major and consequential")

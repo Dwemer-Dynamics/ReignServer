@@ -23,7 +23,7 @@ namespace ReignBetaServer
                 return TestDict("ok", false, "errorCode", "retry_identity_mismatch", "error", "Retry must keep the original message identity.");
             string unit = AcceptedConversationEventId(campaign, hero, payload);
             string key = string.Join("|", campaign, ContinuityTimeline(payload), _playerActionGeneration ?? "", unit);
-            using (var lease = DialogueRetryDispatches.Enter(key, 30000, ThrowIfCampaignRequestReplaced))
+            using (var lease = DialogueRetryDispatches.Enter(key, 30000, PersistenceService.ThrowIfCampaignRequestReplaced))
             {
                 if (lease == null) return TestDict("ok", false, "errorCode", "conversation_original_still_running",
                     "error", "The original request is still running. Wait a moment, then select Retry.", "correlationId", correlation);
@@ -72,7 +72,7 @@ namespace ReignBetaServer
         private static bool HasRecallableConversationSpeech(string text) =>
             !string.IsNullOrWhiteSpace(ConversationSpeechForRecall(text));
 
-        private static string ConversationTurnTextForRecall(Dictionary<string, object> turn)
+        internal static string ConversationTurnTextForRecall(Dictionary<string, object> turn)
         {
             string text = ReadString(turn, "text", "");
             return ReadString(turn, "role", "").Equals("player", StringComparison.OrdinalIgnoreCase)
@@ -97,7 +97,7 @@ namespace ReignBetaServer
         // Transport failure stays a failure; a server placeholder is not a model
         // answer, an acknowledgment, a memory, or authorization for an effect.
         private static bool IsIntentionalConversationSilence(Dictionary<string, object> parsed) =>
-            parsed != null && NormalizeSocialEventParticipation(parsed) == "quiet"
+            parsed != null && WorldSimulationService.NormalizeSocialEventParticipation(parsed) == "quiet"
             && string.IsNullOrWhiteSpace(ReadFirstString(parsed, "reply", "response", "text", "content"));
 
         // Called only by routes that allow quiet participation, after structural
@@ -181,7 +181,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static Dictionary<string, object> PrepareCorrespondenceDelivery(Dictionary<string, object> result)
+        internal static Dictionary<string, object> PrepareCorrespondenceDelivery(Dictionary<string, object> result)
         {
             var parsed = ReadBool(result, "ok", false) ? TryParseJsonObject(ReadString(result, "content", "")) : null;
             if (parsed == null) return TestDict("shouldReply", false, "body", "", "error",

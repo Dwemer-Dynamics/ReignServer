@@ -136,7 +136,7 @@ namespace ReignBetaServer
             Check("serialized_allocator_preserves_better_rank_and_required_floor", rankedBudget.ContextPullText.Contains(bestRecord)
                 && rankedBudget.ContextPullText.Contains(rankedFloor) && !rankedBudget.ContextPullText.Contains(weakerRecord)
                 && ReadBool(rankedBudget.Diagnostics, "targetMet", false));
-            Check("serialized_rank_test_reaches_actual_token_trim", ReadObjectList(rankedBudget.Diagnostics, "actions")
+            Check("serialized_rank_test_reaches_actual_token_trim", CharactersService.ReadObjectList(rankedBudget.Diagnostics, "actions")
                 .OfType<Dictionary<string, object>>().Any(d => ReadString(d, "reason", "") == "optional_whole_record_exceeds_serialized_token_allowance"));
             return results;
         }

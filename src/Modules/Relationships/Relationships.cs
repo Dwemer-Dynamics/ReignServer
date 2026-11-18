@@ -8,9 +8,9 @@ using ReignBeta.Shared;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
-        private static readonly string[] RelationshipFacetKeys =
+        internal static readonly string[] RelationshipFacetKeys =
         {
             "trust", "respect", "affection", "loyalty", "fear", "resentment", "rivalry",
             "envy", "attraction", "jealousy", "dependence", "interest_alignment", "debt"
@@ -29,9 +29,9 @@ namespace ReignBetaServer
             "abandonment_fear", "unpaid_obligation", "strategic_seduction", "affair_exposure", "marital_discontent"
         };
 
-        private static void EnsureRelationshipAndCorrespondenceSchema(ReignDbConnection connection)
+        internal static void EnsureRelationshipAndCorrespondenceSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_interaction_receipts (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_interaction_receipts (
     event_id TEXT NOT NULL,
     subject_id TEXT NOT NULL,
     target_id TEXT NOT NULL,
@@ -43,7 +43,7 @@ namespace ReignBetaServer
     PRIMARY KEY(event_id,subject_id,target_id)
 );");
 
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS correspondence_threads (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS correspondence_threads (
     thread_id TEXT PRIMARY KEY,
     participant_a TEXT NOT NULL,
     participant_b TEXT NOT NULL,
@@ -53,7 +53,7 @@ namespace ReignBetaServer
     updated_ts INTEGER NOT NULL,
     UNIQUE(participant_a,participant_b)
 );");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS letters (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS letters (
     letter_id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL,
     sender_id TEXT NOT NULL,
@@ -77,18 +77,18 @@ namespace ReignBetaServer
     created_ts INTEGER NOT NULL,
     updated_ts INTEGER NOT NULL
 );");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_letters_delivery ON letters(status,delivery_day);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_letters_recipient ON letters(recipient_id,status,delivery_day DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_letters_delivery ON letters(status,delivery_day);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_letters_recipient ON letters(recipient_id,status,delivery_day DESC);");
             // Defaults identify existing rows without changing their accepted ETA.
-            EnsureDatabaseColumn(connection, "letters", "transit_policy_version", "INTEGER NOT NULL DEFAULT 0");
-            EnsureDatabaseColumn(connection, "letters", "base_transit_days", "REAL NOT NULL DEFAULT 0");
-            EnsureCorrespondenceMemorySchema(connection);
+            Program.EnsureDatabaseColumn(connection, "letters", "transit_policy_version", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "letters", "base_transit_days", "REAL NOT NULL DEFAULT 0");
+            Program.EnsureCorrespondenceMemorySchema(connection);
             EnsureCorrespondenceDeliverySchema(connection);
-            EnsureConversationMotiveSchema(connection);
+            Program.EnsureConversationMotiveSchema(connection);
             EnsureRelationshipDirectorSchema(connection);
         }
 
-        private static Dictionary<string, object> RelationshipEvaluateApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipEvaluateApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -108,7 +108,7 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Distinct subjectId and targetId are required." };
             }
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureMbtiRelationshipSchema(connection);
                 Dictionary<string, object> applied = RelationshipEvaluateCore(connection, payload, campaignId, eventId, subjectId, targetId);
@@ -127,7 +127,7 @@ namespace ReignBetaServer
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             double worldDay = ReadDouble(payload, "worldDay", ReadDouble(payload, "campaignDay", 0d));
             {
-                Dictionary<string, object> priorEvaluation = QuerySql(connection,
+                Dictionary<string, object> priorEvaluation = Program.QuerySql(connection,
                     "SELECT * FROM relationship_interaction_receipts WHERE event_id=$event AND subject_id=$subject AND target_id=$target LIMIT 1;",
                     new Dictionary<string, object> { ["event"] = eventId, ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
                 if (priorEvaluation != null)
@@ -145,7 +145,7 @@ namespace ReignBetaServer
                 }
                 int nativeDelta = DetermineSmallNativeRelationshipDelta(payload);
                 string pairKey = AmbientPairKey(subjectId, targetId);
-                Dictionary<string, object> chemistry = QuerySql(connection,
+                Dictionary<string, object> chemistry = Program.QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 if (chemistry != null && nativeDelta != 0)
@@ -178,7 +178,7 @@ namespace ReignBetaServer
                         ReadFirstString(payload, "eventType", "type"))
                 };
                 applied["eventId"] = eventId;
-                ExecuteSql(connection, @"INSERT INTO relationship_interaction_receipts(
+                Program.ExecuteSql(connection, @"INSERT INTO relationship_interaction_receipts(
 event_id,subject_id,target_id,native_delta,world_day,reason,source,created_ts)
 VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
                     new Dictionary<string, object>
@@ -206,7 +206,7 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
         // caller-owned transaction. With schemaReady the caller has already run
         // EnsureSocialReputationSchema outside that transaction (its legacy
         // migration issues its own BEGIN). Reason scheduling stays with the caller.
-        private static bool RecomputeRelationshipEvaluationReputation(ReignDbConnection connection, string campaignId,
+        internal static bool RecomputeRelationshipEvaluationReputation(ReignDbConnection connection, string campaignId,
             string timelineId, string targetId, double worldDay, string eventId, int nativeDelta, bool schemaReady)
         {
             if (nativeDelta == 0) return false;
@@ -219,7 +219,7 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
             return popularityChanged;
         }
 
-        private static Dictionary<string, object> RetiredRelationshipMechanicResult(string feature)
+        internal static Dictionary<string, object> RetiredRelationshipMechanicResult(string feature)
         {
             return new Dictionary<string, object>
             {
@@ -263,21 +263,21 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
 
         private static Dictionary<string, object> EnsureRelationshipState(ReignDbConnection connection, string campaignId, string subjectId, string targetId, Dictionary<string, object> payload, long ts)
         {
-            Dictionary<string, object> existing = QuerySql(connection,
+            Dictionary<string, object> existing = Program.QuerySql(connection,
                 "SELECT * FROM relationships WHERE subject_id=$subject AND target_id=$target LIMIT 1;",
                 new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).FirstOrDefault();
             if (existing != null) return existing;
 
-            Dictionary<string, object> subject = ReadJsonObject(CharacterFile(campaignId, subjectId, "profile.json"));
-            Dictionary<string, object> target = ReadJsonObject(CharacterFile(campaignId, targetId, "profile.json"));
+            Dictionary<string, object> subject = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "profile.json"));
+            Dictionary<string, object> target = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "profile.json"));
             Dictionary<string, object> suppliedSubject = ReadDictionary(payload, "subject") ?? new Dictionary<string, object>();
             Dictionary<string, object> suppliedTarget = ReadDictionary(payload, "target") ?? new Dictionary<string, object>();
             if(subject.Count==0)subject=new Dictionary<string, object>(suppliedSubject,StringComparer.OrdinalIgnoreCase);
             if(target.Count==0)target=new Dictionary<string, object>(suppliedTarget,StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> subjectTraitDocument = ReadJsonObject(CharacterFile(campaignId, subjectId, "traits.json"));
-            if (subjectTraitDocument.Count == 0) subjectTraitDocument = ReadDictionary(suppliedSubject, "traits") ?? BuildTraitDocument(suppliedSubject);
-            Dictionary<string, object> targetTraitDocument = ReadJsonObject(CharacterFile(campaignId, targetId, "traits.json"));
-            if (targetTraitDocument.Count == 0) targetTraitDocument = ReadDictionary(suppliedTarget, "traits") ?? BuildTraitDocument(suppliedTarget);
+            Dictionary<string, object> subjectTraitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, subjectId, "traits.json"));
+            if (subjectTraitDocument.Count == 0) subjectTraitDocument = ReadDictionary(suppliedSubject, "traits") ?? CharactersService.BuildTraitDocument(suppliedSubject);
+            Dictionary<string, object> targetTraitDocument = Program.ReadJsonObject(Program.CharacterFile(campaignId, targetId, "traits.json"));
+            if (targetTraitDocument.Count == 0) targetTraitDocument = ReadDictionary(suppliedTarget, "traits") ?? CharactersService.BuildTraitDocument(suppliedTarget);
             int nativeRelation = Clamp(ReadInt(payload, "nativeRelation", ReadInt(payload, "relation", 0)), -100, 100);
             bool spouse = ReadString(subject, "spouseId", "").Equals(targetId, StringComparison.OrdinalIgnoreCase);
             bool family = spouse
@@ -299,9 +299,9 @@ VALUES($event,$subject,$target,$delta,$day,$reason,$source,$ts);",
                 ["ts"] = ts, ["payload"] = Json.Serialize(new Dictionary<string, object> { ["initializedFrom"] = "evidence_weighted_prior" })
             };
             foreach (string key in RelationshipFacetKeys) args[key] = ClampRelationship(initial[key]);
-            ExecuteSql(connection, @"INSERT INTO relationships(subject_id,target_id,trust,fear,respect,resentment,loyalty,debt,affection,rivalry,envy,attraction,jealousy,dependence,interest_alignment,native_relation,confidence_json,evidence_json,initialized_ts,last_eval_ts,last_updated_from_json,updated_ts,payload_json)
+            Program.ExecuteSql(connection, @"INSERT INTO relationships(subject_id,target_id,trust,fear,respect,resentment,loyalty,debt,affection,rivalry,envy,attraction,jealousy,dependence,interest_alignment,native_relation,confidence_json,evidence_json,initialized_ts,last_eval_ts,last_updated_from_json,updated_ts,payload_json)
 VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affection,$rivalry,$envy,$attraction,$jealousy,$dependence,$interest_alignment,$native,$confidence,$evidence,$ts,0,'[]',$ts,$payload);", args);
-            return QuerySql(connection, "SELECT * FROM relationships WHERE subject_id=$subject AND target_id=$target LIMIT 1;",
+            return Program.QuerySql(connection, "SELECT * FROM relationships WHERE subject_id=$subject AND target_id=$target LIMIT 1;",
                 new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId }).First();
         }
 
@@ -338,10 +338,10 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
             double subjectPragmatism = RelationshipTraitPercent(subjectTraits, "pragmatism");
             double subjectStatus = RelationshipStatusScore(subject);
             double targetStatus = RelationshipStatusScore(target);
-            double relativeStatus = ClampDouble((targetStatus - subjectStatus) / 50d, -1d, 1d);
+            double relativeStatus = Program.ClampDouble((targetStatus - subjectStatus) / 50d, -1d, 1d);
             double targetAttractiveness = RelationshipVisibleAttractiveness(target, targetTraits);
             double subjectAttractiveness = RelationshipVisibleAttractiveness(subject, subjectTraits);
-            double affinity = ClampDouble(
+            double affinity = Program.ClampDouble(
                 0.25d * (1d - Math.Abs(sociability - targetSociability) / 100d)
                 + 0.20d * (1d - Math.Abs(subjectPragmatism - targetPragmatism) / 100d)
                 + 0.25d * (targetCompassion / 100d) + 0.15d * (targetTact / 100d)
@@ -389,29 +389,29 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
         {
             Dictionary<string, object> percentages = ReadDictionary(traitDocument, "traitPercentages")
                 ?? ReadDictionary(ReadDictionary(traitDocument, "traits"), "traitPercentages");
-            if (percentages != null && percentages.ContainsKey(key)) return ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
+            if (percentages != null && percentages.ContainsKey(key)) return Program.ClampDouble(ReadDouble(percentages, key, 50d), 0d, 100d);
             Dictionary<string, object> foundation = ReadDictionary(traitDocument, "foundationTraits")
                 ?? ReadDictionary(ReadDictionary(traitDocument, "traits"), "foundationTraits")
                 ?? traitDocument ?? new Dictionary<string, object>();
-            return ClampDouble(50d + 25d * ReadDouble(foundation, key, 0d), 0d, 100d);
+            return Program.ClampDouble(50d + 25d * ReadDouble(foundation, key, 0d), 0d, 100d);
         }
 
         private static double RelationshipVisibleAttractiveness(Dictionary<string, object> data, Dictionary<string, object> traits)
         {
             Dictionary<string, object> appearance = ReadDictionary(data, "appearance") ?? data ?? new Dictionary<string, object>();
             Dictionary<string, object> attractiveness = ReadDictionary(traits, "attractiveness") ?? new Dictionary<string, object>();
-            return ClampDouble(ReadDouble(appearance, "attractiveness",
+            return Program.ClampDouble(ReadDouble(appearance, "attractiveness",
                 ReadDouble(data, "visibleAttractiveness", ReadDouble(attractiveness, "weight", ReadDouble(attractiveness, "build", 50d)))), 0d, 100d);
         }
 
         private static double RelationshipStatusScore(Dictionary<string, object> data)
         {
             data = data ?? new Dictionary<string, object>();
-            double tier = ClampDouble(ReadDouble(data, "clanTier", 0d), 0d, 6d);
+            double tier = Program.ClampDouble(ReadDouble(data, "clanTier", 0d), 0d, 6d);
             double fiefs = Math.Max(0d, ReadDouble(data, "clanFiefCount", ReadDouble(data, "fiefCount", 0d)));
             double renown = Math.Max(0d, ReadDouble(data, "clanRenown", ReadDouble(data, "renown", 0d)));
             double influence = Math.Max(0d, ReadDouble(data, "influence", 0d));
-            return ClampDouble(tier * 9d + Math.Min(20d, fiefs * 6d) + Math.Min(15d, renown / 80d)
+            return Program.ClampDouble(tier * 9d + Math.Min(20d, fiefs * 6d) + Math.Min(15d, renown / 80d)
                 + Math.Min(10d, influence / 150d) + (ReadBool(data, "isRuler", false) ? 15d : 0d), 0d, 100d);
         }
 
@@ -470,13 +470,13 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
         {
             string text = ((eventType ?? "") + " " + (summary ?? "")).ToLowerInvariant();
             bool registeredStoryEvent = IsRegisteredRelationshipStoryEvent(eventType);
-            bool betrayal = ContainsAny(text, "betray", "lied", "deceiv", "broke oath", "exposed", "revealed my secret");
-            bool humiliation = ContainsAny(text, "mock", "humiliat", "publicly shamed", "disgrace");
-            bool intimacy = ContainsAny(text, "love", "kiss", "intimate", "embrace", "flirt");
-            bool rejection = ContainsAny(text, "reject", "spurn");
-            bool reconciliation = ContainsAny(text, "apolog", "forgive", "reconcile");
-            string impact = ContainsAny(text, "betray", "murder", "saved my child", "saved her child", "saved his child", "life debt") ? "transformative"
-                : ContainsAny(text, "love", "intimate", "kiss", "humiliat", "rescued", "confession", "oath", "threat") ? "major" : "ordinary";
+            bool betrayal = Program.ContainsAny(text, "betray", "lied", "deceiv", "broke oath", "exposed", "revealed my secret");
+            bool humiliation = Program.ContainsAny(text, "mock", "humiliat", "publicly shamed", "disgrace");
+            bool intimacy = Program.ContainsAny(text, "love", "kiss", "intimate", "embrace", "flirt");
+            bool rejection = Program.ContainsAny(text, "reject", "spurn");
+            bool reconciliation = Program.ContainsAny(text, "apolog", "forgive", "reconcile");
+            string impact = Program.ContainsAny(text, "betray", "murder", "saved my child", "saved her child", "saved his child", "life debt") ? "transformative"
+                : Program.ContainsAny(text, "love", "intimate", "kiss", "humiliat", "rescued", "confession", "oath", "threat") ? "major" : "ordinary";
             int unit = impact == "transformative" ? 35 : impact == "major" ? 16 : 4;
             Dictionary<string, object> deltas = RelationshipFacetKeys.ToDictionary(key => key, key => (object)0, StringComparer.OrdinalIgnoreCase);
             Dictionary<string, object> motive = ReadDictionary(payload, "motiveDecision") ?? new Dictionary<string, object>();
@@ -511,13 +511,13 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
             }
             if (!registeredStoryEvent)
             {
-                if (ContainsAny(text, "thank", "gift", "help", "saved", "rescue", "kindness")) { deltas["trust"] = unit; deltas["affection"] = unit; deltas["loyalty"] = Math.Max(2, unit / 2); }
-                if (ContainsAny(text, "confession", "secret", "trusted you")) { deltas["trust"] = unit; deltas["affection"] = Math.Max(2, unit / 2); }
+                if (Program.ContainsAny(text, "thank", "gift", "help", "saved", "rescue", "kindness")) { deltas["trust"] = unit; deltas["affection"] = unit; deltas["loyalty"] = Math.Max(2, unit / 2); }
+                if (Program.ContainsAny(text, "confession", "secret", "trusted you")) { deltas["trust"] = unit; deltas["affection"] = Math.Max(2, unit / 2); }
                 if (intimacy && calculatedRomance) { deltas["interest_alignment"] = unit; deltas["dependence"] = Math.Max(2, unit / 2); deltas["debt"] = Math.Max(2, unit / 3); }
                 else if (intimacy && !coerciveRomance) { deltas["affection"] = unit; deltas["attraction"] = unit; deltas["loyalty"] = Math.Max(2, unit / 2); }
                 if (rejection || humiliation) { deltas["affection"] = -unit; deltas["respect"] = -unit; deltas["resentment"] = unit; }
                 if (betrayal) { deltas["trust"] = -unit; deltas["loyalty"] = -unit; deltas["resentment"] = unit; deltas["respect"] = -Math.Max(2, unit / 2); }
-                if (ContainsAny(text, "threat", "kill you", "execute")) { deltas["fear"] = unit; deltas["trust"] = -Math.Max(2, unit / 2); deltas["resentment"] = Math.Max(2, unit / 2); }
+                if (Program.ContainsAny(text, "threat", "kill you", "execute")) { deltas["fear"] = unit; deltas["trust"] = -Math.Max(2, unit / 2); deltas["resentment"] = Math.Max(2, unit / 2); }
                 if (reconciliation) { deltas["resentment"] = -unit; deltas["trust"] = Math.Max(2, unit / 2); }
             }
 
@@ -587,23 +587,23 @@ VALUES($subject,$target,$trust,$fear,$respect,$resentment,$loyalty,$debt,$affect
                 string kind = ReadString(item, "kind", "");
                 string operation = ReadString(item, "operation", "reinforce").ToLowerInvariant();
                 if (!RelationshipPressureKinds.Contains(kind)) continue;
-                Dictionary<string, object> existing = QuerySql(connection, "SELECT * FROM relationship_pressures WHERE subject_id=$subject AND target_id=$target AND kind=$kind AND status='active' ORDER BY updated_ts DESC LIMIT 1;",
+                Dictionary<string, object> existing = Program.QuerySql(connection, "SELECT * FROM relationship_pressures WHERE subject_id=$subject AND target_id=$target AND kind=$kind AND status='active' ORDER BY updated_ts DESC LIMIT 1;",
                     new Dictionary<string, object> { ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind }).FirstOrDefault();
-                double delta = ClampDouble(ReadDouble(item, "intensityDelta", operation == "create" ? 25d : operation == "resolve" ? -100d : 10d), -100d, 100d);
+                double delta = Program.ClampDouble(ReadDouble(item, "intensityDelta", operation == "create" ? 25d : operation == "resolve" ? -100d : 10d), -100d, 100d);
                 if (existing == null && operation != "resolve")
                 {
                     string id = "rpr_" + Guid.NewGuid().ToString("N");
-                    double intensity = ClampDouble(Math.Max(0d, delta), 0d, 100d);
-                    ExecuteSql(connection, @"INSERT INTO relationship_pressures(pressure_id,subject_id,target_id,kind,status,intensity,secrecy,summary,related_entities_json,trigger_json,evidence_json,created_day,updated_day,updated_ts,payload_json)
+                    double intensity = Program.ClampDouble(Math.Max(0d, delta), 0d, 100d);
+                    Program.ExecuteSql(connection, @"INSERT INTO relationship_pressures(pressure_id,subject_id,target_id,kind,status,intensity,secrecy,summary,related_entities_json,trigger_json,evidence_json,created_day,updated_day,updated_ts,payload_json)
 VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entities,$trigger,$evidence,$day,$day,$ts,$payload);",
-                        new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["intensity"] = intensity, ["secrecy"] = ClampDouble(ReadDouble(item, "secrecy", 0.5d), 0d, 1d), ["summary"] = ReadString(item, "summary", ""), ["entities"] = Json.Serialize(ReadStringList(item, "relatedEntityIds")), ["trigger"] = Json.Serialize(new Dictionary<string, object> { ["triggered"] = ReadBool(item, "triggered", false) }), ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
+                        new Dictionary<string, object> { ["id"] = id, ["subject"] = subjectId, ["target"] = targetId, ["kind"] = kind, ["intensity"] = intensity, ["secrecy"] = Program.ClampDouble(ReadDouble(item, "secrecy", 0.5d), 0d, 1d), ["summary"] = ReadString(item, "summary", ""), ["entities"] = Json.Serialize(ReadStringList(item, "relatedEntityIds")), ["trigger"] = Json.Serialize(new Dictionary<string, object> { ["triggered"] = ReadBool(item, "triggered", false) }), ["evidence"] = Json.Serialize(new[] { eventId }), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item) });
                     results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = "created", ["intensity"] = intensity, ["pressureId"] = id });
                 }
                 else if (existing != null)
                 {
-                    double intensity = ClampDouble(ReadDouble(existing, "intensity", 0d) + delta, 0d, 100d);
+                    double intensity = Program.ClampDouble(ReadDouble(existing, "intensity", 0d) + delta, 0d, 100d);
                     string status = operation == "resolve" || intensity <= 0d ? "resolved" : "active";
-                    ExecuteSql(connection, "UPDATE relationship_pressures SET status=$status,intensity=$intensity,summary=$summary,updated_day=$day,updated_ts=$ts,payload_json=$payload WHERE pressure_id=$id;",
+                    Program.ExecuteSql(connection, "UPDATE relationship_pressures SET status=$status,intensity=$intensity,summary=$summary,updated_day=$day,updated_ts=$ts,payload_json=$payload WHERE pressure_id=$id;",
                         new Dictionary<string, object> { ["status"] = status, ["intensity"] = intensity, ["summary"] = FirstNonEmpty(ReadString(item, "summary", ""), ReadString(existing, "summary", "")), ["day"] = day, ["ts"] = ts, ["payload"] = Json.Serialize(item), ["id"] = ReadString(existing, "pressure_id", "") });
                     results.Add(new Dictionary<string, object> { ["kind"] = kind, ["operation"] = status == "resolved" ? "resolved" : operation, ["intensity"] = intensity, ["pressureId"] = ReadString(existing, "pressure_id", "") });
                 }
@@ -611,22 +611,22 @@ VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entitie
             return results;
         }
 
-        private static Dictionary<string, object> RelationshipContextApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipContextApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string subjectId = ReadFirstString(payload, "subjectId", "npcId", "heroStringId");
             string targetId = ReadFirstString(payload, "targetId", "playerId");
             double day = ReadDouble(payload, "worldDay", 0d);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
                 string timelineId = ReadString(payload, "timelineId", "main");
                 double standingDay = day > 0d
                     ? day
-                    : LatestKnownWorldDay(connection, campaignId);
+                    : WorldSimulationService.LatestKnownWorldDay(connection, campaignId);
                 string pairKey = AmbientPairKey(subjectId, targetId);
-                Dictionary<string, object> chemistry = QuerySql(connection,
+                Dictionary<string, object> chemistry = Program.QuerySql(connection,
                     "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                     new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
                 bool subjectIsA = chemistry != null && ReadString(chemistry, "hero_a_id", "")
@@ -645,7 +645,7 @@ VALUES($id,$subject,$target,$kind,'active',$intensity,$secrecy,$summary,$entitie
                 int compatibility = chemistry == null ? 0
                     : ReadInt(chemistry, subjectIsA ? "chance_a_to_b" : "chance_b_to_a", 0);
                 Dictionary<string, object> lifecycle = RelationshipLifecycleView(connection, subjectId, targetId);
-                List<Dictionary<string, object>> incidents = QuerySql(connection, @"SELECT kind,world_day,summary,rumor_id
+                List<Dictionary<string, object>> incidents = Program.QuerySql(connection, @"SELECT kind,world_day,summary,rumor_id
 FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created_ts DESC LIMIT 12;",
                     new Dictionary<string, object> { ["pair"] = pairKey });
                 return new Dictionary<string, object>
@@ -677,7 +677,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             }
         }
 
-        private static List<Dictionary<string, object>> EvaluateCompletedActionRelationships(Dictionary<string, object> payload)
+        internal static List<Dictionary<string, object>> EvaluateCompletedActionRelationships(Dictionary<string, object> payload)
         {
             List<Dictionary<string, object>> changes = new List<Dictionary<string, object>>();
             List<Dictionary<string, object>> directions = CompletedActionRelationshipDirections(payload);
@@ -699,10 +699,10 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
 
         // Actor-toward-target first, then the reverse. Empty when the report has no
         // relationship effect. A null timeline keeps the legacy "main" default.
-        private static List<Dictionary<string, object>> CompletedActionRelationshipDirections(Dictionary<string, object> payload, string timelineId = null)
+        internal static List<Dictionary<string, object>> CompletedActionRelationshipDirections(Dictionary<string, object> payload, string timelineId = null)
         {
             List<Dictionary<string, object>> directions = new List<Dictionary<string, object>>();
-            if (IsPracticeDuelActionReport(payload)) return directions;
+            if (Program.IsPracticeDuelActionReport(payload)) return directions;
             string status = ReadString(payload, "status", "");
             string actorId = ReadFirstString(payload, "actorHeroStringId", "actorHeroId");
             string targetId = ReadFirstString(payload, "targetHeroStringId", "targetHeroId");
@@ -714,7 +714,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             string campaignId = ReadString(payload, "campaignId", "default");
             string actionId = ReadFirstString(payload, "serverActionId", "actionId", "id");
             string actionType = ReadFirstString(payload, "type", "command");
-            if (IsTemporaryPartyGuestLifecycleAction(CanonicalCommand(actionType)))
+            if (IsTemporaryPartyGuestLifecycleAction(Program.CanonicalCommand(actionType)))
             {
                 return directions;
             }
@@ -748,13 +748,13 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             return directions;
         }
 
-        private static int CompletedActionSharedDelta(List<int> nativeDeltas) => nativeDeltas.Count == 0 ? 0
+        internal static int CompletedActionSharedDelta(List<int> nativeDeltas) => nativeDeltas.Count == 0 ? 0
             : Clamp((int)Math.Round(nativeDeltas.Average(), MidpointRounding.AwayFromZero), -25, 15);
 
         // Opt-in terminal reports only: both directional evaluations and their
         // idempotency rows join the caller's transaction. The caller has verified
         // that no directional row predates the protocol, so none is idempotent here.
-        private static int EvaluateCompletedActionRelationshipsInTransaction(ReignDbConnection connection,
+        internal static int EvaluateCompletedActionRelationshipsInTransaction(ReignDbConnection connection,
             List<Dictionary<string, object>> directions, List<Dictionary<string, object>> evaluations)
         {
             List<int> nativeDeltas = new List<int>();
@@ -772,7 +772,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             return CompletedActionSharedDelta(nativeDeltas);
         }
 
-        private static bool IsTemporaryPartyGuestLifecycleAction(string actionType)
+        internal static bool IsTemporaryPartyGuestLifecycleAction(string actionType)
         {
             switch ((actionType ?? string.Empty).Trim().ToLowerInvariant())
             {
@@ -793,9 +793,9 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             double day = ReadDouble(payload, "worldDay", 0d);
             HashSet<string> present = new HashSet<string>(ReadStringList(payload, "presentHeroIds"), StringComparer.OrdinalIgnoreCase);
             string playerId = ReadFirstString(payload, "playerId", "playerHeroStringId");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                List<Dictionary<string, object>> candidates = QuerySql(connection, "SELECT * FROM relationship_developments WHERE status='ready' AND available_day<=$day AND (expires_day=0 OR expires_day>=$day) ORDER BY priority DESC,updated_ts ASC LIMIT 30;", new Dictionary<string, object> { ["day"] = day });
+                List<Dictionary<string, object>> candidates = Program.QuerySql(connection, "SELECT * FROM relationship_developments WHERE status='ready' AND available_day<=$day AND (expires_day=0 OR expires_day>=$day) ORDER BY priority DESC,updated_ts ASC LIMIT 30;", new Dictionary<string, object> { ["day"] = day });
                 Dictionary<string, object> selected = candidates.FirstOrDefault(row =>
                 {
                     string mode = ReadString(row, "delivery_mode", "in_person");
@@ -806,7 +806,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                     return mode == "offscreen" && !subject.Equals(playerId, StringComparison.OrdinalIgnoreCase) && !target.Equals(playerId, StringComparison.OrdinalIgnoreCase);
                 });
                 if (selected == null) return new Dictionary<string, object> { ["ok"] = true, ["development"] = new Dictionary<string, object>() };
-                ExecuteSql(connection, "UPDATE relationship_developments SET status='claimed',claimed_day=$day,updated_ts=$ts WHERE development_id=$id AND status='ready';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = ReadString(selected, "development_id", "") });
+                Program.ExecuteSql(connection, "UPDATE relationship_developments SET status='claimed',claimed_day=$day,updated_ts=$ts WHERE development_id=$id AND status='ready';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = ReadString(selected, "development_id", "") });
                 selected["status"] = "claimed";
                 return new Dictionary<string, object> { ["ok"] = true, ["development"] = selected };
             }
@@ -819,14 +819,14 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             string id = ReadFirstString(payload, "developmentId", "development_id");
             string status = ReadString(payload, "status", "resolved").ToLowerInvariant();
             if (status != "resolved" && status != "deferred" && status != "cancelled") status = "resolved";
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                ExecuteSql(connection, "UPDATE relationship_developments SET status=$status,resolved_day=$day,payload_json=$payload,updated_ts=$ts WHERE development_id=$id;", new Dictionary<string, object> { ["status"] = status, ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
+                Program.ExecuteSql(connection, "UPDATE relationship_developments SET status=$status,resolved_day=$day,payload_json=$payload,updated_ts=$ts WHERE development_id=$id;", new Dictionary<string, object> { ["status"] = status, ["day"] = ReadDouble(payload, "worldDay", 0d), ["payload"] = Json.Serialize(payload), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
             }
             return new Dictionary<string, object> { ["ok"] = true, ["developmentId"] = id, ["status"] = status };
         }
 
-        private static Dictionary<string, object> CorrespondenceSendApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CorrespondenceSendApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -843,14 +843,14 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             double deliveryDay = campaignReport
                 ? dispatchDay
                 : Math.Max(dispatchDay + 0.25d, ReadDouble(payload, "deliveryDay", dispatchDay + 3d));
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 string reason = ReadString(payload, "reason", "");
                 if ((source.Equals("court_economic_transfer", StringComparison.OrdinalIgnoreCase)
                         || campaignReport || IsDeterministicMarriageLetter(source))
                     && !string.IsNullOrWhiteSpace(reason))
                 {
-                    Dictionary<string, object> existing = QuerySql(connection,
+                    Dictionary<string, object> existing = Program.QuerySql(connection,
                         "SELECT * FROM letters WHERE sender_id=$sender AND recipient_id=$recipient AND source=$source AND reason=$reason ORDER BY created_ts DESC,letter_id;",
                         new Dictionary<string, object> { ["sender"] = senderId, ["recipient"] = recipientId, ["source"] = source, ["reason"] = reason })
                         .FirstOrDefault(row => !IsDeterministicMarriageLetter(source)
@@ -874,7 +874,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 if (campaignReport)
                 {
                     string letterId = ReadString(inserted, "letterId", "");
-                    ExecuteSql(connection,
+                    Program.ExecuteSql(connection,
                         "UPDATE letters SET status='delivered',delivery_day=$day,delivered_day=$day,updated_ts=$ts WHERE letter_id=$id;",
                         new Dictionary<string, object>
                         {
@@ -885,15 +885,15 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                     inserted["status"] = "delivered";
                     inserted["deliveryDay"] = dispatchDay;
                     inserted["deliveredDay"] = dispatchDay;
-                    Dictionary<string, object> delivered = QuerySql(connection,
+                    Dictionary<string, object> delivered = Program.QuerySql(connection,
                         "SELECT * FROM letters WHERE letter_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = letterId }).FirstOrDefault();
                     if (delivered != null) AppendDeliveredLetterHistory(campaignId, recipientId, delivered, dispatchDay);
                 }
-                List<Dictionary<string, object>> queuedActions = !UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase)
+                List<Dictionary<string, object>> queuedActions = !Program.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase)
                     ? QueueImmediateRebellionLetterAction(campaignId, payload, senderId, recipientId, body)
                     : new List<Dictionary<string, object>>();
-                if (!UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase))
+                if (!Program.UsesStructuredActions(payload) && source.Equals("player", StringComparison.OrdinalIgnoreCase))
                     queuedActions.AddRange(QueueImmediateCampaignOrderGuidanceAction(
                         connection, campaignId, payload, senderId, recipientId, body));
                 inserted["ok"] = true;
@@ -909,13 +909,13 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
             string recipientId,
             string body)
         {
-            string command = LooksLikeExplicitPlayerRebellionDeclaration(body)
+            string command = Program.LooksLikeExplicitPlayerRebellionDeclaration(body)
                 ? "start_ruling_clan_rebellion"
-                : LooksLikeExplicitPlayerRebellionSurrender(body) ? "surrender_rebellion" : string.Empty;
+                : Program.LooksLikeExplicitPlayerRebellionSurrender(body) ? "surrender_rebellion" : string.Empty;
             if (string.IsNullOrWhiteSpace(command)) return new List<Dictionary<string, object>>();
             Dictionary<string, object> sender = ReadDictionary(payload, "sender") ?? new Dictionary<string, object>();
             Dictionary<string, object> recipient = ReadDictionary(payload, "recipient") ?? new Dictionary<string, object>();
-            Dictionary<string, object> candidate = BuildRebellionActionCandidate(
+            Dictionary<string, object> candidate = Program.BuildRebellionActionCandidate(
                 command,
                 senderId,
                 FirstNonEmpty(ReadFirstString(payload, "playerKingdomId", "actorKingdomId"), ReadString(sender, "kingdomId", "")),
@@ -926,11 +926,11 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
                 command == "start_ruling_clan_rebellion"
                     ? "The player dispatched an explicit unilateral challenge and declaration of rebellion to the current ruler."
                     : "The player dispatched an explicit surrender of their named rebellion leadership.");
-            List<Dictionary<string, object>> queued = EvaluateAndQueueActionCandidates(
+            List<Dictionary<string, object>> queued = Program.EvaluateAndQueueActionCandidates(
                 campaignId, payload, body, new List<Dictionary<string, object>> { candidate },
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
             if (queued.Count == 0 && errors.Count > 0)
-                LogOperational("correspondence.rebellion_action_failed",
+                Program.LogOperational("correspondence.rebellion_action_failed",
                     new Dictionary<string, object> { ["campaignId"] = campaignId, ["errors"] = errors, ["rejected"] = rejected });
             return queued;
         }
@@ -945,7 +945,7 @@ FROM relationship_incidents WHERE pair_key=$pair ORDER BY world_day DESC,created
         {
             string response = NormalizeCampaignOrderGuidance(body);
             if (string.IsNullOrWhiteSpace(response)) return new List<Dictionary<string, object>>();
-            Dictionary<string, object> report = QuerySql(connection,
+            Dictionary<string, object> report = Program.QuerySql(connection,
                 @"SELECT * FROM letters
 WHERE sender_id=$commander AND recipient_id=$player
   AND source='campaign_command_urgent_report'
@@ -976,11 +976,11 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
                     ["reportId"] = ReadFirstString(reportPayload, "reportId", "report_id")
                 }
             };
-            List<Dictionary<string, object>> queued = EvaluateAndQueueActionCandidates(
+            List<Dictionary<string, object>> queued = Program.EvaluateAndQueueActionCandidates(
                 campaignId, payload, body, new List<Dictionary<string, object>> { candidate },
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
             if (queued.Count == 0 && errors.Count > 0)
-                LogOperational("correspondence.campaign_guidance_action_failed",
+                Program.LogOperational("correspondence.campaign_guidance_action_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = campaignId,
@@ -994,19 +994,19 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
 
         private static string NormalizeCampaignOrderGuidance(string text)
         {
-            string q = NormalizeLookup(text);
+            string q = Program.NormalizeLookup(text);
             if (string.IsNullOrWhiteSpace(q)
-                || ContainsAnyPhrase(q, new[] { "should i", "could i", "would i", "maybe", "perhaps" }))
+                || Program.ContainsAnyPhrase(q, new[] { "should i", "could i", "would i", "maybe", "perhaps" }))
                 return string.Empty;
-            if (ContainsAnyPhrase(q, new[] { "cancel the order", "cancel this order", "abort the order" })) return "cancel";
-            if (ContainsAnyPhrase(q, new[] { "withdraw", "retreat", "fall back" })) return "withdraw";
-            if (ContainsAnyPhrase(q, new[] { "hold position", "hold your position", "wait there", "stay put" })) return "hold";
-            if (ContainsAnyPhrase(q, new[] { "adapt", "change the plan", "use your judgment", "use your judgement" })) return "adapt";
-            if (ContainsAnyPhrase(q, new[] { "continue", "proceed", "carry on", "execute the order" })) return "continue";
+            if (Program.ContainsAnyPhrase(q, new[] { "cancel the order", "cancel this order", "abort the order" })) return "cancel";
+            if (Program.ContainsAnyPhrase(q, new[] { "withdraw", "retreat", "fall back" })) return "withdraw";
+            if (Program.ContainsAnyPhrase(q, new[] { "hold position", "hold your position", "wait there", "stay put" })) return "hold";
+            if (Program.ContainsAnyPhrase(q, new[] { "adapt", "change the plan", "use your judgment", "use your judgement" })) return "adapt";
+            if (Program.ContainsAnyPhrase(q, new[] { "continue", "proceed", "carry on", "execute the order" })) return "continue";
             return string.Empty;
         }
 
-        private static Dictionary<string, object> InsertLetter(ReignDbConnection connection, string senderId, string senderName, string recipientId, string recipientName, string body, string source, string reason, string parentLetterId, string originId, string destinationId, double dispatchDay, double deliveryDay, Dictionary<string, object> payload, double? travelTimeMultiplier = null)
+        internal static Dictionary<string, object> InsertLetter(ReignDbConnection connection, string senderId, string senderName, string recipientId, string recipientName, string body, string source, string reason, string parentLetterId, string originId, string destinationId, double dispatchDay, double deliveryDay, Dictionary<string, object> payload, double? travelTimeMultiplier = null)
         {
             // Accept the letter and its author's continuity changes together. A
             // failed projection must not leave a sent letter that a retry duplicates.
@@ -1014,7 +1014,7 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             {
             if (source == "npc_reply" && !string.IsNullOrWhiteSpace(parentLetterId))
             {
-                var existing = QuerySql(connection, "SELECT * FROM letters WHERE parent_letter_id=$parent AND sender_id=$sender AND recipient_id=$recipient AND source='npc_reply' LIMIT 1;",
+                var existing = Program.QuerySql(connection, "SELECT * FROM letters WHERE parent_letter_id=$parent AND sender_id=$sender AND recipient_id=$recipient AND source='npc_reply' LIMIT 1;",
                     new Dictionary<string, object> { ["parent"] = parentLetterId, ["sender"] = senderId, ["recipient"] = recipientId }).FirstOrDefault();
                 if (existing != null)
                 {
@@ -1027,43 +1027,43 @@ ORDER BY dispatch_day DESC,created_ts DESC LIMIT 1;",
             }
             string a = string.Compare(senderId, recipientId, StringComparison.OrdinalIgnoreCase) <= 0 ? senderId : recipientId;
             string b = a == senderId ? recipientId : senderId;
-            Dictionary<string, object> thread = QuerySql(connection, "SELECT * FROM correspondence_threads WHERE participant_a=$a AND participant_b=$b LIMIT 1;", new Dictionary<string, object> { ["a"] = a, ["b"] = b }).FirstOrDefault();
+            Dictionary<string, object> thread = Program.QuerySql(connection, "SELECT * FROM correspondence_threads WHERE participant_a=$a AND participant_b=$b LIMIT 1;", new Dictionary<string, object> { ["a"] = a, ["b"] = b }).FirstOrDefault();
             string threadId = thread == null ? "thread_" + Guid.NewGuid().ToString("N") : ReadString(thread, "thread_id", "");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (thread == null)
-                ExecuteSql(connection, "INSERT INTO correspondence_threads(thread_id,participant_a,participant_b,last_activity_day,created_ts,updated_ts) VALUES($id,$a,$b,$day,$ts,$ts);", new Dictionary<string, object> { ["id"] = threadId, ["a"] = a, ["b"] = b, ["day"] = dispatchDay, ["ts"] = ts });
+                Program.ExecuteSql(connection, "INSERT INTO correspondence_threads(thread_id,participant_a,participant_b,last_activity_day,created_ts,updated_ts) VALUES($id,$a,$b,$day,$ts,$ts);", new Dictionary<string, object> { ["id"] = threadId, ["a"] = a, ["b"] = b, ["day"] = dispatchDay, ["ts"] = ts });
             string letterId = "letter_" + Guid.NewGuid().ToString("N");
             if (double.IsNaN(dispatchDay) || double.IsInfinity(dispatchDay)) throw new InvalidOperationException("Letter dispatch day must be finite.");
             bool immediate = string.Equals(source, "campaign_command_urgent_report", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(source, "campaign_command_report", StringComparison.OrdinalIgnoreCase);
             double baseTransit = immediate ? 0d : CorrespondenceTransitPolicy.NormalizeBaseDays(deliveryDay - dispatchDay);
             deliveryDay = dispatchDay + CorrespondenceTransitPolicy.NewTransitDays(baseTransit, immediate,
-                travelTimeMultiplier ?? CorrespondenceOption(LoadSettings(), "correspondenceTravelTimeMultiplier"));
-            ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,parent_letter_id,origin_id,destination_id,dispatch_day,delivery_day,payload_json,created_ts,updated_ts,transit_policy_version,base_transit_days)
+                travelTimeMultiplier ?? Program.CorrespondenceOption(Program.LoadSettings(), "correspondenceTravelTimeMultiplier"));
+            Program.ExecuteSql(connection, @"INSERT INTO letters(letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,parent_letter_id,origin_id,destination_id,dispatch_day,delivery_day,payload_json,created_ts,updated_ts,transit_policy_version,base_transit_days)
 VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_transit',$source,$reason,$parent,$origin,$destination,$dispatch,$delivery,$payload,$ts,$ts,$policy,$baseTransit);",
                 new Dictionary<string, object> { ["id"] = letterId, ["thread"] = threadId, ["sender"] = senderId, ["senderName"] = senderName, ["recipient"] = recipientId, ["recipientName"] = recipientName, ["body"] = body, ["source"] = source, ["reason"] = reason, ["parent"] = parentLetterId, ["origin"] = originId, ["destination"] = destinationId, ["dispatch"] = dispatchDay, ["delivery"] = deliveryDay, ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts,
                     ["policy"] = CorrespondenceTransitPolicy.Version, ["baseTransit"] = baseTransit });
-            ExecuteSql(connection, "UPDATE correspondence_threads SET last_letter_id=$letter,last_activity_day=$day,updated_ts=$ts WHERE thread_id=$thread;", new Dictionary<string, object> { ["letter"] = letterId, ["day"] = dispatchDay, ["ts"] = ts, ["thread"] = threadId });
-            ExecuteSql(connection, "UPDATE letters SET timeline_id=$timeline,dispatch_sequence=nextval('memory_accepted_turn_sequence') WHERE letter_id=$id;",
-                new Dictionary<string, object> { ["timeline"] = ActiveWorldHistoryTimeline(connection), ["id"] = letterId });
+            Program.ExecuteSql(connection, "UPDATE correspondence_threads SET last_letter_id=$letter,last_activity_day=$day,updated_ts=$ts WHERE thread_id=$thread;", new Dictionary<string, object> { ["letter"] = letterId, ["day"] = dispatchDay, ["ts"] = ts, ["thread"] = threadId });
+            Program.ExecuteSql(connection, "UPDATE letters SET timeline_id=$timeline,dispatch_sequence=nextval('memory_accepted_turn_sequence') WHERE letter_id=$id;",
+                new Dictionary<string, object> { ["timeline"] = WorldSimulationService.ActiveWorldHistoryTimeline(connection), ["id"] = letterId });
             if ((source == "npc_reply" || source == "npc_initiated" || source == "npc_introduction" || source == "relationship_development") && ReadDictionaryList(payload, "continuityWrites").Count > 0)
             {
                 // Accepted composition belongs to the author. Recipient knowledge
                 // still requires the existing delivered-letter path.
                 var continuityPayload = new Dictionary<string, object>(payload) { ["sceneTurnId"] = letterId,
-                    ["worldDay"] = dispatchDay, ["timelineId"] = ActiveWorldHistoryTimeline(connection) };
-                StoreAcceptedConversationContinuity(connection, continuityPayload, senderId, recipientId,
+                    ["worldDay"] = dispatchDay, ["timelineId"] = WorldSimulationService.ActiveWorldHistoryTimeline(connection) };
+                Program.StoreAcceptedConversationContinuity(connection, continuityPayload, senderId, recipientId,
                     letterId, body, ReadDictionaryList(payload, "continuityWrites"), ts);
             }
             var agencyContext = ReadDictionary(ReadDictionary(payload, "motiveDecision"), "conversationAgency");
             if (agencyContext != null && ReadDictionaryList(payload, "proposalDecisions").Count > 0
                 && (source == "npc_reply" || source == "npc_initiated" || source == "npc_introduction" || source == "relationship_development"))
             {
-                var agencyReceipt = CommitConversationAgency(connection, payload, agencyContext,
+                var agencyReceipt = Program.CommitConversationAgency(connection, payload, agencyContext,
                     FirstNonEmpty(ReadString(payload, "agencyTurnId", ""), letterId), false);
                 if (!ReadBool(agencyReceipt, "ok", false)) throw new InvalidOperationException("The letter's negotiation became stale before dispatch.");
                 payload["conversationAgencyReceipt"] = agencyReceipt;
-                ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id=$id;",
+                Program.ExecuteSql(connection, "UPDATE letters SET payload_json=$payload WHERE letter_id=$id;",
                     new Dictionary<string, object> { ["id"] = letterId, ["payload"] = Json.Serialize(payload) });
             }
             transaction.Commit();
@@ -1073,13 +1073,13 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
             }
         }
 
-        private static Dictionary<string, object> CorrespondenceThreadsApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CorrespondenceThreadsApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string playerId = ReadFirstString(payload, "playerId", "playerHeroStringId");
             HashSet<string> contacts = new HashSet<string>(ReadStringList(payload, "contactIds"), StringComparer.OrdinalIgnoreCase);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 // Contact priority must cover the complete visible history, even
                 // when an old thread falls outside the bounded body snapshot.
@@ -1093,7 +1093,7 @@ VALUES($id,$thread,$sender,$senderName,$recipient,$recipientName,$body,'in_trans
                         + ") OR source IN ('campaign_command_urgent_report','campaign_command_report','npc_introduction',"
                         + "'reign_marriage_offer','reign_marriage_answer','reign_marriage_meeting'))";
                 }
-                var states = QuerySql(connection, @"SELECT DISTINCT ON (contact_id) contact_id,
+                var states = Program.QuerySql(connection, @"SELECT DISTINCT ON (contact_id) contact_id,
 SUM(CASE WHEN recipient_id=$player AND status='delivered' THEN 1 ELSE 0 END) OVER (PARTITION BY contact_id) AS unread_count,status
 FROM (SELECT sender_id,recipient_id,status,dispatch_day,created_ts,letter_id,CASE WHEN sender_id=$player THEN recipient_id ELSE sender_id END AS contact_id
 FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,created_ts DESC,letter_id DESC;", parameters)
@@ -1109,14 +1109,14 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 // diagnostics stored in payload_json. Keep those in the ledger.
                 const string displayColumns = "letter_id,thread_id,sender_id,sender_name,recipient_id,recipient_name,body,status,source,reason,dispatch_day,delivery_day,delivered_day,read_day,created_ts";
                 var letters = ReadBool(payload, "summaryOnly", false) ? new List<Dictionary<string, object>>()
-                    : QuerySql(connection, "SELECT * FROM (SELECT " + displayColumns + " FROM letters WHERE " + where
+                    : Program.QuerySql(connection, "SELECT * FROM (SELECT " + displayColumns + " FROM letters WHERE " + where
                         + " ORDER BY dispatch_day DESC,created_ts DESC,letter_id DESC LIMIT 1000) recent ORDER BY dispatch_day ASC,created_ts ASC,letter_id ASC;", parameters);
                 return TestDict("ok", true, "letters", letters, "contactStates", states,
                     "unreadCount", states.Sum(row => ReadInt(row, "unreadCount", 0)));
             }
         }
 
-        private static Dictionary<string, object> CorrespondenceTickApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CorrespondenceTickApi(Dictionary<string, object> payload)
         {
             payload ??= new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -1125,7 +1125,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             if (playerId.Length == 0 || !double.IsFinite(day) || day < 0)
                 return TestDict("ok", false, "error", "A player and finite native world day are required.");
             string timeline;
-            using (var connection = OpenCampaignConnection(campaignId)) timeline = ActiveWorldHistoryTimeline(connection);
+            using (var connection = Program.OpenCampaignConnection(campaignId)) timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
             string requestedTimeline = ReadString(payload, "timelineId", timeline);
             if (requestedTimeline != timeline) return TestDict("ok", false, "error", "Correspondence timeline changed; refresh the campaign state.");
             string phase = ReadString(payload, "phase", "all");
@@ -1151,10 +1151,10 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             var nativeRelationChanges = new List<Dictionary<string, object>>();
             var queuedActions = new List<Dictionary<string, object>>();
             var structuredActions = new List<Dictionary<string, object>>();
-            using (var connection = OpenCampaignConnection(campaignId))
+            using (var connection = Program.OpenCampaignConnection(campaignId))
             {
                 Dictionary<string, object> storedPayload = TryParseJsonObject(ReadString(letter, "payload_json", "{}")) ?? new Dictionary<string, object>();
-                if (recipientId == playerId && UsesStructuredActions(storedPayload))
+                if (recipientId == playerId && Program.UsesStructuredActions(storedPayload))
                     structuredActions.Add(TestDict("letterId", letterId, "request", storedPayload,
                         "response", TestDict("ok", true, "structuredActionDecision", ReadDictionary(storedPayload, "validatedStructuredActionDecision") ?? new Dictionary<string, object>())));
                 Dictionary<string, object> recipientProfile = ReadDictionary(storedPayload, "recipient") ?? new Dictionary<string, object>();
@@ -1168,8 +1168,8 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                     ["target"] = ReadDictionary(storedPayload, "sender") ?? new Dictionary<string, object>()
                 };
                 Dictionary<string, object> storedMotive = ReadDictionary(storedPayload, "motiveDecision");
-                relationshipPayload["motiveDecision"] = storedMotive ?? BuildConversationDecisionContext(
-                    campaignId, "correspondence", recipientId, recipientProfile, LoadCharacterStack(campaignId, recipientId), new Dictionary<string, object>(),
+                relationshipPayload["motiveDecision"] = storedMotive ?? Program.BuildConversationDecisionContext(
+                    campaignId, "correspondence", recipientId, recipientProfile, Program.LoadCharacterStack(campaignId, recipientId), new Dictionary<string, object>(),
                     ReadString(letter, "body", ""), "Private written correspondence.",
                     new Dictionary<string, object> { ["playerHeroStringId"] = senderId, ["recipientId"] = senderId, ["worldDay"] = day, ["mode"] = "correspondence", ["sceneOpportunity"] = new Dictionary<string, object> { ["private"] = true, ["exposure"] = 0.08d, ["witnessIds"] = new List<string>() } },
                     new Dictionary<string, object> { ["identityState"] = "known" });
@@ -1195,11 +1195,11 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                         var dispatched = InsertLetter(connection, recipientId, ReadString(letter, "recipient_name", recipientId), senderId, ReadString(letter, "sender_name", senderId), ReadString(reply, "body", ""), "npc_reply", ReadString(reply, "reason", "reply"), letterId, ReadString(letter, "destination_id", ""), ReadString(letter, "origin_id", ""), day, day + transit, reply);
                         queuedReplies.Add(dispatched);
                         var agencyReceipt = ReadDictionary(reply, "conversationAgencyReceipt");
-                        if (agencyReceipt != null && !ConversationRepairFailed(reply))
+                        if (agencyReceipt != null && !Program.ConversationRepairFailed(reply))
                         {
                             var assessments = new List<Dictionary<string, object>>();
                             var reactionPayload = new Dictionary<string, object> { ["conversationAgencyReceipt"] = agencyReceipt, ["playerText"] = ReadString(letter, "body", "") };
-                            ApplyAgencyRelationshipAssessment(assessments, reactionPayload, recipientId, senderId);
+                            Program.ApplyAgencyRelationshipAssessment(assessments, reactionPayload, recipientId, senderId);
                             if (assessments.Count > 0)
                             {
                                 var reaction = ConversationRelationshipEvaluateApi(new Dictionary<string, object> {
@@ -1214,10 +1214,10 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                         }
                         var actionPayload = new Dictionary<string, object>(storedPayload);
                         if (agencyReceipt != null) actionPayload["conversationAgencyReceipt"] = agencyReceipt;
-                        if (!UsesStructuredActions(storedPayload) && !ConversationRepairFailed(reply))
+                        if (!Program.UsesStructuredActions(storedPayload) && !Program.ConversationRepairFailed(reply))
                         {
                             queuedActions.AddRange(QueueAcceptedRebellionLetterReply(campaignId, actionPayload, letter, reply, senderId, recipientId));
-                            if (agencyReceipt == null || ReadDictionaryList(agencyReceipt, "updates").Any(r => ReadString(r, "topic", "") == "service" && AgencyAccepted(ReadString(r, "disposition", ""))))
+                            if (agencyReceipt == null || ReadDictionaryList(agencyReceipt, "updates").Any(r => ReadString(r, "topic", "") == "service" && Program.AgencyAccepted(ReadString(r, "disposition", ""))))
                                 queuedActions.AddRange(QueueAcceptedCampaignOrderLetterReply(campaignId, actionPayload, letter, reply, senderId, recipientId));
                         }
                     }
@@ -1240,13 +1240,13 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
         {
             List<Dictionary<string, object>> candidates = BuildRebellionLetterReplyCandidates(
                 storedPayload, receivedLetter, npcReply, playerId, npcId);
-            candidates = candidates.Where(candidate => BindConversationAgencyAuthority(storedPayload,
+            candidates = candidates.Where(candidate => Program.BindConversationAgencyAuthority(storedPayload,
                 ReadString(candidate, "command", ""), ReadDictionary(candidate, "terms") ?? new Dictionary<string, object>(),
                 new Dictionary<string, object>(), new List<string>(), candidate)).ToList();
             if (candidates.Count == 0) return candidates;
             string request = ReadString(receivedLetter, "body", "");
             string replyBody = ReadString(npcReply, "body", "");
-            return EvaluateAndQueueActionCandidates(campaignId, storedPayload,
+            return Program.EvaluateAndQueueActionCandidates(campaignId, storedPayload,
                 request + "\n" + replyBody, candidates,
                 out List<string> errors, out List<Dictionary<string, object>> rejected);
         }
@@ -1282,18 +1282,18 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             string decision = ReadString(npcReply, "rebellionDecision", "none").ToLowerInvariant();
             string command = string.Empty;
             bool npcIsActor = false;
-            if (LooksLikeRebellionRecruitmentRequest(request)
-                && (decision == "accept_recruitment" || (decision == "none" && IsUnambiguousActionAcceptance(replyBody))))
+            if (Program.LooksLikeRebellionRecruitmentRequest(request)
+                && (decision == "accept_recruitment" || (decision == "none" && Program.IsUnambiguousActionAcceptance(replyBody))))
             {
                 command = "recruit_lord_to_rebellion";
             }
-            else if (LooksLikePlayerJoinRebellionRequest(request)
-                && (decision == "accept_player_join" || (decision == "none" && IsUnambiguousActionAcceptance(replyBody))))
+            else if (Program.LooksLikePlayerJoinRebellionRequest(request)
+                && (decision == "accept_player_join" || (decision == "none" && Program.IsUnambiguousActionAcceptance(replyBody))))
             {
                 command = "join_rebellion";
             }
-            else if (LooksLikeRebellionSurrenderDemand(request)
-                && (decision == "surrender" || LooksLikeExplicitNpcRebellionSurrender(replyBody)))
+            else if (Program.LooksLikeRebellionSurrenderDemand(request)
+                && (decision == "surrender" || Program.LooksLikeExplicitNpcRebellionSurrender(replyBody)))
             {
                 command = "surrender_rebellion";
                 npcIsActor = true;
@@ -1302,10 +1302,10 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
 
             Dictionary<string, object> player = ReadDictionary(storedPayload, "sender") ?? new Dictionary<string, object>();
             Dictionary<string, object> candidate = npcIsActor
-                ? BuildRebellionActionCandidate(command, npcId, ReadString(recipient, "kingdomId", ""), ReadString(recipient, "clanId", ""),
+                ? Program.BuildRebellionActionCandidate(command, npcId, ReadString(recipient, "kingdomId", ""), ReadString(recipient, "clanId", ""),
                     playerId, ReadString(player, "kingdomId", ""), ReadString(player, "clanId", ""),
                     "The NPC's delivered written reply explicitly surrendered their named rebellion leadership.")
-                : BuildRebellionActionCandidate(command, playerId, ReadString(player, "kingdomId", ""), ReadString(player, "clanId", ""),
+                : Program.BuildRebellionActionCandidate(command, playerId, ReadString(player, "kingdomId", ""), ReadString(player, "clanId", ""),
                     npcId, ReadString(recipient, "kingdomId", ""), ReadString(recipient, "clanId", ""),
                     command == "recruit_lord_to_rebellion"
                         ? "The NPC's delivered written reply explicitly accepted recruitment into the player's active rebellion."
@@ -1313,24 +1313,24 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             return new List<Dictionary<string, object>> { candidate };
         }
 
-        private static Dictionary<string, object> CorrespondenceReadApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CorrespondenceReadApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string letterId = ReadFirstString(payload, "letterId", "letter_id");
             var letterIds = ReadStringList(payload, "letterIds").Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).Take(1000).ToList();
             double day = ReadDouble(payload, "worldDay", 0d);
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 if (letterIds.Count == 0)
-                    ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE letter_id=$id AND status='delivered';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = letterId });
+                    Program.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE letter_id=$id AND status='delivered';", new Dictionary<string, object> { ["day"] = day, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = letterId });
                 else
                 {
                     string playerId = ReadString(payload, "playerId", "");
                     if (playerId.Length == 0) return TestDict("ok", false, "error", "A recipient is required for a batch read acknowledgment.");
                     var parameters = TestDict("day", day, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "player", playerId);
                     var ids = letterIds.Select((id, i) => { parameters["id" + i] = id; return "$id" + i; });
-                    ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE recipient_id=$player AND status='delivered' AND letter_id IN ("
+                    Program.ExecuteSql(connection, "UPDATE letters SET status='read',read_day=$day,updated_ts=$ts WHERE recipient_id=$player AND status='delivered' AND letter_id IN ("
                         + string.Join(",", ids) + ");", parameters);
                 }
             }
@@ -1339,33 +1339,33 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
 
         private static Dictionary<string, object> GenerateNpcLetter(string campaignId, string senderId, string recipientId, Dictionary<string, object> receivedLetter, double day, bool autonomousInitiation = false, bool firstIntroduction = false)
         {
-            var settings = LoadSettings();
-            Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, senderId, "profile.json"));
+            var settings = Program.LoadSettings();
+            Dictionary<string, object> profile = Program.ReadJsonObject(Program.CharacterFile(campaignId, senderId, "profile.json"));
             profile = MergeCorrespondenceRecipientProfile(profile, receivedLetter, senderId);
-            Dictionary<string, object> characteristics = LoadCharacterStack(campaignId, senderId);
+            Dictionary<string, object> characteristics = Program.LoadCharacterStack(campaignId, senderId);
             Dictionary<string, object> relationship = RelationshipContextApi(new Dictionary<string, object> { ["campaignId"] = campaignId, ["subjectId"] = senderId, ["targetId"] = recipientId });
             string senderName = ReadString(profile, "name", senderId);
             string recipientName = ReadString(receivedLetter, "sender_name", recipientId);
             string letterBody = ReadString(receivedLetter, "body", "");
             var receivedPayload = TryParseJsonObject(ReadString(receivedLetter, "payload_json", "{}"));
             string timeline;
-            using (var connection = OpenCampaignConnection(campaignId)) timeline = ActiveWorldHistoryTimeline(connection);
+            using (var connection = Program.OpenCampaignConnection(campaignId)) timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
             Dictionary<string, object> memoryContextPayload = new Dictionary<string, object>(profile, StringComparer.OrdinalIgnoreCase)
             {
                 ["worldDay"] = day, ["playerHeroStringId"] = recipientId, ["interactionMode"] = "correspondence",
                 ["timelineId"] = timeline, ["deferContinuityAllocation"] = true,
             };
-            if (UsesStructuredActions(receivedPayload))
+            if (Program.UsesStructuredActions(receivedPayload))
             {
                 memoryContextPayload["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                 memoryContextPayload["structuredActionContext"] = ReadDictionary(receivedPayload, "structuredActionContext");
                 memoryContextPayload["speakerHeroStringId"] = senderId;
             }
-            var letterMemoryPacket = BuildNpcMemoryPacket(campaignId, senderId, recipientId, "", letterBody, 1200,
+            var letterMemoryPacket = Program.BuildNpcMemoryPacket(campaignId, senderId, recipientId, "", letterBody, 1200,
                 memoryContextPayload, settings);
             memoryContextPayload["memoryPrecisionEvidence"] = ReadDictionary(letterMemoryPacket, "precisionEvidence");
             string memoryContext = ReadString(letterMemoryPacket, "memoryPacket", "");
-            PromptEnvelope promptEnvelope = BuildCorrespondencePromptEnvelope(campaignId, senderId, senderName, recipientId, recipientName, day, letterBody, profile, characteristics, relationship, memoryContext, memoryContextPayload, autonomousInitiation, firstIntroduction);
+            Program.PromptEnvelope promptEnvelope = Program.BuildCorrespondencePromptEnvelope(campaignId, senderId, senderName, recipientId, recipientName, day, letterBody, profile, characteristics, relationship, memoryContext, memoryContextPayload, autonomousInitiation, firstIntroduction);
             Dictionary<string, object> motiveDecision = ReadDictionary(promptEnvelope.Diagnostics, "motiveDecision") ?? new Dictionary<string, object>();
             Dictionary<string, object> llmRequest = new Dictionary<string, object>
             {
@@ -1377,24 +1377,24 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
                 ["promptCacheEligible"] = true,
                 ["response_format"] = new Dictionary<string, object> { ["type"] = "json_object" }
             };
-            string correlationId = EnsureCorrelationId(llmRequest);
-            if (UsesStructuredActions(memoryContextPayload)) llmRequest["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
+            string correlationId = Program.EnsureCorrelationId(llmRequest);
+            if (Program.UsesStructuredActions(memoryContextPayload)) llmRequest["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
             memoryContextPayload["turnId"] = "mail_" + ReadString(receivedLetter, "letter_id", correlationId);
             memoryContextPayload["playerText"] = letterBody;
-            Dictionary<string, object> llm = GenerateSinglePassConversation(llmRequest, memoryContextPayload, "correspondence");
-            Dictionary<string, object> parsed = PrepareCorrespondenceDelivery(llm);
+            Dictionary<string, object> llm = Program.GenerateSinglePassConversation(llmRequest, memoryContextPayload, "correspondence");
+            Dictionary<string, object> parsed = Program.PrepareCorrespondenceDelivery(llm);
             if (parsed != null)
             {
-                if (UsesStructuredActions(memoryContextPayload))
+                if (Program.UsesStructuredActions(memoryContextPayload))
                 {
-                    CaptureStructuredActionDecision(memoryContextPayload, parsed);
+                    Program.CaptureStructuredActionDecision(memoryContextPayload, parsed);
                     parsed["structuredActionProtocolVersion"] = Reign.Core.Contracts.Actions.ActionNegotiation.ProtocolVersion;
                     parsed["structuredActionContext"] = ReadDictionary(memoryContextPayload, "structuredActionContext");
                     parsed["validatedStructuredActionDecision"] = ReadDictionary(memoryContextPayload, "validatedStructuredActionDecision");
                 }
-                string body = RemoveSpokenNumericSkillLevels(ReadFirstString(parsed, "body", "response", "letter"), out bool skillNumericRepairApplied);
+                string body = CharactersService.RemoveSpokenNumericSkillLevels(ReadFirstString(parsed, "body", "response", "letter"), out bool skillNumericRepairApplied);
                 parsed["body"] = body;
-                parsed["timelineId"] = ContinuityTimeline(memoryContextPayload);
+                parsed["timelineId"] = Program.ContinuityTimeline(memoryContextPayload);
                 parsed["worldDay"] = day;
                 parsed["skillNumericRepairApplied"] = skillNumericRepairApplied;
                 parsed["shouldReply"] = ReadBool(parsed, "shouldReply", true);
@@ -1438,7 +1438,7 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             string recipientId = ReadString(letter, "recipient_id", "");
             string npcId = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? recipientId : senderId;
             if (string.IsNullOrWhiteSpace(npcId)) return;
-            Dictionary<string, object> line = DialogueLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", ReadString(letter, "sender_name", senderId), ReadString(letter, "body", ""));
+            Dictionary<string, object> line = Program.DialogueLine(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "player" : "npc", ReadString(letter, "sender_name", senderId), ReadString(letter, "body", ""));
             line["channel"] = "correspondence";
             line["letterId"] = ReadString(letter, "letter_id", "");
             line["threadId"] = ReadString(letter, "thread_id", "");
@@ -1446,15 +1446,15 @@ FROM letters WHERE " + where + ") visible ORDER BY contact_id,dispatch_day DESC,
             line["recipientId"] = recipientId;
             line["worldDay"] = day;
             line["direction"] = senderId.Equals(playerId, StringComparison.OrdinalIgnoreCase) ? "sent" : "received";
-            AppendJsonLineToPath(CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
-            StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
-            using (var pregnancyConnection = OpenCampaignConnection(campaignId))
+            Program.AppendJsonLineToPath(Program.CharacterFile(campaignId, npcId, "history", "dialogue.jsonl"), line);
+            Program.StoreCorrespondenceTurn(campaignId, npcId, playerId, letter, day);
+            using (var pregnancyConnection = Program.OpenCampaignConnection(campaignId))
                 AcceptPregnancyDisclosures(pregnancyConnection, ReadString(letter, "timeline_id", "main"), senderId,
                     ReadString(letter, "body", ""), TryParseJsonObject(ReadString(letter, "payload_json", "{}")),
                     new[] { recipientId }, "delivered_letter:" + ReadString(letter, "letter_id", ""), day);
         }
 
-        private static double ClampRelationship(double value) => ClampDouble(value, -100d, 100d);
+        private static double ClampRelationship(double value) => Program.ClampDouble(value, -100d, 100d);
         private static double ValueAsDouble(object value)
         {
             if (value == null) return 0d;

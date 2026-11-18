@@ -48,7 +48,7 @@ namespace ReignBetaServer
             ["item_given"] = "gift", ["sea_travel_started"] = "voyage"
         };
 
-        private static void EnsureSharedActivityMemorySchema(ReignDbConnection connection)
+        internal static void EnsureSharedActivityMemorySchema(ReignDbConnection connection)
         {
             const string marker = "shared_activity_memory_schema";
             if (IsPostgreSqlComponentSchemaReady(connection, marker, 1)) return;
@@ -151,7 +151,7 @@ CREATE INDEX IF NOT EXISTS idx_shared_contact_owner ON shared_travel_contact(tim
             return "participant";
         }
 
-        private static bool ProjectSharedActivity(ReignDbConnection connection, string timeline,
+        internal static bool ProjectSharedActivity(ReignDbConnection connection, string timeline,
             Dictionary<string, object> item, string playerOverride = "")
         {
             string type = ReadFirstString(item, "eventType", "event_type");
@@ -256,7 +256,7 @@ WHERE a.timeline_id=$timeline AND a.player_id=$player AND o.owner_id=$owner AND 
             rows.AddRange(QuerySql(connection, @"SELECT * FROM (" + select.Replace("SELECT a.*,", "SELECT ROW_NUMBER() OVER(PARTITION BY a.kind ORDER BY a.world_day DESC,a.sequence DESC) AS family_rank,a.*,")
                 + ") ranked WHERE family_rank<=8 ORDER BY world_day DESC;", args));
             var topics = MemoryQueryTerms(query).Take(6).ToList();
-            if (TableExists(connection, "conversation_continuity"))
+            if (WorldSimulationService.TableExists(connection, "conversation_continuity"))
                 topics.AddRange(QuerySql(connection, @"SELECT payload_json FROM conversation_continuity WHERE timeline_id=$timeline AND owner_id=$owner
 AND kind='agenda' AND status IN ('open','active','waiting','blocked','deferred');", args)
                     .Select(r => ReadString(ReadDictionary(TryParseJsonObject(ReadString(r, "payload_json", "{}")), "activityStep"), "targetId", ""))
@@ -286,7 +286,7 @@ AND EXISTS(SELECT 1 FROM shared_activity_observers o WHERE o.activity_id=a.activ
         private static void BackfillRetainedSharedActivities(ReignDbConnection connection, string timeline,
             string player, string owner, double day)
         {
-            if (!TableExists(connection, "world_history_events")) return;
+            if (!WorldSimulationService.TableExists(connection, "world_history_events")) return;
             // Exact historic participants BEFORE the limit; current party members
             // are never used to grant attendance at older events.
             string supported = string.Join(",", SharedActivityKinds.Keys.Select(k => "'" + k + "'"));
@@ -299,7 +299,7 @@ AND NOT EXISTS(SELECT 1 FROM shared_activity_events a WHERE a.activity_id=e.even
 ORDER BY e.world_day DESC,e.sequence DESC LIMIT 80;", ActivityFields("timeline", timeline, "player", player, "owner", owner, "day", day));
             foreach (var row in rows)
             {
-                row["entities"] = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""))
+                row["entities"] = WorldSimulationService.QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""))
                     .Select(e => ActivityFields("entityId", ReadString(e, "entity_id", ""), "entityType", ReadString(e, "entity_type", ""),
                         "name", ReadString(e, "name_snapshot", ""), "role", ReadString(e, "role", ""), "side", ReadString(e, "side", ""),
                         "partyId", ReadString(e, "party_id", ""), "quantity", ReadDouble(e, "quantity", 0d))).ToList();
@@ -310,7 +310,7 @@ ORDER BY e.world_day DESC,e.sequence DESC LIMIT 80;", ActivityFields("timeline",
         private static Dictionary<string, object> LastExplicitSharedChat(ReignDbConnection connection,
             string timeline, string player, string owner, double day)
         {
-            if (!TableExists(connection, "conversation_turns") || !TableExists(connection, "conversation_sessions")) return null;
+            if (!WorldSimulationService.TableExists(connection, "conversation_turns") || !WorldSimulationService.TableExists(connection, "conversation_sessions")) return null;
             // These source turns are inserted only after accepted output. Group
             // listeners do not acquire a fictional direct reply or private talk.
             var rows = QuerySql(connection, @"SELECT t.*,s.player_id,s.payload_json AS session_payload FROM conversation_turns t
@@ -329,9 +329,9 @@ ORDER BY t.world_day DESC,t.ts DESC,t.turn_order DESC LIMIT 1;", ActivityFields(
         }
 
         private static string SharedActivityGeneration(ReignDbConnection connection) =>
-            TableExists(connection, "memory_precision_state") ? ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "") : "";
+            WorldSimulationService.TableExists(connection, "memory_precision_state") ? ReadString(ReadMemoryPrecisionState(connection), "restore_generation", "") : "";
 
-        private static bool SharedActivityGenerationMatches(ReignDbConnection connection, Dictionary<string, object> payload)
+        internal static bool SharedActivityGenerationMatches(ReignDbConnection connection, Dictionary<string, object> payload)
         {
             string expected = ReadString(payload, "sharedActivityGeneration", "");
             return expected.Length == 0 || expected == SharedActivityGeneration(connection);
@@ -346,7 +346,7 @@ ORDER BY t.world_day DESC,t.ts DESC,t.turn_order DESC LIMIT 1;", ActivityFields(
                 throw new InvalidOperationException("The campaign was restored while this conversation was being prepared. Retry from the loaded save.");
             var ids = ReadStringList(sync, "eventIds").Distinct().ToList();
             if (ids.Count == 0) return true;
-            if (ids.Count > 256 || !TableExists(connection, "world_history_events")) return false;
+            if (ids.Count > 256 || !WorldSimulationService.TableExists(connection, "world_history_events")) return false;
             var args = ActivityFields("timeline", timeline);
             for (int i = 0; i < ids.Count; i++) args["e" + i] = ids[i];
             return QuerySql(connection, "SELECT event_id FROM world_history_events WHERE timeline_id=$timeline AND event_id IN ("
@@ -404,7 +404,7 @@ ORDER BY t.world_day DESC,t.ts DESC,t.turn_order DESC LIMIT 1;", ActivityFields(
             string timeline, string owner, List<Dictionary<string, object>> activities)
         {
             var resolved = new List<Dictionary<string, object>>();
-            if (!TableExists(connection, "conversation_continuity")) return resolved;
+            if (!WorldSimulationService.TableExists(connection, "conversation_continuity")) return resolved;
             foreach (var row in QuerySql(connection, @"SELECT * FROM conversation_continuity WHERE timeline_id=$timeline
 AND owner_id=$owner AND kind='agenda' AND status IN ('open','active','waiting','blocked','deferred');",
                 ActivityFields("timeline", timeline, "owner", owner)))

@@ -9,7 +9,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private sealed class AcceptedPlayerInputSource
+        internal sealed class AcceptedPlayerInputSource
         {
             internal string Original;
             internal string PrivateFocusId = "";
@@ -21,7 +21,7 @@ namespace ReignBetaServer
         // It is kept out of prompt dictionaries and copied explicitly at acceptance.
         private static readonly ConditionalWeakTable<Dictionary<string, object>, AcceptedPlayerInputSource> PlayerInputSources = new();
 
-        private static string ProjectCurrentPlayerPromptText(string input, string listenerId, Dictionary<string, object> payload)
+        internal static string ProjectCurrentPlayerPromptText(string input, string listenerId, Dictionary<string, object> payload)
         {
             var attendees = ReadDictionaryList(payload, "attendees");
             if (attendees.Count == 0) attendees = MergedInteractionParticipantProfiles(payload ?? TestDict());
@@ -50,7 +50,7 @@ namespace ReignBetaServer
             return solo.Length > 0 && !solo.Equals(player, StringComparison.OrdinalIgnoreCase) ? solo : "__private_unknown__";
         }
 
-        private static void CopyPlayerInputSource(Dictionary<string, object> source, Dictionary<string, object> target)
+        internal static void CopyPlayerInputSource(Dictionary<string, object> source, Dictionary<string, object> target)
         {
             if (source != null && target != null && PlayerInputSources.TryGetValue(source, out var captured))
             {
@@ -61,7 +61,7 @@ namespace ReignBetaServer
             }
         }
 
-        private static void PreservePlayerInputSource(ReignDbConnection connection, Dictionary<string, object> request,
+        internal static void PreservePlayerInputSource(ReignDbConnection connection, Dictionary<string, object> request,
             string sessionId, string eventId, string exchangeId, string playerId, string playerName,
             double worldDay, long ts, string locationId)
         {

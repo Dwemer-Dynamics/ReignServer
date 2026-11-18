@@ -10,11 +10,11 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private const int PostgreSqlWorldHistorySchemaRevision = 4;
-        private static readonly object WorldHistoryCacheLock = new object();
-        private static readonly Dictionary<string, Dictionary<string, object>> WorldHistoryClaimCache =
+        internal static readonly object WorldHistoryCacheLock = new object();
+        internal static readonly Dictionary<string, Dictionary<string, object>> WorldHistoryClaimCache =
             new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
 
         private static readonly string[] WorldHistoryPurposes =
@@ -33,47 +33,47 @@ namespace ReignBetaServer
         {
             const string marker =
                 "postgresql_world_history_schema_revision";
-            if (IsPostgreSqlComponentSchemaReady(connection, marker,
+            if (Program.IsPostgreSqlComponentSchemaReady(connection, marker,
                 PostgreSqlWorldHistorySchemaRevision))
                 return;
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_timelines (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_timelines (
 timeline_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,parent_timeline_id TEXT NOT NULL DEFAULT '',fork_event_id TEXT NOT NULL DEFAULT '',
 history_complete_from_day REAL NOT NULL DEFAULT 0,head_sequence INTEGER NOT NULL DEFAULT 0,head_event_id TEXT NOT NULL DEFAULT '',
 is_active INTEGER NOT NULL DEFAULT 1,created_utc TEXT NOT NULL,updated_utc TEXT NOT NULL); ");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_events (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_events (
 event_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,sequence INTEGER NOT NULL,world_day REAL NOT NULL,
 event_type TEXT NOT NULL,category TEXT NOT NULL DEFAULT '',phase TEXT NOT NULL DEFAULT 'completed',correlation_id TEXT NOT NULL DEFAULT '',
 location_id TEXT NOT NULL DEFAULT '',location_name TEXT NOT NULL DEFAULT '',dissemination_class TEXT NOT NULL DEFAULT 'ordinary',
 summary TEXT NOT NULL DEFAULT '',semantic_text TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT 'native',is_complete INTEGER NOT NULL DEFAULT 1,
 checksum TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',created_utc TEXT NOT NULL); ");
-            EnsureDatabaseColumn(connection, "world_history_events", "subject_id",
+            Program.EnsureDatabaseColumn(connection, "world_history_events", "subject_id",
                 "TEXT NOT NULL DEFAULT ''");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_entities (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_entities (
 event_id TEXT NOT NULL,ordinal INTEGER NOT NULL,entity_id TEXT NOT NULL DEFAULT '',entity_type TEXT NOT NULL DEFAULT '',
 name_snapshot TEXT NOT NULL DEFAULT '',role TEXT NOT NULL DEFAULT '',side TEXT NOT NULL DEFAULT '',party_id TEXT NOT NULL DEFAULT '',
 clan_id TEXT NOT NULL DEFAULT '',kingdom_id TEXT NOT NULL DEFAULT '',quantity REAL NOT NULL DEFAULT 0,before_json TEXT NOT NULL DEFAULT '{}',
 after_json TEXT NOT NULL DEFAULT '{}',payload_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(event_id,ordinal)); ");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_knowledge_rules (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_knowledge_rules (
 rule_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,audience_type TEXT NOT NULL,audience_id TEXT NOT NULL DEFAULT '',
 available_day REAL NOT NULL,acquisition_mode TEXT NOT NULL DEFAULT '',confidence REAL NOT NULL DEFAULT 1); ");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_claim_checks (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_claim_checks (
 check_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,world_day REAL NOT NULL,claimant_id TEXT NOT NULL DEFAULT '',
 speaker_id TEXT NOT NULL DEFAULT '',raw_claim TEXT NOT NULL,purpose TEXT NOT NULL,claim_family TEXT NOT NULL,
 objective_verdict TEXT NOT NULL,speaker_verdict TEXT NOT NULL,explanation TEXT NOT NULL DEFAULT '',constraints_json TEXT NOT NULL DEFAULT '{}',
 evidence_event_ids_json TEXT NOT NULL DEFAULT '[]',speaker_event_ids_json TEXT NOT NULL DEFAULT '[]',minime_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL); ");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_ingest_state (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_ingest_state (
 client_id TEXT NOT NULL,timeline_id TEXT NOT NULL,last_sequence INTEGER NOT NULL DEFAULT 0,last_event_id TEXT NOT NULL DEFAULT '',
 updated_utc TEXT NOT NULL,PRIMARY KEY(client_id,timeline_id)); ");
             bool postgres = ReignPostgreSqlDialect.IsPostgreSql(connection);
             if (!postgres)
-                ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_timeline_type_day ON world_history_events(timeline_id,event_type,world_day DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_location_day ON world_history_events(timeline_id,location_id,world_day DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_correlation ON world_history_events(timeline_id,correlation_id,sequence);");
-            ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_wh_event_sequence ON world_history_events(timeline_id,sequence,event_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_lookup ON world_history_entities(entity_id,role,event_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_event ON world_history_entities(entity_id,event_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_evidence ON world_history_events(timeline_id,event_type,world_day DESC,event_id);");
+                Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_timeline_type_day ON world_history_events(timeline_id,event_type,world_day DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_location_day ON world_history_events(timeline_id,location_id,world_day DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_correlation ON world_history_events(timeline_id,correlation_id,sequence);");
+            Program.ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_wh_event_sequence ON world_history_events(timeline_id,sequence,event_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_lookup ON world_history_entities(entity_id,role,event_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_event ON world_history_entities(entity_id,event_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_event_evidence ON world_history_events(timeline_id,event_type,world_day DESC,event_id);");
             if (postgres)
             {
                 // idx_wh_event_evidence has the complete prefix used by the
@@ -82,41 +82,41 @@ updated_utc TEXT NOT NULL,PRIMARY KEY(client_id,timeline_id)); ");
                 // These changes preserve every event and every evidence path;
                 // they remove only redundant index maintenance and unrelated
                 // rows from the specialized worker index.
-                ExecuteSql(connection, @"DROP INDEX IF EXISTS idx_wh_event_timeline_type_day;
+                Program.ExecuteSql(connection, @"DROP INDEX IF EXISTS idx_wh_event_timeline_type_day;
 DROP INDEX IF EXISTS idx_wh_social_subject_sequence;");
-                ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_wh_social_subject_sequence_v2
+                Program.ExecuteSql(connection, @"CREATE INDEX IF NOT EXISTS idx_wh_social_subject_sequence_v2
 ON world_history_events(timeline_id,subject_id,sequence,event_id)
 WHERE event_type='social_outcome';");
             }
             else
-                ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_social_subject_sequence ON world_history_events(timeline_id,event_type,subject_id,sequence,event_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_kingdom ON world_history_entities(kingdom_id,event_id);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_rule_event ON world_history_knowledge_rules(event_id,available_day);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_rule_audience ON world_history_knowledge_rules(audience_type,audience_id,available_day);");
-            ExecuteSql(connection, "CREATE VIRTUAL TABLE IF NOT EXISTS world_history_fts USING fts5(event_id UNINDEXED,text,entities,roles,location,event_type);");
+                Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_social_subject_sequence ON world_history_events(timeline_id,event_type,subject_id,sequence,event_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_entity_kingdom ON world_history_entities(kingdom_id,event_id);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_rule_event ON world_history_knowledge_rules(event_id,available_day);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_wh_rule_audience ON world_history_knowledge_rules(audience_type,audience_id,available_day);");
+            Program.ExecuteSql(connection, "CREATE VIRTUAL TABLE IF NOT EXISTS world_history_fts USING fts5(event_id UNINDEXED,text,entities,roles,location,event_type);");
             EnsureWorldHistoryRetentionSchema(connection);
             if (ReignPostgreSqlDialect.IsPostgreSql(connection)
-                && ReadString(QuerySql(connection, @"SELECT value FROM schema_meta
+                && ReadString(Program.QuerySql(connection, @"SELECT value FROM schema_meta
 WHERE key='world_history_social_subject_index_v1' LIMIT 1;")
                     .FirstOrDefault(), "value", "") != "1")
             {
-                ExecuteSql(connection, @"UPDATE world_history_events
+                Program.ExecuteSql(connection, @"UPDATE world_history_events
 SET subject_id=COALESCE(CAST(payload_json AS jsonb)->>'subjectId',
                         CAST(payload_json AS jsonb)->>'heroId','')
 WHERE event_type='social_outcome' AND subject_id='';");
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
 VALUES('world_history_social_subject_index_v1','1');");
             }
-            int historyVersion = ReadInt(QuerySql(connection,
+            int historyVersion = ReadInt(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='world_history_version' LIMIT 1;").FirstOrDefault(), "value", 0);
             if (historyVersion < 3)
             {
-                ExecuteSql(connection, "SAVEPOINT world_history_storage_upgrade;");
+                Program.ExecuteSql(connection, "SAVEPOINT world_history_storage_upgrade;");
                 try
                 {
-                    ExecuteSql(connection, @"CREATE TEMP TABLE IF NOT EXISTS world_history_noise_events(event_id TEXT PRIMARY KEY);");
-                    ExecuteSql(connection, "DELETE FROM world_history_noise_events;");
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO world_history_noise_events(event_id)
+                    Program.ExecuteSql(connection, @"CREATE TEMP TABLE IF NOT EXISTS world_history_noise_events(event_id TEXT PRIMARY KEY);");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_noise_events;");
+                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO world_history_noise_events(event_id)
 SELECT e.event_id FROM world_history_events e
 WHERE e.event_type IN (
     'ship_owner_changed','ship_created','ship_repaired','ship_destroyed',
@@ -130,35 +130,35 @@ AND NOT EXISTS (
     SELECT 1 FROM world_history_entities n
     WHERE n.event_id=e.event_id AND (n.entity_id='main_party' OR n.party_id='main_party')
 );");
-                    ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
-                    ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
-                    ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
-                    ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
-                    ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_type='unattributed_state_change';");
-                    ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
-                    ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                    ExecuteSql(connection, "RELEASE world_history_storage_upgrade;");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_id IN (SELECT event_id FROM world_history_noise_events);");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_knowledge_rules WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_entities WHERE event_id IN (SELECT event_id FROM world_history_events WHERE event_type='unattributed_state_change');");
+                    Program.ExecuteSql(connection, "DELETE FROM world_history_events WHERE event_type='unattributed_state_change';");
+                    Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
+                    Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
+                    Program.ExecuteSql(connection, "RELEASE world_history_storage_upgrade;");
                 }
                 catch
                 {
-                    try { ExecuteSql(connection, "ROLLBACK TO world_history_storage_upgrade;"); } catch { }
-                    try { ExecuteSql(connection, "RELEASE world_history_storage_upgrade;"); } catch { }
+                    try { Program.ExecuteSql(connection, "ROLLBACK TO world_history_storage_upgrade;"); } catch { }
+                    try { Program.ExecuteSql(connection, "RELEASE world_history_storage_upgrade;"); } catch { }
                     throw;
                 }
             }
-            else ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
-            EnsureImmediateTournamentKnowledge(connection);
-            EnsurePlayerPerformanceSchema(connection);
-            string storedCampaignId = ReadString(QuerySql(connection,
+            else Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('world_history_version','3');");
+            Program.EnsureImmediateTournamentKnowledge(connection);
+            Program.EnsurePlayerPerformanceSchema(connection);
+            string storedCampaignId = ReadString(Program.QuerySql(connection,
                 "SELECT campaign_id FROM world_history_events WHERE campaign_id<>'' LIMIT 1;").FirstOrDefault(), "campaign_id", "");
             if (!string.IsNullOrWhiteSpace(storedCampaignId))
-                TryDeleteFile(CampaignFile(storedCampaignId, "world", "history.jsonl"));
+                PersistenceService.TryDeleteFile(Program.CampaignFile(storedCampaignId, "world", "history.jsonl"));
             if (postgres)
             {
-                ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
+                Program.ExecuteSql(connection, @"INSERT INTO schema_meta(key,value)
 VALUES('postgresql_world_history_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                     new Dictionary<string, object>
@@ -166,7 +166,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         ["revision"] = PostgreSqlWorldHistorySchemaRevision
                             .ToString(CultureInfo.InvariantCulture)
                     });
-                MarkPostgreSqlComponentSchemaReady(connection, marker,
+                Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
                     PostgreSqlWorldHistorySchemaRevision);
             }
         }
@@ -203,7 +203,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                     placeholders.Add("$" + name);
                 }
 
-                foreach (Dictionary<string, object> row in QuerySql(connection,
+                foreach (Dictionary<string, object> row in Program.QuerySql(connection,
                     "SELECT event_id FROM world_history_events WHERE event_id IN ("
                     + string.Join(",", placeholders) + ");",
                     parameters, transaction))
@@ -237,27 +237,27 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             double latestIngestedDay = events.Select(item =>
                 ReadDouble(item, "worldDay", ReadDouble(item, "world_day", 0d)))
                 .DefaultIfEmpty(0d).Max();
-            bool hasSpouseLetter = events.Any(item => IsSpouseLetterPayload(ReadDictionary(item, "payload")
+            bool hasSpouseLetter = events.Any(item => RelationshipsService.IsSpouseLetterPayload(ReadDictionary(item, "payload")
                 ?? TryParseJsonObject(ReadString(item,"payload_json","{}"))));
             // Spouse-letter projections enter the relationship monitor. Reserve
             // it before the ingest transaction takes any table/advisory locks.
             using var relationshipOwnership = hasSpouseLetter
-                ? EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId)) : null;
+                ? PersistenceService.EnterCampaignWorkLock(RelationshipsService.CampaignRelationshipWriteLock(campaignId)) : null;
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 // Schema helpers take the process-wide PostgreSQL schema-mutation
                 // advisory lock. Complete them before the ingest transaction so
                 // retention compaction cannot retain that lock for its entire batch.
                 EnsureWorldHistorySchema(connection);
-                EnsureSharedActivityMemorySchema(connection);
+                Program.EnsureSharedActivityMemorySchema(connection);
                 if (hasSpouseLetter)
                 {
-                    EnsureRelationshipAndCorrespondenceSchema(connection);
-                    EnsureMbtiRelationshipSchema(connection);
-                    EnsureRelationshipLifecycleSchema(connection);
+                    RelationshipsService.EnsureRelationshipAndCorrespondenceSchema(connection);
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    RelationshipsService.EnsureRelationshipLifecycleSchema(connection);
                 }
-                if (!SharedActivityGenerationMatches(connection, payload))
+                if (!Program.SharedActivityGenerationMatches(connection, payload))
                     return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Stale activity upload from an obsolete save generation." };
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
@@ -265,7 +265,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                         LoadExistingWorldHistoryEventIds(connection, events,
                             transaction);
                     string now = DateTime.UtcNow.ToString("o");
-                    ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
+                    Program.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
 VALUES($timeline,$campaign,$parent,$fork,$complete,0,'',1,$now,$now)
 ON CONFLICT(timeline_id) DO UPDATE SET
 campaign_id=$campaign,
@@ -280,11 +280,11 @@ is_active=1,updated_utc=$now;",
                         ["parent"] = ReadFirstString(payload, "parentTimelineId", "parent_timeline_id"),
                         ["fork"] = ReadFirstString(payload, "forkEventId", "fork_event_id"), ["complete"] = completeFrom, ["now"] = now
                     });
-                ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$timeline THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
+                Program.ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$timeline THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
                     new Dictionary<string, object> { ["timeline"] = timelineId, ["campaign"] = campaignId });
 
-                List<PreparedWorldHistoryEvent> preparedEvents =
-                    new List<PreparedWorldHistoryEvent>();
+                List<PersistenceService.PreparedWorldHistoryEvent> preparedEvents =
+                    new List<PersistenceService.PreparedWorldHistoryEvent>();
                 foreach (Dictionary<string, object> item in events.OrderBy(x => ReadLong(x, "sequence", 0)))
                 {
                     string eventId = ReadFirstString(item, "eventId", "event_id", "id");
@@ -299,8 +299,8 @@ is_active=1,updated_utc=$now;",
                         continue;
                     }
 
-                    PreparedWorldHistoryEvent prepared =
-                        PrepareWorldHistoryEvent(item, now);
+                    PersistenceService.PreparedWorldHistoryEvent prepared =
+                        PersistenceService.PrepareWorldHistoryEvent(item, now);
                     if (prepared.Sequence >= headSequence)
                     {
                         headSequence = prepared.Sequence;
@@ -316,15 +316,15 @@ is_active=1,updated_utc=$now;",
 
                 if (ReignPostgreSqlDialect.IsPostgreSql(connection))
                 {
-                    accepted = InsertWorldHistoryPostgreSqlBulk(connection,
+                    accepted = PersistenceService.InsertWorldHistoryPostgreSqlBulk(connection,
                         transaction, campaignId, timelineId, preparedEvents);
                     duplicates += preparedEvents.Count - accepted;
                 }
                 else
                 {
-                    foreach (PreparedWorldHistoryEvent prepared in preparedEvents)
+                    foreach (PersistenceService.PreparedWorldHistoryEvent prepared in preparedEvents)
                     {
-                        ExecuteSql(connection, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,correlation_id,location_id,location_name,dissemination_class,retention_class,player_involved,summary,semantic_text,source,is_complete,checksum,payload_json,created_utc,subject_id)
+                        Program.ExecuteSql(connection, @"INSERT INTO world_history_events(event_id,campaign_id,timeline_id,sequence,world_day,event_type,category,phase,correlation_id,location_id,location_name,dissemination_class,retention_class,player_involved,summary,semantic_text,source,is_complete,checksum,payload_json,created_utc,subject_id)
 VALUES($id,$campaign,$timeline,$sequence,$day,$type,$category,$phase,$correlation,$location,$locationName,$dissemination,$retention,$player,$summary,$semantic,$source,$complete,$checksum,$payload,$created,$subject);",
                             prepared.EventParameters(campaignId, timelineId));
                         StoreWorldHistoryEntities(connection, prepared.EventId,
@@ -341,7 +341,7 @@ VALUES($id,$campaign,$timeline,$sequence,$day,$type,$category,$phase,$correlatio
                     }
                 }
 
-                ExecuteSql(connection, @"UPDATE world_history_events
+                Program.ExecuteSql(connection, @"UPDATE world_history_events
 SET retention_class='consequential'
 WHERE timeline_id=$timeline AND correlation_id<>'' AND correlation_id IN (
     SELECT correlation_id FROM world_history_events
@@ -351,31 +351,31 @@ AND event_type IN ('battle_completed','raid_completed','siege_completed');",
                     new Dictionary<string, object> { ["timeline"] = timelineId });
                 if (headSequence > 0)
                 {
-                    ExecuteSql(connection, "UPDATE world_history_timelines SET head_sequence=MAX(head_sequence,$sequence),head_event_id=$event,updated_utc=$now WHERE timeline_id=$timeline;",
+                    Program.ExecuteSql(connection, "UPDATE world_history_timelines SET head_sequence=MAX(head_sequence,$sequence),head_event_id=$event,updated_utc=$now WHERE timeline_id=$timeline;",
                         new Dictionary<string, object> { ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now, ["timeline"] = timelineId });
-                    ExecuteSql(connection, @"INSERT INTO world_history_ingest_state(client_id,timeline_id,last_sequence,last_event_id,updated_utc)
+                    Program.ExecuteSql(connection, @"INSERT INTO world_history_ingest_state(client_id,timeline_id,last_sequence,last_event_id,updated_utc)
 VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_id) DO UPDATE SET last_sequence=MAX(world_history_ingest_state.last_sequence,$sequence),last_event_id=$event,updated_utc=$now;",
                         new Dictionary<string, object> { ["client"] = clientId, ["timeline"] = timelineId, ["sequence"] = headSequence, ["event"] = headEventId, ["now"] = now });
                 }
                     // Preserve original native participation before lossy history compaction.
                     foreach (var item in events)
                     {
-                        ProjectSharedActivity(connection, timelineId, item);
+                        Program.ProjectSharedActivity(connection, timelineId, item);
                         if (hasSpouseLetter)
                         {
-                            foreach (var stored in QuerySql(connection,
+                            foreach (var stored in Program.QuerySql(connection,
                                 "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline;",
                                 TestDict("id", ReadFirstString(item, "eventId", "event_id", "id"), "timeline", timelineId)))
-                                ProjectSpouseSeparation(connection, campaignId, timelineId, stored);
+                                RelationshipsService.ProjectSpouseSeparation(connection, campaignId, timelineId, stored);
                         }
                         string performanceKind = ReadFirstString(item, "eventType", "event_type", "type");
                         if (performanceKind != "battle_completed" && performanceKind != "tournament_finished"
                             && !(performanceKind == "social_outcome" && ReadString(item, "source", "") == "reign_social"
                                 && (ReadDictionary(item, "payload") ?? TryParseJsonObject(ReadString(item, "payload_json", "{}"))).ContainsKey("duelMode"))) continue;
                         string performanceEventId = ReadFirstString(item, "eventId", "event_id", "id");
-                        foreach (var performanceEvent in QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));",
+                        foreach (var performanceEvent in Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));",
                             TestDict("id", performanceEventId, "timeline", timelineId)))
-                            ProjectPlayerPerformanceEvent(connection, performanceEvent);
+                            Program.ProjectPlayerPerformanceEvent(connection, performanceEvent);
                     }
                     transaction.Commit();
                 }
@@ -435,7 +435,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                     "social_outcome", StringComparison.OrdinalIgnoreCase))
                 .Where(item =>
                 {
-                    Dictionary<string, object> outcome = DictionaryOrDefault(
+                    Dictionary<string, object> outcome = Program.DictionaryOrDefault(
                         item, "payload", item);
                     return !string.IsNullOrWhiteSpace(ReadString(outcome,
                                "dynamicReputationTagId", ""))
@@ -463,13 +463,13 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                         eventId, ex, connection);
                     errors.Add("Direct social outcome " + eventId
                         + " failed before acknowledgment: "
-                        + LimitText(ex.Message, 500));
+                        + Program.LimitText(ex.Message, 500));
                 }
             }
             return acknowledged;
         }
 
-        private static Dictionary<string, object> WorldHistoryOpenTimelineApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> WorldHistoryOpenTimelineApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -482,10 +482,10 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
             bool branched = false;
             bool historyMissing = false;
             Dictionary<string, object> result;
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
-                Dictionary<string, object> existing = QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = requested }).FirstOrDefault();
+                Dictionary<string, object> existing = Program.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = requested }).FirstOrDefault();
                 long serverHead = ReadLong(existing, "head_sequence", 0);
                 if (existing == null && savedSequence > 0)
                 {
@@ -499,7 +499,7 @@ VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_i
                     branched = true;
                 }
                 string now = DateTime.UtcNow.ToString("o");
-                ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
+                Program.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,parent_timeline_id,fork_event_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
 VALUES($id,$campaign,$parent,$fork,$complete,$sequence,$head,1,$now,$now)
 ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dictionary<string, object>
                 {
@@ -507,20 +507,20 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
                     ["fork"] = savedHead, ["complete"] = completeFrom, ["sequence"] = branched ? savedSequence : Math.Max(savedSequence, serverHead),
                     ["head"] = savedHead, ["now"] = now
                 });
-                ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$id THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
+                Program.ExecuteSql(connection, "UPDATE world_history_timelines SET is_active=CASE WHEN timeline_id=$id THEN 1 ELSE 0 END WHERE campaign_id=$campaign;",
                     new Dictionary<string, object> { ["id"] = timelineId, ["campaign"] = campaignId });
                 if (historyMissing || branched)
                 {
-                    BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
-                    BindRecoveredCommunications(connection, requested, timelineId, savedSequence, savedHead);
-                    BindRecoveredPregnancyKnowledge(connection, requested, timelineId, savedSequence, savedHead);
-                    BindRecoveredMemorySources(connection, requested, timelineId, savedSequence, savedHead);
+                    Program.BindRecoveredLetterSources(connection, requested, timelineId, savedSequence, savedHead);
+                    Program.BindRecoveredCommunications(connection, requested, timelineId, savedSequence, savedHead);
+                    RelationshipsService.BindRecoveredPregnancyKnowledge(connection, requested, timelineId, savedSequence, savedHead);
+                    Program.BindRecoveredMemorySources(connection, requested, timelineId, savedSequence, savedHead);
                 }
                 result = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["branched"] = branched,
                     ["historyMissing"] = historyMissing,
-                    ["sharedActivityGeneration"] = ReadString(ReadMemoryPrecisionState(connection), "restore_generation", ""),
+                    ["sharedActivityGeneration"] = ReadString(Program.ReadMemoryPrecisionState(connection), "restore_generation", ""),
                     ["parentTimelineId"] = branched ? requested : ReadString(existing, "parent_timeline_id", ""),
                     ["savedSequence"] = savedSequence, ["previousServerHeadSequence"] = serverHead, ["historyCompleteFromWorldDay"] = completeFrom
                 };
@@ -534,7 +534,7 @@ ON CONFLICT(timeline_id) DO UPDATE SET is_active=1,updated_utc=$now;", new Dicti
             int ordinal = 0;
             foreach (Dictionary<string, object> entity in entities ?? new List<Dictionary<string, object>>())
             {
-                ExecuteSql(connection, @"INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,name_snapshot,role,side,party_id,clan_id,kingdom_id,quantity,before_json,after_json,payload_json)
+                Program.ExecuteSql(connection, @"INSERT INTO world_history_entities(event_id,ordinal,entity_id,entity_type,name_snapshot,role,side,party_id,clan_id,kingdom_id,quantity,before_json,after_json,payload_json)
 VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quantity,$before,$after,$payload);",
                     new Dictionary<string, object>
                     {
@@ -549,7 +549,7 @@ VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quanti
             }
         }
 
-        private static List<Dictionary<string, object>>
+        internal static List<Dictionary<string, object>>
             CompactWorldHistoryEntities(string eventType,
                 List<Dictionary<string, object>> entities)
         {
@@ -619,7 +619,7 @@ VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quanti
             List<Dictionary<string, object>> entities, List<Dictionary<string, object>> supplied)
         {
             List<Dictionary<string, object>> rules =
-                BuildWorldHistoryKnowledgeRules(eventType, day,
+                PersistenceService.BuildWorldHistoryKnowledgeRules(eventType, day,
                     dissemination, entities, supplied);
 
             int ordinal = 0;
@@ -629,7 +629,7 @@ VALUES($event,$ordinal,$id,$type,$name,$role,$side,$party,$clan,$kingdom,$quanti
                 string audienceId = ReadFirstString(rule, "audienceId", "audience_id");
                 double available = ReadDouble(rule, "availableDay", ReadDouble(rule, "available_day", day));
                 string ruleId = eventId + ":" + ordinal++ + ":" + audienceType + ":" + audienceId;
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO world_history_knowledge_rules(rule_id,event_id,audience_type,audience_id,available_day,acquisition_mode,confidence)
 VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<string, object>
                 {
                     ["id"] = ruleId, ["event"] = eventId, ["type"] = audienceType, ["audience"] = audienceId, ["day"] = available,
@@ -638,16 +638,16 @@ VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<stri
             }
         }
 
-        private static bool IsImmediateHistoryParticipant(string eventType, Dictionary<string, object> entity)
+        internal static bool IsImmediateHistoryParticipant(string eventType, Dictionary<string, object> entity)
         {
             string type = ReadFirstString(entity, "entityType", "entity_type", "type");
-            return (type == "hero" || type == "character") && IsFirsthandWorldHistoryRole(eventType, ReadString(entity, "role", ""));
+            return (type == "hero" || type == "character") && Program.IsFirsthandWorldHistoryRole(eventType, ReadString(entity, "role", ""));
         }
 
         private static void InsertWorldHistoryFts(ReignDbConnection connection, string eventId, string text, List<Dictionary<string, object>> entities, string location, string eventType)
         {
-            ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = eventId });
-            ExecuteSql(connection, "INSERT INTO world_history_fts(event_id,text,entities,roles,location,event_type) VALUES($id,$text,$entities,$roles,$location,$type);",
+            Program.ExecuteSql(connection, "DELETE FROM world_history_fts WHERE event_id=$id;", new Dictionary<string, object> { ["id"] = eventId });
+            Program.ExecuteSql(connection, "INSERT INTO world_history_fts(event_id,text,entities,roles,location,event_type) VALUES($id,$text,$entities,$roles,$location,$type);",
                 new Dictionary<string, object>
                 {
                     ["id"] = eventId, ["text"] = text ?? "", ["entities"] = string.Join(" ", entities.Select(x => ReadFirstString(x, "entityId", "name", "nameSnapshot"))),
@@ -655,10 +655,10 @@ VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<stri
                 });
         }
 
-        private static Dictionary<string, object> WorldHistoryQueryApi(Dictionary<string, string> query)
+        internal static Dictionary<string, object> WorldHistoryQueryApi(Dictionary<string, string> query)
         {
             query = query ?? new Dictionary<string, string>();
-            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : LatestCampaignId();
+            string campaignId = query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
             string timelineId = query.ContainsKey("timelineId") ? query["timelineId"] : string.Empty;
             string entityId = query.ContainsKey("entityId") ? query["entityId"] : string.Empty;
             string type = query.ContainsKey("eventType") ? query["eventType"] : string.Empty;
@@ -666,12 +666,12 @@ VALUES($id,$event,$type,$audience,$day,$mode,$confidence);", new Dictionary<stri
             double fromDay = ParseDoubleInvariant(query.ContainsKey("fromDay") ? query["fromDay"] : "", -1d);
             double toDay = ParseDoubleInvariant(query.ContainsKey("toDay") ? query["toDay"] : "", double.MaxValue);
             int limit = Math.Max(1, Math.Min(500, ParseIntInvariant(query.ContainsKey("limit") ? query["limit"] : "", 100)));
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
                 timelineId = FirstNonEmpty(timelineId, ActiveWorldHistoryTimeline(connection));
-                List<string> terms = MemoryQueryTerms(text).Take(16).ToList();
-                List<Dictionary<string, object>> rows = QuerySql(connection, @"SELECT DISTINCT e.* FROM world_history_events e
+                List<string> terms = Program.MemoryQueryTerms(text).Take(16).ToList();
+                List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"SELECT DISTINCT e.* FROM world_history_events e
 LEFT JOIN world_history_entities n ON n.event_id=e.event_id
 WHERE e.timeline_id=$timeline AND ($entity='' OR n.entity_id=$entity) AND ($type='' OR e.event_type=$type)
 AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DESC LIMIT $limit;",
@@ -685,35 +685,35 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
             }
         }
 
-        private static Dictionary<string, object> WorldHistoryEventApi(Dictionary<string, string> query, string eventId)
+        internal static Dictionary<string, object> WorldHistoryEventApi(Dictionary<string, string> query, string eventId)
         {
-            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : LatestCampaignId();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
-                Dictionary<string, object> row = QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
+                Dictionary<string, object> row = Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = eventId }).FirstOrDefault();
                 if (row == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "World-history event was not found." };
                 row["entities"] = QueryWorldHistoryEntities(connection, eventId);
-                row["knowledgeRules"] = QuerySql(connection, "SELECT * FROM world_history_knowledge_rules WHERE event_id=$id ORDER BY available_day;", new Dictionary<string, object> { ["id"] = eventId });
+                row["knowledgeRules"] = Program.QuerySql(connection, "SELECT * FROM world_history_knowledge_rules WHERE event_id=$id ORDER BY available_day;", new Dictionary<string, object> { ["id"] = eventId });
                 return new Dictionary<string, object> { ["ok"] = true, ["event"] = row };
             }
         }
 
-        private static Dictionary<string, object> WorldHistoryCorrelationApi(Dictionary<string, string> query, string correlationId)
+        internal static Dictionary<string, object> WorldHistoryCorrelationApi(Dictionary<string, string> query, string correlationId)
         {
-            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : LatestCampaignId();
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : Program.LatestCampaignId();
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
                 string timeline = query != null && query.ContainsKey("timelineId") ? query["timelineId"] : ActiveWorldHistoryTimeline(connection);
-                List<Dictionary<string, object>> rows = QuerySql(connection, "SELECT * FROM world_history_events WHERE timeline_id=$timeline AND correlation_id=$id ORDER BY sequence;",
+                List<Dictionary<string, object>> rows = Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE timeline_id=$timeline AND correlation_id=$id ORDER BY sequence;",
                     new Dictionary<string, object> { ["timeline"] = timeline, ["id"] = correlationId });
                 foreach (Dictionary<string, object> row in rows) row["entities"] = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
                 return new Dictionary<string, object> { ["ok"] = true, ["correlationId"] = correlationId, ["events"] = rows };
             }
         }
 
-        private static Dictionary<string, object> WorldHistoryVerifyApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> WorldHistoryVerifyApi(Dictionary<string, object> payload)
         {
             Stopwatch timer = Stopwatch.StartNew();
             payload = payload ?? new Dictionary<string, object>();
@@ -726,14 +726,14 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
             if (string.IsNullOrWhiteSpace(claim)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "claim text is required." };
             bool lookupOnly = ReadBool(payload, "lookupOnly", false) || string.IsNullOrWhiteSpace(claimantId);
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureWorldHistorySchema(connection);
                 string timelineId = FirstNonEmpty(ReadFirstString(payload, "timelineId", "timeline_id"), ActiveWorldHistoryTimeline(connection));
-                Dictionary<string, object> timeline = QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
+                Dictionary<string, object> timeline = Program.QuerySql(connection, "SELECT * FROM world_history_timelines WHERE timeline_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = timelineId }).FirstOrDefault()
                     ?? new Dictionary<string, object>();
                 long head = ReadLong(timeline, "head_sequence", 0);
-                string cacheKey = "source_claim_v3|" + campaignId + "|" + NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
+                string cacheKey = "source_claim_v3|" + campaignId + "|" + Program.NormalizeLookup(claim) + "|" + claimantId + "|" + speakerId + "|" + speakerKingdomId + "|" + timelineId + "|" + head
                     + "|" + worldDay.ToString("R", CultureInfo.InvariantCulture) + "|lookup=" + lookupOnly
                     + "|" + ReadDouble(payload, "fromDay", -1d).ToString("R", CultureInfo.InvariantCulture)
                     + "|" + ReadDouble(payload, "toDay", worldDay > 0 ? worldDay : double.MaxValue).ToString("R", CultureInfo.InvariantCulture)
@@ -772,10 +772,10 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
 
                 string candidateClaimantId = lookupOnly ? "" : claimantId;
                 List<Dictionary<string, object>> candidates = QueryWorldHistoryCandidates(connection, timelineId, claim, family, candidateClaimantId, entityHints, locationId, fromDay, toDay, 256);
-                Dictionary<string, object> semanticHistory = TrySemanticMemorySearch(campaignId, claim,
-                    new Dictionary<string, object>(), LoadSettings(), new[] { "world_history_event" }, timelineId);
-                candidates = MergeSemanticWorldHistoryCandidates(connection, campaignId, timelineId, claim, family, claimantId,
-                    entityHints, locationId, fromDay, toDay, candidates, semanticHistory, LoadSettings());
+                Dictionary<string, object> semanticHistory = Program.TrySemanticMemorySearch(campaignId, claim,
+                    new Dictionary<string, object>(), Program.LoadSettings(), new[] { "world_history_event" }, timelineId);
+                candidates = Program.MergeSemanticWorldHistoryCandidates(connection, campaignId, timelineId, claim, family, claimantId,
+                    entityHints, locationId, fromDay, toDay, candidates, semanticHistory, Program.LoadSettings());
                 Dictionary<string, object> minimeRerank = TryMinimeHistoryRerank(claim, purpose, family, candidates.Take(64).ToList());
                 ApplyWorldHistoryMinimeScores(candidates, minimeRerank);
                 candidates = candidates.OrderByDescending(x => ReadDouble(x, "combinedScore", ReadDouble(x, "deterministicScore", 0d))).Take(12).ToList();
@@ -823,9 +823,9 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                 List<string> speakerIds = evidenceIds.Where(id => WorldHistoryEventVisibleToSpeaker(connection, id, speakerId, speakerKingdomId, worldDay)).ToList();
                 foreach (string visibleEventId in speakerIds)
                 {
-                    UpsertKnowledgeReceipt(connection, visibleEventId, speakerId, "world_history_rule", 1d, 1d, worldDay, "world_history_verification", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                    Program.UpsertKnowledgeReceipt(connection, visibleEventId, speakerId, "world_history_rule", 1d, 1d, worldDay, "world_history_verification", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 }
-                List<string> reconciledBeliefIds = ReconcileWorldHistoryClaimBeliefs(connection, speakerId, speakerIds, worldDay);
+                List<string> reconciledBeliefIds = Program.ReconcileWorldHistoryClaimBeliefs(connection, speakerId, speakerIds, worldDay);
                 string objectiveVerdict = ReadString(verdict, "verdict", "insufficient_evidence");
                 string speakerVerdict = string.IsNullOrWhiteSpace(speakerId) ? "unknown" : speakerIds.Count == 0 ? "unknown" : objectiveVerdict;
                 string checkId = "whc_" + Guid.NewGuid().ToString("N");
@@ -839,7 +839,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                     ["explanation"] = ReadString(verdict, "explanation", ""), ["evidenceEventIds"] = evidenceIds,
                     ["speakerEvidenceEventIds"] = speakerIds, ["matchedComponents"] = ReadStringList(verdict, "matchedComponents"),
                     ["mismatchedComponents"] = ReadStringList(verdict, "mismatchedComponents"),
-                    ["speakerKnowledge"] = BuildWorldHistoryKnowledgeSummary(connection, speakerIds, speakerId, speakerKingdomId, worldDay),
+                    ["speakerKnowledge"] = Program.BuildWorldHistoryKnowledgeSummary(connection, speakerIds, speakerId, speakerKingdomId, worldDay),
                     ["reconciledBeliefIds"] = reconciledBeliefIds,
                     ["coverage"] = new Dictionary<string, object> { ["historyCompleteFromWorldDay"] = completeFrom, ["requestedFromDay"] = fromDay, ["complete"] = fromDay < 0 || completeFrom <= 0 || fromDay >= completeFrom },
                     ["minime"] = new Dictionary<string, object> { ["route"] = minimeRoute, ["rerank"] = minimeRerank },
@@ -852,7 +852,7 @@ AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to ORDER BY e.sequence DES
                     ["candidateCount"] = candidates.Count, ["candidateEventIds"] = candidates.Select(x => ReadString(x, "event_id", "")).ToList(),
                     ["durationMs"] = timer.ElapsedMilliseconds, ["cached"] = false
                 };
-                ExecuteSql(connection, @"INSERT INTO world_history_claim_checks(check_id,campaign_id,timeline_id,world_day,claimant_id,speaker_id,raw_claim,purpose,claim_family,objective_verdict,speaker_verdict,explanation,constraints_json,evidence_event_ids_json,speaker_event_ids_json,minime_json,created_ts)
+                Program.ExecuteSql(connection, @"INSERT INTO world_history_claim_checks(check_id,campaign_id,timeline_id,world_day,claimant_id,speaker_id,raw_claim,purpose,claim_family,objective_verdict,speaker_verdict,explanation,constraints_json,evidence_event_ids_json,speaker_event_ids_json,minime_json,created_ts)
 VALUES($id,$campaign,$timeline,$day,$claimant,$speaker,$claim,$purpose,$family,$objective,$speakerVerdict,$explanation,$constraints,$evidence,$speakerEvidence,$minime,$ts);",
                     new Dictionary<string, object>
                     {
@@ -880,20 +880,20 @@ VALUES($id,$campaign,$timeline,$day,$claimant,$speaker,$claim,$purpose,$family,$
                 ["claimant"] = claimantId ?? "", ["limit"] = Math.Max(1, Math.Min(256, limit))
             };
             List<Dictionary<string, object>> rows = string.IsNullOrWhiteSpace(claimantId)
-                ? QuerySql(connection, @"SELECT e.* FROM world_history_events e INDEXED BY idx_wh_event_evidence
+                ? Program.QuerySql(connection, @"SELECT e.* FROM world_history_events e INDEXED BY idx_wh_event_evidence
 WHERE e.timeline_id=$timeline AND ($location='' OR e.location_id=$location) AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to
 ORDER BY e.sequence DESC LIMIT $limit;", parameters)
-                : QuerySql(connection, @"SELECT e.* FROM world_history_entities n INDEXED BY idx_wh_entity_event
+                : Program.QuerySql(connection, @"SELECT e.* FROM world_history_entities n INDEXED BY idx_wh_entity_event
 JOIN world_history_events e ON e.event_id=n.event_id WHERE n.entity_id=$claimant AND e.timeline_id=$timeline
 AND ($location='' OR e.location_id=$location) AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to
 ORDER BY e.sequence DESC LIMIT $limit;", parameters);
-            List<string> ftsTerms = MemoryQueryTerms(claim).Where(x => x.Length > 2).Take(16).ToList();
-            string ftsQuery = BuildFtsQuery(ftsTerms);
+            List<string> ftsTerms = Program.MemoryQueryTerms(claim).Where(x => x.Length > 2).Take(16).ToList();
+            string ftsQuery = Program.BuildFtsQuery(ftsTerms);
             if (!string.IsNullOrWhiteSpace(ftsQuery))
             {
                 try
                 {
-                    List<Dictionary<string, object>> semanticRows = QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
+                    List<Dictionary<string, object>> semanticRows = Program.QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
 WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR e.world_day>=$from) AND e.world_day<=$to LIMIT 128;",
                         new Dictionary<string, object> { ["query"] = ftsQuery, ["timeline"] = timelineId, ["from"] = fromDay, ["to"] = toDay <= 0 ? double.MaxValue : toDay });
                     HashSet<string> seen = new HashSet<string>(rows.Select(x => ReadString(x, "event_id", "")), StringComparer.OrdinalIgnoreCase);
@@ -901,7 +901,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 }
                 catch { }
             }
-            List<string> terms = MemoryQueryTerms(claim).Concat(FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
+            List<string> terms = Program.MemoryQueryTerms(claim).Concat(FamilyTerms(family)).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
             foreach (Dictionary<string, object> row in rows)
             {
                 List<Dictionary<string, object>> entities = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
@@ -961,7 +961,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 bool direct = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "direct_rescuer", "rescuer", "releaser"));
                 bool assisted = claimantMatches.Any(x => HasHistoryRole(x, claimantId, "assisting_rescuer", "rescuing_side_participant", "participant"));
                 int beneficiaries = claimantMatches.SelectMany(x => ReadDictionaryList(x, "entities")).Where(x => RoleContains(ReadString(x, "role", ""), "beneficiary", "rescued_prisoner", "released_prisoner")).Select(x => ReadString(x, "entity_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                bool severalClaim = ContainsAny(NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
+                bool severalClaim = Program.ContainsAny(Program.NormalizeLookup(claim), "several", "many", "multiple", "three", "four", "five");
                 verdict = direct && (!severalClaim || beneficiaries >= 3) ? "verified" : direct || assisted ? "partially_verified" : familyMatches.All(HistoryEventRosterComplete) ? "contradicted" : "insufficient_evidence";
                 explanation = direct ? "The claimant is connected to a direct release; beneficiary quantity was checked." : assisted ? "The claimant assisted the rescuing side but is not the direct recorded rescuer." : "No complete matching event credits the claimant with the rescue.";
                 if (direct || assisted) matched.Add("rescue participation");
@@ -979,9 +979,9 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             return new Dictionary<string, object> { ["verdict"] = verdict, ["explanation"] = explanation, ["evidenceEventIds"] = evidence, ["matchedComponents"] = matched, ["mismatchedComponents"] = mismatched };
         }
 
-        private static Dictionary<string, object> ClassifyWorldHistoryClaim(string claim)
+        internal static Dictionary<string, object> ClassifyWorldHistoryClaim(string claim)
         {
-            string q = NormalizeLookup(claim);
+            string q = Program.NormalizeLookup(claim);
             string purpose = HistoryClaimContainsTerm(q, "i did", "i was", "i fought", "i rescued", "i captured", "i killed") ? "self_claim"
                 : HistoryClaimContainsTerm(q, "because of me", "my victory", "my doing", "credit", "hero") ? "credit_or_boast"
                 : HistoryClaimContainsTerm(q, "was not there", "wasnt there", "elsewhere", "alibi") ? "alibi"
@@ -1014,15 +1014,15 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
         private static Dictionary<string, object> TryMinimeHistoryRoute(string claim, string fallbackPurpose, string fallbackFamily)
         {
             Dictionary<string, object> status = new Dictionary<string, object> { ["applied"] = false, ["purpose"] = fallbackPurpose, ["claimFamily"] = fallbackFamily, ["method"] = "deterministic_fallback" };
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             if (!ReadBool(settings, "enableMinimeMemoryWorker", true) || !ReadBool(settings, "enableMinimeMemoryReranking", true)) return status;
             try
             {
                 List<Dictionary<string, object>> candidates = WorldHistoryPurposes.Select(x => new Dictionary<string, object> { ["id"] = "purpose:" + x, ["text"] = PurposeDescription(x) })
                     .Concat(WorldHistoryFamilies.Select(x => new Dictionary<string, object> { ["id"] = "family:" + x, ["text"] = FamilyDescription(x) })).ToList();
-                string raw = PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
+                string raw = Program.PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
                 {
-                    ["query"] = LimitText(claim, 1800), ["candidates"] = candidates, ["top_k"] = candidates.Count
+                    ["query"] = Program.LimitText(claim, 1800), ["candidates"] = candidates, ["top_k"] = candidates.Count
                 }), Math.Max(250, Math.Min(1500, ReadInt(settings, "minimeRerankTimeoutMs", 1500))));
                 Dictionary<string, object> decoded = TryParseJsonObject(raw);
                 List<Dictionary<string, object>> results = ReadDictionaryList(decoded, "results").Concat(ReadDictionaryList(decoded, "ranked")).Concat(ReadDictionaryList(decoded, "items")).ToList();
@@ -1056,25 +1056,25 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 status["method"] = ReadBool(status, "applied", false) ? "minime_generic_assist" : "deterministic_authoritative";
                 status["results"] = results.Take(12).ToList();
             }
-            catch (Exception ex) { status["error"] = LimitText(ex.Message, 500); }
+            catch (Exception ex) { status["error"] = Program.LimitText(ex.Message, 500); }
             return status;
         }
 
         private static Dictionary<string, object> TryMinimeHistoryRerank(string claim, string purpose, string family, List<Dictionary<string, object>> candidates)
         {
             Dictionary<string, object> status = new Dictionary<string, object> { ["applied"] = false, ["scores"] = new Dictionary<string, object>(), ["candidateCount"] = candidates.Count };
-            Dictionary<string, object> settings = LoadSettings();
+            Dictionary<string, object> settings = Program.LoadSettings();
             if (candidates.Count < 2 || !ReadBool(settings, "enableMinimeMemoryWorker", true) || !ReadBool(settings, "enableMinimeMemoryReranking", true)) return status;
             try
             {
                 List<Dictionary<string, object>> outbound = candidates.Take(64).Select(x => new Dictionary<string, object>
                 {
-                    ["id"] = ReadString(x, "event_id", ""), ["text"] = LimitText(ReadString(x, "semantic_text", ReadString(x, "summary", "")), 1800)
+                    ["id"] = ReadString(x, "event_id", ""), ["text"] = Program.LimitText(ReadString(x, "semantic_text", ReadString(x, "summary", "")), 1800)
                 }).ToList();
                 string query = "Purpose: " + purpose + ". Claim family: " + family + ". Find canonical evidence for: " + claim;
-                string raw = PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
+                string raw = Program.PostJsonToUrl(ReadString(settings, "minimeRerankUrl", "http://127.0.0.1:8082/rerank"), Json.Serialize(new Dictionary<string, object>
                 {
-                    ["query"] = LimitText(query, 1800), ["candidates"] = outbound, ["top_k"] = outbound.Count
+                    ["query"] = Program.LimitText(query, 1800), ["candidates"] = outbound, ["top_k"] = outbound.Count
                 }), Math.Max(250, Math.Min(1500, ReadInt(settings, "minimeRerankTimeoutMs", 1500))));
                 Dictionary<string, object> decoded = TryParseJsonObject(raw);
                 List<Dictionary<string, object>> results = ReadDictionaryList(decoded, "results").Concat(ReadDictionaryList(decoded, "ranked")).Concat(ReadDictionaryList(decoded, "items")).ToList();
@@ -1082,11 +1082,11 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 foreach (Dictionary<string, object> result in results)
                 {
                     string id = ReadFirstString(result, "id", "candidate_id", "candidateId");
-                    if (!string.IsNullOrWhiteSpace(id)) scores[id] = ClampDouble(ReadDouble(result, "score", ReadDouble(result, "similarity", 0d)), -1d, 1d);
+                    if (!string.IsNullOrWhiteSpace(id)) scores[id] = Program.ClampDouble(ReadDouble(result, "score", ReadDouble(result, "similarity", 0d)), -1d, 1d);
                 }
                 status["applied"] = scores.Count > 0; status["scores"] = scores; status["results"] = results.Take(64).ToList();
             }
-            catch (Exception ex) { status["error"] = LimitText(ex.Message, 500); }
+            catch (Exception ex) { status["error"] = Program.LimitText(ex.Message, 500); }
             return status;
         }
 
@@ -1099,7 +1099,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                 double semantic = scores.ContainsKey(id) ? Convert.ToDouble(scores[id], CultureInfo.InvariantCulture) : 0d;
                 candidate["minimeScore"] = semantic;
                 candidate["combinedScore"] = ReadDouble(candidate, "deterministicScore", 0d)
-                    + Math.Max(0d, ReadDouble(candidate, "vectorSemanticScore", 0d)) * ReadDouble(LoadSettings(), "vectorScoreWeight", 30d)
+                    + Math.Max(0d, ReadDouble(candidate, "vectorSemanticScore", 0d)) * ReadDouble(Program.LoadSettings(), "vectorScoreWeight", 30d)
                     + Math.Max(0d, semantic) * 5d;
             }
         }
@@ -1107,7 +1107,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
         private static bool WorldHistoryEventVisibleToSpeaker(ReignDbConnection connection, string eventId, string speakerId, string speakerKingdomId, double worldDay)
         {
             if (string.IsNullOrWhiteSpace(speakerId)) return false;
-            Dictionary<string, object> knowledge = DetermineWorldHistoryKnowledge(connection, new List<string> { eventId }, speakerId, speakerKingdomId, worldDay);
+            Dictionary<string, object> knowledge = Program.DetermineWorldHistoryKnowledge(connection, new List<string> { eventId }, speakerId, speakerKingdomId, worldDay);
             return !string.Equals(ReadString(knowledge, "basis", "none"), "none", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -1116,7 +1116,7 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             HashSet<string> present = new HashSet<string>(candidates.Select(x => ReadString(x, "event_id", "")), StringComparer.OrdinalIgnoreCase);
             foreach (string correlation in candidates.Select(x => ReadString(x, "correlation_id", "")).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList())
             {
-                foreach (Dictionary<string, object> row in QuerySql(connection, "SELECT * FROM world_history_events WHERE timeline_id=$timeline AND correlation_id=$correlation ORDER BY sequence;", new Dictionary<string, object> { ["timeline"] = timelineId, ["correlation"] = correlation }))
+                foreach (Dictionary<string, object> row in Program.QuerySql(connection, "SELECT * FROM world_history_events WHERE timeline_id=$timeline AND correlation_id=$correlation ORDER BY sequence;", new Dictionary<string, object> { ["timeline"] = timelineId, ["correlation"] = correlation }))
                 {
                     string id = ReadString(row, "event_id", "");
                     if (present.Add(id)) { row["entities"] = QueryWorldHistoryEntities(connection, id); row["deterministicScore"] = 1d; row["combinedScore"] = 1d; candidates.Add(row); }
@@ -1126,58 +1126,58 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
 
         internal static List<Dictionary<string, object>> QueryWorldHistoryEntities(ReignDbConnection connection, string eventId)
         {
-            return QuerySql(connection, "SELECT * FROM world_history_entities WHERE event_id=$id ORDER BY ordinal;", new Dictionary<string, object> { ["id"] = eventId });
+            return Program.QuerySql(connection, "SELECT * FROM world_history_entities WHERE event_id=$id ORDER BY ordinal;", new Dictionary<string, object> { ["id"] = eventId });
         }
 
-        private static string ActiveWorldHistoryTimeline(ReignDbConnection connection)
+        internal static string ActiveWorldHistoryTimeline(ReignDbConnection connection)
         {
-            return ReadString(QuerySql(connection, "SELECT timeline_id FROM world_history_timelines WHERE is_active=1 ORDER BY updated_utc DESC LIMIT 1;").FirstOrDefault(), "timeline_id", "main");
+            return ReadString(Program.QuerySql(connection, "SELECT timeline_id FROM world_history_timelines WHERE is_active=1 ORDER BY updated_utc DESC LIMIT 1;").FirstOrDefault(), "timeline_id", "main");
         }
 
-        private static string BuildWorldHistorySemanticText(string eventType, string phase, string summary, List<Dictionary<string, object>> entities, string location)
+        internal static string BuildWorldHistorySemanticText(string eventType, string phase, string summary, List<Dictionary<string, object>> entities, string location)
         {
             string roles = string.Join("; ", (entities ?? new List<Dictionary<string, object>>()).Take(80).Select(x =>
                 FirstNonEmpty(ReadFirstString(x, "name", "nameSnapshot", "entityId", "id"), "unknown") + " was " + ReadString(x, "role", "participant") +
                 (string.IsNullOrWhiteSpace(ReadString(x, "side", "")) ? "" : " on " + ReadString(x, "side", "") + " side")));
-            return LimitText(eventType + " " + phase + " at " + location + ". " + summary + " Roles: " + roles, 12000);
+            return Program.LimitText(eventType + " " + phase + " at " + location + ". " + summary + " Roles: " + roles, 12000);
         }
 
-        private static string ClassifyWorldHistoryCategory(string eventType)
+        internal static string ClassifyWorldHistoryCategory(string eventType)
         {
-            string q = NormalizeLookup(eventType);
-            if (ContainsAny(q, "battle", "raid", "siege", "war", "army", "prisoner", "wounded", "killed")) return "warfare";
-            if (ContainsAny(q, "marriage", "birth", "child", "relation", "clan")) return "personal_and_clan";
-            if (ContainsAny(q, "trade", "item", "gold", "workshop", "caravan")) return "economy";
-            if (ContainsAny(q, "settlement", "village", "governor", "building")) return "settlement";
+            string q = Program.NormalizeLookup(eventType);
+            if (Program.ContainsAny(q, "battle", "raid", "siege", "war", "army", "prisoner", "wounded", "killed")) return "warfare";
+            if (Program.ContainsAny(q, "marriage", "birth", "child", "relation", "clan")) return "personal_and_clan";
+            if (Program.ContainsAny(q, "trade", "item", "gold", "workshop", "caravan")) return "economy";
+            if (Program.ContainsAny(q, "settlement", "village", "governor", "building")) return "settlement";
             return "campaign";
         }
 
-        private static bool IsMajorWorldHistoryEvent(string eventType)
+        internal static bool IsMajorWorldHistoryEvent(string eventType)
         {
-            return ContainsAny(NormalizeLookup(eventType), "war declared", "make peace", "alliance", "kingdom created", "kingdom destroyed", "ruling clan", "settlement owner", "marriage", "given birth", "hero killed", "rebellion");
+            return Program.ContainsAny(Program.NormalizeLookup(eventType), "war declared", "make peace", "alliance", "kingdom created", "kingdom destroyed", "ruling clan", "settlement owner", "marriage", "given birth", "hero killed", "rebellion");
         }
 
-        private static bool EventMatchesFamily(string eventType, List<Dictionary<string, object>> entities, string family)
+        internal static bool EventMatchesFamily(string eventType, List<Dictionary<string, object>> entities, string family)
         {
-            string q = NormalizeLookup(eventType + " " + string.Join(" ", (entities ?? new List<Dictionary<string, object>>()).Select(x => ReadString(x, "role", ""))));
+            string q = Program.NormalizeLookup(eventType + " " + string.Join(" ", (entities ?? new List<Dictionary<string, object>>()).Select(x => ReadString(x, "role", ""))));
             switch (family)
             {
-                case "presence": case "leadership": case "victory": case "defeat": return ContainsAny(q, "battle", "raid", "siege", "hideout", "blockade");
-                case "rescue": return ContainsAny(q, "rescue", "released prisoner", "direct rescuer", "assisting rescuer");
-                case "release": return ContainsAny(q, "release", "freed");
-                case "capture": return ContainsAny(q, "prisoner taken", "capture", "captor");
-                case "killing": return ContainsAny(q, "killed", "killer", "execution");
-                case "wounding": return ContainsAny(q, "wounded", "wound");
-                case "raid": return ContainsAny(q, "raid", "village looted");
-                case "siege": case "conquest": case "defense": return ContainsAny(q, "siege", "settlement owner", "conquest");
-                case "ownership": return ContainsAny(q, "owner", "ownership", "workshop");
-                case "marriage": return ContainsAny(q, "marriage", "married");
-                case "diplomacy": return ContainsAny(q, "war declared", "peace", "alliance", "diplomacy", "treaty");
-                case "payment": return ContainsAny(q, "gold", "payment", "paid");
-                case "trade": return ContainsAny(q, "trade", "item sold", "barter");
-                case "tournament": return ContainsAny(q, "tournament");
-                case "travel": return ContainsAny(q, "settlement entered", "settlement left", "travel");
-                case "meeting": return ContainsAny(q, "met", "conversation", "meeting");
+                case "presence": case "leadership": case "victory": case "defeat": return Program.ContainsAny(q, "battle", "raid", "siege", "hideout", "blockade");
+                case "rescue": return Program.ContainsAny(q, "rescue", "released prisoner", "direct rescuer", "assisting rescuer");
+                case "release": return Program.ContainsAny(q, "release", "freed");
+                case "capture": return Program.ContainsAny(q, "prisoner taken", "capture", "captor");
+                case "killing": return Program.ContainsAny(q, "killed", "killer", "execution");
+                case "wounding": return Program.ContainsAny(q, "wounded", "wound");
+                case "raid": return Program.ContainsAny(q, "raid", "village looted");
+                case "siege": case "conquest": case "defense": return Program.ContainsAny(q, "siege", "settlement owner", "conquest");
+                case "ownership": return Program.ContainsAny(q, "owner", "ownership", "workshop");
+                case "marriage": return Program.ContainsAny(q, "marriage", "married");
+                case "diplomacy": return Program.ContainsAny(q, "war declared", "peace", "alliance", "diplomacy", "treaty");
+                case "payment": return Program.ContainsAny(q, "gold", "payment", "paid");
+                case "trade": return Program.ContainsAny(q, "trade", "item sold", "barter");
+                case "tournament": return Program.ContainsAny(q, "tournament");
+                case "travel": return Program.ContainsAny(q, "settlement entered", "settlement left", "travel");
+                case "meeting": return Program.ContainsAny(q, "met", "conversation", "meeting");
                 default: return true;
             }
         }
@@ -1201,21 +1201,21 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             return HasHistoryRole(evt, entityId, roles);
         }
 
-        private static bool RoleContains(string role, params string[] values)
+        internal static bool RoleContains(string role, params string[] values)
         {
-            string q = NormalizeLookup(role);
-            return values.Any(x => q.Contains(NormalizeLookup(x)));
+            string q = Program.NormalizeLookup(role);
+            return values.Any(x => q.Contains(Program.NormalizeLookup(x)));
         }
 
-        private static double HistoryTermScore(Dictionary<string, object> row, List<string> terms)
+        internal static double HistoryTermScore(Dictionary<string, object> row, List<string> terms)
         {
-            string text = NormalizeLookup(ReadString(row, "semantic_text", "") + " " + ReadString(row, "summary", "") + " " + ReadString(row, "event_type", "") + " " + ReadString(row, "location_name", ""));
-            return (terms ?? new List<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Sum(x => text.Contains(NormalizeLookup(x)) ? 1d : 0d);
+            string text = Program.NormalizeLookup(ReadString(row, "semantic_text", "") + " " + ReadString(row, "summary", "") + " " + ReadString(row, "event_type", "") + " " + ReadString(row, "location_name", ""));
+            return (terms ?? new List<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Sum(x => text.Contains(Program.NormalizeLookup(x)) ? 1d : 0d);
         }
 
-        private static List<string> FamilyTerms(string family)
+        internal static List<string> FamilyTerms(string family)
         {
-            return FamilyDescription(family).Split(new[] { ' ', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(NormalizeLookup).Where(x => x.Length > 3).Distinct().ToList();
+            return FamilyDescription(family).Split(new[] { ' ', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(Program.NormalizeLookup).Where(x => x.Length > 3).Distinct().ToList();
         }
 
         private static string PurposeDescription(string purpose)
@@ -1229,10 +1229,10 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
         }
 
         internal static double ParseDoubleInvariant(string value, double fallback) { return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback; }
-        private static int ParseIntInvariant(string value, int fallback) { return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback; }
+        internal static int ParseIntInvariant(string value, int fallback) { return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback; }
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        private static Dictionary<string, object> RunWorldHistorySelfTests()
+        internal static Dictionary<string, object> RunWorldHistorySelfTests()
         {
             string campaignId = "wh_" + Guid.NewGuid().ToString("N").Substring(0, 12);
             string timelineId = "main";
@@ -1280,16 +1280,16 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
                     && ReadStringList(lookup,"evidenceEventIds").Contains("battle_test",StringComparer.OrdinalIgnoreCase)
                     && ReadDictionaryList(ReadDictionary(lookup,"speakerKnowledge"),"events").Any(x=>ReadString(x,"event_id","")=="battle_test")}}
             };
-            assertions.AddRange(RunLieDetectionAssertions(campaignId, timelineId));
+            assertions.AddRange(Program.RunLieDetectionAssertions(campaignId, timelineId));
             assertions.AddRange(RunWorldHistoryRetentionAssertions());
-            assertions.AddRange(RunWorldHistoryDialogueAssertions(campaignId, timelineId));
+            assertions.AddRange(Program.RunWorldHistoryDialogueAssertions(campaignId, timelineId));
             try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-            try { Directory.Delete(CampaignDirectory(campaignId), true); } catch { }
+            try { Directory.Delete(Program.CampaignDirectory(campaignId), true); } catch { }
             return new Dictionary<string, object> { ["ok"] = assertions.All(x => ReadBool(x, "passed", false)), ["passed"] = assertions.All(x => ReadBool(x, "passed", false)), ["assertions"] = assertions };
         }
 #endif
 
-        private static Dictionary<string, object> RunWorldHistoryStressTests(int rowCount = 1000000)
+        internal static Dictionary<string, object> RunWorldHistoryStressTests(int rowCount = 1000000)
         {
             rowCount = Math.Max(1000, Math.Min(1000000, rowCount));
             string campaignId = "ws_" + Guid.NewGuid().ToString("N").Substring(0, 12);
@@ -1299,10 +1299,10 @@ WHERE world_history_fts MATCH $query AND e.timeline_id=$timeline AND ($from<0 OR
             int queryCount = 0;
             try
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureWorldHistorySchema(connection);
-                    ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
+                    Program.ExecuteSql(connection, @"INSERT INTO world_history_timelines(timeline_id,campaign_id,history_complete_from_day,head_sequence,head_event_id,is_active,created_utc,updated_utc)
 VALUES($timeline,$campaign,1,$head,'stress_last',1,$now,$now);", new Dictionary<string, object>
                     {
                         ["timeline"] = timelineId, ["campaign"] = campaignId, ["head"] = rowCount, ["now"] = DateTime.UtcNow.ToString("o")
@@ -1343,7 +1343,7 @@ VALUES($event,0,'main_hero','hero','Player','participant winner','attacker','mai
                         transaction.Commit();
                     }
                     Stopwatch queryTimer = Stopwatch.StartNew();
-                    queryCount = QuerySql(connection, @"SELECT e.event_id,e.sequence,e.world_day FROM world_history_entities n INDEXED BY idx_wh_entity_event
+                    queryCount = Program.QuerySql(connection, @"SELECT e.event_id,e.sequence,e.world_day FROM world_history_entities n INDEXED BY idx_wh_entity_event
 JOIN world_history_events e ON e.event_id=n.event_id WHERE n.entity_id='main_hero' AND e.timeline_id=$timeline
 AND e.event_type='battle_completed' AND e.world_day BETWEEN $from AND $to ORDER BY e.world_day DESC LIMIT 256;",
                         new Dictionary<string, object> { ["timeline"] = timelineId, ["from"] = 5000d, ["to"] = 10001d }).Count;
@@ -1355,7 +1355,7 @@ AND e.event_type='battle_completed' AND e.world_day BETWEEN $from AND $to ORDER 
             {
                 total.Stop();
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-                try { Directory.Delete(CampaignDirectory(campaignId), true); } catch { }
+                try { Directory.Delete(Program.CampaignDirectory(campaignId), true); } catch { }
             }
             bool passed = queryCount > 0 && queryMs < 250;
             return new Dictionary<string, object>

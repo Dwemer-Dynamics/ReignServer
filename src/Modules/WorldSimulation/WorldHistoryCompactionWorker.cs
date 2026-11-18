@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
         private const int PostgreSqlWorldHistoryCompactionBatchSize = 2000;
 
@@ -71,7 +71,7 @@ namespace ReignBetaServer
                     Dictionary<string, object> result;
                     Stopwatch timer = Stopwatch.StartNew();
                     using (ReignDbConnection connection =
-                        OpenCampaignConnection(lane.CampaignId))
+                        Program.OpenCampaignConnection(lane.CampaignId))
                     {
                         EnsureWorldHistorySchema(connection);
                         using (ReignDbTransaction transaction =
@@ -119,7 +119,7 @@ namespace ReignBetaServer
                     lane.LastCompletedUtc = DateTime.UtcNow.ToString("o");
                     lane.Running = false;
                 }
-                LogOperational("world_history.compaction_failed",
+                Program.LogOperational("world_history.compaction_failed",
                     new Dictionary<string, object>
                     {
                         ["campaignId"] = lane.CampaignId,
@@ -142,7 +142,7 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> result;
                 using (ReignDbConnection connection =
-                    OpenCampaignConnection(campaignId))
+                    Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureWorldHistorySchema(connection);
                     using (ReignDbTransaction transaction =

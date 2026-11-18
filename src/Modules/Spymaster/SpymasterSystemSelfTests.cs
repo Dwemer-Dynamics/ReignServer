@@ -177,7 +177,7 @@ namespace ReignBetaServer
             }
             finally
             {
-                Program.TryDeleteDirectory(Program.CampaignDirectory(exclusionCampaign));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(exclusionCampaign));
             }
             add("agent_activation_relation_boundaries",
                 ReignSpymasterCore.ForeignAgentCanDisrupt(-31d)
@@ -195,7 +195,7 @@ namespace ReignBetaServer
                 using (ReignDbConnection connection = Program.OpenCampaignConnection(activationCampaign))
                 {
                     EnsureSpymasterSchema(connection);
-                    Program.EnsureMbtiRelationshipSchema(connection);
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                     Program.ExecuteSql(connection, @"INSERT INTO relationship_pair_chemistry(
 pair_key,hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
 effective_affinity_a_to_b,effective_affinity_b_to_a,first_day,last_day,
@@ -204,7 +204,7 @@ VALUES($pair,'enemy_ruler','player_ruler',-29,-80,-95,-95,0,0,
 'fixture_initialization','directional-outlook-fixture',1,0);",
                         new Dictionary<string, object>
                         {
-                            ["pair"] = Program.AmbientPairKey("enemy_ruler", "player_ruler")
+                            ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler")
                         });
                     Program.ExecuteSql(connection, @"INSERT INTO foreign_agent_assignments(campaign_id,timeline_id,agent_hero_id,sponsor_kingdom_id,
 sponsor_ruler_id,settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json,updated_ts)
@@ -229,7 +229,7 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
                         {
                             ["outlook"] = rulerOutlook, ["reverse"] = reverseOutlook,
                             ["effective"] = effectiveOutlook, ["day"] = day,
-                            ["pair"] = Program.AmbientPairKey("enemy_ruler", "player_ruler")
+                            ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler")
                         });
                     }
                     return SpymasterAgentsTickApi(new Dictionary<string, object>
@@ -317,7 +317,7 @@ WHERE pair_key=$pair;", new Dictionary<string, object>
                 using (ReignDbConnection connection = Program.OpenCampaignConnection(activationCampaign))
                 {
                     Program.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=-30 WHERE pair_key=$pair;",
-                        new Dictionary<string, object> { ["pair"] = Program.AmbientPairKey("enemy_ruler", "player_ruler") });
+                        new Dictionary<string, object> { ["pair"] = RelationshipsService.AmbientPairKey("enemy_ruler", "player_ruler") });
                     Program.ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET status='active',next_action_day=14,last_action_day=-1
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;",
                         new Dictionary<string, object>
@@ -353,7 +353,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
             }
             finally
             {
-                Program.TryDeleteDirectory(Program.CampaignDirectory(activationCampaign));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(activationCampaign));
             }
 
             string fallbackCampaign = "_spymaster_relationship_fallback_" + Guid.NewGuid().ToString("N");
@@ -398,7 +398,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
             }
             finally
             {
-                Program.TryDeleteDirectory(Program.CampaignDirectory(fallbackCampaign));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(fallbackCampaign));
             }
 
             add("social_rumor_outcomes", ReignSpymasterCore.SocialMitigationOutcome("mitigate_own_rumor", 0.819999d) == "disproven"

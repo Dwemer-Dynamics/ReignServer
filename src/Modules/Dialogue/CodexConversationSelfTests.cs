@@ -666,7 +666,7 @@ namespace ReignBetaServer
                 PromptParityIdentity(), "", "", motive);
         }
 
-        private static Dictionary<string, object> PromptParityPayload(string mode, bool parallel)
+        internal static Dictionary<string, object> PromptParityPayload(string mode, bool parallel)
         {
             var payload = new Dictionary<string, object>
             {
@@ -691,7 +691,7 @@ namespace ReignBetaServer
             return payload;
         }
 
-        private static Dictionary<string, object> PromptParityProfile()
+        internal static Dictionary<string, object> PromptParityProfile()
         {
             return new Dictionary<string, object>
             {
@@ -700,7 +700,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> PromptParityCharacteristics()
+        internal static Dictionary<string, object> PromptParityCharacteristics()
         {
             return new Dictionary<string, object>
             {
@@ -728,7 +728,7 @@ namespace ReignBetaServer
             };
         }
 
-        private static Dictionary<string, object> PromptParityIdentity()
+        internal static Dictionary<string, object> PromptParityIdentity()
         {
             return new Dictionary<string, object>
             {

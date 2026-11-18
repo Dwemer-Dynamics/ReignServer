@@ -16,7 +16,7 @@ namespace ReignBetaServer
         private static readonly ConditionalWeakTable<Dictionary<string, object>, List<Dictionary<string, object>>> PromptStatementSources = new();
         private const int RequiredConversationTailCount = 30;
 
-        private static Dictionary<string, string> PlannedPromptSources(Dictionary<string, object> context) =>
+        internal static Dictionary<string, string> PlannedPromptSources(Dictionary<string, object> context) =>
             context != null && PromptDeliveredSources.TryGetValue(context, out var sources) ? sources : null;
 
         private static bool TryProjectBoundTranscript(List<Dictionary<string, object>> lines,

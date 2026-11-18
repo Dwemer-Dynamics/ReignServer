@@ -313,7 +313,7 @@ CREATE INDEX IF NOT EXISTS idx_conversation_reference_reverse ON conversation_re
                         "role", ReadString(row, "role", ""), "text", original))), Speaker = ReadString(row, "speaker_id", ""),
                     Sequence = ReadLong(row, "accepted_sequence", 0), Timestamp = ReadLong(row, "ts", 0), Day = ReadDouble(row, "world_day", 0) };
             }
-            if (type != "letter" || !TableExists(connection, "letters")) return null;
+            if (type != "letter" || !WorldSimulationService.TableExists(connection, "letters")) return null;
             row = QuerySql(connection, "SELECT * FROM letters WHERE letter_id=$id;", TestDict("id", id)).SingleOrDefault();
             if (!LetterVisibleToObserver(connection, row, access.NpcId, access, out double learned)) return null;
             string letterView = NormalizePromptSegment(SanitizeUnknownIdentityEvidenceText(ReadString(row, "body", ""), access));
@@ -443,7 +443,7 @@ ON CONFLICT(edge_id) DO NOTHING;", TestDict("id", edgeId, "owner", unit.Hero, "t
             int maximumHops, int maximumNodes, Dictionary<string, object> diagnostics)
         {
             var result = new List<ConversationReferenceSource>();
-            if (!TableExists(connection, "conversation_reference_edges")) return result;
+            if (!WorldSimulationService.TableExists(connection, "conversation_reference_edges")) return result;
             var visited = new HashSet<string>(StringComparer.Ordinal);
             var frontier = seeds.Distinct().Take(6).ToList();
             var sources = new Dictionary<string, ConversationReferenceSource>(StringComparer.Ordinal);
@@ -546,7 +546,7 @@ ORDER BY as_of_sequence DESC,edge_id LIMIT $limit;", TestDict("owner", access.Np
         private static void RebindRestoredConversationReferences(ReignDbConnection connection,
             Dictionary<string, object> point, string generation)
         {
-            if (!TableExists(connection, "conversation_reference_edges") || point == null
+            if (!WorldSimulationService.TableExists(connection, "conversation_reference_edges") || point == null
                 || ReadString(point, "savePointId", "").Length == 0) return;
             string timeline = ReadString(point, "timelineId", "");
             if (timeline.Length == 0) return;

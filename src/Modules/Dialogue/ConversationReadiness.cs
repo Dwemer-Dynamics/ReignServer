@@ -8,7 +8,7 @@ namespace ReignBetaServer
 {
     internal static partial class Program
     {
-        private static readonly Dictionary<string, Tuple<int, double, bool>> ConversationReadinessGates =
+        internal static readonly Dictionary<string, Tuple<int, double, bool>> ConversationReadinessGates =
             new Dictionary<string, Tuple<int, double, bool>>(StringComparer.OrdinalIgnoreCase)
             {
                 ["structural_pipeline"] = Tuple.Create(40, 1.00, true),
@@ -29,7 +29,7 @@ namespace ReignBetaServer
                 ["performance_resilience"] = Tuple.Create(40, 0.95, false)
             };
 
-        private static string CurrentConversationBuildVersion()
+        internal static string CurrentConversationBuildVersion()
         {
             Version version = typeof(Program).Assembly.GetName().Version;
             string mvid = typeof(Program).Assembly.ManifestModule.ModuleVersionId.ToString("N");
@@ -679,21 +679,21 @@ namespace ReignBetaServer
             return scorecard;
         }
 
-        private static bool ConversationReadinessRunIsCompleted(Dictionary<string, object> run)
+        internal static bool ConversationReadinessRunIsCompleted(Dictionary<string, object> run)
         {
             return ReadString(run, "status", "")
                 .Equals("completed", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool ConversationReadinessRunIsTerminalFailure(Dictionary<string, object> run)
+        internal static bool ConversationReadinessRunIsTerminalFailure(Dictionary<string, object> run)
         {
             return new[] { "failed", "cancelled", "interrupted" }
                 .Contains(ReadString(run, "status", ""), StringComparer.OrdinalIgnoreCase);
         }
 
-        private static List<Dictionary<string, object>> LoadConversationReadinessRuns(string campaignId, string qualificationId)
+        internal static List<Dictionary<string, object>> LoadConversationReadinessRuns(string campaignId, string qualificationId)
         {
-            string root = LiveTestRunsRoot(campaignId);
+            string root = WorldSimulationService.LiveTestRunsRoot(campaignId);
             if (!Directory.Exists(root)) return new List<Dictionary<string, object>>();
             return Directory.GetFiles(root, "*.json", SearchOption.TopDirectoryOnly)
                 .Select(ReadJsonObject)
@@ -725,7 +725,7 @@ namespace ReignBetaServer
                 : string.IsNullOrWhiteSpace(FirstNonEmpty(ReadString(result, "reply", ""), ReadString(result, "text", ""))) ? 0 : 1;
         }
 
-        private static bool ConversationReadinessCommandPassed(
+        internal static bool ConversationReadinessCommandPassed(
             Dictionary<string, object> command,
             List<Dictionary<string, object>> assertions,
             List<Dictionary<string, object>> failures,
@@ -1006,7 +1006,7 @@ namespace ReignBetaServer
             Directory.CreateDirectory(path);
             return path;
         }
-        private static string ConversationReadinessStatePath(string campaignId)
+        internal static string ConversationReadinessStatePath(string campaignId)
         {
             return Path.Combine(ConversationReadinessRoot(campaignId), "active.json");
         }

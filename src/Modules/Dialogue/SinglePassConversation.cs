@@ -11,12 +11,12 @@ namespace ReignBetaServer
         // from a client/model are never a receipt and never authorize an action.
         private sealed class SinglePassConversationReceipt { }
         private static readonly ConditionalWeakTable<Dictionary<string, object>, SinglePassConversationReceipt> SinglePassConversations = new();
-        private static bool IsSinglePassConversation(Dictionary<string, object> payload) =>
+        internal static bool IsSinglePassConversation(Dictionary<string, object> payload) =>
             payload != null && SinglePassConversations.TryGetValue(payload, out _);
         private static void BeginSinglePassConversation(Dictionary<string, object> payload) =>
             SinglePassConversations.GetValue(payload, _ => new SinglePassConversationReceipt());
 
-        private static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
+        internal static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
             Dictionary<string, object> payload, string mode, bool allowQuiet = false,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {

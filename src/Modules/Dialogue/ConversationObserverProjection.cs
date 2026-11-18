@@ -48,7 +48,7 @@ namespace ReignBetaServer
 
         // Player narration is complete story context after explicit audience
         // scoping. NPC-authored private narration retains its observer boundary.
-        private static Dictionary<string, object> ProjectConversationNarration(string source, string speakerId, string observerId, bool playerNarration = false)
+        internal static Dictionary<string, object> ProjectConversationNarration(string source, string speakerId, string observerId, bool playerNarration = false)
         {
             source ??= "";
             if (playerNarration)

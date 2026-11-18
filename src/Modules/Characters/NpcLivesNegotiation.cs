@@ -6,7 +6,7 @@ using ReignBeta.Shared.Characters;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static bool IsDuplicateNpcStoryDuelProposal(NpcLivesState state, string hero, string player,
             Dictionary<string, object> payload, ActionDecision decision)
@@ -23,14 +23,14 @@ namespace ReignBetaServer
                     && !s.Evidence.Any(e => e.ObjectiveId == o.Id)));
         }
 
-        private static void ConstrainNpcStoryDuelProposal(Dictionary<string, object> payload, string hero,
+        internal static void ConstrainNpcStoryDuelProposal(Dictionary<string, object> payload, string hero,
             string player, ActionDecision decision)
         {
             if (decision.Kind != "propose") return;
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return;
-            using var c = OpenCampaignConnection(campaign);
-            var state = ReadNpcLives(c, campaign, ContinuityTimeline(payload));
+            using var c = Program.OpenCampaignConnection(campaign);
+            var state = ReadNpcLives(c, campaign, Program.ContinuityTimeline(payload));
             if (!IsDuplicateNpcStoryDuelProposal(state, hero, player, payload, decision)) return;
             // Reject the whole proposed bundle; silently retaining only some terms
             // would change the NPC's offer. No consent or story evidence is granted.
@@ -40,7 +40,7 @@ namespace ReignBetaServer
 
         // One bounded local repair aligns final accepted prose with the saved rules.
         // This preview never changes state. Only the accepted source transaction does.
-        private static void ConstrainNpcLeaveReply(Dictionary<string, object> payload, string hero,
+        internal static void ConstrainNpcLeaveReply(Dictionary<string, object> payload, string hero,
             Dictionary<string, object> parsed, ref string reply)
         {
             // A wholly malformed envelope has no effect metadata. Preserve the
@@ -52,8 +52,8 @@ namespace ReignBetaServer
             var assessment = ReadDictionary(parsed, "npcLeaveAssessment");
             string campaign = ReadString(payload, "campaignId", "");
             if (campaign.Length == 0) return;
-            using var c = OpenCampaignConnection(campaign);
-            var state = ReadNpcLives(c, campaign, ContinuityTimeline(payload));
+            using var c = Program.OpenCampaignConnection(campaign);
+            var state = ReadNpcLives(c, campaign, Program.ContinuityTimeline(payload));
             // The saved request owns this turn. An omitted or wrong model-supplied
             // assessment must not bypass the guard or publish an invented promise.
             var leave = state.Leaves.FirstOrDefault(l => l.HeroId == hero && l.Status == "discussing");
@@ -66,11 +66,11 @@ namespace ReignBetaServer
                 && !leave.AcceptedArgumentIds.Contains(reason);
             string sentence = valid ? NpcLeaveNegotiation.Response(NpcLeaveNegotiation.Persuaded(leave, reason,
                 ReadBool(assessment, "compelling", false), state.CampaignId + "|" + state.TimelineId),
-                NpcLivesPolicy.ReaskDelay(ReadNpcLivesOptions()))
+                NpcLivesPolicy.ReaskDelay(Program.ReadNpcLivesOptions()))
                 : "My personal request is still unresolved. We can discuss it or review the current terms; nothing has been agreed by changing the subject.";
             // A fixed result is deliberately rendered as a complete reply. Keeping
             // arbitrary adjacent prose could retain a contradictory promise.
-            reply = RenderGroundedSceneHeading(payload, hero, parsed, sentence);
+            reply = Program.RenderGroundedSceneHeading(payload, hero, parsed, sentence);
             // Everything inferred from the discarded draft must be discarded too.
             // The accepted argument is the only permitted effect of this repair.
             parsed.Clear();

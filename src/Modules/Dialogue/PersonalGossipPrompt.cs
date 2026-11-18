@@ -73,7 +73,7 @@ with the exact words of this reply. Do not mark something raised merely because 
                 string timeline = GossipTimeline(payload), player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
                 double day = ReadDouble(payload, "worldDay", 0);
                 string session = ReadFirstString(payload, "conversationSessionId", "sessionId");
-                using (EnterCampaignWorkLock(GossipGate(campaign)))
+                using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
                 using (var c = OpenCampaignConnection(campaign))
                 {
                     EnsurePersonalGossipSchema(c);
@@ -282,7 +282,7 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
             {
                 if (request.DeliveryOnly)
                     return PersonalGossipDeliveryReadiness(c, campaign, request);
-                if (!TableExists(c, "personal_gossip_messages")) return GossipStatusResponse.NoSchema().ToDictionary();
+                if (!WorldSimulationService.TableExists(c, "personal_gossip_messages")) return GossipStatusResponse.NoSchema().ToDictionary();
                 return GossipStatusResponse.Snapshot(PersonalGossipVersion, QuerySql(c, "SELECT message_id,root_id,timeline_id,speaker_id,recipient_id,is_reply,hop,created_day,due_day,expires_day,status,attempts FROM personal_gossip_messages ORDER BY created_day DESC,message_id LIMIT 100;"),
                     QuerySql(c, "SELECT topic_id,speaker_id,created_day,status,payload_json FROM personal_gossip_topics ORDER BY created_day DESC,topic_id LIMIT 30;")
                         .Select(row => GossipFields("id", ReadString(row, "topic_id", ""), "speakerId", ReadString(row, "speaker_id", ""),
@@ -297,10 +297,10 @@ AND owner_id=$owner AND raise_session='' AND acquired_day<=$day;", GossipFields(
         private static Dictionary<string, object> PersonalGossipDeliveryReadiness(ReignDbConnection c, string campaign, GossipStatusRequest request)
         {
             // Read only: readiness must not create a schema, mutate a clock, or invoke a provider.
-            string timeline = TableExists(c, "world_history_timelines") ? ActiveWorldHistoryTimeline(c) : "main";
+            string timeline = WorldSimulationService.TableExists(c, "world_history_timelines") ? WorldSimulationService.ActiveWorldHistoryTimeline(c) : "main";
             if (request.HasTimelineId && request.TimelineId != timeline)
                 return GossipStatusProtocol.Failure(GossipStatusProtocol.TimelineNotActiveError);
-            bool schema = TableExists(c, "personal_gossip_messages");
+            bool schema = WorldSimulationService.TableExists(c, "personal_gossip_messages");
             double day = request.WorldDay.HasValue
                     ? request.WorldDay.Value : schema ? ReadDouble(GossipClock(c, timeline), "world_day", 0) : 0;
             var counts = schema ? QuerySql(c, @"SELECT status,COUNT(*) AS count FROM personal_gossip_messages

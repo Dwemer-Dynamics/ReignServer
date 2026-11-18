@@ -281,7 +281,7 @@ ORDER BY tag_id,acquired_day,source_occurrence_id;",
                 .ThenBy(source => ReadString(source, "sourceId", ""))
                 .ToList();
             string sourcesJson = Json.Serialize(sources);
-            int standingValue = Program.RoundAwayFromZero(sources.Sum(source =>
+            int standingValue = RelationshipsService.RoundAwayFromZero(sources.Sum(source =>
                 ReadDouble(source, "effectiveContribution", 0d)));
             Dictionary<string, object> existing = Program.QuerySql(connection, @"
 SELECT standing_value,sources_json,revision,last_changed_day
@@ -324,7 +324,7 @@ last_changed_day=$day,updated_ts=$ts;",
                     ["ts"] = ts
                 });
             if (valueChanged)
-                Program.QueuePublicStandingInvalidation(connection, campaignId, timelineId,
+                RelationshipsService.QueuePublicStandingInvalidation(connection, campaignId, timelineId,
                     subjectId, revision, worldDay);
         }
 

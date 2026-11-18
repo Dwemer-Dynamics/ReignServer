@@ -48,8 +48,8 @@ VALUES($id,$campaign,'source','player','social_event','closed',1,1,$day,$day,'["
             try
             {
                 using var c = OpenCampaignConnection(campaign);
-                EnsurePersonalGossipSchema(c); EnsureMbtiRelationshipSchema(c); EnsureCategorizedMemorySchema(c); EnsureMemoryPrecisionSchema(c);
-                EnsureConversationRelationshipSchema(c);
+                EnsurePersonalGossipSchema(c); RelationshipsService.EnsureMbtiRelationshipSchema(c); EnsureCategorizedMemorySchema(c); EnsureMemoryPrecisionSchema(c);
+                RelationshipsService.EnsureConversationRelationshipSchema(c);
                 foreach (string id in new[] { "witness", "second", "third" })
                 {
                     WriteJsonObject(CharacterFile(campaign, id, "traits.json"), GossipTestTraits("sociability", 100, "curiosity", 100));
@@ -216,7 +216,7 @@ VALUES('retained_source_late_receipt',$campaign,'main',$exchange,'source','playe
                     && ReadStringList(newEpisodeTopic, "relationshipReassessmentExchangeIds").SequenceEqual(new[] { ReadString(newEpisode, "exchangeId", "") }), newEpisodeTopic);
                 GossipTestPair(c, "witness", "target", 20, -20);
                 ExecuteSql(c, "UPDATE relationship_pair_chemistry SET social_modifier_a_to_b=10,social_modifier_b_to_a=-90 WHERE pair_key=$pair;",
-                    GossipFields("pair", AmbientPairKey("witness", "target")));
+                    GossipFields("pair", RelationshipsService.AmbientPairKey("witness", "target")));
                 check("gossip_effective_directional_affinity_includes_social_modifier_and_clamps", GossipAffinity(c, "witness", "target", witness, target) == 30
                     && GossipAffinity(c, "target", "witness", target, witness) == -100, null);
                 settings["personalGossipShareAdjustment"] = 100;

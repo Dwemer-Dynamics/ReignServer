@@ -52,7 +52,7 @@ namespace ReignBetaServer
 
         private static int GossipPercent(double value, int cap = 100) =>
             (int)Math.Round(ClampDouble(double.IsFinite(value) ? value : 0, 0, cap), MidpointRounding.AwayFromZero);
-        private static double GossipTrait(Dictionary<string, object> traits, string key) => RelationshipTraitPercent(traits, key);
+        private static double GossipTrait(Dictionary<string, object> traits, string key) => RelationshipsService.RelationshipTraitPercent(traits, key);
         private static int GossipFeeling(Dictionary<string, object> signal, string key) =>
             new[] { 0, 25, 50, 75, 100 }.Contains(ReadInt(signal, key, 0)) ? ReadInt(signal, key, 0) : 0;
         private static bool GossipEmotionEligible(double emotion, Dictionary<string, object> traits) =>
@@ -186,8 +186,8 @@ namespace ReignBetaServer
         }
 
         // Stable stages survive repeated turns and Save Sync without accumulating odds.
-        private static double GossipDraw(string topic, string stage) => StableUnit(PersonalGossipVersion + "|" + topic + "|" + stage);
-        private static int GossipRoll(string topic, string stage) => Math.Min(100, 1 + (int)(GossipDraw(topic, stage) * 100));
+        internal static double GossipDraw(string topic, string stage) => RelationshipsService.StableUnit(PersonalGossipVersion + "|" + topic + "|" + stage);
+        internal static int GossipRoll(string topic, string stage) => Math.Min(100, 1 + (int)(GossipDraw(topic, stage) * 100));
         private static string GossipTopicCategory(string category) => new[] { "family", "relationship", "intimacy", "politics",
             "shared_activity", "gift", "question", "impression", "conversation" }.Contains(category) ? category : "conversation";
         private static string GossipTopicId(string timeline, string speaker, string player, double day, string category, string subject) =>

@@ -60,7 +60,7 @@ namespace ReignBetaServer
                     File.Copy(file, destination, false);
             }
 
-            string stableSaveSyncRoot = SaveSyncRoot();
+            string stableSaveSyncRoot = PersistenceService.SaveSyncRoot();
             foreach (string legacyName in redirectedDirectories)
             {
                 string source = Path.Combine(legacyRoot, legacyName);
@@ -77,7 +77,7 @@ namespace ReignBetaServer
                 Encoding.UTF8);
         }
 
-        private static void CopyDirectoryMissingOnly(
+        internal static void CopyDirectoryMissingOnly(
             string sourceRoot,
             string destinationRoot)
         {

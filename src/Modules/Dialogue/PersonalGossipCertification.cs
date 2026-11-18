@@ -11,7 +11,7 @@ namespace ReignBetaServer
         // The native heartbeat keeps a live, exact conversation/probe lease valid while its
         // production provider runs. It cannot resurrect an expired lease or extend
         // the command's original bounded execution deadline.
-        private static bool TryRenewPersonalGossipConversationLease(Dictionary<string, object> run,
+        internal static bool TryRenewPersonalGossipConversationLease(Dictionary<string, object> run,
             Dictionary<string, object> runtime, DateTimeOffset now, bool armed)
         {
             if (!armed || run == null || runtime == null || ReadString(run, "mode", "") != "personal_gossip"
@@ -20,15 +20,15 @@ namespace ReignBetaServer
                 || !new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "personal_gossip" }.Contains(ReadString(runtime, "activeMode", ""))
                 || ReadString(runtime, "gameInstanceId", "") != ReadString(run, "gameInstanceId", "")
                 || ReadString(runtime, "campaignId", "") != ReadString(run, "campaignId", "")
-                || ParseLiveTestUtc(ReadString(runtime, "receivedUtc", "")) < now.AddSeconds(-LiveTestHeartbeatFreshSeconds)) return false;
+                || WorldSimulationService.ParseLiveTestUtc(ReadString(runtime, "receivedUtc", "")) < now.AddSeconds(-WorldSimulationService.LiveTestHeartbeatFreshSeconds)) return false;
             var enrollment = ReadDictionary(run, "enrollment");
             var sync = ReadDictionary(runtime, "saveSync");
-            if (!PersonalGossipEnrollmentValid(enrollment, ReadString(run, "campaignId", ""))
+            if (!WorldSimulationService.PersonalGossipEnrollmentValid(enrollment, ReadString(run, "campaignId", ""))
                 || ReadString(runtime, "activeSaveName", "") != ReadString(enrollment, "disposableSaveName", "")
                 || !ReadBool(sync, "ready", false) || ReadBool(sync, "alignmentPending", true)
                 || ReadString(sync, "timelineId", "") != ReadString(enrollment, "timelineId", "")
                 || ReadBool(ReadDictionary(runtime, "nativeSave"), "isSaving", true)) return false;
-            var command = FirstLiveTestCommandInSequence(run);
+            var command = WorldSimulationService.FirstLiveTestCommandInSequence(run);
             if (command == null || ReadString(command, "operation", "") != "personal_gossip_test"
                 || !(ReadString(ReadDictionary(command, "testCase"), "phase", "") == "conversation"
                         && new[] { "individual_chat", "party_chat", "social_event", "wilderness_event" }.Contains(ReadString(runtime, "activeMode", ""))
@@ -38,13 +38,13 @@ namespace ReignBetaServer
                 || !new[] { "accepted", "running" }.Contains(ReadString(command, "status", ""))
                 || CanonicalJson(ReadDictionary(command, "enrollment")) != CanonicalJson(enrollment)
                 || ReadString(command, "leaseId", "").Length == 0) return false;
-            DateTimeOffset expiry = ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", ""));
-            DateTimeOffset started = ParseLiveTestUtc(ReadString(command, "leaseStartedUtc", ""));
+            DateTimeOffset expiry = WorldSimulationService.ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", ""));
+            DateTimeOffset started = WorldSimulationService.ParseLiveTestUtc(ReadString(command, "leaseStartedUtc", ""));
             int timeout = ReadInt(command, "timeoutSeconds", 0);
             if (expiry <= now || expiry > now.AddSeconds(20) || started == DateTimeOffset.MinValue
                 || started > now || timeout < 1 || timeout > 1800) return false;
             DateTimeOffset deadline = started.AddSeconds(timeout);
-            DateTimeOffset renewed = now.AddSeconds(LiveTestLeaseSeconds);
+            DateTimeOffset renewed = now.AddSeconds(WorldSimulationService.LiveTestLeaseSeconds);
             if (renewed > deadline) renewed = deadline;
             if (renewed <= expiry) return false;
             command["leaseExpiresUtc"] = renewed.ToString("o");
@@ -55,13 +55,13 @@ namespace ReignBetaServer
         private static bool GossipTestAuthorized(Dictionary<string, object> p)
         {
             string campaign = ReadString(p, "campaignId", ""), instance = ReadString(p, "gameInstanceId", "");
-            var run = LoadLiveTestRun(campaign, ReadString(p, "runId", ""));
-            var runtime = LoadLiveTestRuntime(campaign); var enrollment = ReadDictionary(run, "enrollment");
+            var run = WorldSimulationService.LoadLiveTestRun(campaign, ReadString(p, "runId", ""));
+            var runtime = WorldSimulationService.LoadLiveTestRuntime(campaign); var enrollment = ReadDictionary(run, "enrollment");
             var command = ReadDictionaryList(run, "commands").SingleOrDefault(x => ReadString(x, "commandId", "") == ReadString(p, "commandId", ""));
             var sync = ReadDictionary(runtime, "saveSync");
             return campaign.Length > 0 && instance.Length > 0 && command != null
-                && IsLiveTestArmed(ReadJsonObject(LiveTestArmPath())) && IsFreshLiveTestRuntime(runtime)
-                && PersonalGossipEnrollmentValid(enrollment, campaign) && ReadString(run, "mode", "") == "personal_gossip"
+                && WorldSimulationService.IsLiveTestArmed(ReadJsonObject(WorldSimulationService.LiveTestArmPath())) && WorldSimulationService.IsFreshLiveTestRuntime(runtime)
+                && WorldSimulationService.PersonalGossipEnrollmentValid(enrollment, campaign) && ReadString(run, "mode", "") == "personal_gossip"
                 && new[] { "queued", "running" }.Contains(ReadString(run, "status", ""))
                 && ReadString(run, "campaignId", "") == campaign && ReadString(runtime, "campaignId", "") == campaign
                 && ReadString(run, "gameInstanceId", "") == instance && ReadString(runtime, "gameInstanceId", "") == instance
@@ -75,7 +75,7 @@ namespace ReignBetaServer
                 && ReadString(command, "operation", "") == "personal_gossip_test"
                 && new[] { "leased", "accepted", "running" }.Contains(ReadString(command, "status", ""))
                 && ReadString(p, "leaseId", "").Length > 0 && ReadString(command, "leaseId", "") == ReadString(p, "leaseId", "")
-                && ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) > DateTimeOffset.UtcNow
+                && WorldSimulationService.ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) > DateTimeOffset.UtcNow
                 && ReadDictionary(p, "testCase")?.Count > 0
                 && CanonicalJson(ReadDictionary(p, "testCase")) == CanonicalJson(ReadDictionary(command, "testCase"));
         }
@@ -91,7 +91,7 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
             string campaign = ReadString(p, "campaignId", ""), timeline = ReadString(p, "timelineId", "");
             var test = ReadDictionary(p, "testCase"); string phase = ReadString(test, "phase", "");
             ValidatePersonalGossipTestCase(test);
-            var run = LoadLiveTestRun(campaign, ReadString(p, "runId", ""));
+            var run = WorldSimulationService.LoadLiveTestRun(campaign, ReadString(p, "runId", ""));
             if (new[] { "conversation", "tick", "composition_probe" }.Contains(phase) && !ReadBool(ReadDictionary(run, "enrollment"), "allowProviderCalls", false))
                 throw new InvalidOperationException("This phase needs explicit provider authorization.");
             var presence = ReadDictionary(p, "gossipPresence"); var people = ReadDictionaryList(presence, "people");
@@ -103,11 +103,11 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
             if (!new[] { "catalog", "snapshot", "presence_contract", "prepare", "policy_probe", "tick", "conversation", "composition_probe" }.Contains(phase))
                 throw new ArgumentException("Unknown gossip test phase.");
             if (phase == "composition_probe") return PersonalGossipCompositionProbe(campaign, timeline, p, test);
-            using (EnterCampaignWorkLock(GossipGate(campaign)))
+            using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
             using (var c = OpenCampaignConnection(campaign))
             {
-                EnsurePersonalGossipSchema(c); EnsureMbtiRelationshipSchema(c);
-                if (ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
+                EnsurePersonalGossipSchema(c); RelationshipsService.EnsureMbtiRelationshipSchema(c);
+                if (WorldSimulationService.ActiveWorldHistoryTimeline(c) != timeline) throw new InvalidOperationException("The active timeline changed.");
                 var selected = ReadStringList(test, "heroIds");
                 string actor = ReadString(test, "actorHeroId", "");
                 if (actor.Length > 0 && !selected.Contains(actor)) selected.Add(actor);
@@ -244,7 +244,7 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
                 "providerCalls", 0, "npcKnowledgeAuthority", false);
         }
 
-        private static void ValidatePersonalGossipTestCase(Dictionary<string, object> test)
+        internal static void ValidatePersonalGossipTestCase(Dictionary<string, object> test)
         {
             if (test == null || Json.Serialize(test).Length > 65536) throw new ArgumentException("Missing or oversized gossip case.");
             string phase = ReadString(test, "phase", "");
@@ -335,21 +335,21 @@ created_utc TEXT NOT NULL,consumed_topic TEXT NOT NULL DEFAULT '',payload_json T
             if (QuerySql(c, "SELECT fixture_id FROM personal_gossip_test_fixtures WHERE fixture_id=$id;", GossipFields("id", fixture)).Count > 0)
                 throw new InvalidOperationException("This fixture already ran. Observe it or restore the retained Current before retrying.");
             var journal = GossipFields("testCase", test, "gameInstanceId", ReadString(p, "gameInstanceId", ""),
-                "restoreGeneration", Interlocked.Read(ref CampaignReplacementGeneration), "activeSaveName", ReadString(p, "activeSaveName", ""),
+                "restoreGeneration", Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration), "activeSaveName", ReadString(p, "activeSaveName", ""),
                 "memoryRestoreGeneration", ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""),
                 "beforePresence", people.Where(x => ids.Contains(GossipHeroId(x))).ToList(),
                 "beforeNativeActivationStates", activationStates,
                 "beforeTraits", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)ReadJsonObject(CharacterFile(campaign, ReadString(x, "heroId", ""), "traits.json"))),
                 "beforeEditorAuthority", profiles.ToDictionary(x => ReadString(x, "heroId", ""), x => (object)ReadJsonObject(CharacterFile(campaign, ReadString(x, "heroId", ""), "editor_authority.json"))),
                 "beforeRelationships", ReadDictionaryList(test, "relationships").SelectMany(x => QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                    GossipFields("pair", AmbientPairKey(ReadString(x, "observerId", ""), ReadString(x, "subjectId", ""))))).ToList());
+                    GossipFields("pair", RelationshipsService.AmbientPairKey(ReadString(x, "observerId", ""), ReadString(x, "subjectId", ""))))).ToList());
             // Persist recovery evidence BEFORE any fixture mutation. Current's retained save restores both stores.
             ExecuteSql(c, "INSERT INTO personal_gossip_test_fixtures(fixture_id,timeline_id,speaker_id,marker,created_utc,payload_json) VALUES($id,$timeline,$actor,$marker,$utc,$json);",
                 GossipFields("id", fixture, "timeline", ReadString(p, "timelineId", ""), "actor", actor, "marker", marker,
                     "utc", DateTimeOffset.UtcNow.ToString("o"), "json", Json.Serialize(journal)));
             foreach (var row in ReadDictionaryList(test, "relationships"))
             {
-                string a = ReadString(row, "observerId", ""), b = ReadString(row, "subjectId", ""), pair = AmbientPairKey(a, b);
+                string a = ReadString(row, "observerId", ""), b = ReadString(row, "subjectId", ""), pair = RelationshipsService.AmbientPairKey(a, b);
                 var old = QuerySql(c, "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair;", GossipFields("pair", pair)).FirstOrDefault();
                 if (old == null)
                     ExecuteSql(c, @"INSERT INTO relationship_pair_chemistry(pair_key,hero_a_id,hero_b_id,mbti_a,mbti_b,affinity_a_to_b,affinity_b_to_a,first_day,last_day,updated_ts)
@@ -373,15 +373,15 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
         {
             // The complete editor save establishes authority as well as legal values.
             // Otherwise ordinary Open may rematerialize a shipped profile over the fixture.
-            EnsureCharacterEditorSchema(c);
+            CharactersService.EnsureCharacterEditorSchema(c);
             // Match an actual edit: load the complete profile before granting editor
             // authority. A traits-only save on sparse legacy storage would otherwise
             // preserve a missing narrative and make the subsequent conversation fail.
-            var loaded = CharacterEditorLoadApi(GossipFields("campaignId", campaign, "heroStringId", hero));
+            var loaded = CharactersService.CharacterEditorLoadApi(GossipFields("campaignId", campaign, "heroStringId", hero));
             if (!ReadBool(loaded, "ok", false))
                 throw new InvalidOperationException("The guarded trait prerequisite could not load its ordinary editor profile.");
             var head = QuerySql(c, "SELECT revision_token FROM character_editor_heads WHERE hero_id=$hero LIMIT 1;", GossipFields("hero", hero)).FirstOrDefault();
-            var saved = CharacterEditorSaveApi(GossipFields("campaignId", campaign, "heroStringId", hero,
+            var saved = CharactersService.CharacterEditorSaveApi(GossipFields("campaignId", campaign, "heroStringId", hero,
                 "section", "traits", "revisionToken", ReadString(head, "revision_token", ""),
                 "description", "Guarded disposable personal gossip trait prerequisite", "documents", GossipFields("traits", traits)));
             if (!ReadBool(saved, "ok", false) || ReadBool(saved, "nativeQueued", true))
@@ -416,16 +416,16 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
                 if (previous?.Count > 0) topic["operatorTestControls"] = previous;
                 return; // Never change an existing saved decision.
             }
-            if (!TableExists(c, "personal_gossip_test_fixtures")) return;
-            var runtime = LoadLiveTestRuntime(campaign);
+            if (!WorldSimulationService.TableExists(c, "personal_gossip_test_fixtures")) return;
+            var runtime = WorldSimulationService.LoadLiveTestRuntime(campaign);
             foreach (var row in QuerySql(c, "SELECT * FROM personal_gossip_test_fixtures WHERE timeline_id=$timeline AND speaker_id=$speaker AND consumed_topic='' ORDER BY created_utc LIMIT 32;",
                 GossipFields("timeline", ReadString(topic, "timelineId", ""), "speaker", ReadString(topic, "speakerId", ""))))
             {
                 var journal = GossipJson(row); var test = ReadDictionary(journal, "testCase"); string marker = ReadString(row, "marker", "");
                 if (marker.Length < 8 || ReadString(topic, "sourceText", "").IndexOf(marker, StringComparison.Ordinal) < 0
-                    || !GossipTestControlsMatch(journal, runtime, Interlocked.Read(ref CampaignReplacementGeneration),
+                    || !GossipTestControlsMatch(journal, runtime, Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration),
                         ReadString(ReadMemoryPrecisionState(c), "restore_generation", ""),
-                        ParseLiveTestUtc(ReadString(row, "created_utc", "")), DateTimeOffset.UtcNow)) continue;
+                        WorldSimulationService.ParseLiveTestUtc(ReadString(row, "created_utc", "")), DateTimeOffset.UtcNow)) continue;
                 topic["operatorTestControls"] = GossipFields("fixtureId", ReadString(row, "fixture_id", ""), "draws", ReadDictionary(test, "draws"),
                     "compositionMode", ReadString(test, "compositionMode", "production"));
                 ExecuteSql(c, "UPDATE personal_gossip_test_fixtures SET consumed_topic=$topic WHERE fixture_id=$id AND consumed_topic='';",
@@ -433,7 +433,7 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
                 break;
             }
         }
-        private static bool GossipTestControlsMatch(Dictionary<string, object> journal, Dictionary<string, object> runtime,
+        internal static bool GossipTestControlsMatch(Dictionary<string, object> journal, Dictionary<string, object> runtime,
             long processGeneration, string memoryGeneration, DateTimeOffset created, DateTimeOffset now) =>
             ReadString(runtime, "activeSaveName", "").Length > 0
             && ReadString(runtime, "gameInstanceId", "").Length > 0
@@ -442,13 +442,13 @@ VALUES($pair,$a,$b,'','',$affinity,0,$day,$day,$ts);", GossipFields("pair", pair
             && ReadLong(journal, "restoreGeneration", -1) == processGeneration && processGeneration >= 0
             && !string.IsNullOrEmpty(memoryGeneration) && ReadString(journal, "memoryRestoreGeneration", "") == memoryGeneration
             && created > now.AddHours(-12) && created <= now.AddMinutes(1);
-        private static double GossipDecisionDraw(Dictionary<string, object> topic, string id, string stage)
+        internal static double GossipDecisionDraw(Dictionary<string, object> topic, string id, string stage)
         {
             var draws = ReadDictionary(ReadDictionary(topic, "operatorTestControls"), "draws");
             double n = ReadDouble(draws, stage, double.NaN);
             return double.IsFinite(n) && stage.EndsWith("_recipient", StringComparison.Ordinal) && n >= 0 && n < 1 ? n : GossipDraw(id, stage);
         }
-        private static int GossipDecisionRoll(Dictionary<string, object> topic, string id, string stage)
+        internal static int GossipDecisionRoll(Dictionary<string, object> topic, string id, string stage)
         {
             double n = ReadDouble(ReadDictionary(ReadDictionary(topic, "operatorTestControls"), "draws"), stage, double.NaN);
             return double.IsFinite(n) && n == Math.Truncate(n) && n >= 1 && n <= 100 ? (int)n : GossipRoll(id, stage);

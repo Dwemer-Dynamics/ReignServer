@@ -112,7 +112,7 @@ namespace ReignBetaServer
         private static bool ValidateMemoryScoringCoverage(Dictionary<string, object> coverage, string text)
         {
             if (coverage == null || text.Length == 0) return false;
-            var spans = ReadObjectList(coverage, "sourceSpansUtf16");
+            var spans = CharactersService.ReadObjectList(coverage, "sourceSpansUtf16");
             int count = ReadInt(coverage, "windowCount", 0);
             int tokens = ReadInt(coverage, "maxWindowTokens", 0);
             if (count < 1 || count > 16 || count != spans.Count || tokens < 1 || tokens > 2048

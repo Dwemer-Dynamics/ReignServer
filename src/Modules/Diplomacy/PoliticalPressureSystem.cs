@@ -345,7 +345,7 @@ llm_selector_status=$selector,llm_narration_status=$narration,notice_status='rea
                     ["pressureAmount"] = pressureAmount, ["selectorStatus"] = selectorStatus,
                     ["narrationStatus"] = narrationStatus
                 });
-            Program.InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return new Dictionary<string, object> { ["ok"] = true, ["status"] = "incident_created",
                 ["incidentId"] = incidentId, ["polarity"] = polarity, ["severity"] = severity };
         }
@@ -368,7 +368,7 @@ status=excluded.status,origin_kingdom_id=excluded.origin_kingdom_id,incident_id=
                     ["chance"] = PoliticalPressureIncidentChance, ["roll"] = roll, ["passed"] = passed ? 1 : 0,
                     ["status"] = status ?? "", ["origin"] = originKingdomId ?? "", ["incident"] = incidentId ?? "", ["ts"] = ts
                 });
-                Program.RecordWorldTestCounter(connection, campaignId, timelineId, day, "political_pressures",
+                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, day, "political_pressures",
                     "daily:" + day.ToString(CultureInfo.InvariantCulture), new Dictionary<string, object>
                     {
                         ["dailyRolls"] = 1, [passed ? "dailyRollsPassed" : "dailyRollsFailed"] = 1,
@@ -775,7 +775,7 @@ ON CONFLICT(effect_id) DO NOTHING;", new Dictionary<string, object>
                         ["timeline"] = timelineId, ["day"] = worldDay, ["target"] = settlementId, ["ts"] = ts
                     });
                 }
-                Program.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", incidentId + ":domestic:" + side, new Dictionary<string, object>
                     {
                         ["rulersRefusingLords"] = 1,
@@ -913,7 +913,7 @@ pressure_value=MAX(-100,MIN(100,political_pressure_state.pressure_value+$delta))
                     }).FirstOrDefault();
                 after = ReadInt(changed, "pressure_value", after);
                 transaction.Commit();
-                Program.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", incidentId + ":pressure:" + actorId, new Dictionary<string, object>
                     {
                         ["pressureMovement"] = Math.Abs(after - before), [after > before ? "hostilePressureAdded" : "peacefulPressureAdded"] = Math.Abs(after - before),
@@ -1036,7 +1036,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$acto
                     ["directionId"] = directionId, ["eventId"] = eventId, ["pressureConsumed"] = Math.Abs(before),
                     ["hostileBacklash"] = accepted ? 0 : 8, ["relationshipPenalty"] = accepted ? 0 : -25
                 });
-            Program.InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
         }
 
         private static void RecordPoliticalPressureNoAction(string campaignId, string timelineId,
@@ -1134,7 +1134,7 @@ after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=
             RecordPoliticalPressureActivity(campaignId, timelineId, receiptDay, incidentId, null, null,
                 "message_receipt", "", "", "", "acknowledged", 0, 0, 0, 0, "", incidentId,
                 "Game message displayed and native effects reported.", payload);
-            Program.InvalidateWorldTestOverviewCache(campaignId, timelineId);
+            WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return PoliticalPressureAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
 
@@ -1165,7 +1165,7 @@ $status,$before,$after,$roll,$chance,$action,$correlation,$reason,$payload,$ts) 
                         ["chance"] = chance, ["action"] = actionId ?? "", ["correlation"] = correlation ?? "",
                         ["reason"] = reason ?? "", ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
                     });
-                Program.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
+                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", activityId, new Dictionary<string, object>
                     {
                         ["activity:" + (eventType ?? "unknown")] = 1, ["status:" + (status ?? "unknown")] = 1
@@ -1448,7 +1448,7 @@ VALUES($campaign,'main','ours','hostile',60),($campaign,'main','ours','resolved'
             {
                 ReignPostgreSqlStorage.ClearAllPools();
                 try { ReignPostgreSqlStorage.DropCampaign(campaignId); } catch { }
-                Program.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
+                PersistenceService.TryDeleteDirectory(Program.CampaignDirectory(campaignId));
             }
             return rows;
         }

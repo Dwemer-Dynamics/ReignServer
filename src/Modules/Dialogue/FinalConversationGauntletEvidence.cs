@@ -168,7 +168,7 @@ namespace ReignBetaServer
             Dictionary<string, object> data =
                 ReadDictionary(promptEntry, "data");
             if (data == null) return;
-            List<object> sections = ReadObjectList(data, "promptSections");
+            List<object> sections = CharactersService.ReadObjectList(data, "promptSections");
             List<object> fingerprints = new List<object>();
             for (int index = 0; index < sections.Count; index++)
             {

@@ -9,7 +9,7 @@ using System.Text;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class RelationshipsService
     {
         private const double DirectorRunIntervalDays = 7d;
         private const double DirectorPairCooldownDays = 7d;
@@ -19,7 +19,7 @@ namespace ReignBetaServer
         {
             const string marker =
                 "postgresql_relationship_director_schema_revision";
-            bool schemaReady = IsPostgreSqlComponentSchemaReady(connection,
+            bool schemaReady = Program.IsPostgreSqlComponentSchemaReady(connection,
                 marker, PostgreSqlRelationshipDirectorSchemaRevision);
             if (!schemaReady)
             {
@@ -27,7 +27,7 @@ namespace ReignBetaServer
                 EnsureArrangedMarriageSchema(connection);
                 if (ReignPostgreSqlDialect.IsPostgreSql(connection))
                 {
-                    ExecuteSql(connection, @"
+                    Program.ExecuteSql(connection, @"
 INSERT INTO schema_meta(key,value)
 VALUES('postgresql_relationship_director_schema_revision',$revision)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
@@ -37,7 +37,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
                                 PostgreSqlRelationshipDirectorSchemaRevision
                                     .ToString()
                         });
-                    MarkPostgreSqlComponentSchemaReady(connection, marker,
+                    Program.MarkPostgreSqlComponentSchemaReady(connection, marker,
                         PostgreSqlRelationshipDirectorSchemaRevision);
                 }
             }
@@ -53,12 +53,12 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
         {
             const string repairMarker =
                 "already_pregnant_conception_obsolete_repair_v1";
-            if (ReadString(QuerySql(connection,
+            if (ReadString(Program.QuerySql(connection,
                     "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                     new Dictionary<string, object> { ["key"] = repairMarker })
                     .FirstOrDefault(), "value", "") == "1") return;
 
-            foreach (Dictionary<string, object> action in QuerySql(connection, @"
+            foreach (Dictionary<string, object> action in Program.QuerySql(connection, @"
 SELECT director_action_id,payload_json,result_json
 FROM relationship_director_actions
 WHERE action_type='start_conception' AND status='failed';"))
@@ -80,12 +80,12 @@ WHERE action_type='start_conception' AND status='failed';"))
                 string actionId = ReadString(action, "director_action_id", "");
                 string conceptionId = ReadString(actionPayload,
                     "conceptionId", "");
-                ExecuteSql(connection, @"
+                Program.ExecuteSql(connection, @"
 UPDATE relationship_director_actions SET status='obsolete'
 WHERE director_action_id=$id AND status='failed';",
                     new Dictionary<string, object> { ["id"] = actionId });
                 if (!string.IsNullOrWhiteSpace(conceptionId))
-                    ExecuteSql(connection, @"
+                    Program.ExecuteSql(connection, @"
 UPDATE conceptions SET status='obsolete_game',updated_ts=$ts
 WHERE conception_id=$id AND status='pending_game';",
                         new Dictionary<string, object>
@@ -94,7 +94,7 @@ WHERE conception_id=$id AND status='pending_game';",
                             ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                         });
             }
-            ExecuteSql(connection, @"
+            Program.ExecuteSql(connection, @"
 INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');",
                 new Dictionary<string, object> { ["key"] = repairMarker });
         }
@@ -104,17 +104,17 @@ INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');",
         {
             const string repairMarker =
                 "organic_marriage_native_postcondition_repair_v1";
-            string markerValue = ReadString(QuerySql(connection,
+            string markerValue = ReadString(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key=$key LIMIT 1;",
                 new Dictionary<string, object> { ["key"] = repairMarker })
                 .FirstOrDefault(), "value", "");
             Dictionary<string, object> markerState = TryParseJsonObject(
                 markerValue) ?? new Dictionary<string, object>();
             long auditTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            if (!TableExists(connection, "relationship_observed_heroes"))
+            if (!WorldSimulationService.TableExists(connection, "relationship_observed_heroes"))
                 return;
 
-            List<Dictionary<string, object>> completed = QuerySql(connection, @"
+            List<Dictionary<string, object>> completed = Program.QuerySql(connection, @"
 SELECT director_action_id,world_day,actor_id,target_id,payload_json,result_json
 FROM relationship_director_actions
 WHERE action_type='marriage' AND status='completed';")
@@ -133,7 +133,7 @@ WHERE action_type='marriage' AND status='completed';")
                                 StringComparison.OrdinalIgnoreCase));
                 }).ToList();
 
-            double observedThroughLatest = ReadDouble(QuerySql(connection,
+            double observedThroughLatest = ReadDouble(Program.QuerySql(connection,
                 @"SELECT MAX(last_observed_day) AS latest
 FROM relationship_observed_heroes;").FirstOrDefault(), "latest", -1d);
             if (ReadInt(markerState, "completedActionCount", -1)
@@ -143,7 +143,7 @@ FROM relationship_observed_heroes;").FirstOrDefault(), "latest", -1d);
                 return;
 
             Dictionary<string, Dictionary<string, object>> observations =
-                QuerySql(connection, @"SELECT hero_id,profile_json,last_observed_day
+                Program.QuerySql(connection, @"SELECT hero_id,profile_json,last_observed_day
 FROM relationship_observed_heroes;")
                 .ToDictionary(row => ReadString(row, "hero_id", ""), row => row,
                     StringComparer.OrdinalIgnoreCase);
@@ -221,8 +221,8 @@ FROM relationship_observed_heroes;")
 
             if (invalidActions.Count > 0)
             {
-                EnsureSemanticMemorySchema(connection);
-                EnsureWorldTestTelemetrySchema(connection);
+                Program.EnsureSemanticMemorySchema(connection);
+                WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
                 string campaignId = ReignPostgreSqlStorage
                     .CampaignIdForConnection(connection);
                 HashSet<string> affectedRollups = new HashSet<string>(
@@ -253,22 +253,22 @@ FROM relationship_observed_heroes;")
                             ["reclassifiedFrom"] = "completed",
                             ["originalResult"] = originalResult
                         };
-                    ExecuteSql(connection, @"UPDATE relationship_director_actions
+                    Program.ExecuteSql(connection, @"UPDATE relationship_director_actions
 SET status='invalid',result_json=$result WHERE director_action_id=$id;",
                         new Dictionary<string, object>
                         {
                             ["result"] = Json.Serialize(repairedResult),
                             ["id"] = actionId
                         });
-                    ExecuteSql(connection, @"DELETE FROM relationship_incidents
+                    Program.ExecuteSql(connection, @"DELETE FROM relationship_incidents
 WHERE kind='marriage' AND payload_json LIKE $needle;",
                         new Dictionary<string, object>
                         {
                             ["needle"] = "%" + actionId + "%"
                         });
                     string eventId = "marriage_" + actionId;
-                    DeleteWorldMemoryEventProjection(connection, eventId);
-                    ExecuteSql(connection,
+                    Program.DeleteWorldMemoryEventProjection(connection, eventId);
+                    Program.ExecuteSql(connection,
                         "DELETE FROM events WHERE event_id=$event;",
                         new Dictionary<string, object> { ["event"] = eventId });
 
@@ -279,11 +279,11 @@ WHERE kind='marriage' AND payload_json LIKE $needle;",
                         "worldDay", ReadDouble(action, "world_day", 0d)));
                     if (!string.IsNullOrWhiteSpace(campaignId))
                     {
-                        RecordWorldTestCounterSchemaReady(connection, campaignId,
+                        WorldSimulationService.RecordWorldTestCounterSchemaReady(connection, campaignId,
                             timelineId, outcomeDay, "marriages",
                             "outcome_" + actionId,
-                            BuildWorldTestMarriageOutcomeCounters(
-                                WorldTestMarriageOutcomeRoute(payload),
+                            WorldSimulationService.BuildWorldTestMarriageOutcomeCounters(
+                                WorldSimulationService.WorldTestMarriageOutcomeRoute(payload),
                                 "invalid"));
                         affectedRollups.Add(timelineId + "|"
                             + outcomeDay.ToString(CultureInfo.InvariantCulture));
@@ -293,12 +293,12 @@ WHERE kind='marriage' AND payload_json LIKE $needle;",
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 foreach (KeyValuePair<string, string> pair in blockedPairs)
                 {
-                    Dictionary<string, object> lifecycle = QuerySql(connection,
+                    Dictionary<string, object> lifecycle = Program.QuerySql(connection,
                         @"SELECT lover_active FROM relationship_pair_lifecycle
 WHERE pair_key=$pair LIMIT 1;",
                         new Dictionary<string, object> { ["pair"] = pair.Key })
                         .FirstOrDefault() ?? new Dictionary<string, object>();
-                    ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
 married=0,marriage_action_id='',marriage_blocked=1,
 marriage_block_reason=$reason,updated_ts=$ts WHERE pair_key=$pair;",
                         new Dictionary<string, object>
@@ -307,7 +307,7 @@ marriage_block_reason=$reason,updated_ts=$ts WHERE pair_key=$pair;",
                             ["ts"] = ts,
                             ["pair"] = pair.Key
                         });
-                    ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                    Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 shared_tag=$tag,updated_ts=$ts WHERE pair_key=$pair AND shared_tag='married';",
                         new Dictionary<string, object>
                         {
@@ -323,13 +323,13 @@ shared_tag=$tag,updated_ts=$ts WHERE pair_key=$pair AND shared_tag='married';",
                     string timelineId = affected.Substring(0, separator);
                     int day = int.Parse(affected.Substring(separator + 1),
                         CultureInfo.InvariantCulture);
-                    EnqueueWorldTestRollup(connection, campaignId, timelineId,
+                    WorldSimulationService.EnqueueWorldTestRollup(connection, campaignId, timelineId,
                         day, repairMarker);
                 }
-                ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
+                Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
 VALUES('campaign_compaction_required','1');");
             }
-            ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
+            Program.ExecuteSql(connection, @"INSERT OR REPLACE INTO schema_meta(key,value)
 VALUES($key,$value);", new Dictionary<string, object>
             {
                 ["key"] = repairMarker,
@@ -348,53 +348,53 @@ VALUES($key,$value);", new Dictionary<string, object>
         private static void EnsureRelationshipDirectorSchemaCore(
             ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_director_runs (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_director_runs (
 run_id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL,world_day REAL NOT NULL,status TEXT NOT NULL,
 candidate_count INTEGER NOT NULL DEFAULT 0,event_count INTEGER NOT NULL DEFAULT 0,minime_json TEXT NOT NULL DEFAULT '{}',
 input_json TEXT NOT NULL DEFAULT '{}',output_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_director_runs_day ON relationship_director_runs(world_day DESC);");
-            int prunedDirectorPayloads = ReadInt(QuerySql(connection,
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_director_runs_day ON relationship_director_runs(world_day DESC);");
+            int prunedDirectorPayloads = ReadInt(Program.QuerySql(connection,
                 "SELECT COUNT(*) AS count FROM relationship_director_runs WHERE length(input_json)>65536;").FirstOrDefault(), "count", 0);
             if (prunedDirectorPayloads > 0)
             {
-                ExecuteSql(connection, "UPDATE relationship_director_runs SET input_json='{\"legacyPayloadPruned\":true}' WHERE length(input_json)>65536;");
-                ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
+                Program.ExecuteSql(connection, "UPDATE relationship_director_runs SET input_json='{\"legacyPayloadPruned\":true}' WHERE length(input_json)>65536;");
+                Program.ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
             }
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_director_actions (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_director_actions (
 director_action_id TEXT PRIMARY KEY,action_type TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',world_day REAL NOT NULL,
 actor_id TEXT NOT NULL DEFAULT '',target_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',
 created_ts INTEGER NOT NULL,claimed_ts INTEGER NOT NULL DEFAULT 0,resolved_ts INTEGER NOT NULL DEFAULT 0,result_json TEXT NOT NULL DEFAULT '{}');" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_director_actions_status ON relationship_director_actions(status,world_day);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_director_actions_pair_status ON relationship_director_actions(actor_id,target_id,status);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_director_actions_status ON relationship_director_actions(status,world_day);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_director_actions_pair_status ON relationship_director_actions(actor_id,target_id,status);");
             EnsureRelationshipNativeTargetSchema(connection);
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conception_attempts (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conception_attempts (
 attempt_id TEXT PRIMARY KEY,source TEXT NOT NULL,event_id TEXT NOT NULL DEFAULT '',mother_id TEXT NOT NULL,father_id TEXT NOT NULL,
 mother_age REAL NOT NULL,chance REAL NOT NULL,roll REAL NOT NULL,success INTEGER NOT NULL,world_day REAL NOT NULL,
 payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);" );
-            EnsureDatabaseColumn(connection,"conception_attempts","status","TEXT NOT NULL DEFAULT 'resolved'");
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conceptions (
+            Program.EnsureDatabaseColumn(connection,"conception_attempts","status","TEXT NOT NULL DEFAULT 'resolved'");
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS conceptions (
 conception_id TEXT PRIMARY KEY,attempt_id TEXT NOT NULL DEFAULT '',mother_id TEXT NOT NULL,biological_father_id TEXT NOT NULL,
 legal_father_id TEXT NOT NULL DEFAULT '',conception_day REAL NOT NULL,due_day REAL NOT NULL,status TEXT NOT NULL DEFAULT 'pending_game',
 secrecy REAL NOT NULL DEFAULT 0,child_id TEXT NOT NULL DEFAULT '',revealed INTEGER NOT NULL DEFAULT 0,
 payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS parentage (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS parentage (
 child_id TEXT PRIMARY KEY,mother_id TEXT NOT NULL,biological_father_id TEXT NOT NULL,legal_father_id TEXT NOT NULL DEFAULT '',
 is_illegitimate INTEGER NOT NULL DEFAULT 0,revealed INTEGER NOT NULL DEFAULT 0,bastard_surname TEXT NOT NULL DEFAULT '',
 conception_id TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL DEFAULT '{}',updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS director_outbox (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS director_outbox (
 outbox_id TEXT PRIMARY KEY,kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',world_day REAL NOT NULL,
 subject_ids_json TEXT NOT NULL DEFAULT '[]',payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS marriage_leader_rolls (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS marriage_leader_rolls (
 roll_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL DEFAULT 'main',period_index INTEGER NOT NULL,leader_id TEXT NOT NULL,clan_id TEXT NOT NULL,world_day REAL NOT NULL,
 chance REAL NOT NULL,roll REAL NOT NULL,urgency REAL NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
 UNIQUE(timeline_id,period_index,leader_id));" );
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS marriage_evaluations (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS marriage_evaluations (
 evaluation_id TEXT PRIMARY KEY,route TEXT NOT NULL,status TEXT NOT NULL,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
 clan_a_id TEXT NOT NULL DEFAULT '',clan_b_id TEXT NOT NULL DEFAULT '',leader_a_id TEXT NOT NULL DEFAULT '',leader_b_id TEXT NOT NULL DEFAULT '',
 world_day REAL NOT NULL,score REAL NOT NULL DEFAULT 0,leader_a_approved INTEGER NOT NULL DEFAULT 0,leader_b_approved INTEGER NOT NULL DEFAULT 0,
 resentment_a REAL NOT NULL DEFAULT 0,resentment_b REAL NOT NULL DEFAULT 0,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_marriage_evaluations_status ON marriage_evaluations(status,world_day DESC);");
-            EnsureDatabaseColumn(connection,"marriage_evaluations","timeline_id","TEXT NOT NULL DEFAULT 'main'");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_marriage_evaluations_status ON marriage_evaluations(status,world_day DESC);");
+            Program.EnsureDatabaseColumn(connection,"marriage_evaluations","timeline_id","TEXT NOT NULL DEFAULT 'main'");
             MigrateMarriageLeaderRollTimeline(connection);
             ReclassifyNativeMarriageEligibilityFailures(connection);
             EnsureRelationshipLifecycleSchema(connection);
@@ -402,47 +402,47 @@ resentment_a REAL NOT NULL DEFAULT 0,resentment_b REAL NOT NULL DEFAULT 0,payloa
 
         private static void ReclassifyNativeMarriageEligibilityFailures(ReignDbConnection connection)
         {
-            if(ReadString(QuerySql(connection,"SELECT value FROM schema_meta WHERE key='native_marriage_invalid_classification_v1' LIMIT 1;").FirstOrDefault(),"value","")=="1")return;
-            foreach(Dictionary<string,object> action in QuerySql(connection,@"SELECT director_action_id,payload_json
+            if(ReadString(Program.QuerySql(connection,"SELECT value FROM schema_meta WHERE key='native_marriage_invalid_classification_v1' LIMIT 1;").FirstOrDefault(),"value","")=="1")return;
+            foreach(Dictionary<string,object> action in Program.QuerySql(connection,@"SELECT director_action_id,payload_json
 FROM relationship_director_actions
 WHERE action_type='marriage' AND status='failed'
 AND result_json LIKE '%Native marriage model rejected the couple.%';"))
             {
                 Dictionary<string,object> payload=TryParseJsonObject(ReadString(action,"payload_json","{}"))??new Dictionary<string,object>();
                 string evaluationId=ReadString(payload,"evaluationId","");
-                ExecuteSql(connection,"UPDATE relationship_director_actions SET status='invalid' WHERE director_action_id=$id;",
+                Program.ExecuteSql(connection,"UPDATE relationship_director_actions SET status='invalid' WHERE director_action_id=$id;",
                     new Dictionary<string,object>{{"id",ReadString(action,"director_action_id","")}});
-                if(!string.IsNullOrWhiteSpace(evaluationId))ExecuteSql(connection,
+                if(!string.IsNullOrWhiteSpace(evaluationId))Program.ExecuteSql(connection,
                     "UPDATE marriage_evaluations SET status='invalid_native' WHERE evaluation_id=$id AND status='failed';",
                     new Dictionary<string,object>{{"id",evaluationId}});
             }
-            ExecuteSql(connection,"INSERT OR REPLACE INTO schema_meta(key,value) VALUES('native_marriage_invalid_classification_v1','1');");
+            Program.ExecuteSql(connection,"INSERT OR REPLACE INTO schema_meta(key,value) VALUES('native_marriage_invalid_classification_v1','1');");
         }
 
-        private static void EnsureRelationshipNativeTargetSchema(ReignDbConnection connection)
+        internal static void EnsureRelationshipNativeTargetSchema(ReignDbConnection connection)
         {
             if (!IsRelationshipMaintenanceTableReady(connection, "relationship_native_targets"))
             {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_native_targets (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS relationship_native_targets (
 pair_key TEXT PRIMARY KEY,hero_a_id TEXT NOT NULL,hero_b_id TEXT NOT NULL,
 target_relation INTEGER NOT NULL,observed_relation INTEGER NOT NULL DEFAULT 0,
 status TEXT NOT NULL DEFAULT 'pending',world_day REAL NOT NULL,last_sync_day REAL NOT NULL DEFAULT -1000,
 attempt_count INTEGER NOT NULL DEFAULT 0,claimed_ts INTEGER NOT NULL DEFAULT 0,
 last_error TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL);" );
-            ExecuteSql(connection,
+            Program.ExecuteSql(connection,
                 "CREATE INDEX IF NOT EXISTS idx_relationship_native_targets_status ON relationship_native_targets(status,world_day,pair_key);");
-            EnsureDatabaseColumn(connection, "relationship_native_targets", "revision", "INTEGER NOT NULL DEFAULT 1");
-            EnsureDatabaseColumn(connection, "relationship_native_targets", "requires_observation", "INTEGER NOT NULL DEFAULT 0");
+            Program.EnsureDatabaseColumn(connection, "relationship_native_targets", "revision", "INTEGER NOT NULL DEFAULT 1");
+            Program.EnsureDatabaseColumn(connection, "relationship_native_targets", "requires_observation", "INTEGER NOT NULL DEFAULT 0");
             }
 
-            bool chemistryExists = QuerySql(connection,
+            bool chemistryExists = Program.QuerySql(connection,
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='relationship_pair_chemistry' LIMIT 1;").Any();
-            if (!chemistryExists || ReadString(QuerySql(connection,
+            if (!chemistryExists || ReadString(Program.QuerySql(connection,
                 "SELECT value FROM schema_meta WHERE key='relationship_native_targets_v1' LIMIT 1;")
                 .FirstOrDefault(), "value", "") == "1") return;
 
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, "SAVEPOINT migrate_relationship_native_targets;");
+            Program.ExecuteSql(connection, "SAVEPOINT migrate_relationship_native_targets;");
             try
             {
                 // The legacy chemistry row only stored the projected value; it
@@ -450,20 +450,20 @@ last_error TEXT NOT NULL DEFAULT '',updated_ts INTEGER NOT NULL);" );
                 // Migrating it as both target and observation manufactured an
                 // already-aligned pending target for every legacy action. Let
                 // the next native observation create a real coalesced target.
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "DELETE FROM relationship_director_actions WHERE action_type='native_relation';");
-                ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_action_pending=0,native_action_id='';");
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('relationship_native_targets_v1','1');");
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('campaign_compaction_required','1');");
-                ExecuteSql(connection, "RELEASE migrate_relationship_native_targets;");
+                Program.ExecuteSql(connection, "RELEASE migrate_relationship_native_targets;");
             }
             catch
             {
-                try { ExecuteSql(connection, "ROLLBACK TO migrate_relationship_native_targets;"); } catch { }
-                try { ExecuteSql(connection, "RELEASE migrate_relationship_native_targets;"); } catch { }
+                try { Program.ExecuteSql(connection, "ROLLBACK TO migrate_relationship_native_targets;"); } catch { }
+                try { Program.ExecuteSql(connection, "RELEASE migrate_relationship_native_targets;"); } catch { }
                 throw;
             }
         }
@@ -516,7 +516,7 @@ native_action_pending=0,native_action_id='';");
             // Read the current catalog instead of issuing no-op DDL. CREATE INDEX
             // takes a table lock even when it already exists. No process cache or
             // marker can outlive a rolled-back migration or a Save Sync restore.
-            return QuerySql(connection, @"
+            return Program.QuerySql(connection, @"
 SELECT 1 AS ready FROM pg_class t
 WHERE t.relnamespace=(SELECT n.oid FROM pg_namespace n WHERE n.nspname=current_schema())
 AND t.relname=$table AND t.relkind IN ('r','p')
@@ -537,7 +537,7 @@ AND NOT EXISTS (
         {
             if (ReignPostgreSqlDialect.IsPostgreSql(connection))
             {
-                bool currentPostgreSqlConstraint = QuerySql(connection, @"
+                bool currentPostgreSqlConstraint = Program.QuerySql(connection, @"
 SELECT 1 AS present
 FROM pg_constraint constraint_row
 JOIN pg_class table_row ON table_row.oid=constraint_row.conrelid
@@ -552,20 +552,20 @@ WHERE schema_row.nspname=current_schema()
 LIMIT 1;").Any();
                 if (currentPostgreSqlConstraint) return;
             }
-            Dictionary<string,object> table=QuerySql(connection,"SELECT sql FROM sqlite_master WHERE type='table' AND name='marriage_leader_rolls' LIMIT 1;").FirstOrDefault();
+            Dictionary<string,object> table=Program.QuerySql(connection,"SELECT sql FROM sqlite_master WHERE type='table' AND name='marriage_leader_rolls' LIMIT 1;").FirstOrDefault();
             string schema=ReadString(table,"sql","").Replace(" ",string.Empty).Replace("\r",string.Empty).Replace("\n",string.Empty).ToLowerInvariant();
             if(schema.Contains("unique(timeline_id,period_index,leader_id)"))return;
-            ExecuteSql(connection,"ALTER TABLE marriage_leader_rolls RENAME TO marriage_leader_rolls_legacy;");
-            ExecuteSql(connection,@"CREATE TABLE marriage_leader_rolls (
+            Program.ExecuteSql(connection,"ALTER TABLE marriage_leader_rolls RENAME TO marriage_leader_rolls_legacy;");
+            Program.ExecuteSql(connection,@"CREATE TABLE marriage_leader_rolls (
 roll_id TEXT PRIMARY KEY,timeline_id TEXT NOT NULL DEFAULT 'main',period_index INTEGER NOT NULL,leader_id TEXT NOT NULL,clan_id TEXT NOT NULL,world_day REAL NOT NULL,
 chance REAL NOT NULL,roll REAL NOT NULL,urgency REAL NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL DEFAULT '{}',created_ts INTEGER NOT NULL,
 UNIQUE(timeline_id,period_index,leader_id));");
-            ExecuteSql(connection,@"INSERT OR IGNORE INTO marriage_leader_rolls(roll_id,timeline_id,period_index,leader_id,clan_id,world_day,chance,roll,urgency,status,payload_json,created_ts)
+            Program.ExecuteSql(connection,@"INSERT OR IGNORE INTO marriage_leader_rolls(roll_id,timeline_id,period_index,leader_id,clan_id,world_day,chance,roll,urgency,status,payload_json,created_ts)
 SELECT roll_id,'main',period_index,leader_id,clan_id,world_day,chance,roll,urgency,status,payload_json,created_ts FROM marriage_leader_rolls_legacy;");
-            ExecuteSql(connection,"DROP TABLE marriage_leader_rolls_legacy;");
+            Program.ExecuteSql(connection,"DROP TABLE marriage_leader_rolls_legacy;");
         }
 
-        private static Dictionary<string, object> VerifyPlayerConceptionAttemptApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> VerifyPlayerConceptionAttemptApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -602,12 +602,12 @@ SELECT roll_id,'main',period_index,leader_id,clan_id,world_day,chance,roll,urgen
                 };
             }
 
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
-                Dictionary<string, object> prior = QuerySql(connection, "SELECT * FROM conception_attempts WHERE attempt_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = attemptId }).FirstOrDefault();
+                Dictionary<string, object> prior = Program.QuerySql(connection, "SELECT * FROM conception_attempts WHERE attempt_id=$id LIMIT 1;", new Dictionary<string, object> { ["id"] = attemptId }).FirstOrDefault();
                 if (prior != null)
                 {
-                    Dictionary<string, object> priorConception = QuerySql(connection,"SELECT * FROM conceptions WHERE attempt_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",attemptId}}).FirstOrDefault() ?? new Dictionary<string, object>();
+                    Dictionary<string, object> priorConception = Program.QuerySql(connection,"SELECT * FROM conceptions WHERE attempt_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",attemptId}}).FirstOrDefault() ?? new Dictionary<string, object>();
                     string priorStatus = ReadString(prior,"status","resolved");
                     bool cancelled = priorStatus.Equals("cancelled",StringComparison.OrdinalIgnoreCase);
                     return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["attemptId"] = attemptId, ["decision"] = priorStatus, ["verified"] = verified, ["eligible"] = ReadInt(prior, "success", 0) == 1 || ReadDouble(prior, "chance", 0d) > 0d, ["chance"] = ReadDouble(prior, "chance", 0d), ["roll"] = ReadDouble(prior, "roll", -1d), ["rollPerformed"] = !cancelled, ["cancelled"] = cancelled, ["success"] = !cancelled && ReadInt(prior, "success", 0) == 1,
@@ -618,7 +618,7 @@ SELECT roll_id,'main',period_index,leader_id,clan_id,world_day,chance,roll,urgen
                 double roll = cancelledNow ? -1d : StableUnit(attemptId + "|player_conception");
                 bool success = !cancelledNow && chance > 0d && roll < chance;
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"INSERT INTO conception_attempts(attempt_id,source,event_id,mother_id,father_id,mother_age,chance,roll,success,world_day,payload_json,created_ts,status)
+                Program.ExecuteSql(connection, @"INSERT INTO conception_attempts(attempt_id,source,event_id,mother_id,father_id,mother_age,chance,roll,success,world_day,payload_json,created_ts,status)
 VALUES($id,'player_dialogue_action',$event,$mother,$father,$age,$chance,$roll,$success,$day,$payload,$ts,$status);", new Dictionary<string, object>
                 {
                     ["id"] = attemptId,["event"] = ReadString(payload,"eventId",attemptId),["mother"] = motherId,["father"] = fatherId,["age"] = age,
@@ -632,7 +632,7 @@ VALUES($id,'player_dialogue_action',$event,$mother,$father,$age,$chance,$roll,$s
                     string spouseId = ReadString(mother, "spouseId", "");
                     string legalFatherId = !string.IsNullOrWhiteSpace(spouseId) ? spouseId : fatherId;
                     double secrecy = !string.IsNullOrWhiteSpace(spouseId) && !spouseId.Equals(fatherId, StringComparison.OrdinalIgnoreCase) ? 0.75d : 0d;
-                    ExecuteSql(connection, @"INSERT INTO conceptions(conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,conception_day,due_day,status,secrecy,payload_json,created_ts,updated_ts)
+                    Program.ExecuteSql(connection, @"INSERT INTO conceptions(conception_id,attempt_id,mother_id,biological_father_id,legal_father_id,conception_day,due_day,status,secrecy,payload_json,created_ts,updated_ts)
 VALUES($id,$attempt,$mother,$bio,$legal,$day,$due,'pending_game',$secrecy,$payload,$ts,$ts);", new Dictionary<string, object>
                     {
                         ["id"] = conceptionId,["attempt"] = attemptId,["mother"] = motherId,["bio"] = fatherId,["legal"] = legalFatherId,
@@ -644,35 +644,35 @@ VALUES($id,$attempt,$mother,$bio,$legal,$day,$due,'pending_game',$secrecy,$paylo
             }
         }
 
-        private static Dictionary<string, object> FamilyConceptionReportApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> FamilyConceptionReportApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string id = ReadFirstString(payload, "conceptionId", "id");
             string status = ReadString(payload, "status", "active");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureRelationshipDirectorSchema(connection);
                 // Native observations also report births, but never enter the server conception scheduler.
                 if (ReadString(payload, "contextSource", "").StartsWith("bannerlord_native", StringComparison.Ordinal)
-                    && ReadString(payload, "timelineId", "") == ActiveWorldHistoryTimeline(connection))
-                    ExecuteSql(connection, @"INSERT OR IGNORE INTO conceptions(conception_id,mother_id,biological_father_id,legal_father_id,
+                    && ReadString(payload, "timelineId", "") == WorldSimulationService.ActiveWorldHistoryTimeline(connection))
+                    Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO conceptions(conception_id,mother_id,biological_father_id,legal_father_id,
 conception_day,due_day,status,payload_json,created_ts,updated_ts) VALUES($id,$mother,$father,$legal,$start,$due,$status,$payload,$ts,$ts);",
                         TestDict("id", id, "mother", ReadString(payload, "motherId", ""), "father", ReadString(payload, "biologicalFatherId", ""),
                             "legal", ReadString(payload, "legalFatherId", ""), "start", ReadDouble(payload, "conceptionDay", 0),
                             "due", ReadDouble(payload, "dueDay", 0), "status", status, "payload", Json.Serialize(payload), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                ExecuteSql(connection, "UPDATE conceptions SET status=$status,child_id=$child,payload_json=$payload,updated_ts=$ts WHERE conception_id=$id;", new Dictionary<string, object>
+                Program.ExecuteSql(connection, "UPDATE conceptions SET status=$status,child_id=$child,payload_json=$payload,updated_ts=$ts WHERE conception_id=$id;", new Dictionary<string, object>
                 {
                     ["status"] = status,["child"] = ReadFirstString(payload,"childId","childHeroStringId"),["payload"] = Json.Serialize(payload),["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),["id"] = id
                 });
                 if (status == "born")
                 {
-                    Dictionary<string, object> row = QuerySql(connection,"SELECT * FROM conceptions WHERE conception_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",id}}).FirstOrDefault();
+                    Dictionary<string, object> row = Program.QuerySql(connection,"SELECT * FROM conceptions WHERE conception_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",id}}).FirstOrDefault();
                     string child = ReadFirstString(payload,"childId","childHeroStringId");
                     if (row != null && !string.IsNullOrWhiteSpace(child))
                     {
                         bool illegitimate = ReadBool(payload,"isIllegitimate",false) || !ReadString(row,"legal_father_id","").Equals(ReadString(row,"biological_father_id",""),StringComparison.OrdinalIgnoreCase);
-                        ExecuteSql(connection,@"INSERT OR REPLACE INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
+                        Program.ExecuteSql(connection,@"INSERT OR REPLACE INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
 VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payload,$ts);",new Dictionary<string, object>{{"child",child},{"mother",ReadString(row,"mother_id","")},{"bio",ReadString(row,"biological_father_id","")},{"legal",ReadString(row,"legal_father_id","")},{"illegitimate",illegitimate?1:0},{"revealed",ReadBool(payload,"fatherExposed",false)?1:0},{"conception",id},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
                         if (illegitimate && !ReadString(row,"legal_father_id","").Equals(ReadString(row,"biological_father_id",""),StringComparison.OrdinalIgnoreCase))
                         {
@@ -681,7 +681,7 @@ VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payloa
                             double concealRoll=StableUnit(id+"|conceal_parentage");
                             if(concealRoll>concealChance)
                             {
-                                ExecuteSql(connection,@"INSERT INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts)
+                                Program.ExecuteSql(connection,@"INSERT INTO director_outbox(outbox_id,kind,status,world_day,subject_ids_json,payload_json,created_ts)
 VALUES($id,'parentage_rumor_seed','pending',$day,$subjects,$payload,$ts);",new Dictionary<string, object>{{"id","outbox_"+Guid.NewGuid().ToString("N")},{"day",ReadDouble(payload,"worldDay",0d)},{"subjects",Json.Serialize(new[]{child,ReadString(row,"mother_id",""),ReadString(row,"biological_father_id","")})},{"payload",Json.Serialize(new Dictionary<string, object>{{"childId",child},{"motherId",ReadString(row,"mother_id","")},{"biologicalFatherId",ReadString(row,"biological_father_id","")},{"legalFatherId",ReadString(row,"legal_father_id","")},{"concealChance",concealChance},{"concealRoll",concealRoll}})},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
                             }
                         }
@@ -691,27 +691,27 @@ VALUES($id,'parentage_rumor_seed','pending',$day,$subjects,$payload,$ts);",new D
             return new Dictionary<string, object>{{"ok",true},{"conceptionId",id},{"status",status}};
         }
 
-        private static Dictionary<string, object> FamilyParentageRevealApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> FamilyParentageRevealApi(Dictionary<string, object> payload)
         {
             payload=payload??new Dictionary<string, object>();string campaignId=ReadString(payload,"campaignId","default"),childId=ReadFirstString(payload,"childId","childHeroStringId");double day=ReadDouble(payload,"worldDay",0d);
-            using(ReignDbConnection connection=OpenCampaignConnection(campaignId))
+            using(ReignDbConnection connection=Program.OpenCampaignConnection(campaignId))
             {
-                Dictionary<string, object> row=QuerySql(connection,"SELECT * FROM parentage WHERE child_id=$child LIMIT 1;",new Dictionary<string, object>{{"child",childId}}).FirstOrDefault();
+                Dictionary<string, object> row=Program.QuerySql(connection,"SELECT * FROM parentage WHERE child_id=$child LIMIT 1;",new Dictionary<string, object>{{"child",childId}}).FirstOrDefault();
                 if(row==null)return new Dictionary<string, object>{{"ok",false},{"error","Parentage record was not found."}};
                 if(ReadInt(row,"revealed",0)==1)return new Dictionary<string, object>{{"ok",true},{"idempotent",true},{"childId",childId}};
-                ExecuteSql(connection,"UPDATE parentage SET revealed=1,is_illegitimate=1,bastard_surname=$surname,payload_json=$payload,updated_ts=$ts WHERE child_id=$child;",new Dictionary<string, object>{{"surname",ReadString(payload,"bastardSurname","Baseborn")},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"child",childId}});
+                Program.ExecuteSql(connection,"UPDATE parentage SET revealed=1,is_illegitimate=1,bastard_surname=$surname,payload_json=$payload,updated_ts=$ts WHERE child_id=$child;",new Dictionary<string, object>{{"surname",ReadString(payload,"bastardSurname","Baseborn")},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()},{"child",childId}});
                 QueueDirectorAction(connection,"reveal_parentage",day,childId,ReadString(row,"biological_father_id",""),new Dictionary<string, object>{{"childId",childId},{"biologicalFatherId",ReadString(row,"biological_father_id","")},{"legalFatherId",ReadString(row,"legal_father_id","")},{"bastardSurname",ReadString(payload,"bastardSurname","Baseborn")}});
-                StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventType","parentage_revealed"},{"worldDay",day},{"summary","The concealed biological parentage of "+childId+" was publicly exposed."},{"participants",new[]{childId,ReadString(row,"mother_id",""),ReadString(row,"biological_father_id","")}},{"visibility","public"},{"importance",0.95d}},"parentage_reveal");
+                Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventType","parentage_revealed"},{"worldDay",day},{"summary","The concealed biological parentage of "+childId+" was publicly exposed."},{"participants",new[]{childId,ReadString(row,"mother_id",""),ReadString(row,"biological_father_id","")}},{"visibility","public"},{"importance",0.95d}},"parentage_reveal");
                 return new Dictionary<string, object>{{"ok",true},{"childId",childId},{"queued",true}};
             }
         }
 
-        private static Dictionary<string, object> RelationshipDirectorSnapshotApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipDirectorSnapshotApi(Dictionary<string, object> payload)
         {
             return RunRelationshipDirector(payload ?? new Dictionary<string, object>(), false);
         }
 
-        private static Dictionary<string, object> RelationshipDirectorRunApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipDirectorRunApi(Dictionary<string, object> payload)
         {
             return RunRelationshipDirector(payload ?? new Dictionary<string, object>(), true);
         }
@@ -726,21 +726,21 @@ VALUES($id,'parentage_rumor_seed','pending',$day,$subjects,$payload,$ts);",new D
             // Relationship effects re-enter this monitor. Acquire it before any
             // database work so a waiting effect cannot retain table locks needed
             // by the worker that already owns the campaign monitor.
-            using var ownership = EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId));
+            using var ownership = PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId));
             ownership.SetStage("director_schema");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureRelationshipDirectorSchema(connection);
                 // Publish telemetry schema readiness only after its DDL commits,
                 // before the period transaction can fail or roll back.
-                EnsureWorldTestTelemetrySchema(connection);
+                WorldSimulationService.EnsureWorldTestTelemetrySchema(connection);
                 string timeline=ReadString(payload,"timelineId","main");
                 long period=Reign.Relationships.ArrangedMarriagePolicy.Period(day);
                 RevalidateLegacyMarriageOffers(connection,timeline,day);
                 ownership.SetStage("director_transaction");
                 using (var transaction=connection.BeginTransaction())
                 {
-                if(QuerySql(connection,"SELECT period_index FROM arranged_marriage_periods WHERE timeline_id=$t AND period_index=$p;",new Dictionary<string,object>{{"t",timeline},{"p",period}}).Any())
+                if(Program.QuerySql(connection,"SELECT period_index FROM arranged_marriage_periods WHERE timeline_id=$t AND period_index=$p;",new Dictionary<string,object>{{"t",timeline},{"p",period}}).Any())
                     return new Dictionary<string,object>{{"ok",true},{"idempotent",true},{"periodIndex",period},{"nextDay",(period+1)*7d}};
                 // A replayed capture is evaluated once. Missing uncaptured historical periods are not synthesized.
                 ownership.SetStage("arranged_marriage_candidates");
@@ -760,16 +760,16 @@ VALUES($id,'parentage_rumor_seed','pending',$day,$subjects,$payload,$ts);",new D
                     ["clanCount"] = ReadDictionaryList(payload, "clans").Count,
                     ["purpose"] = "political_marriage_only"
                 };
-                ExecuteSql(connection,@"INSERT INTO relationship_director_runs(run_id,campaign_id,world_day,status,candidate_count,event_count,minime_json,input_json,output_json,created_ts)
+                Program.ExecuteSql(connection,@"INSERT INTO relationship_director_runs(run_id,campaign_id,world_day,status,candidate_count,event_count,minime_json,input_json,output_json,created_ts)
 VALUES($id,$campaign,$day,'completed',$candidates,$events,'{""disabled"":true}',$input,$output,$ts);",
                     new Dictionary<string, object>{{"id",runId},{"campaign",campaignId},{"day",day},
                         {"candidates",candidateCount},{"events",eventCount},
                         {"input",Json.Serialize(compactInput)},{"output",Json.Serialize(marriage)},{"ts",ts}});
-                ExecuteSql(connection, @"DELETE FROM relationship_director_runs
+                Program.ExecuteSql(connection, @"DELETE FROM relationship_director_runs
 WHERE run_id NOT IN (
     SELECT run_id FROM relationship_director_runs ORDER BY world_day DESC,created_ts DESC LIMIT 64
 );");
-                ExecuteSql(connection,"INSERT INTO arranged_marriage_periods(timeline_id,period_index,world_day,status,created_ts) VALUES($t,$p,$d,'completed',$ts);",new Dictionary<string,object>{{"t",timeline},{"p",period},{"d",day},{"ts",ts}});
+                Program.ExecuteSql(connection,"INSERT INTO arranged_marriage_periods(timeline_id,period_index,world_day,status,created_ts) VALUES($t,$p,$d,'completed',$ts);",new Dictionary<string,object>{{"t",timeline},{"p",period},{"d",day},{"ts",ts}});
                 ownership.SetStage("director_commit");
                 transaction.Commit();
                 return new Dictionary<string, object>{{"ok",true},{"runId",runId},{"periodIndex",period},{"nextDay",(period+1)*7d},
@@ -858,7 +858,7 @@ WHERE run_id NOT IN (
                 },
                 ["sceneOpportunity"]=new Dictionary<string, object>{{"private",true},{"exposure",0.12d},{"coercive",false},{"witnessIds",new List<string>()}}
             };
-            Dictionary<string, object> context=BuildConversationDecisionContext(campaignId,"autonomous_relationship",actorId,actor,LoadCharacterStack(campaignId,actorId),new Dictionary<string, object>(),"","A private autonomous social opportunity.",payload,new Dictionary<string, object>{{"identityState","known"}});
+            Dictionary<string, object> context=Program.BuildConversationDecisionContext(campaignId,"autonomous_relationship",actorId,actor,Program.LoadCharacterStack(campaignId,actorId),new Dictionary<string, object>(),"","A private autonomous social opportunity.",payload,new Dictionary<string, object>{{"identityState","known"}});
             return ReadDictionary(context,"romance")??new Dictionary<string, object>();
         }
 
@@ -918,36 +918,36 @@ WHERE run_id NOT IN (
         private static double MarriageUrgency(Dictionary<string, object> clan,Dictionary<string, object> leader,List<Dictionary<string, object>> members)
         {
             int children=members.Sum(x=>ReadInt(x,"childrenCount",0));
-            double agePressure=members.Count==0?0d:members.Average(x=>ClampDouble((ReadDouble(x,"age",18d)-18d)/25d,0d,1d));
-            double succession=ClampDouble((members.Count==1?0.45d:0.15d)+(children==0?0.30d:0d)+0.25d*agePressure,0d,1d);
-            double isolation=ClampDouble(0.55d-ReadDouble(clan,"tier",0d)/12d-ReadDouble(clan,"gold",0d)/1000000d,0d,1d);
+            double agePressure=members.Count==0?0d:members.Average(x=>Program.ClampDouble((ReadDouble(x,"age",18d)-18d)/25d,0d,1d));
+            double succession=Program.ClampDouble((members.Count==1?0.45d:0.15d)+(children==0?0.30d:0d)+0.25d*agePressure,0d,1d);
+            double isolation=Program.ClampDouble(0.55d-ReadDouble(clan,"tier",0d)/12d-ReadDouble(clan,"gold",0d)/1000000d,0d,1d);
             double traits=(Trait01(leader,"ambition")+Trait01(leader,"dutyMotivation")+Trait01(leader,"traditionalism")+Trait01(leader,"familyMotivation")+Trait01(leader,"powerMotivation")+Trait01(leader,"pragmatism")+Trait01(leader,"riskTolerance"))/7d;
-            return ClampDouble(0.45d*succession+0.25d*isolation+0.30d*traits,0d,1d);
+            return Program.ClampDouble(0.45d*succession+0.25d*isolation+0.30d*traits,0d,1d);
         }
 
         private static double DynasticMarriageScore(Dictionary<string, object> own,Dictionary<string, object> other,Dictionary<string, object> leader,Dictionary<string, object> member,Dictionary<string, object> candidate)
         {
-            double standing=ClampDouble(ReadDouble(other,"tier",0d)/6d,0d,1d)*18d+ClampDouble(ReadDouble(other,"renown",0d)/6000d,0d,1d)*10d;
-            double resources=ClampDouble(ReadDouble(other,"gold",0d)/500000d,0d,1d)*10d+ClampDouble(ReadDouble(other,"influence",0d)/1000d,0d,1d)*8d;
+            double standing=Program.ClampDouble(ReadDouble(other,"tier",0d)/6d,0d,1d)*18d+Program.ClampDouble(ReadDouble(other,"renown",0d)/6000d,0d,1d)*10d;
+            double resources=Program.ClampDouble(ReadDouble(other,"gold",0d)/500000d,0d,1d)*10d+Program.ClampDouble(ReadDouble(other,"influence",0d)/1000d,0d,1d)*8d;
             double compatibility=ReadString(own,"kingdomId","")==ReadString(other,"kingdomId","")?14d:8d;
             if(ReadString(own,"cultureId","")==ReadString(other,"cultureId",""))compatibility+=8d;
-            double household=12d*(ReadInt(candidate,"childrenCount",0)==0?1d:0.5d)+8d*(1d-ClampDouble(Math.Abs(ReadDouble(member,"age",25d)-ReadDouble(candidate,"age",25d))/30d,0d,1d));
+            double household=12d*(ReadInt(candidate,"childrenCount",0)==0?1d:0.5d)+8d*(1d-Program.ClampDouble(Math.Abs(ReadDouble(member,"age",25d)-ReadDouble(candidate,"age",25d))/30d,0d,1d));
             double strategy=12d*Trait01(leader,"ambition")+10d*Trait01(leader,"familyMotivation")+8d*Trait01(leader,"pragmatism");
-            return ClampDouble(standing+resources+compatibility+household+strategy,0d,100d);
+            return Program.ClampDouble(standing+resources+compatibility+household+strategy,0d,100d);
         }
 
         private static double ArrangedMarriageResentment(Dictionary<string, object> spouse,Dictionary<string, object> match,Dictionary<string, object> leader,double politicalValue)
         {
             double resistance=0.20d*Trait01(spouse,"assertiveness")+0.16d*Trait01(spouse,"pride")+0.12d*Trait01(spouse,"impulsiveness")+0.12d*(1d-Trait01(spouse,"traditionalism"));
             double acceptance=0.16d*Trait01(spouse,"dutyMotivation")+0.14d*Trait01(spouse,"familyMotivation")+0.10d*Trait01(spouse,"loyalty")+0.10d*Trait01(spouse,"pragmatism")+0.08d*Trait01(spouse,"ambition");
-            double relation=ClampDouble((ReadDouble(spouse,"nativeRelationToLeader",0d)+100d)/200d,0d,1d);
+            double relation=Program.ClampDouble((ReadDouble(spouse,"nativeRelationToLeader",0d)+100d)/200d,0d,1d);
             double personal=0.10d*Trait01(spouse,"attraction")+0.08d*Trait01(spouse,"socialTrust");
-            return Math.Round(ClampDouble(15d+65d*resistance-55d*acceptance-15d*relation-10d*personal-10d*(politicalValue/100d),0d,60d),2);
+            return Math.Round(Program.ClampDouble(15d+65d*resistance-55d*acceptance-15d*relation-10d*personal-10d*(politicalValue/100d),0d,60d),2);
         }
 
         private static bool MarriagePairAlreadyActive(ReignDbConnection connection,string timelineId,string a,string b)
         {
-            return QuerySql(connection,"SELECT evaluation_id FROM marriage_evaluations WHERE timeline_id=$timeline AND ((hero_a_id=$a AND hero_b_id=$b) OR (hero_a_id=$b AND hero_b_id=$a)) AND status IN ('evaluating','approved','player_court_pending','player_offer_pending','wedding_pending','awaiting_diplomacy','recovery','executed') LIMIT 1;",new Dictionary<string, object>{{"timeline",timelineId},{"a",a},{"b",b}}).Any();
+            return Program.QuerySql(connection,"SELECT evaluation_id FROM marriage_evaluations WHERE timeline_id=$timeline AND ((hero_a_id=$a AND hero_b_id=$b) OR (hero_a_id=$b AND hero_b_id=$a)) AND status IN ('evaluating','approved','player_court_pending','player_offer_pending','wedding_pending','awaiting_diplomacy','recovery','executed') LIMIT 1;",new Dictionary<string, object>{{"timeline",timelineId},{"a",a},{"b",b}}).Any();
         }
 
         private static void CreateMarriageEvaluation(ReignDbConnection connection,string campaignId,string timelineId,string route,string status,double day,Dictionary<string, object> a,Dictionary<string, object> b,Dictionary<string, object> clanA,Dictionary<string, object> clanB,double score,double resentmentA,double resentmentB,Dictionary<string, object> detail)
@@ -956,11 +956,11 @@ WHERE run_id NOT IN (
             string clanAId=ReadString(a,"clanId",ReadString(clanA,"clanId","")),clanBId=ReadString(b,"clanId",ReadString(clanB,"clanId",""));
             string leaderA=ReadString(clanA,"leaderId",aId),leaderB=ReadString(clanB,"leaderId",bId);
             Dictionary<string, object> data=new Dictionary<string, object>(detail??new Dictionary<string, object>()){{"evaluationId",id},{"route",route},{"heroA",a},{"heroB",b},{"clanA",clanA??new Dictionary<string, object>()},{"clanB",clanB??new Dictionary<string, object>()},{"resentmentA",resentmentA},{"resentmentB",resentmentB}};
-            ExecuteSql(connection,@"INSERT INTO marriage_evaluations(evaluation_id,route,status,hero_a_id,hero_b_id,clan_a_id,clan_b_id,leader_a_id,leader_b_id,world_day,score,leader_a_approved,leader_b_approved,resentment_a,resentment_b,payload_json,created_ts,updated_ts,timeline_id)
+            Program.ExecuteSql(connection,@"INSERT INTO marriage_evaluations(evaluation_id,route,status,hero_a_id,hero_b_id,clan_a_id,clan_b_id,leader_a_id,leader_b_id,world_day,score,leader_a_approved,leader_b_approved,resentment_a,resentment_b,payload_json,created_ts,updated_ts,timeline_id)
 VALUES($id,$route,$status,$a,$b,$ca,$cb,$la,$lb,$day,$score,$aa,$ba,$ra,$rb,$payload,$ts,$ts,$timeline);",new Dictionary<string, object>{{"aa",ReadDouble(detail,"leaderAApproval",100)>=25?1:0},{"ba",ReadDouble(detail,"leaderBApproval",100)>=25?1:0},{"id",id},{"route",route},{"status",status},{"a",aId},{"b",bId},{"ca",clanAId},{"cb",clanBId},{"la",leaderA},{"lb",leaderB},{"day",day},{"score",score},{"ra",resentmentA},{"rb",resentmentB},{"payload",Json.Serialize(data)},{"ts",ts},{"timeline",timelineId}});
             bool diplomatic=ReadBool(detail,"diplomaticPackageRequired",false);
             string funnel=diplomatic?"diplomatic":"arranged";
-            RecordWorldTestCounter(connection,campaignId,timelineId,(int)Math.Floor(day),"marriages",
+            WorldSimulationService.RecordWorldTestCounter(connection,campaignId,timelineId,(int)Math.Floor(day),"marriages",
                 funnel+"_evaluation_"+id,new Dictionary<string, object>
                 {
                     {funnel+"Evaluations",1},
@@ -971,15 +971,15 @@ VALUES($id,$route,$status,$a,$b,$ca,$cb,$la,$lb,$day,$score,$aa,$ba,$ra,$rb,$pay
             if(status=="refused")
             {
                 string refusalKey=ReadString(detail,"refusalKey",id);
-                ExecuteSql(connection,"INSERT OR IGNORE INTO arranged_marriage_refusals(refusal_key,timeline_id,proposal_id) VALUES($k,$t,$p);",new Dictionary<string,object>{{"k",refusalKey},{"t",timelineId},{"p",id}});
+                Program.ExecuteSql(connection,"INSERT OR IGNORE INTO arranged_marriage_refusals(refusal_key,timeline_id,proposal_id) VALUES($k,$t,$p);",new Dictionary<string,object>{{"k",refusalKey},{"t",timelineId},{"p",id}});
                 ApplyMarriageLeaderEffect(connection,campaignId,timelineId,id,leaderA,leaderB,-10,day);
-                RecordWorldTestCounter(connection,campaignId,timelineId,(int)Math.Floor(day),"marriages","refusal_"+id,new Dictionary<string,object>{{"arrangedRefused",1},{"refused:"+ReadString(detail,"refusalReason","approval_too_low"),1}});
+                WorldSimulationService.RecordWorldTestCounter(connection,campaignId,timelineId,(int)Math.Floor(day),"marriages","refusal_"+id,new Dictionary<string,object>{{"arrangedRefused",1},{"refused:"+ReadString(detail,"refusalReason","approval_too_low"),1}});
             }
             if(status=="approved" || status=="player_offer_pending")
             {
                 string actionId=QueueDirectorAction(connection,status=="approved" ? "marriage" : "player_marriage_offer",day,aId,bId,new Dictionary<string, object>{{"evaluationId",id},{"route",route},{"timelineId",timelineId},{"marriageTerms",ReadDictionary(detail,"marriageTerms")},{"resentmentA",resentmentA},{"resentmentB",resentmentB},{"leaderAId",leaderA},{"leaderBId",leaderB}});
                 if(string.IsNullOrWhiteSpace(actionId))
-                    ExecuteSql(connection,"UPDATE marriage_evaluations SET status='reservation_blocked',updated_ts=$ts WHERE evaluation_id=$id;",new Dictionary<string, object>{{"ts",ts},{"id",id}});
+                    Program.ExecuteSql(connection,"UPDATE marriage_evaluations SET status='reservation_blocked',updated_ts=$ts WHERE evaluation_id=$id;",new Dictionary<string, object>{{"ts",ts},{"id",id}});
             }
         }
 
@@ -987,17 +987,17 @@ VALUES($id,$route,$status,$a,$b,$ca,$cb,$la,$lb,$day,$score,$aa,$ba,$ra,$rb,$pay
         {
             double motivation=0.20d*Trait01(mother,"shame")+0.15d*Trait01(mother,"familyMotivation")+0.15d*Trait01(mother,"traditionalism")+0.10d*Trait01(mother,"dutyMotivation")+0.10d*Trait01(mother,"survivalMotivation")+0.10d*Trait01(mother,"religionMotivation")+0.20d*(1d-Trait01(mother,"honesty"));
             double competence=0.25d*Trait01(mother,"tact")+0.20d*Trait01(mother,"discipline")+0.15d*Trait01(mother,"emotionalStability")+0.15d*Trait01(mother,"pragmatism")+0.15d*Trait01(mother,"confidence")+0.10d;
-            return ClampDouble(0.15d+0.35d*motivation+0.40d*competence-0.10d,0.05d,0.95d);
+            return Program.ClampDouble(0.15d+0.35d*motivation+0.40d*competence-0.10d,0.05d,0.95d);
         }
 
         internal static Dictionary<string, object> LoadDirectorHeroProfile(string campaignId,string heroId,Dictionary<string, object> snapshot)
         {
             Dictionary<string, object> result = snapshot == null ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, object>(snapshot,StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, object> stored = ReadJsonObject(CharacterFile(campaignId,heroId,"profile.json"));
+            Dictionary<string, object> stored = Program.ReadJsonObject(Program.CharacterFile(campaignId,heroId,"profile.json"));
             foreach(var pair in stored) if(!result.ContainsKey(pair.Key) || string.IsNullOrWhiteSpace(Convert.ToString(result[pair.Key],CultureInfo.InvariantCulture))) result[pair.Key]=pair.Value;
-            Dictionary<string, object> traits = ReadJsonObject(CharacterFile(campaignId,heroId,"traits.json"));
+            Dictionary<string, object> traits = Program.ReadJsonObject(Program.CharacterFile(campaignId,heroId,"traits.json"));
             Dictionary<string, object> foundation=ReadDictionary(traits,"foundationTraits")??ReadDictionary(result,"foundationTraits");
-            if(foundation==null||foundation.Count==0)foundation=ReadDictionary(BuildTraitDocument(result),"foundationTraits")??new Dictionary<string, object>();
+            if(foundation==null||foundation.Count==0)foundation=ReadDictionary(CharactersService.BuildTraitDocument(result),"foundationTraits")??new Dictionary<string, object>();
             result["foundationTraits"] = foundation;
             result["traits"] = traits;
             result["heroStringId"] = heroId;
@@ -1013,7 +1013,7 @@ VALUES($id,$route,$status,$a,$b,$ca,$cb,$la,$lb,$day,$score,$aa,$ba,$ra,$rb,$pay
                 EnsureRelationshipLifecycleSchema(connection);
                 string pairKey = AmbientPairKey(actor, target);
                 long reservationTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_marriage_reservations(
+                Program.ExecuteSql(connection, @"INSERT OR IGNORE INTO relationship_marriage_reservations(
 hero_id,pair_key,director_action_id,created_day,created_ts) VALUES
 ($actor,$pair,$action,$day,$ts),($target,$pair,$action,$day,$ts);",
                     new Dictionary<string, object>
@@ -1022,33 +1022,33 @@ hero_id,pair_key,director_action_id,created_day,created_ts) VALUES
                         ["pair"] = pairKey, ["action"] = id,
                         ["day"] = day, ["ts"] = reservationTs
                     });
-                int reserved = ReadInt(QuerySql(connection, @"SELECT COUNT(*) AS count
+                int reserved = ReadInt(Program.QuerySql(connection, @"SELECT COUNT(*) AS count
 FROM relationship_marriage_reservations WHERE director_action_id=$action;",
                     new Dictionary<string, object> { ["action"] = id })
                     .FirstOrDefault(), "count", 0);
                 if (reserved != 2)
                 {
-                    ExecuteSql(connection, @"DELETE FROM relationship_marriage_reservations
+                    Program.ExecuteSql(connection, @"DELETE FROM relationship_marriage_reservations
 WHERE director_action_id=$action;",
                         new Dictionary<string, object> { ["action"] = id });
                     return "";
                 }
             }
-            ExecuteSql(connection,@"INSERT INTO relationship_director_actions(director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,created_ts)
+            Program.ExecuteSql(connection,@"INSERT INTO relationship_director_actions(director_action_id,action_type,status,world_day,actor_id,target_id,payload_json,created_ts)
 VALUES($id,$type,'pending',$day,$actor,$target,$payload,$ts);",new Dictionary<string, object>{{"id",id},{"type",type},{"day",day},{"actor",actor},{"target",target},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
             return id;
         }
 
-        private static Dictionary<string, object> RelationshipDirectorPollActionsApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipDirectorPollActionsApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             using (ReignDbTransaction transaction = connection.BeginTransaction())
             {
                 EnsureRelationshipDirectorSchema(connection);
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 long stale = ts - 300;
-                List<Dictionary<string, object>> rows = QuerySql(connection, @"
+                List<Dictionary<string, object>> rows = Program.QuerySql(connection, @"
 SELECT * FROM relationship_director_actions
 WHERE action_type<>'native_relation'
   AND (status='pending' OR (status='claimed' AND claimed_ts<$stale))
@@ -1061,7 +1061,7 @@ ORDER BY world_day,created_ts LIMIT 50;",
                     new Dictionary<string, object> { ["stale"] = stale });
                 foreach (Dictionary<string, object> row in rows)
                 {
-                    ExecuteSql(connection,
+                    Program.ExecuteSql(connection,
                         "UPDATE relationship_director_actions SET status='claimed',claimed_ts=$ts WHERE director_action_id=$id;",
                         new Dictionary<string, object> { ["ts"] = ts, ["id"] = ReadString(row, "director_action_id", "") });
                     row["payload"] = TryParseJsonObject(ReadString(row, "payload_json", "{}"))
@@ -1084,11 +1084,11 @@ ORDER BY world_day,created_ts LIMIT 50;",
         {
             string id = ReadFirstString(payload, "directorActionId", "director_action_id");
             string pairKey = id.Substring("native_target:".Length);
-            string status = NormalizeLookup(ReadString(payload, "status", "completed"));
+            string status = Program.NormalizeLookup(ReadString(payload, "status", "completed"));
             string error = ReadString(payload, "error", "");
             double day = ReadDouble(payload, "worldDay", 0d);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Dictionary<string, object> target = QuerySql(connection,
+            Dictionary<string, object> target = Program.QuerySql(connection,
                 "SELECT * FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
             if (target == null)
@@ -1103,11 +1103,11 @@ ORDER BY world_day,created_ts LIMIT 50;",
             if (status == "completed")
             {
                 int applied = ReadInt(target, "target_relation", 0);
-                ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts
 WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["day"] = day, ["ts"] = ts, ["pair"] = pairKey });
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["pair"] = pairKey });
                 return new Dictionary<string, object>
@@ -1119,10 +1119,10 @@ WHERE pair_key=$pair;",
 
             if (status == "obsolete" || status == "skipped")
             {
-                ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+                Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["ts"] = ts, ["pair"] = pairKey });
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["pair"] = pairKey });
                 return new Dictionary<string, object>
@@ -1132,7 +1132,7 @@ native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$pair;
                 };
             }
 
-            ExecuteSql(connection, @"UPDATE relationship_native_targets SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_native_targets SET
 status='failed',claimed_ts=0,last_error=$error,updated_ts=$ts WHERE pair_key=$pair;",
                 new Dictionary<string, object>
                 {
@@ -1150,7 +1150,7 @@ status='failed',claimed_ts=0,last_error=$error,updated_ts=$ts WHERE pair_key=$pa
             ReignDbConnection connection, string campaignId, string pairKey,
             int delta, double worldDay)
         {
-            Dictionary<string, object> pair = QuerySql(connection,
+            Dictionary<string, object> pair = Program.QuerySql(connection,
                 "SELECT * FROM relationship_pair_chemistry WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey })
                 .FirstOrDefault();
@@ -1168,7 +1168,7 @@ status='failed',claimed_ts=0,last_error=$error,updated_ts=$ts WHERE pair_key=$pa
             int projected = ProjectNativeRelation(connection, heroA, heroB,
                 affinityAB, affinityBA, effectiveAB, effectiveBA);
             EnsureRelationshipNativeTargetSchema(connection);
-            Dictionary<string, object> nativeTarget = QuerySql(connection,
+            Dictionary<string, object> nativeTarget = Program.QuerySql(connection,
                 "SELECT observed_relation,requires_observation FROM relationship_native_targets WHERE pair_key=$pair LIMIT 1;",
                 new Dictionary<string, object> { ["pair"] = pairKey })
                 .FirstOrDefault();
@@ -1178,7 +1178,7 @@ status='failed',claimed_ts=0,last_error=$error,updated_ts=$ts WHERE pair_key=$pa
             bool observationRequired = RelationshipNativeObservationRequired(pair, nativeTarget);
             bool pending = projected != observed || observationRequired;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 affinity_a_to_b=$ab,affinity_b_to_a=$ba,effective_affinity_a_to_b=$effectiveAB,
 effective_affinity_b_to_a=$effectiveBA,tag_a_to_b=$tagAB,tag_b_to_a=$tagBA,
 projected_native_relation=$projected,native_action_pending=$pending,
@@ -1197,7 +1197,7 @@ native_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                     ["ts"] = ts, ["pair"] = pairKey
                 });
             if (pending)
-                ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
+                Program.ExecuteSql(connection, @"INSERT INTO relationship_native_targets(
 pair_key,hero_a_id,hero_b_id,target_relation,observed_relation,status,world_day,
 last_sync_day,attempt_count,claimed_ts,last_error,updated_ts,revision,requires_observation)
 VALUES($pair,$a,$b,$target,$observed,'pending',$day,-1000,0,0,'',$ts,1,$requiresObservation)
@@ -1214,7 +1214,7 @@ updated_ts=$ts;", new Dictionary<string, object>
                     ["day"] = worldDay, ["ts"] = ts
                 });
             else
-                ExecuteSql(connection,
+                Program.ExecuteSql(connection,
                     "DELETE FROM relationship_native_targets WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["pair"] = pairKey });
             return true;
@@ -1226,7 +1226,7 @@ updated_ts=$ts;", new Dictionary<string, object>
             double worldDay)
         {
             string conceptionId = ReadString(actionPayload, "conceptionId", "");
-            Dictionary<string, object> commitment = QuerySql(connection,
+            Dictionary<string, object> commitment = Program.QuerySql(connection,
                 "SELECT * FROM relationship_conception_commitments WHERE conception_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = conceptionId })
                 .FirstOrDefault();
@@ -1237,7 +1237,7 @@ updated_ts=$ts;", new Dictionary<string, object>
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (actionStatus != "completed")
             {
-                ExecuteSql(connection, @"UPDATE relationship_conception_commitments
+                Program.ExecuteSql(connection, @"UPDATE relationship_conception_commitments
 SET status='conception_failed',updated_ts=$ts WHERE conception_id=$id;",
                     new Dictionary<string, object> { ["ts"] = ts, ["id"] = conceptionId });
                 return;
@@ -1267,7 +1267,7 @@ SET status='conception_failed',updated_ts=$ts WHERE conception_id=$id;",
                             ["timelineId"] = ReadString(actionPayload,
                                 "timelineId", "main"), ["silent"] = true
                         });
-                ExecuteSql(connection, @"UPDATE relationship_conception_commitments
+                Program.ExecuteSql(connection, @"UPDATE relationship_conception_commitments
 SET status=$status,marriage_action_id=$action,updated_ts=$ts WHERE conception_id=$id;",
                     new Dictionary<string, object>
                     {
@@ -1276,7 +1276,7 @@ SET status=$status,marriage_action_id=$action,updated_ts=$ts WHERE conception_id
                         ["action"] = marriageAction, ["ts"] = ts,
                         ["id"] = conceptionId
                     });
-                string existingMarriageStatus = ReadString(QuerySql(connection,
+                string existingMarriageStatus = ReadString(Program.QuerySql(connection,
                     @"SELECT status FROM relationship_director_actions
 WHERE director_action_id=$id LIMIT 1;",
                     new Dictionary<string, object>
@@ -1289,7 +1289,7 @@ WHERE director_action_id=$id LIMIT 1;",
                 else if (!string.IsNullOrWhiteSpace(existingMarriageStatus)
                     && existingMarriageStatus != "pending"
                     && existingMarriageStatus != "claimed")
-                    ExecuteSql(connection, @"UPDATE relationship_conception_commitments
+                    Program.ExecuteSql(connection, @"UPDATE relationship_conception_commitments
 SET status='marriage_failed',updated_ts=$ts WHERE conception_id=$id
 AND status='awaiting_marriage';",
                         new Dictionary<string, object>
@@ -1319,7 +1319,7 @@ AND status='awaiting_marriage';",
                         ["conceptionId"] = conceptionId,
                         ["worldDay"] = worldDay
                     };
-                ExecuteSql(connection, @"UPDATE relationship_director_actions
+                Program.ExecuteSql(connection, @"UPDATE relationship_director_actions
 SET status='invalid',resolved_ts=$ts,result_json=$result
 WHERE director_action_id=$id AND status IN ('pending','claimed');",
                     new Dictionary<string, object>
@@ -1328,17 +1328,17 @@ WHERE director_action_id=$id AND status IN ('pending','claimed');",
                         ["result"] = Json.Serialize(cancellationResult),
                         ["id"] = canceledMarriageAction
                     });
-                ExecuteSql(connection, @"DELETE FROM relationship_marriage_reservations
+                Program.ExecuteSql(connection, @"DELETE FROM relationship_marriage_reservations
 WHERE director_action_id=$id;", new Dictionary<string, object>
                     { ["id"] = canceledMarriageAction });
             }
             ApplyRelationshipCommitmentAffinityDelta(connection, campaignId,
                 pairKey, PregnancyCommitmentBreakupAffinityPenalty, worldDay);
-            ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
 lover_active=0,affair_active=0,romance_stage='',romance_positive_bonus=0,
 married=0,marriage_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
                 new Dictionary<string, object> { ["ts"] = ts, ["pair"] = pairKey });
-            Dictionary<string, object> conception = QuerySql(connection,
+            Dictionary<string, object> conception = Program.QuerySql(connection,
                 "SELECT payload_json FROM conceptions WHERE conception_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = conceptionId })
                 .FirstOrDefault();
@@ -1348,14 +1348,14 @@ married=0,marriage_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
             conceptionPayload["isIllegitimate"] = true;
             conceptionPayload["unmarriedCommitmentPending"] = false;
             conceptionPayload["unmarriedCommitmentOutcome"] = "breakup";
-            ExecuteSql(connection, @"UPDATE conceptions SET secrecy=0.75,
+            Program.ExecuteSql(connection, @"UPDATE conceptions SET secrecy=0.75,
 payload_json=$payload,updated_ts=$ts WHERE conception_id=$id;",
                 new Dictionary<string, object>
                 {
                     ["payload"] = Json.Serialize(conceptionPayload),
                     ["ts"] = ts, ["id"] = conceptionId
                 });
-            ExecuteSql(connection, @"UPDATE relationship_conception_commitments
+            Program.ExecuteSql(connection, @"UPDATE relationship_conception_commitments
 SET status='broke_up',affinity_delta=$delta,updated_ts=$ts WHERE conception_id=$id;",
                 new Dictionary<string, object>
                 {
@@ -1376,7 +1376,7 @@ SET status='broke_up',affinity_delta=$delta,updated_ts=$ts WHERE conception_id=$
             ReignDbConnection connection, string campaignId,
             string conceptionId, double worldDay)
         {
-            Dictionary<string, object> commitment = QuerySql(connection,
+            Dictionary<string, object> commitment = Program.QuerySql(connection,
                 @"SELECT pair_key,status FROM relationship_conception_commitments
 WHERE conception_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = conceptionId })
@@ -1387,7 +1387,7 @@ WHERE conception_id=$id LIMIT 1;",
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             ApplyRelationshipCommitmentAffinityDelta(connection, campaignId,
                 pairKey, PregnancyCommitmentMarriageAffinityBonus, worldDay);
-            ExecuteSql(connection, @"UPDATE relationship_conception_commitments SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_conception_commitments SET
 status='married',affinity_delta=$delta,updated_ts=$ts WHERE conception_id=$id
 AND status='awaiting_marriage';",
                 new Dictionary<string, object>
@@ -1395,7 +1395,7 @@ AND status='awaiting_marriage';",
                     ["delta"] = PregnancyCommitmentMarriageAffinityBonus,
                     ["ts"] = ts, ["id"] = conceptionId
                 });
-            Dictionary<string, object> conceptionRow = QuerySql(connection,
+            Dictionary<string, object> conceptionRow = Program.QuerySql(connection,
                 "SELECT payload_json FROM conceptions WHERE conception_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = conceptionId })
                 .FirstOrDefault();
@@ -1404,7 +1404,7 @@ AND status='awaiting_marriage';",
                 ?? new Dictionary<string, object>();
             completedPayload["unmarriedCommitmentPending"] = false;
             completedPayload["unmarriedCommitmentOutcome"] = "married";
-            ExecuteSql(connection, @"UPDATE conceptions SET payload_json=$payload,
+            Program.ExecuteSql(connection, @"UPDATE conceptions SET payload_json=$payload,
 updated_ts=$ts WHERE conception_id=$id;",
                 new Dictionary<string, object>
                 {
@@ -1424,7 +1424,7 @@ updated_ts=$ts WHERE conception_id=$id;",
 				?? new Dictionary<string, object>();
 			string timelineId = FirstNonEmpty(ReadString(actionPayload,
 				"timelineId", ""), "main");
-            Dictionary<string, object> commitment = QuerySql(connection, @"SELECT *
+            Dictionary<string, object> commitment = Program.QuerySql(connection, @"SELECT *
 FROM relationship_affair_commitments WHERE divorce_action_a_id=$id
 OR divorce_action_b_id=$id LIMIT 1;",
                 new Dictionary<string, object> { ["id"] = actionId })
@@ -1447,14 +1447,14 @@ OR divorce_action_b_id=$id LIMIT 1;",
                     "divorce_b_completed", 0) == 1)) return;
             if (actionStatus != "completed")
             {
-                ExecuteSql(connection, @"UPDATE relationship_affair_commitments
+                Program.ExecuteSql(connection, @"UPDATE relationship_affair_commitments
 SET status='divorce_failed',updated_ts=$ts WHERE pair_key=$pair;",
                     new Dictionary<string, object> { ["ts"] = ts, ["pair"] = pairKey });
                 return;
             }
             if (isDivorceA)
             {
-                ExecuteSql(connection, @"UPDATE relationship_affair_commitments
+                Program.ExecuteSql(connection, @"UPDATE relationship_affair_commitments
 SET divorce_a_completed=1,updated_ts=$ts WHERE pair_key=$pair;",
                     new Dictionary<string, object>
                     {
@@ -1464,7 +1464,7 @@ SET divorce_a_completed=1,updated_ts=$ts WHERE pair_key=$pair;",
             }
             if (isDivorceB)
             {
-                ExecuteSql(connection, @"UPDATE relationship_affair_commitments
+                Program.ExecuteSql(connection, @"UPDATE relationship_affair_commitments
 SET divorce_b_completed=1,updated_ts=$ts WHERE pair_key=$pair;",
                     new Dictionary<string, object>
                     {
@@ -1496,7 +1496,7 @@ SET divorce_b_completed=1,updated_ts=$ts WHERE pair_key=$pair;",
                     }, formerSpouse, divorcedHero, true, true,
 					"The marriage ended when one spouse chose an affair partner.",
 					timelineId));
-            ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_pair_lifecycle SET
 married=0,divorced=1,divorce_day=$day,divorce_action_id='',
 divorce_rumor_id=$rumor,updated_ts=$ts WHERE pair_key=$pair;",
                 new Dictionary<string, object>
@@ -1505,7 +1505,7 @@ divorce_rumor_id=$rumor,updated_ts=$ts WHERE pair_key=$pair;",
                     ["rumor"] = ReadString(rumor, "occurrenceId", ""),
                     ["ts"] = ts, ["pair"] = divorcedPairKey
                 });
-            ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_pair_chemistry SET
 shared_tag='divorced',updated_ts=$ts WHERE pair_key=$pair;",
                 new Dictionary<string, object>
                 {
@@ -1540,7 +1540,7 @@ shared_tag='divorced',updated_ts=$ts WHERE pair_key=$pair;",
                     ["route"] = "affair_commitment",
                     ["silent"] = true
                 });
-            ExecuteSql(connection, @"UPDATE relationship_affair_commitments SET
+            Program.ExecuteSql(connection, @"UPDATE relationship_affair_commitments SET
 status=$status,marriage_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                 new Dictionary<string, object>
                 {
@@ -1551,22 +1551,22 @@ status=$status,marriage_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                 });
         }
 
-        private static Dictionary<string, object> RelationshipDirectorReportActionApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipDirectorReportActionApi(Dictionary<string, object> payload)
         {
             string campaignId=ReadString(payload,"campaignId","default"),id=ReadFirstString(payload,"directorActionId","director_action_id"),status=ReadString(payload,"status","completed");
-            using var ownership = EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId));
+            using var ownership = PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId));
             if (IsRelationshipNativeTargetId(id))
             {
-                using (ReignDbConnection targetConnection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection targetConnection = Program.OpenCampaignConnection(campaignId))
                 {
                     EnsureRelationshipDirectorSchema(targetConnection);
                     return ReportRelationshipNativeTarget(targetConnection, payload);
                 }
             }
-            using(ReignDbConnection connection=OpenCampaignConnection(campaignId))
+            using(ReignDbConnection connection=Program.OpenCampaignConnection(campaignId))
             {
                 EnsureRelationshipDirectorSchema(connection);
-                Dictionary<string, object> action=QuerySql(connection,"SELECT * FROM relationship_director_actions WHERE director_action_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",id}}).FirstOrDefault()??new Dictionary<string, object>();
+                Dictionary<string, object> action=Program.QuerySql(connection,"SELECT * FROM relationship_director_actions WHERE director_action_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",id}}).FirstOrDefault()??new Dictionary<string, object>();
                 Dictionary<string, object> actionPayload=TryParseJsonObject(ReadString(action,"payload_json","{}"))??new Dictionary<string, object>();
                 bool arrangedReport=ReadString(actionPayload,"route","")=="arranged";
                 string completedMarriageEvaluation="";
@@ -1582,10 +1582,10 @@ status=$status,marriage_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                 if (status == "wedding_pending" && actionType == "marriage"
                     || status == "wedding_offer_pending" && actionType == "player_marriage_offer")
                 {
-                    ExecuteSql(connection, "UPDATE relationship_director_actions SET status=$status,result_json=$result WHERE director_action_id=$id AND status IN ('pending','claimed','wedding_pending','wedding_offer_pending');",
+                    Program.ExecuteSql(connection, "UPDATE relationship_director_actions SET status=$status,result_json=$result WHERE director_action_id=$id AND status IN ('pending','claimed','wedding_pending','wedding_offer_pending');",
                         TestDict("id", id, "status", status, "result", Json.Serialize(payload)));
                     if (status == "wedding_pending")
-                        ExecuteSql(connection, "UPDATE marriage_evaluations SET status='wedding_pending' WHERE evaluation_id=$id AND status='approved';",
+                        Program.ExecuteSql(connection, "UPDATE marriage_evaluations SET status='wedding_pending' WHERE evaluation_id=$id AND status='approved';",
                             TestDict("id", ReadString(actionPayload, "evaluationId", "")));
                     reportTransaction?.Commit();
                     return TestDict("ok", true);
@@ -1595,17 +1595,17 @@ status=$status,marriage_action_id=$action,updated_ts=$ts WHERE pair_key=$pair;",
                     if (status == "completed" && (!ReadBool(payload, "marriageVerified", false) || !ReadBool(payload, "paymentVerified", false)))
                         return TestDict("ok", false, "error", "Verified native marriage and consideration are required.");
                     string outcome = status == "completed" ? "executed" : status == "player_refused" ? "rejected_by_player" : status;
-                    ExecuteSql(connection, "UPDATE marriage_evaluations SET status=$status WHERE evaluation_id=$id AND status='player_offer_pending';",
+                    Program.ExecuteSql(connection, "UPDATE marriage_evaluations SET status=$status WHERE evaluation_id=$id AND status='player_offer_pending';",
                         TestDict("id", ReadString(actionPayload, "evaluationId", ""), "status", outcome));
                 }
-                if(status=="deferred") { ExecuteSql(connection,"UPDATE relationship_director_actions SET status='pending',claimed_ts=0 WHERE director_action_id=$id;",new Dictionary<string,object>{{"id",id}}); reportTransaction?.Commit(); return new Dictionary<string,object>{{"ok",true}}; }
+                if(status=="deferred") { Program.ExecuteSql(connection,"UPDATE relationship_director_actions SET status='pending',claimed_ts=0 WHERE director_action_id=$id;",new Dictionary<string,object>{{"id",id}}); reportTransaction?.Commit(); return new Dictionary<string,object>{{"ok",true}}; }
                 if(status=="completed"&&ReadString(actionPayload,"route","")=="arranged"
                     &&(!ReadBool(payload,"marriageVerified",false)||!ReadBool(payload,"paymentVerified",false)))
                     return new Dictionary<string,object>{{"ok",false},{"error","Verified native marriage and payment required."}};
                 long ts=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                ExecuteSql(connection,"UPDATE relationship_director_actions SET status=$status,resolved_ts=$ts,result_json=$result WHERE director_action_id=$id;",new Dictionary<string, object>{{"status",status},{"ts",ts},{"result",Json.Serialize(payload)},{"id",id}});
+                Program.ExecuteSql(connection,"UPDATE relationship_director_actions SET status=$status,resolved_ts=$ts,result_json=$result WHERE director_action_id=$id;",new Dictionary<string, object>{{"status",status},{"ts",ts},{"result",Json.Serialize(payload)},{"id",id}});
                 if(status!="recovery"&&ReadString(action,"action_type","").Equals("marriage",StringComparison.OrdinalIgnoreCase))
-                    ExecuteSql(connection,@"DELETE FROM relationship_marriage_reservations
+                    Program.ExecuteSql(connection,@"DELETE FROM relationship_marriage_reservations
 WHERE director_action_id=$id;",new Dictionary<string, object>{{"id",id}});
                 if(ReadString(action,"action_type","")=="divorce")
                 {
@@ -1624,18 +1624,18 @@ WHERE director_action_id=$id;",new Dictionary<string, object>{{"id",id}});
                                     new Dictionary<string, object>{{"heroStringId",a},{"name",a}},
                                     new Dictionary<string, object>{{"heroStringId",b},{"name",b}},b,a,true,true,
 									"The marriage ended in divorce.",divorceTimeline));
-                            ExecuteSql(connection,@"UPDATE relationship_pair_lifecycle SET married=0,divorced=1,
+                            Program.ExecuteSql(connection,@"UPDATE relationship_pair_lifecycle SET married=0,divorced=1,
 divorce_day=$day,divorce_action_id='',divorce_rumor_id=$rumor,updated_ts=$ts WHERE pair_key=$pair;",
                                 new Dictionary<string, object>{{"day",ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d))},
                                     {"rumor",ReadString(rumor,"occurrenceId","")},{"ts",ts},{"pair",pairKey}});
-                            ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET shared_tag='divorced',updated_ts=$ts WHERE pair_key=$pair;",
+                            Program.ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET shared_tag='divorced',updated_ts=$ts WHERE pair_key=$pair;",
                                 new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
                             RecordRelationshipIncident(connection,pair,"divorce",ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d)),
                                 "The marriage ended in divorce.",new Dictionary<string, object>{{"directorActionId",id}},ReadString(rumor,"occurrenceId",""));
 							FinalizeDivorceProjections(connection,campaignId,divorceTimeline,
 								pair,a,b,divorceWorldDay,id,"The marriage ended in divorce.");
                         }
-                        else ExecuteSql(connection,"UPDATE relationship_pair_lifecycle SET divorce_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
+                        else Program.ExecuteSql(connection,"UPDATE relationship_pair_lifecycle SET divorce_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
                             new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
                     }
                     else if(ReadString(actionPayload,"source","")
@@ -1647,12 +1647,12 @@ divorce_day=$day,divorce_action_id='',divorce_rumor_id=$rumor,updated_ts=$ts WHE
                 else if(ReadString(action,"action_type","")=="marriage")
                 {
                     string evaluationId=ReadString(actionPayload,"evaluationId","");
-                    string outcomeRoute=WorldTestMarriageOutcomeRoute(
+                    string outcomeRoute=WorldSimulationService.WorldTestMarriageOutcomeRoute(
                         actionPayload);
                     string outcomeTimeline=ReadString(actionPayload,"timelineId","main");
                     if(!string.IsNullOrWhiteSpace(evaluationId))
                     {
-                        Dictionary<string, object> evaluation=QuerySql(connection,
+                        Dictionary<string, object> evaluation=Program.QuerySql(connection,
                             "SELECT route,status,payload_json,timeline_id FROM marriage_evaluations WHERE evaluation_id=$id LIMIT 1;",
                             new Dictionary<string, object>{{"id",evaluationId}}).FirstOrDefault()
                             ?? new Dictionary<string, object>();
@@ -1662,7 +1662,7 @@ divorce_day=$day,divorce_action_id='',divorce_rumor_id=$rumor,updated_ts=$ts WHE
                             ?"diplomatic":"arranged";
                         outcomeTimeline=ReadString(evaluation,"timeline_id",outcomeTimeline);
                         string evaluationStatus=status=="completed"?"executed":status=="recovery"?"recovery":status=="invalid"?"invalid_native":status=="obsolete"?"obsolete":"failed";
-                        ExecuteSql(connection,"UPDATE marriage_evaluations SET status=$status,updated_ts=$ts WHERE evaluation_id=$id;",new Dictionary<string, object>{{"status",evaluationStatus},{"ts",ts},{"id",evaluationId}});
+                        Program.ExecuteSql(connection,"UPDATE marriage_evaluations SET status=$status,updated_ts=$ts WHERE evaluation_id=$id;",new Dictionary<string, object>{{"status",evaluationStatus},{"ts",ts},{"id",evaluationId}});
                         if(status=="completed")
                         {
                             FinalizeMarriage(connection,campaignId,evaluationId,ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d)),!arrangedReport);
@@ -1670,19 +1670,19 @@ divorce_day=$day,divorce_action_id='',divorce_rumor_id=$rumor,updated_ts=$ts WHE
                         }
                     }
                     int outcomeDay=(int)Math.Floor(ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d)));
-                    RecordWorldTestCounter(connection,campaignId,outcomeTimeline,outcomeDay,"marriages",
+                    WorldSimulationService.RecordWorldTestCounter(connection,campaignId,outcomeTimeline,outcomeDay,"marriages",
                         "outcome_"+FirstNonEmpty(evaluationId,id),
-                        BuildWorldTestMarriageOutcomeCounters(outcomeRoute,status));
+                        WorldSimulationService.BuildWorldTestMarriageOutcomeCounters(outcomeRoute,status));
                     if(ReadString(actionPayload,"source","")=="mbti_relationship_lifecycle")
                     {
                         string a=ReadString(action,"actor_id",""),b=ReadString(action,"target_id",""),
                             pairKey=ReadString(actionPayload,"pairKey",AmbientPairKey(a,b));
                         if(status=="completed")
                         {
-                            ExecuteSql(connection,@"UPDATE relationship_pair_lifecycle SET married=1,divorced=0,
+                            Program.ExecuteSql(connection,@"UPDATE relationship_pair_lifecycle SET married=1,divorced=0,
 marriage_action_id='',marriage_blocked=0,marriage_block_reason='',updated_ts=$ts WHERE pair_key=$pair;",
                                 new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
-                            ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET shared_tag='married',updated_ts=$ts WHERE pair_key=$pair;",
+                            Program.ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET shared_tag='married',updated_ts=$ts WHERE pair_key=$pair;",
                                 new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
                             AmbientPairContext pair=new AmbientPairContext{PairKey=pairKey,HeroAId=a,HeroBId=b};
                             string lifecycleMarriageRoute=ReadString(
@@ -1694,48 +1694,48 @@ marriage_action_id='',marriage_blocked=0,marriage_block_reason='',updated_ts=$ts
                                     ?"The pair married after jointly accepting responsibility for a conception."
                                     :"The pair married after both directional affinities reached seventy or above.",
                                 new Dictionary<string, object>{{"directorActionId",id},{"route",lifecycleMarriageRoute}});
-                            StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},
+                            Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},
                                 {"eventId","marriage_"+id},{"eventType","world_event"},{"eventSubtype",pregnancyCommitmentRoute?"pregnancy_commitment_marriage":"mutual_affinity_marriage"},
                                 {"worldDay",ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d))},
                                 {"summary",a+" and "+b+" married."},{"participants",new[]{a,b}},
                                 {"visibility","public"},{"importance",0.9d}},"relationship_lifecycle_marriage");
                         }
                         else if(status=="invalid")
-                            ExecuteSql(connection,@"UPDATE relationship_pair_lifecycle SET
+                            Program.ExecuteSql(connection,@"UPDATE relationship_pair_lifecycle SET
 marriage_action_id='',marriage_blocked=1,marriage_block_reason=$reason,updated_ts=$ts
 WHERE pair_key=$pair;",new Dictionary<string, object>
                             {
-                                {"reason",LimitText(FirstNonEmpty(ReadString(payload,"error",""),
+                                {"reason",Program.LimitText(FirstNonEmpty(ReadString(payload,"error",""),
                                     "Native marriage eligibility rejected this couple."),500)},
                                 {"ts",ts},{"pair",pairKey}
                             });
-                        else ExecuteSql(connection,"UPDATE relationship_pair_lifecycle SET marriage_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
+                        else Program.ExecuteSql(connection,"UPDATE relationship_pair_lifecycle SET marriage_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
                             new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
                     }
                     string conceptionCommitmentId=FirstNonEmpty(
                         ReadString(actionPayload,"conceptionId",""),
-                        ReadString(QuerySql(connection,@"SELECT conception_id
+                        ReadString(Program.QuerySql(connection,@"SELECT conception_id
 FROM relationship_conception_commitments WHERE marriage_action_id=$action
 AND status='awaiting_marriage' LIMIT 1;",
                             new Dictionary<string, object>{{"action",id}}).FirstOrDefault(),
                             "conception_id",""));
                     if(!string.IsNullOrWhiteSpace(conceptionCommitmentId))
                     {
-                        string commitmentStatus=ReadString(QuerySql(connection,
+                        string commitmentStatus=ReadString(Program.QuerySql(connection,
                             "SELECT status FROM relationship_conception_commitments WHERE conception_id=$id LIMIT 1;",
                             new Dictionary<string, object>{{"id",conceptionCommitmentId}}).FirstOrDefault(),"status","");
                         if(commitmentStatus=="awaiting_marriage"&&status=="completed")
                             CompletePregnancyCommitmentMarriage(connection,
                                 campaignId,conceptionCommitmentId,
                                 ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d)));
-                        else if(commitmentStatus=="awaiting_marriage") ExecuteSql(connection,@"UPDATE relationship_conception_commitments SET
+                        else if(commitmentStatus=="awaiting_marriage") Program.ExecuteSql(connection,@"UPDATE relationship_conception_commitments SET
 status='marriage_failed',updated_ts=$ts WHERE conception_id=$id;",
                             new Dictionary<string, object>{{"ts",ts},{"id",conceptionCommitmentId}});
                     }
                     string affairCommitmentPair=ReadString(actionPayload,"route","")
                         =="affair_commitment"?ReadString(actionPayload,"pairKey",""):"";
                     if(!string.IsNullOrWhiteSpace(affairCommitmentPair))
-                        ExecuteSql(connection,@"UPDATE relationship_affair_commitments SET
+                        Program.ExecuteSql(connection,@"UPDATE relationship_affair_commitments SET
 status=$status,updated_ts=$ts WHERE pair_key=$pair AND status='awaiting_marriage';",
                             new Dictionary<string, object>{{"status",status=="completed"?"married":"marriage_failed"},{"ts",ts},{"pair",affairCommitmentPair}});
                 }
@@ -1747,11 +1747,11 @@ status=$status,updated_ts=$ts WHERE pair_key=$pair AND status='awaiting_marriage
                         =="relationship_fling";
                     string pairKey=ReadString(actionPayload,"pairKey","");
                     if(!flingConception)
-                        ExecuteSql(connection,"UPDATE relationship_pair_lifecycle SET conception_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
+                        Program.ExecuteSql(connection,"UPDATE relationship_pair_lifecycle SET conception_action_id='',updated_ts=$ts WHERE pair_key=$pair;",
                             new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
                     string conceptionStatus=status=="completed"?"confirmed_game":
                         status=="obsolete"?"obsolete_game":"failed_game";
-                    ExecuteSql(connection,@"UPDATE conceptions SET status=$status,updated_ts=$ts
+                    Program.ExecuteSql(connection,@"UPDATE conceptions SET status=$status,updated_ts=$ts
 WHERE conception_id=$id AND status='pending_game';",
                         new Dictionary<string, object>{{"status",conceptionStatus},{"ts",ts},
                             {"id",ReadString(actionPayload,"conceptionId","")}});
@@ -1772,14 +1772,14 @@ WHERE conception_id=$id AND status='pending_game';",
                     if(status=="completed")
                     {
                         if(ReadString(actionPayload,"source","")=="ambient_relationship_drift"||ReadString(actionPayload,"source","")=="mbti_relationship_chemistry")
-                            ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts WHERE pair_key=$pair;",new Dictionary<string, object>{{"day",ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d))},{"ts",ts},{"pair",pairKey}});
+                            Program.ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET native_action_pending=0,native_action_id='',last_native_sync_day=$day,updated_ts=$ts WHERE pair_key=$pair;",new Dictionary<string, object>{{"day",ReadDouble(payload,"worldDay",ReadDouble(action,"world_day",0d))},{"ts",ts},{"pair",pairKey}});
                         if(ReadString(actionPayload,"source","")=="mbti_relationship_chemistry")
-                            ExecuteSql(connection,"DELETE FROM relationship_director_actions WHERE director_action_id=$id;",
+                            Program.ExecuteSql(connection,"DELETE FROM relationship_director_actions WHERE director_action_id=$id;",
                                 new Dictionary<string, object>{{"id",id}});
                     }
                     else if(ReadString(actionPayload,"source","")=="ambient_relationship_drift"||ReadString(actionPayload,"source","")=="mbti_relationship_chemistry")
                     {
-                        ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$pair;",new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
+                        Program.ExecuteSql(connection,"UPDATE relationship_pair_chemistry SET native_action_pending=0,native_action_id='',updated_ts=$ts WHERE pair_key=$pair;",new Dictionary<string, object>{{"ts",ts},{"pair",pairKey}});
                     }
                 }
                 reportTransaction?.Commit();
@@ -1802,21 +1802,21 @@ WHERE conception_id=$id AND status='pending_game';",
 				["a"] = heroA, ["b"] = heroB, ["pair"] = pair.PairKey,
 				["ts"] = ts
 			};
-			ExecuteSql(connection, @"UPDATE character_reputations
+			Program.ExecuteSql(connection, @"UPDATE character_reputations
 SET status='resolved_by_divorce',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND subject_id IN ($a,$b) AND tag_id='marital_strife' AND status='active';", args);
-			ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='resolved_by_divorce',updated_ts=$ts
+			Program.ExecuteSql(connection, @"UPDATE rumor_subject_tags SET status='resolved_by_divorce',updated_ts=$ts
 WHERE occurrence_id IN (SELECT occurrence_id FROM rumor_occurrences
  WHERE campaign_id=$campaign AND timeline_id=$timeline
  AND archetype_id='marital_strife' AND thread_key=$pair)
 AND subject_id IN ($a,$b) AND status='active';", args);
-			ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='resolved_by_divorce',updated_ts=$ts
+			Program.ExecuteSql(connection, @"UPDATE rumor_occurrences SET status='resolved_by_divorce',updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", args);
 			ReputationService.ReconcileSocialRelationshipsForSubjects(connection, campaignId,
 				timelineId, new[] { heroA, heroB }, worldDay);
-			StoreWorldMemoryEvent(new Dictionary<string, object>
+			Program.StoreWorldMemoryEvent(new Dictionary<string, object>
 			{
 				["campaignId"] = campaignId,
 				["timelineId"] = timelineId,
@@ -1829,7 +1829,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
 				["visibility"] = "public",
 				["importance"] = 0.85d
 			}, "relationship_lifecycle_divorce");
-			WorldHistoryIngestBatchApi(new Dictionary<string, object>
+			WorldSimulationService.WorldHistoryIngestBatchApi(new Dictionary<string, object>
 			{
 				["campaignId"] = campaignId,
 				["timelineId"] = timelineId,
@@ -1858,7 +1858,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
 			});
 		}
 
-        private static Dictionary<string, object> RelationshipDirectorReportActionsApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipDirectorReportActionsApi(Dictionary<string, object> payload)
         {
             string campaignId = ReadString(payload, "campaignId", "default");
             List<Dictionary<string, object>> receipts = ReadDictionaryList(payload, "receipts").Take(500).ToList();
@@ -1868,7 +1868,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
                     ReadFirstString(x, "directorActionId", "director_action_id"))).ToList();
             if (nativeTargets.Count > 0)
             {
-                using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+                using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     EnsureRelationshipDirectorSchema(connection);
@@ -1896,7 +1896,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
 
         internal static void FinalizeMarriage(ReignDbConnection connection,string campaignId,string evaluationId,double day,bool storeMemory=true)
         {
-            Dictionary<string, object> row=QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",evaluationId}}).FirstOrDefault();
+            Dictionary<string, object> row=Program.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id LIMIT 1;",new Dictionary<string, object>{{"id",evaluationId}}).FirstOrDefault();
             if(row==null)return;
             string a=ReadString(row,"hero_a_id",""),b=ReadString(row,"hero_b_id",""),route=ReadString(row,"route","");
             string eventId="marriage_"+evaluationId;
@@ -1915,10 +1915,10 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
 
         internal static void StoreMarriageMemory(ReignDbConnection connection,string campaignId,string evaluationId,double day)
         {
-            var row=QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",evaluationId}}).FirstOrDefault();
+            var row=Program.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE evaluation_id=$id;",new Dictionary<string,object>{{"id",evaluationId}}).FirstOrDefault();
             if(row==null)return;
             string a=ReadString(row,"hero_a_id",""),b=ReadString(row,"hero_b_id",""),route=ReadString(row,"route",""),eventId="marriage_"+evaluationId;
-            StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventId",eventId},{"eventType","world_event"},{"eventSubtype",route=="arranged"?"arranged_marriage":"romantic_marriage"},{"worldDay",day},{"summary",a+" and "+b+" married"+(route=="arranged"?" by agreement of their clan leaders.":" after developing mutual trust, affection, and attraction.")},{"participants",new[]{a,b,ReadString(row,"leader_a_id",""),ReadString(row,"leader_b_id","")}},{"visibility","public"},{"importance",0.9d}},"relationship_director_marriage");
+            Program.StoreWorldMemoryEvent(new Dictionary<string, object>{{"campaignId",campaignId},{"eventId",eventId},{"eventType","world_event"},{"eventSubtype",route=="arranged"?"arranged_marriage":"romantic_marriage"},{"worldDay",day},{"summary",a+" and "+b+" married"+(route=="arranged"?" by agreement of their clan leaders.":" after developing mutual trust, affection, and attraction.")},{"participants",new[]{a,b,ReadString(row,"leader_a_id",""),ReadString(row,"leader_b_id","")}},{"visibility","public"},{"importance",0.9d}},"relationship_director_marriage");
         }
 
         private static void ApplyCompelledMarriageConsequence(ReignDbConnection connection,string campaignId,string timelineId,string eventId,string spouse,string match,string leader,double resentment,double day)
@@ -1935,7 +1935,7 @@ AND archetype_id='marital_strife' AND thread_key=$pair AND status='active';", ar
                     "compelled_political_marriage",timelineId);
             }
             string text=resentment>=40d?"They feel deeply wronged that their clan leader compelled this marriage and expect the grievance to shape their future.":resentment>=20d?"They resent having no choice in the arranged marriage, even while recognizing its dynastic purpose.":"They accept the clan leader's authority but retain private unease about the arranged marriage.";
-            ExecuteSql(connection,@"INSERT OR IGNORE INTO comprehension(comprehension_id,event_id,owner_id,text,stance,confidence,known_by_json,about_entities_json,hidden_from_json,ts,payload_json)
+            Program.ExecuteSql(connection,@"INSERT OR IGNORE INTO comprehension(comprehension_id,event_id,owner_id,text,stance,confidence,known_by_json,about_entities_json,hidden_from_json,ts,payload_json)
 VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$payload);",new Dictionary<string, object>{{"id","comprehension_"+evaluationIdSafe(eventId,spouse)},{"event",eventId},{"owner",spouse},{"text",text},{"known",Json.Serialize(new[]{spouse})},{"about",Json.Serialize(new[]{match,leader})},{"ts",ts},{"payload",Json.Serialize(new Dictionary<string, object>{{"resentment",resentment},{"compelledMarriage",true}})}});
         }
 
@@ -1944,32 +1944,32 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
             return Convert.ToBase64String(SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(eventId+"|"+owner))).Replace("/","_").Replace("+","-").TrimEnd('=').Substring(0,24);
         }
 
-        private static Dictionary<string, object> RelationshipDirectorStatusApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> RelationshipDirectorStatusApi(Dictionary<string, object> payload)
         {
-            string campaignId=ReadString(payload,"campaignId","default"),timelineId=ReadString(payload,"timelineId","main");using(ReignDbConnection connection=OpenCampaignConnection(campaignId)){EnsureRelationshipDirectorSchema(connection);return new Dictionary<string, object>{{"ok",true},{"relationshipModel","directional_mbti_native_relation"},{"passiveMechanicalEventsEnabled",false},{"relationshipLlmCalls",0},{"directorPolicy","political_marriage_only"},{"lastRun",QuerySql(connection,"SELECT * FROM relationship_director_runs ORDER BY world_day DESC LIMIT 1;").FirstOrDefault()??new Dictionary<string, object>()},{"pendingActions",ReadInt(QuerySql(connection,"SELECT COUNT(*) AS count FROM relationship_director_actions WHERE status='pending';").FirstOrDefault(),"count",0)},{"marriageEvaluations",QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE timeline_id=$timeline ORDER BY world_day DESC LIMIT 50;",new Dictionary<string, object>{{"timeline",timelineId}})},{"marriageRolls",QuerySql(connection,"SELECT * FROM marriage_leader_rolls WHERE timeline_id=$timeline ORDER BY world_day DESC LIMIT 50;",new Dictionary<string, object>{{"timeline",timelineId}})},{"ambient",MbtiRelationshipStatusApi(payload)}};}
+            string campaignId=ReadString(payload,"campaignId","default"),timelineId=ReadString(payload,"timelineId","main");using(ReignDbConnection connection=Program.OpenCampaignConnection(campaignId)){EnsureRelationshipDirectorSchema(connection);return new Dictionary<string, object>{{"ok",true},{"relationshipModel","directional_mbti_native_relation"},{"passiveMechanicalEventsEnabled",false},{"relationshipLlmCalls",0},{"directorPolicy","political_marriage_only"},{"lastRun",Program.QuerySql(connection,"SELECT * FROM relationship_director_runs ORDER BY world_day DESC LIMIT 1;").FirstOrDefault()??new Dictionary<string, object>()},{"pendingActions",ReadInt(Program.QuerySql(connection,"SELECT COUNT(*) AS count FROM relationship_director_actions WHERE status='pending';").FirstOrDefault(),"count",0)},{"marriageEvaluations",Program.QuerySql(connection,"SELECT * FROM marriage_evaluations WHERE timeline_id=$timeline ORDER BY world_day DESC LIMIT 50;",new Dictionary<string, object>{{"timeline",timelineId}})},{"marriageRolls",Program.QuerySql(connection,"SELECT * FROM marriage_leader_rolls WHERE timeline_id=$timeline ORDER BY world_day DESC LIMIT 50;",new Dictionary<string, object>{{"timeline",timelineId}})},{"ambient",MbtiRelationshipStatusApi(payload)}};}
         }
 
-        private static bool IsExplicitConceptionCapablePlayerText(string text)
+        internal static bool IsExplicitConceptionCapablePlayerText(string text)
         {
             string value=(text??"").ToLowerInvariant();
-            bool completed=ContainsAny(value,"we made love","i made love","slept together","lay together","finished inside","came inside","inseminat");
-            bool conceive=ContainsAny(value,"try for a child","tried for a child","attempted to have a child","make a child","conceive","get you pregnant","become pregnant");
-            return (completed&&conceive)||ContainsAny(value,"finished inside","came inside","inseminat");
+            bool completed=Program.ContainsAny(value,"we made love","i made love","slept together","lay together","finished inside","came inside","inseminat");
+            bool conceive=Program.ContainsAny(value,"try for a child","tried for a child","attempted to have a child","make a child","conceive","get you pregnant","become pregnant");
+            return (completed&&conceive)||Program.ContainsAny(value,"finished inside","came inside","inseminat");
         }
 
         private static double PlayerConceptionChance(double age){if(age<18d||age>45d)return 0d;return (15d-(age-18d)*(12d/27d))/100d;}
-        private static string NormalizePregnancyChoiceToken(string value){return (value??"").Trim().ToLowerInvariant().Replace("-","_").Replace(" ","_");}
+        internal static string NormalizePregnancyChoiceToken(string value){return (value??"").Trim().ToLowerInvariant().Replace("-","_").Replace(" ","_");}
         internal static double StableUnit(string seed){using(SHA256 sha=SHA256.Create()){byte[] hash=sha.ComputeHash(Encoding.UTF8.GetBytes(seed??""));ulong value=BitConverter.ToUInt64(hash,0);return value/(double)ulong.MaxValue;}}
         private static double TraitFromProfile(Dictionary<string, object> profile,string key){Dictionary<string, object> direct=ReadDictionary(profile,"foundationTraits")??ReadDictionary(ReadDictionary(profile,"traits"),"foundationTraits")??ReadDictionary(profile,"traits")??new Dictionary<string, object>();return ReadDouble(direct,key,0d);}
-        private static double Trait01(Dictionary<string, object> profile,string key){return ClampDouble((TraitFromProfile(profile,key)+2d)/4d,0d,1d);}
+        private static double Trait01(Dictionary<string, object> profile,string key){return Program.ClampDouble((TraitFromProfile(profile,key)+2d)/4d,0d,1d);}
 
-        private static List<Dictionary<string, object>> RunPregnancyChoiceSelfTests()
+        internal static List<Dictionary<string, object>> RunPregnancyChoiceSelfTests()
         {
             List<Dictionary<string, object>> rows=new List<Dictionary<string, object>>();
             Action<string,bool,string> add=(id,passed,summary)=>rows.Add(new Dictionary<string, object>{{"ok",true},{"passed",passed},{"suite","pregnancy_choice"},{"caseId",id},{"name",id},{"summary",summary},{"durationMs",0}});
-            string previousRoot=CampaignsRootOverride.Value;
-            string isolatedRoot=Path.Combine(DataDir,"test_runs","pregnancy_choice_"+Guid.NewGuid().ToString("N"));
-            CampaignsRootOverride.Value=isolatedRoot;
+            string previousRoot=Program.CampaignsRootOverride.Value;
+            string isolatedRoot=Path.Combine(Program.DataDir,"test_runs","pregnancy_choice_"+Guid.NewGuid().ToString("N"));
+            Program.CampaignsRootOverride.Value=isolatedRoot;
             try
             {
                 string campaign="pregnancy_choice_campaign";
@@ -1984,8 +1984,8 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
 
                 Dictionary<string, object> preview=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","preview"));
                 int previewRows;
-                using(ReignDbConnection connection=OpenCampaignConnection(campaign))
-                    previewRows=ReadInt(QuerySql(connection,"SELECT COUNT(*) AS count FROM conception_attempts;").FirstOrDefault(),"count",-1);
+                using(ReignDbConnection connection=Program.OpenCampaignConnection(campaign))
+                    previewRows=ReadInt(Program.QuerySql(connection,"SELECT COUNT(*) AS count FROM conception_attempts;").FirstOrDefault(),"count",-1);
                 add("preview_is_stateless",
                     ReadBool(preview,"ok",false)&&ReadBool(preview,"eligible",false)&&!ReadBool(preview,"rollPerformed",true)&&ReadDouble(preview,"roll",0d)==-1d&&previewRows==0,
                     "Opening the popup reports eligibility and chance without consuming or storing a pregnancy roll.");
@@ -1993,8 +1993,8 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
                 Dictionary<string, object> cancelled=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","pull_out"));
                 Dictionary<string, object> cancelledThenProceed=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","proceed"));
                 Dictionary<string, object> cancelledRow;
-                using(ReignDbConnection connection=OpenCampaignConnection(campaign))
-                    cancelledRow=QuerySql(connection,"SELECT * FROM conception_attempts WHERE attempt_id='attempt_preview_cancel' LIMIT 1;").FirstOrDefault();
+                using(ReignDbConnection connection=Program.OpenCampaignConnection(campaign))
+                    cancelledRow=Program.QuerySql(connection,"SELECT * FROM conception_attempts WHERE attempt_id='attempt_preview_cancel' LIMIT 1;").FirstOrDefault();
                 add("pull_out_never_rolls",
                     ReadBool(cancelled,"cancelled",false)&&!ReadBool(cancelled,"rollPerformed",true)&&ReadDouble(cancelled,"roll",0d)==-1d
                     &&ReadString(cancelledRow,"status","")=="cancelled"&&ReadDouble(cancelledRow,"roll",0d)==-1d,
@@ -2011,22 +2011,22 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
                     &&ReadBool(proceededAgain,"idempotent",false)&&Math.Abs(ReadDouble(proceeded,"roll",-1d)-ReadDouble(proceededAgain,"roll",-2d))<double.Epsilon,
                     "Proceed performs one deterministic roll and retries return the same stored outcome.");
 
-                Dictionary<string, object> gate=NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
-                Dictionary<string, object> suppressed=NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
+                Dictionary<string, object> gate=Program.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
+                Dictionary<string, object> suppressed=Program.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
                 add("llm_gate_and_pull_out_suppression",
                     ReadBool(gate,"needed",false)&&!ReadBool(suppressed,"needed",true),
                     "Completed LLM insemination actions open the choice, while the pull_out follow-up cannot recursively trigger another roll.");
 
-                Dictionary<string, Dictionary<string, object>> metadata=PromptMetadataByName();
+                Dictionary<string, Dictionary<string, object>> metadata=Program.PromptMetadataByName();
                 add("pull_out_prompt_is_editable",
-                    PromptFileNames.Contains("pull_out.txt",StringComparer.OrdinalIgnoreCase)
+                    Program.PromptFileNames.Contains("pull_out.txt",StringComparer.OrdinalIgnoreCase)
                     &&metadata.ContainsKey("pull_out.txt")&&ReadBool(metadata["pull_out.txt"],"visible",false)
-                    &&!string.IsNullOrWhiteSpace(LoadPromptTemplate("pull_out.txt")),
+                    &&!string.IsNullOrWhiteSpace(Program.LoadPromptTemplate("pull_out.txt")),
                     "The pull_out prompt is registered, visible in the Control Center editor, and has a non-empty default.");
             }
             finally
             {
-                CampaignsRootOverride.Value=previousRoot;
+                Program.CampaignsRootOverride.Value=previousRoot;
                 try{if(Directory.Exists(isolatedRoot))Directory.Delete(isolatedRoot,true);}catch{}
             }
             return rows;
@@ -2085,7 +2085,7 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
             Dictionary<string, object> dutiful=new Dictionary<string, object>{{"foundationTraits",new Dictionary<string, object>{{"dutyMotivation",2},{"familyMotivation",2},{"loyalty",2},{"traditionalism",2},{"pragmatism",2},{"assertiveness",-2},{"pride",-2},{"impulsiveness",-2}}},{"nativeRelationToLeader",80d}};
             Dictionary<string, object> resistant=new Dictionary<string, object>{{"foundationTraits",new Dictionary<string, object>{{"dutyMotivation",-2},{"familyMotivation",-2},{"loyalty",-2},{"traditionalism",-2},{"pragmatism",-2},{"assertiveness",2},{"pride",2},{"impulsiveness",2}}},{"nativeRelationToLeader",-50d}};
             add("compelled_marriage_trait_resentment",ArrangedMarriageResentment(resistant,new Dictionary<string, object>(),new Dictionary<string, object>(),40d)>ArrangedMarriageResentment(dutiful,new Dictionary<string, object>(),new Dictionary<string, object>(),40d),"Resistant personalities receive more arranged-marriage resentment than dutiful traditional personalities.");
-            double lowChance=ClampDouble(0.01d+0.04d*0d,0.01d,0.05d),highChance=ClampDouble(0.01d+0.04d*1d,0.01d,0.05d);
+            double lowChance=Program.ClampDouble(0.01d+0.04d*0d,0.01d,0.05d),highChance=Program.ClampDouble(0.01d+0.04d*1d,0.01d,0.05d);
             add("arranged_marriage_weekly_chance_cap",Math.Abs(lowChance-0.01d)<0.000001d&&Math.Abs(highChance-0.05d)<0.000001d,"Weekly clan-leader marriage chance scales from 1% and never exceeds 5%.");
             List<KeyValuePair<string,double>> eventCatalog=new List<KeyValuePair<string,double>>
             {
@@ -2099,10 +2099,10 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
             HashSet<string> reached=new HashSet<string>(Enumerable.Range(0,2000).Select(i=>SelectWeightedPassiveEvent(eventCatalog,"reachability_"+i)),StringComparer.OrdinalIgnoreCase);
             add("weighted_event_catalog_reachability",eventCatalog.All(x=>reached.Contains(x.Key)),"Every discrete relationship event remains selectable when its eligibility gate supplies positive weight.");
             double simulated=0d;HashSet<int> processedDays=new HashSet<int>();bool duplicate=false;
-            for(int day=0;day<630;day++){if(!processedDays.Add(day)){duplicate=true;break;}double gap=25d-simulated;if(Math.Abs(gap)>=0.5d)simulated=ClampDouble(simulated+ClampDouble(gap*0.02d,-0.50d,0.50d),-100d,100d);}
+            for(int day=0;day<630;day++){if(!processedDays.Add(day)){duplicate=true;break;}double gap=25d-simulated;if(Math.Abs(gap)>=0.5d)simulated=Program.ClampDouble(simulated+Program.ClampDouble(gap*0.02d,-0.50d,0.50d),-100d,100d);}
             add("five_year_ambient_bounded_simulation",!duplicate&&simulated>=-25d&&simulated<=25d&&processedDays.Count==630,"A seeded five-year, 126-day-year daily simulation remains bounded and processes each day once.");
             string storyCampaign="relationship_story_selftest_"+Guid.NewGuid().ToString("N");
-            using(ReignDbConnection storyConnection=OpenCampaignConnection(storyCampaign))
+            using(ReignDbConnection storyConnection=Program.OpenCampaignConnection(storyCampaign))
             {
                 EnsureRelationshipDirectorSchema(storyConnection);
                 ApplyStoryEventToDatabase(storyConnection,"mutual_romantic_flirtation","story_flirt","story_a","story_b",10d,false,false);
@@ -2124,14 +2124,14 @@ VALUES($id,$event,$owner,$text,'private_response',0.9,$known,$about,'[]',$ts,$pa
                     "Persisted major courtships apply the exact 50% third-party arrangement penalty.");
                 int displaced=ConvertDisplacedCourtshipsToTemptation(storyConnection,"story_a","story_c",22d,"story_arranged");
                 Dictionary<string,object> displacedThread=LoadStoryThread(storyConnection,"story_a","story_b","romance",22d);
-                int displacementPressures=ReadInt(QuerySql(storyConnection,
+                int displacementPressures=ReadInt(Program.QuerySql(storyConnection,
                     "SELECT COUNT(*) AS count FROM relationship_pressures WHERE ((subject_id='story_a' AND target_id='story_b' AND kind='divided_loyalty') OR (subject_id='story_b' AND target_id='story_a' AND kind='romantic_displacement')) AND status='active';").FirstOrDefault(),"count",0);
                 add("production_displaced_courtship",displaced==1&&ReadString(displacedThread,"route","")=="temptation"&&displacementPressures==2,
                     "An overriding arranged marriage preserves the persisted romance as temptation and creates only private directional pressures.");
                 for(int i=0;i<4;i++)ApplyStoryEventToDatabase(storyConnection,"political_rivalry_argument","rivalry_"+i,"story_a","story_b",20+i*7,false,false);
-                int feuds=ReadInt(QuerySql(storyConnection,"SELECT COUNT(DISTINCT pair_key) AS count FROM relationship_story_threads WHERE kind='rivalry' AND intensity>=75;").FirstOrDefault(),"count",0);
+                int feuds=ReadInt(Program.QuerySql(storyConnection,"SELECT COUNT(DISTINCT pair_key) AS count FROM relationship_story_threads WHERE kind='rivalry' AND intensity>=75;").FirstOrDefault(),"count",0);
                 add("persistent_feud_progression",feuds==1,"Repeated political conflicts create one pair-level feud state.");
-                ExecuteSql(storyConnection,@"INSERT INTO relationship_pressures(pressure_id,subject_id,target_id,kind,status,intensity,secrecy,summary,related_entities_json,trigger_json,evidence_json,created_day,updated_day,updated_ts,payload_json)
+                Program.ExecuteSql(storyConnection,@"INSERT INTO relationship_pressures(pressure_id,subject_id,target_id,kind,status,intensity,secrecy,summary,related_entities_json,trigger_json,evidence_json,created_day,updated_day,updated_ts,payload_json)
 VALUES('story_pressure','story_c','story_d','strategic_seduction','active',60,.8,'','[]','{}','[]',40,55,$ts,'{}');",
                     new Dictionary<string,object>{{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
                 LoadPairStorySummary(storyConnection,"story_c","story_d",60d);

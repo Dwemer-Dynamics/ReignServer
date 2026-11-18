@@ -244,7 +244,7 @@ standing_value=-5,sources_json=$sources,revision=character_public_standing.revis
                         ["sources"] = Json.Serialize(new List<Dictionary<string, object>> { TestDict("sourceType", "rumor", "tagId", "whoremonger",
                             "rawValue", -5, "effectiveContribution", -5d, "sourceId", "filelock_fixture") }) });
                 // The ordinary reader, outside any snapshot scope, reads the same profiles from disk.
-                ordinaryStanding = ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", protocolActor, pairTarget);
+                ordinaryStanding = RelationshipsService.ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", protocolActor, pairTarget);
             }
             const string peerActionId = "da_filelock_peer";
             var peerRow = TestDict("id", peerActionId, "campaignId", campaign, "status", "queued", "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -330,10 +330,10 @@ WHERE pid=$peer AND NOT granted AND $acceptance=ANY(pg_blocking_pids(pid))) AS w
                         // transaction, before reputation recompute can change the target's standing.
                         chemistryAtEvaluation = QuerySql(c, @"SELECT hero_a_id,hero_b_id,affinity_a_to_b,affinity_b_to_a,
 effective_affinity_a_to_b,effective_affinity_b_to_a FROM relationship_pair_chemistry WHERE pair_key=$pair;",
-                            TestDict("pair", AmbientPairKey(protocolActor, pairTarget))).FirstOrDefault();
+                            TestDict("pair", RelationshipsService.AmbientPairKey(protocolActor, pairTarget))).FirstOrDefault();
                         // Inside the acceptance scope the pair resolves from its snapshot; any other hero is refused.
-                        snapshotStanding = ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", protocolActor, pairTarget);
-                        try { ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", "player_actions_unsnapped_observer", pairTarget); }
+                        snapshotStanding = RelationshipsService.ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", protocolActor, pairTarget);
+                        try { RelationshipsService.ResolveObserverPublicStanding(c, campaign, "player_actions_timeline", "player_actions_unsnapped_observer", pairTarget); }
                         catch (InvalidOperationException) { unsnappedRefused = true; }
                     }
                     else peerQueuedAtCommit = peerPid != 0 && blockedWaiters(c).Contains(peerPid);
@@ -410,7 +410,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                 directionalDeltas = QuerySql(connection, "SELECT native_delta FROM relationship_interaction_receipts WHERE event_id LIKE 'action_relationship_' || $id || '_%';",
                     TestDict("id", protocolId)).Select(r => ReadInt(r, "native_delta", 0)).Where(d => d != 0).ToList();
             add("terminal_report_stages_one_isolated_action_delta", ReadString(protocolFirst, "disposition", "") == "accepted"
-                && ReadInt(protocolEffect, "delta", 0) != 0 && ReadInt(protocolEffect, "delta", 0) == CompletedActionSharedDelta(directionalDeltas)
+                && ReadInt(protocolEffect, "delta", 0) != 0 && ReadInt(protocolEffect, "delta", 0) == RelationshipsService.CompletedActionSharedDelta(directionalDeltas)
                 && protocolCount(directionalSql) == 2 && protocolCount(actionReceiptSql) == 1
                 && IsProtocolOwnedTerminalAction(ReadDurableConversationAction(campaign, protocolId)), protocolFirst);
             // The retried first acceptance commits exactly one derived metric per changed target, at the report day.
@@ -533,7 +533,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             SaveDurableConversationAction(campaign, legacyOverwrite);
             add("terminal_report_evidence_survives_same_status_legacy_save", ReadString(ReadDictionary(ReadDurableConversationAction(campaign, protocolId), "report"), "message", "")
                 == "A kind gift was handed over with thanks.", null);
-            Func<string, Dictionary<string, object>> protocolAck = ackGeneration => ConversationRelationshipNativeReceiptApi(TestDict("campaignId", campaign,
+            Func<string, Dictionary<string, object>> protocolAck = ackGeneration => RelationshipsService.ConversationRelationshipNativeReceiptApi(TestDict("campaignId", campaign,
                 "receiptIds", new List<string> { ReadString(protocolEffect, "receiptId", "") }, "nativeReceipt", TestDict(
                     "schema", "reign-native-relationship-receipt-v2", "subjectId", ReadString(protocolEffect, "subjectId", ""), "targetId", ReadString(protocolEffect, "targetId", ""),
                     "priorNativeRelation", 0, "nativeRelation", ReadInt(protocolEffect, "delta", 0), "delta", ReadInt(protocolEffect, "delta", 0),
@@ -567,7 +567,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             hypothetical["playerText"] = "For example:\nI give you 2000 gold.";
             var hypotheticalRecord = TestDict("source", "dialogue_auto_commit", "actorHeroStringId", ReadString(payload, "playerHeroStringId", ""));
             var hypotheticalErrors = new List<string>();
-            BindDialogueActionAuthority(hypotheticalRecord, TestDict(), hypothetical, "transfer_gold", "RegularTransferGold", "hypothetical", hypotheticalErrors);
+            WorldSimulationService.BindDialogueActionAuthority(hypotheticalRecord, TestDict(), hypothetical, "transfer_gold", "RegularTransferGold", "hypothetical", hypotheticalErrors);
             add("npc_planner_cannot_turn_example_into_player_payment", hypotheticalErrors.Any(e => e.Contains("hypothetical")), hypotheticalErrors);
             var together = NewContribution(payload, "pay_and_join");
             together["playerText"] = "I give you 2000 gold to join as a companion.";
@@ -585,9 +585,9 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
             add("recruitment_depends_on_verified_advance", ReadStringList(recruitmentTerms, "paymentDependencies").Count == 1
                 && ReadInt(recruitmentTerms, "agreedGold", -1) == 2000, recruitmentTerms);
             foreach (string decision in new[] { "I join you as your companion. My husband could visit later.", "I accept. If my family visits, they will need a room." })
-                add("unrelated_condition_" + results.Count, ResidentHasUnconditionalConsent(decision), decision);
+                add("unrelated_condition_" + results.Count, CharactersService.ResidentHasUnconditionalConsent(decision), decision);
             foreach (string decision in new[] { "I could join if you pay.", "I will join tomorrow.", "I agree, provided you release me first.", "I join you. But only if my husband agrees.", "I join you. If you pay me." })
-                add("real_condition_" + results.Count, !ResidentHasUnconditionalConsent(decision), decision);
+                add("real_condition_" + results.Count, !CharactersService.ResidentHasUnconditionalConsent(decision), decision);
             add("purse_claim_requires_receipt", VisibleReplyClaimsCompletedWorldAction("Two thousand denars in my purse.", out _), null);
             var visible = VisibleFailedRepairWithoutEffects(TestDict("reply", "Two thousand denars in my purse. I am your companion."));
             add("invalid_reply_cannot_preserve_success_claim", !ReadString(visible, "reply", "").Contains("in my purse")
@@ -788,7 +788,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         "timelineId", "player_actions_timeline", "reportGeneration", protocolGeneration, "reportSha256", ReadString(protocolFirst, "reportSha256", ""),
                         "admission", echo));
                     if (proof != null) body["loadProof"] = proof;
-                    return ConversationRelationshipNativeReceiptApi(body);
+                    return RelationshipsService.ConversationRelationshipNativeReceiptApi(body);
                 };
                 var l1Echo = TestDict("generation", g2, "loadSessionId", "stage3_l1");
                 var l1Proof = TestDict("loadSessionId", "stage3_l1", "savePointId", "stage3_point", "restoreGeneration", g2);
@@ -997,14 +997,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject;",
                         ExecuteSql(cx, "DELETE FROM memory_continuity_branches WHERE timeline_id=$t;", TestDict("t", reboundTimeline));
                 }
             }
-            var point = SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");
+            var point = PersistenceService.SaveSyncTestPointPayload(campaign, "player_action_snapshot", 20d, "Player action isolated snapshot");
             point["timelineId"] = "player_actions_timeline";
-            var registered = SaveSyncRegisterApi(point);
+            var registered = PersistenceService.SaveSyncRegisterApi(point);
             int before = ReadDurableConversationActions(campaign).Count;
             payload = NewContribution(payload, "future_gift");
             RunPlayerActionTurn(payload, () => TestDict("ok", true, "reply", "Thank you for the offer."));
-            MarkSaveSyncActiveStateDirty(campaign);
-            var restored = SaveSyncLoadApi(point, false);
+            PersistenceService.MarkSaveSyncActiveStateDirty(campaign);
+            var restored = PersistenceService.SaveSyncLoadApi(point, false);
             add("save_sync_rewinds_outbox_and_ignores_newer_json", ReadBool(registered, "ok", false) && ReadBool(restored, "ok", false)
                 && ReadDurableConversationActions(campaign).Count == before
                 && !ReadActionQueueUnlocked(campaign).Any(r => ReadString(ReadDictionary(r, "record"), "negotiationId", "") == "future_gift"), restored);

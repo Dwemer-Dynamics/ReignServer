@@ -32,7 +32,7 @@ VALUES($rule,$event,'global','all',$day,'public_world_news',1) ON CONFLICT(rule_
             ExecuteSql(connection, "INSERT OR REPLACE INTO schema_meta(key,value) VALUES($key,'1');", TestDict("key", marker));
         }
 
-        private static bool ValidPublicWorldHistory(Dictionary<string, object> row)
+        internal static bool ValidPublicWorldHistory(Dictionary<string, object> row)
         {
             string type = ReadString(row, "event_type", "");
             if (Reign.Core.Contracts.World.ReignPublicNews.IsNativePublicDiplomacy(type, ReadString(row, "source", ""), ReadString(row, "dissemination_class", ""))) return true;
@@ -104,7 +104,7 @@ ON s.value=n.entity_id WHERE n.event_id=e.event_id) ORDER BY e.world_day DESC,e.
                 Add(QuerySql(connection, @"SELECT e.* FROM world_history_fts JOIN world_history_events e ON e.event_id=world_history_fts.event_id
 WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DESC,e.sequence DESC LIMIT 24;", args), true);
             }
-            return DistinctPublicWorldHistory(rows.Values).Where(row => !observer.PlayerIdentityUnknown || !QueryWorldHistoryEntities(connection,
+            return DistinctPublicWorldHistory(rows.Values).Where(row => !observer.PlayerIdentityUnknown || !WorldSimulationService.QueryWorldHistoryEntities(connection,
                     ReadString(row, "event_id", "")).Any(n => ReadString(n, "entity_id", "") == observer.PlayerId
                         || ReadString(n, "entity_id", "") == "main_hero" || ReadString(n, "entity_id", "") == "player_hero"))
                 .Select(row => {
@@ -112,18 +112,18 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
                     row["acquisitionModes"] = new List<string> { "public_world_news" };
                     if (ReadString(row, "event_type", "").StartsWith("tournament_", StringComparison.Ordinal))
                     {
-                        var participants = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
+                        var participants = WorldSimulationService.QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
                         row["tournamentFirsthand"] = participants.Any(n => ReadString(n, "entity_id", "") == observer.NpcId
-                            && RoleContains(ReadString(n, "role", ""), "participant", "winner"));
-                        row["tournamentWinningTeam"] = participants.Where(n => RoleContains(ReadString(n, "role", ""), "winner"))
+                            && WorldSimulationService.RoleContains(ReadString(n, "role", ""), "participant", "winner"));
+                        row["tournamentWinningTeam"] = participants.Where(n => WorldSimulationService.RoleContains(ReadString(n, "role", ""), "winner"))
                             .Select(n => ReadString(n, "name_snapshot", "")).Where(n => n.Length > 0).Distinct().ToList();
                     }
                     if (ReadString(row, "event_type", "") == "ruler_judgment")
                     {
-                        var people = QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
+                        var people = WorldSimulationService.QueryWorldHistoryEntities(connection, ReadString(row, "event_id", ""));
                         var data = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
-                        string actor = ReadString(people.FirstOrDefault(n => RoleContains(ReadString(n, "role", ""), "actor")), "name_snapshot", "The ruling authority");
-                        string target = ReadString(people.FirstOrDefault(n => RoleContains(ReadString(n, "role", ""), "participant")), "name_snapshot", "the captive leader");
+                        string actor = ReadString(people.FirstOrDefault(n => WorldSimulationService.RoleContains(ReadString(n, "role", ""), "actor")), "name_snapshot", "The ruling authority");
+                        string target = ReadString(people.FirstOrDefault(n => WorldSimulationService.RoleContains(ReadString(n, "role", ""), "participant")), "name_snapshot", "the captive leader");
                         row["summary"] = actor + " publicly announced the ruling concerning " + target + ": "
                             + ReadString(row, "summary", "").TrimEnd('.') + ". Verdict: " + ReadString(data, "verdict", "unknown")
                             + (ReadString(row, "phase", "") == "sentenced" ? "; scheduled execution day "
@@ -183,7 +183,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
             }
             return "(" + string.Join(" OR ", clauses) + ")";
         }
-        private static bool IsPublicTournamentHistory(string eventType, string dissemination)
+        internal static bool IsPublicTournamentHistory(string eventType, string dissemination)
         {
             return (string.Equals(eventType, "tournament_started", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(eventType, "tournament_finished", StringComparison.OrdinalIgnoreCase))
@@ -192,7 +192,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
                     || string.Equals(dissemination, "major_world", StringComparison.OrdinalIgnoreCase));
         }
 
-        private static Dictionary<string, object> PublicTournamentKnowledgeRule(double day)
+        internal static Dictionary<string, object> PublicTournamentKnowledgeRule(double day)
         {
             return new Dictionary<string, object>
             {
@@ -202,7 +202,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " ORDER BY e.world_day DE
             };
         }
 
-        private static void EnsureImmediateTournamentKnowledge(ReignDbConnection connection)
+        internal static void EnsureImmediateTournamentKnowledge(ReignDbConnection connection)
         {
             const string marker = "world_history_immediate_tournament_news_v1";
             if (ReadString(QuerySql(connection, "SELECT value FROM schema_meta WHERE key=$key;",
@@ -236,8 +236,8 @@ AND dissemination_class IN ('ordinary','major_world'));");
             bool worldQuestion = RouteHasLane(route, "world_affairs") || RouteHasLane(route, "local_awareness");
             bool recognize = verifiedInterlocutor && !knowledge.PlayerIdentityUnknown
                 && !string.IsNullOrWhiteSpace(knowledge.PlayerId);
-            EnsureWorldHistorySchema(connection);
-            timelineId = FirstNonEmpty(timelineId, ActiveWorldHistoryTimeline(connection));
+            WorldSimulationService.EnsureWorldHistorySchema(connection);
+            timelineId = FirstNonEmpty(timelineId, WorldSimulationService.ActiveWorldHistoryTimeline(connection));
             EnsurePublicWorldNewsKnowledge(connection);
             var publicNews = LoadPublicWorldNews(connection, timelineId, worldDay, knowledge, topic);
             if (!worldQuestion && !recognize) return publicNews;
@@ -333,7 +333,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
 
             foreach (var row in candidates.Values)
             {
-                double lexical = HistoryTermScore(row, terms);
+                double lexical = WorldSimulationService.HistoryTermScore(row, terms);
                 double score = lexical + Math.Max(0d, ReadDouble(row, "vectorSemanticScore", 0d)) * 30d;
                 if (ReadString(row, "location_id", "").Equals(knowledge.LocationId, StringComparison.OrdinalIgnoreCase)
                     && !string.IsNullOrWhiteSpace(knowledge.LocationId)) score += 16d;
@@ -347,7 +347,7 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                 .ThenByDescending(r => ReadLong(r, "sequence", 0)).Take(24))
             {
                 string eventId = ReadString(row, "event_id", "");
-                var entities = QueryWorldHistoryEntities(connection, eventId);
+                var entities = WorldSimulationService.QueryWorldHistoryEntities(connection, eventId);
                 bool aboutPlayer = entities.Any(e => ReadString(e, "entity_id", "").Equals(knowledge.PlayerId, StringComparison.OrdinalIgnoreCase));
                 if (knowledge.PlayerIdentityUnknown && (aboutPlayer || entities.Any(e =>
                     ReadString(e, "entity_id", "") == "main_hero" || ReadString(e, "entity_id", "") == "player_hero"))) continue;
@@ -362,15 +362,15 @@ WHERE world_history_fts MATCH $query AND " + visible + " AND " + eligible
                 if (ReadString(row, "event_type", "") == "tournament_finished")
                 {
                     row["tournamentFirsthand"] = entities.Any(e => string.Equals(ReadString(e, "entity_id", ""), knowledge.NpcId, StringComparison.OrdinalIgnoreCase)
-                        && RoleContains(ReadString(e, "role", ""), "participant", "winner"));
-                    row["tournamentWinningTeam"] = entities.Where(e => RoleContains(ReadString(e, "role", ""), "winner"))
+                        && WorldSimulationService.RoleContains(ReadString(e, "role", ""), "participant", "winner"));
+                    row["tournamentWinningTeam"] = entities.Where(e => WorldSimulationService.RoleContains(ReadString(e, "role", ""), "winner"))
                         .Select(e => ReadString(e, "name_snapshot", "")).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().ToList();
                     row["documentedPlayerTournamentWins"] = documentedPlayerTournamentWins;
                 }
                 row["verifiedInterlocutorAchievement"] = recognize && aboutPlayer
                     && ReadString(row, "event_type", "") == "tournament_finished"
                     && entities.Any(e => ReadString(e, "entity_id", "") == knowledge.PlayerId
-                        && RoleContains(ReadString(e, "role", ""), "winner"));
+                        && WorldSimulationService.RoleContains(ReadString(e, "role", ""), "winner"));
                 if (ReadBool(row, "verifiedInterlocutorAchievement", false) && !recognitionIds.Contains(eventId))
                     row["dialogueHistoryScore"] = ReadDouble(row, "dialogueHistoryScore", 0d) + 32d;
                 result.Add(row);

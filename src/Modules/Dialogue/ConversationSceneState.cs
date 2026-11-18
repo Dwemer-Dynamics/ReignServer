@@ -65,7 +65,7 @@ updated_ts INTEGER NOT NULL);");
             return (long)Math.Floor(Math.Max(0d, ReadDouble(payload, "worldDay", 0d)) * 24d + 0.000001d);
         }
 
-        private static List<Dictionary<string, object>> MergedInteractionParticipantProfiles(Dictionary<string, object> payload)
+        internal static List<Dictionary<string, object>> MergedInteractionParticipantProfiles(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
             Dictionary<string, object> scene = ReadDictionary(payload, "conversationSceneState") ?? new Dictionary<string, object>();
@@ -121,7 +121,7 @@ updated_ts INTEGER NOT NULL);");
             return childIndex >= 0 && childIndex < childNames.Count ? childNames[childIndex] : string.Empty;
         }
 
-        private static List<Dictionary<string, object>> FindNativeKinshipContradictions(
+        internal static List<Dictionary<string, object>> FindNativeKinshipContradictions(
             Dictionary<string, object> parsed, Dictionary<string, object> payload, string speakerId)
         {
             List<Dictionary<string, object>> profiles = MergedInteractionParticipantProfiles(payload);
@@ -131,7 +131,7 @@ updated_ts INTEGER NOT NULL);");
             List<string> texts = new List<string>();
             CollectConversationStringValues(parsed, texts);
             Dictionary<string, int> firstNameCounts = profiles
-                .Select(x => FirstName(ReadString(x, "name", "")))
+                .Select(x => WorldSimulationService.FirstName(ReadString(x, "name", "")))
                 .Where(x => x.Length >= 4)
                 .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
@@ -143,7 +143,7 @@ updated_ts INTEGER NOT NULL);");
                 if (string.IsNullOrWhiteSpace(targetId) || targetId.Equals(speakerId, StringComparison.OrdinalIgnoreCase)) continue;
                 string targetName = FirstNonEmpty(ReadString(target, "name", ""), targetId);
                 List<string> aliases = new List<string> { targetName, targetId };
-                string firstName = FirstName(targetName);
+                string firstName = WorldSimulationService.FirstName(targetName);
                 if (firstName.Length >= 4 && firstNameCounts.TryGetValue(firstName, out int count) && count == 1) aliases.Add(firstName);
                 string actual = NativeRelationFromSpeaker(speaker, targetId);
                 foreach (string text in texts)
@@ -422,7 +422,7 @@ updated_ts INTEGER NOT NULL);");
 
         // A location is a concise display label, never a prompt or a truncated
         // instruction block. Reject legacy polluted values before display/state use.
-        private static string ConversationLocationLabel(string value)
+        internal static string ConversationLocationLabel(string value)
         {
             value = (value ?? "").Trim();
             return value.Length <= 180 && value.IndexOfAny(new[] { '\r', '\n' }) < 0 ? value : "";
@@ -557,7 +557,7 @@ updated_ts INTEGER NOT NULL);");
                 if (string.IsNullOrWhiteSpace(heroId) || detailedParticipantIds == null || !detailedParticipantIds.Contains(heroId)) continue;
                 Dictionary<string, object> profile = ReadJsonObject(CharacterFile(campaignId, heroId, "profile.json"));
                 if (profile.Count == 0) profile = participant;
-                Dictionary<string, object> mbti = ResolveCharacterMbtiProfile(
+                Dictionary<string, object> mbti = RelationshipsService.ResolveCharacterMbtiProfile(
                     campaignId, heroId, profile, ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json")));
                 if (ReadString(mbti, "type", "XXXX") != "XXXX") participant["mbtiProfile"] = mbti;
             }

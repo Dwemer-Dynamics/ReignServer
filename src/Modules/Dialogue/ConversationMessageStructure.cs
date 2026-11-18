@@ -22,7 +22,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
 
         // Mark the template itself, before untrusted values are substituted. Never
         // locate a turn by parsing a player's headings or a quoted speaker name.
-        private sealed class ConversationTemplateSlots
+        internal sealed class ConversationTemplateSlots
         {
             public string Template, MarkedLiveTurn;
             public string HistoryStart, HistoryEnd, PlayerStart, PlayerEnd;
@@ -92,7 +92,7 @@ The final LATEST PLAYER TURN contains the current contribution, including its co
             FirstNonEmpty(ReadFirstString(line, "sourceTurnId", "turn_id", "id", "turnId", "promptLocalSourceId"), PromptHash(ReadString(line, "text", "")).Substring(0, 20)),
             @"[^\p{L}\p{Nd}_:.,-]", "_");
 
-        private static void StructureConversationMessages(PromptEnvelope envelope, ConversationTemplateSlots slots,
+        internal static void StructureConversationMessages(PromptEnvelope envelope, ConversationTemplateSlots slots,
             string transcript, List<Dictionary<string, object>> lines, Func<List<Dictionary<string, object>>, string> render,
             string observer, string playerName, string playerText, bool eventMode, Func<string, string> project,
             Dictionary<string, object> observedStage = null)

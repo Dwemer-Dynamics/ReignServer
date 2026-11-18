@@ -82,7 +82,7 @@ result_json TEXT NOT NULL, restore_generation TEXT NOT NULL, created_ts BIGINT N
             // Matching JSON flags or an unsealed clone confer no exemption.
             if (IsSealedAnswerSupportAudit(input)) return;
             input["politicalAuthors"] = writerRequest.TryGetValue("politicalAuthors", out object authors) ? authors : new object[0];
-            input["messages"] = RequiredPoliticalMessages(input, ReadDictionaryList(input, "messages"));
+            input["messages"] = CharactersService.RequiredPoliticalMessages(input, ReadDictionaryList(input, "messages"));
         }
 
         internal static Dictionary<string, object> GenerateRouteConversation(RouteConversationMemory context,

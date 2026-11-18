@@ -102,7 +102,7 @@ namespace ReignBetaServer
                     && ReadDictionaryList(boundedFailures, "failures").Count == 32 && ReadBool(boundedFailures, "failureDetailsLimited", false)
                     && Json.Serialize(boundedFailures).Length < 32768 && ReadDictionaryList(TryParseJsonObject(File.ReadAllText(ReadString(boundedFailures, "resultsPath", ""))), "results").Count == 80);
             }
-            finally { TryDeleteDirectory(cliEvidence); }
+            finally { PersistenceService.TryDeleteDirectory(cliEvidence); }
             var agencyFacts = TestDict("player.knownTournamentWins", 107);
             string agencyPrompt = ConversationAgencyPrompt(TestDict("facts", agencyFacts));
             Check("negotiation_prompt_rough_but_engine_fact_exact", agencyPrompt.Contains("over a hundred") && !agencyPrompt.Contains("107") && ReadInt(agencyFacts, "player.knownTournamentWins", 0) == 107);
@@ -195,7 +195,7 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                     && QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';").Count == 2,
                     TestDict("prompt", bootstrapped, "rows", QuerySql(connection, "SELECT * FROM obligations WHERE owed_by='bootstrap_npc';")));
 
-                EnsureWorldHistorySchema(connection);
+                WorldSimulationService.EnsureWorldHistorySchema(connection);
                 EnsurePlayerPerformanceSchema(connection);
                 var publicRule = new[] { TestDict("audienceType", "global", "audienceId", "all", "availableDay", 20d) };
                 var events = new List<Dictionary<string, object>>();
@@ -216,9 +216,9 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                 Receipt("private", "battle_completed", "win", "", "private", rules: new[] { TestDict("audienceType", "entity", "audienceId", "other", "availableDay", 20d) });
                 foreach (var group in events.GroupBy(e => ReadString(e, "timeline", "")))
                 {
-                    var receipt = WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", group.Key, "events", group.ToList()));
+                    var receipt = WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", group.Key, "events", group.ToList()));
                     Check("native_ingest_" + group.Key, ReadBool(receipt, "ok", false) && ReadInt(receipt, "accepted", 0) == group.Count());
-                    var replay = WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", group.Key, "events", group.ToList()));
+                    var replay = WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", group.Key, "events", group.ToList()));
                     Check("native_replay_" + group.Key, ReadInt(replay, "accepted", 0) == 0);
                 }
                 var access = BuildKnowledgeAccessContext("npc", "player", "", context);
@@ -283,7 +283,7 @@ VALUES('promise_bootstrap',$campaign,'bootstrap_npc','player','open',1,1,'[""pla
                         && observers.All(row => new[] { "npc", "player" }.Contains(ReadString(row, "owner_id", ""))), observers);
                     Check("practice_has_no_automatic_relationship_effect_" + playerWon,
                         ReadDictionaryList(report, "nativeRelationChanges").Count == 0
-                        && EvaluateCompletedActionRelationships(practice).Count == 0);
+                        && RelationshipsService.EvaluateCompletedActionRelationships(practice).Count == 0);
                     Check("practice_creates_no_public_or_social_history_" + playerWon,
                         QuerySql(connection, "SELECT * FROM world_history_events WHERE correlation_id=$action;", TestDict("action", action)).Count == 0
                         && QuerySql(connection, "SELECT * FROM character_performance_events WHERE event_id=$event;", TestDict("event", "action_" + action)).Count == 0);

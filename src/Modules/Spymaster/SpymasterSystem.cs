@@ -203,7 +203,7 @@ result_summary=$result,payload_json=$payload,updated_ts=$ts;", new Dictionary<st
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
-                double roll = Program.StableUnit(string.Join("|", campaignId, timelineId, missionId, "social_apply"));
+                double roll = RelationshipsService.StableUnit(string.Join("|", campaignId, timelineId, missionId, "social_apply"));
                 if (type.Contains("mitigate") && type.Contains("rumor"))
                 {
                     string status = ReignSpymasterCore.SocialMitigationOutcome(type, roll);
@@ -313,7 +313,7 @@ VALUES($occurrence,$subject,$tag,'target',$description,$value,0,'active','[]',$s
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureSpymasterSchema(connection);
-                bool hasRelationshipTable = Program.TableExists(connection, "relationships");
+                bool hasRelationshipTable = WorldSimulationService.TableExists(connection, "relationships");
                 List<Dictionary<string, object>> assignments = Program.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id,sponsor_ruler_id,
 settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json
 FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY sponsor_kingdom_id,agent_hero_id;",
@@ -362,12 +362,12 @@ FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$time
                         {
                             double projectedDay = day + cycle * 5d;
                             List<Dictionary<string, object>> ranked = candidateDiagnostics.Where(x => ReadBool(x, "eligible", false))
-                                .OrderBy(x => Program.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(projectedDay / 5d), ReadString(x, "heroId", ""), "candidate"))).ToList();
+                                .OrderBy(x => RelationshipsService.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(projectedDay / 5d), ReadString(x, "heroId", ""), "candidate"))).ToList();
                             foreach (Dictionary<string, object> candidate in ranked)
                             {
                                 string heroId = ReadString(candidate, "heroId", "");
                                 double chance = ReignSpymasterCore.RecruitmentChance(ReadDouble(candidate, "loyalty", 40d)) / 100d;
-                                double roll = Program.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(projectedDay / 5d), heroId, "recruit"));
+                                double roll = RelationshipsService.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(projectedDay / 5d), heroId, "recruit"));
                                 if (roll >= chance) continue;
                                 projected = new Dictionary<string, object>
                                 {
@@ -420,7 +420,7 @@ FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$time
             using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 EnsureSpymasterSchema(connection);
-                bool hasRelationshipTable = Program.TableExists(connection, "relationships");
+                bool hasRelationshipTable = WorldSimulationService.TableExists(connection, "relationships");
                 foreach (Dictionary<string, object> enemy in enemies)
                 {
                     string sponsor = ReadString(enemy, "kingdomId", "");
@@ -447,7 +447,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                                     : null;
                                 double loyalty = relationship == null ? ReadDouble(x, "nativeLoyaltyFallback", 50d) : ReadDouble(relationship, "loyalty", 50d);
                                 x["_loyalty"] = loyalty;
-                                x["_rank"] = Program.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(day / 5d), heroId, "candidate"));
+                                x["_rank"] = RelationshipsService.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(day / 5d), heroId, "candidate"));
                                 return x;
                             }).Where(x => ReadDouble(x, "_loyalty", 50d) <= 40d).OrderBy(x => ReadDouble(x, "_rank", 1d)).ToList();
                         foreach (Dictionary<string, object> candidate in eligible)
@@ -455,7 +455,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline;",
                             string heroId = ReadString(candidate, "heroId", "");
                             double loyalty = Math.Max(0d, Math.Min(40d, ReadDouble(candidate, "_loyalty", 40d)));
                             double chance = ReignSpymasterCore.RecruitmentChance(loyalty) / 100d;
-                            double roll = Program.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(day / 5d), heroId, "recruit"));
+                            double roll = RelationshipsService.StableUnit(string.Join("|", campaignId, sponsor, Math.Floor(day / 5d), heroId, "recruit"));
                             if (roll >= chance) continue;
                             Program.ExecuteSql(connection, @"INSERT INTO foreign_agent_assignments(campaign_id,timeline_id,agent_hero_id,sponsor_kingdom_id,
 sponsor_ruler_id,settlement_id,is_notable,status,recruited_day,next_action_day,last_action_day,payload_json,updated_ts)
@@ -465,7 +465,7 @@ VALUES($campaign,$timeline,$agent,$sponsor,$ruler,$settlement,$notable,'dormant'
                                     ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = heroId, ["sponsor"] = sponsor,
                                     ["ruler"] = sponsorRuler, ["settlement"] = ReadString(candidate, "settlementId", ""),
                                     ["notable"] = ReadBool(candidate, "isNotable", false) ? 1 : 0, ["day"] = day,
-                                    ["next"] = day + 1d + Math.Floor(Program.StableUnit(heroId + "|first_action") * 20d),
+                                    ["next"] = day + 1d + Math.Floor(RelationshipsService.StableUnit(heroId + "|first_action") * 20d),
                                     ["payload"] = Json.Serialize(new Dictionary<string, object> { ["hiddenAffiliation"] = sponsor, ["loyaltyAtRecruitment"] = loyalty }),
                                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                                 });
@@ -499,7 +499,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
                     }
                     if (ReadString(agent, "status", "") != "active" || ReadDouble(agent, "next_action_day", day + 1d) > day) continue;
                     string agentId = ReadString(agent, "agent_hero_id", "");
-                    double productionActionRoll = Program.StableUnit(string.Join("|", campaignId, agentId, Math.Floor(day), "action"));
+                    double productionActionRoll = RelationshipsService.StableUnit(string.Join("|", campaignId, agentId, Math.Floor(day), "action"));
                     Dictionary<string, object> controlledAction = payload.TryGetValue("controlledAgentAction", out object controlledValue)
                         ? controlledValue as Dictionary<string, object> : null;
                     bool controlled = controlledAction != null
@@ -512,13 +512,13 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
                     if (actionRoll < 0.58d)
                     {
                         string[] types = { "food", "construction", "security", "loyalty" };
-                        int index = Math.Min(types.Length - 1, (int)Math.Floor(Program.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|type") * types.Length));
+                        int index = Math.Min(types.Length - 1, (int)Math.Floor(RelationshipsService.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|type") * types.Length));
                         string effect = types[index];
                         string actionId = "foreign-agent-" + agentId + "-" + Math.Floor(day).ToString("0", CultureInfo.InvariantCulture) + "-" + effect;
                         createdActionId = actionId;
-                        double detectRoll = Program.StableUnit(actionId + "|detect");
+                        double detectRoll = RelationshipsService.StableUnit(actionId + "|detect");
                         bool detected = detectRoll < 0.25d;
-                        bool attributed = detected && Program.StableUnit(actionId + "|attribute") < 0.35d;
+                        bool attributed = detected && RelationshipsService.StableUnit(actionId + "|attribute") < 0.35d;
                         actions.Add(new Dictionary<string, object>
                         {
                             ["actionId"] = actionId,
@@ -533,7 +533,7 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
                                 : "A hidden foreign agent disrupted the settlement without detection."
                         });
                     }
-                    double next = day + 1d + Math.Floor(Program.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|next") * 20d);
+                    double next = day + 1d + Math.Floor(RelationshipsService.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|next") * 20d);
                     Program.ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET last_action_day=$day,next_action_day=$next,updated_ts=$ts
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;", new Dictionary<string, object>
                     { ["day"] = day, ["next"] = next, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = agentId });
@@ -603,7 +603,7 @@ FROM foreign_agent_assignments WHERE campaign_id=$campaign AND timeline_id=$time
                 result["source"] = "missing_ruler_identity";
                 return result;
             }
-            if (!Program.TableExists(connection, "relationship_pair_chemistry"))
+            if (!WorldSimulationService.TableExists(connection, "relationship_pair_chemistry"))
             {
                 result["source"] = "missing_relationship_pair_table";
                 return result;

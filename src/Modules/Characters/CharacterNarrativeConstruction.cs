@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static readonly ConcurrentDictionary<string, object> NarrativeConstructionLocks = new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
@@ -17,11 +17,11 @@ namespace ReignBetaServer
                     + "-token output limit before returning a complete character. The completed sections were kept; another identical attempt was not sent.") { }
         }
 
-        private static bool NormalizeCharacterConstructionBudget(Dictionary<string, object> settings)
+        internal static bool NormalizeCharacterConstructionBudget(Dictionary<string, object> settings)
         {
             bool initialized = ReadBool(settings, "characterConstructionBudgetInitialized", false);
-            int previous = ReadInt(settings, "characterConstructionMaxTokens", CharacterConstructionTokenCeiling);
-            int maximum = initialized ? CharacterConstructionMaxTokensForAttempt(previous, 1) : CharacterConstructionTokenCeiling;
+            int previous = ReadInt(settings, "characterConstructionMaxTokens", Program.CharacterConstructionTokenCeiling);
+            int maximum = initialized ? Program.CharacterConstructionMaxTokensForAttempt(previous, 1) : Program.CharacterConstructionTokenCeiling;
             settings["characterConstructionMaxTokens"] = maximum;
             settings["characterConstructionBudgetInitialized"] = true;
             return !initialized || maximum != previous;
@@ -72,9 +72,9 @@ namespace ReignBetaServer
             Dictionary<string, object> hero, Dictionary<string, object> traits, string seed,
             Func<Dictionary<string, object>, Dictionary<string, object>> provider,
             Dictionary<string, object> checkpoint = null, Action<Dictionary<string, object>> saveCheckpoint = null,
-            int maxTokens = CharacterConstructionTokenCeiling)
+            int maxTokens = Program.CharacterConstructionTokenCeiling)
         {
-            maxTokens = CharacterConstructionMaxTokensForAttempt(maxTokens, 1);
+            maxTokens = Program.CharacterConstructionMaxTokensForAttempt(maxTokens, 1);
             var blueprint = BuildNarrativeBlueprint(hero, seed, traits);
             string inputFingerprint = NarrativeAuthoringFingerprint(hero, traits, seed, blueprint);
             var document = checkpoint != null && ReadString(checkpoint, "inputFingerprint", "") == inputFingerprint
@@ -179,7 +179,7 @@ namespace ReignBetaServer
                 if (!accepted) document["status"] = "blueprint";
                 attempts.Add(new Dictionary<string, object> { ["stage"] = "single_call", ["attempt"] = attempt,
                     ["ok"] = accepted, ["errors"] = errors.Distinct().ToList(), ["provider"] = ReadString(response, "provider", ""),
-                    ["providerError"] = LimitText(ReadString(response, "error", ""), 1200),
+                    ["providerError"] = Program.LimitText(ReadString(response, "error", ""), 1200),
                     ["model"] = ReadString(response, "model", ""), ["finishReason"] = ReadString(response, "finishReason", ""),
                     ["durationMs"] = timer.ElapsedMilliseconds, ["maxTokens"] = maxTokens,
                     ["requestCharacters"] = NarrativeAuthorPolicy.Length + userPrompt.Length,
@@ -189,7 +189,7 @@ namespace ReignBetaServer
                 document["authoringMethod"] = "single_call_v1";
                 if (accepted) document["authoring"] = "library_plus_character_construction_provider";
                 saveCheckpoint?.Invoke(document);
-                if (!ReadBool(response, "ok", false)) throw new InvalidOperationException("Narrative provider request failed: " + LimitText(ReadString(response, "error", "Provider unavailable."), 1200));
+                if (!ReadBool(response, "ok", false)) throw new InvalidOperationException("Narrative provider request failed: " + Program.LimitText(ReadString(response, "error", "Provider unavailable."), 1200));
                 if (accepted) return document;
                 var remainingLifeErrors = NarrativeLifeErrors(document);
                 int incompleteSectionsAfter = ReadDictionaryList(document, "items").Count(item => !NarrativeItemTextReady(item))
@@ -218,7 +218,7 @@ namespace ReignBetaServer
         private static string NarrativeAuthoringFingerprint(Dictionary<string, object> hero,
             Dictionary<string, object> traits, string seed, Dictionary<string, object> blueprint = null)
         {
-            return PromptHash(Json.Serialize(hero) + Json.Serialize(traits) + seed + NarrativeAuthorPolicy
+            return Program.PromptHash(Json.Serialize(hero) + Json.Serialize(traits) + seed + NarrativeAuthorPolicy
                 + Json.Serialize(LoadNarrativeLibrary()) + Json.Serialize(blueprint ?? BuildNarrativeBlueprint(hero, seed, traits)));
         }
 
@@ -242,79 +242,79 @@ namespace ReignBetaServer
             return errors;
         }
 
-        private static Dictionary<string, object> ConstructNarrativeCharacter(string campaignId, string heroId,
+        internal static Dictionary<string, object> ConstructNarrativeCharacter(string campaignId, string heroId,
             Dictionary<string, object> hero, bool force, string source)
         {
-            string path = CharacterFile(campaignId, heroId, "narrative.json");
-            var existing = ReadJsonObject(path);
-            var traits = ReadJsonObject(CharacterFile(campaignId, heroId, "traits.json"));
-            if (!TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
-            string stagedPath = CharacterFile(campaignId, heroId, "narrative_authoring.json");
-            var settings = LoadSettings();
+            string path = Program.CharacterFile(campaignId, heroId, "narrative.json");
+            var existing = Program.ReadJsonObject(path);
+            var traits = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"));
+            if (!Program.TraitDocumentReady(traits)) traits = BuildTraitDocument(hero);
+            string stagedPath = Program.CharacterFile(campaignId, heroId, "narrative_authoring.json");
+            var settings = Program.LoadSettings();
             try
             {
                 var narrative = !force && NarrativeDocumentReady(existing) ? existing :
                     AuthorCharacterNarrative(hero, traits, "dynamic/" + campaignId + "/" + heroId,
-                        ChatWithLlm, force && NarrativeDocumentReady(existing) ? null : ReadJsonObject(stagedPath), value => WriteJsonObject(stagedPath, value),
-                        ReadInt(settings, "characterConstructionMaxTokens", CharacterConstructionTokenCeiling));
+                        Program.ChatWithLlm, force && NarrativeDocumentReady(existing) ? null : Program.ReadJsonObject(stagedPath), value => Program.WriteJsonObject(stagedPath, value),
+                        ReadInt(settings, "characterConstructionMaxTokens", Program.CharacterConstructionTokenCeiling));
                 // Publish only a complete document. The projections are derived from this
                 // single atomically written source, never from partially completed stages.
                 lock (NarrativeStateLock)
                 {
                     if (source == TownNotableProfileSource && !TownProfilePublicationAllowed(campaignId, heroId))
                         return TestDict("ok", false, "status", "speculative_superseded");
-                    WriteJsonObject(path, narrative);
-                    WriteJsonObject(CharacterFile(campaignId, heroId, "traits.json"), traits);
+                    Program.WriteJsonObject(path, narrative);
+                    Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "traits.json"), traits);
                     var projection = new Dictionary<string, object> { ["narrative"] = narrative,
                         ["background"] = new Dictionary<string, object> { ["nativeEncyclopediaText"] = ReadString(hero, "nativeEncyclopediaText", "") } };
                     ApplyNarrativePromptProjection(projection);
                     foreach (var part in new Dictionary<string, string> { ["background"] = "background", ["voice"] = "voice", ["motivations"] = "motivations",
                         ["saveQuirks"] = "save_quirks", ["hiddenHistory"] = "hidden_history", ["secrets"] = "secrets" })
-                        WriteJsonObject(CharacterFile(campaignId, heroId, part.Value + ".json"), projection[part.Key]);
+                        Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, part.Value + ".json"), projection[part.Key]);
                     var ready = new Dictionary<string, object> { ["ok"] = true, ["status"] = "ready", ["llmUsed"] = true,
-                        ["constructionEngineVersion"] = CharacterConstructionEngineVersion, ["narrativeSchema"] = NarrativeSchema,
+                        ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion, ["narrativeSchema"] = NarrativeSchema,
                         ["source"] = source ?? "character_construction", ["constructedUtc"] = DateTime.UtcNow.ToString("o") };
-                    WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), ready);
-                    InvalidatePromptRuntimeCache();
+                    Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), ready);
+                    Program.InvalidatePromptRuntimeCache();
                     return ready;
                 }
             }
             catch (Exception ex)
             {
-                if (ex is CampaignRequestReplacedException) throw;
+                if (ex is PersistenceService.CampaignRequestReplacedException) throw;
                 var failure = new Dictionary<string, object> { ["ok"] = false, ["status"] = "failed",
                     ["error"] = ex.Message, ["failureKind"] = ex is NarrativeOutputLimitException ? "output_limit"
-                        : ex.Message.StartsWith("Narrative provider request failed") ? CharacterFailureKindFromText(ex.Message) : "parse",
-                    ["settingsRevision"] = ReadString(settings, "settingsRevision", ""), ["settingsFingerprint"] = SettingsFingerprint(settings),
-                    ["constructionEngineVersion"] = CharacterConstructionEngineVersion, ["failedUtc"] = DateTime.UtcNow.ToString("o") };
-                if (ReadString(existing, "status", "") != "ready") WriteJsonObject(CharacterFile(campaignId, heroId, "constructed.json"), failure);
+                        : ex.Message.StartsWith("Narrative provider request failed") ? Program.CharacterFailureKindFromText(ex.Message) : "parse",
+                    ["settingsRevision"] = ReadString(settings, "settingsRevision", ""), ["settingsFingerprint"] = Program.SettingsFingerprint(settings),
+                    ["constructionEngineVersion"] = Program.CharacterConstructionEngineVersion, ["failedUtc"] = DateTime.UtcNow.ToString("o") };
+                if (ReadString(existing, "status", "") != "ready") Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"), failure);
                 return failure;
             }
         }
 
-        private static Dictionary<string, object> EnsureNarrativeCharacterConstructed(string campaignId, string heroId,
+        internal static Dictionary<string, object> EnsureNarrativeCharacterConstructed(string campaignId, string heroId,
             Dictionary<string, object> hero, string source)
         {
-            using (EnterCampaignWorkLock(NarrativeConstructionLocks.GetOrAdd(campaignId + "|" + heroId, _ => new object())))
+            using (PersistenceService.EnterCampaignWorkLock(NarrativeConstructionLocks.GetOrAdd(campaignId + "|" + heroId, _ => new object())))
             {
                 if (LoadCharacterProfileLibrary().ContainsKey(heroId))
                 {
                     var materialized = MaterializeCharacterProfile(campaignId, heroId, hero, false, false);
                     if (!ReadBool(materialized, "ok", false)) return materialized;
-                    var ready = ReadJsonObject(CharacterFile(campaignId, heroId, "constructed.json"));
-                    ready["ok"] = NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaignId, heroId, "narrative.json")));
+                    var ready = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
+                    ready["ok"] = NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json")));
                     return ready;
                 }
-                var existing = ReadJsonObject(CharacterFile(campaignId, heroId, "constructed.json"));
-                bool complete = NarrativeDocumentReady(ReadJsonObject(CharacterFile(campaignId, heroId, "narrative.json")));
-                if (complete && ReadString(existing, "narrativeSchema", "") == NarrativeSchema && IsCharacterConstructionReady(existing))
+                var existing = Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "constructed.json"));
+                bool complete = NarrativeDocumentReady(Program.ReadJsonObject(Program.CharacterFile(campaignId, heroId, "narrative.json")));
+                if (complete && ReadString(existing, "narrativeSchema", "") == NarrativeSchema && Program.IsCharacterConstructionReady(existing))
                 { existing["alreadyReady"] = true; return existing; }
-                if (!complete && ReadString(existing, "status", "") == "failed" && !ShouldRetryFailedConstruction(existing, LoadSettings()))
+                if (!complete && ReadString(existing, "status", "") == "failed" && !Program.ShouldRetryFailedConstruction(existing, Program.LoadSettings()))
                 { existing["ok"] = false; existing["alreadyFailed"] = true; return existing; }
                 // New characters have their full story before speaking. A partial stage
                 // stays in its checkpoint and cannot be presented as a completed profile.
                 var result = ConstructNarrativeCharacter(campaignId, heroId, hero, false, source);
-                if (IsCharacterConstructionReady(result) && source != TownNotableProfileSource)
+                if (Program.IsCharacterConstructionReady(result) && source != TownNotableProfileSource)
                     MarkCharacterConstructionCompletedOnInteraction(campaignId, heroId, source);
                 return result;
             }

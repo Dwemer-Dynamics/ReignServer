@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class WorldSimulationService
     {
-        private const string MarriageDialogueCompletionContract =
+        internal const string MarriageDialogueCompletionContract =
             "Native spouse identity is authoritative. Accepted proposals, vows, a narrated priest or ceremony, "
             + "and earlier dialogue are not proof that a marriage completed. Never call the player your spouse "
             + "unless current native spouse data confirms it. If both people consent to completing their marriage "
@@ -15,7 +15,7 @@ namespace ReignBetaServer
             + "couple in intent. A request to perform the agreed ceremony is still executable, not roleplay_only. "
             + "Questions, hypotheticals, refusals and agreements about other relatives do not authorize this couple.";
 
-        private static bool IsCanonicalRouterArgument(string key)
+        internal static bool IsCanonicalRouterArgument(string key)
         {
             string compact = Regex.Replace(key ?? "", "[^a-zA-Z0-9]", "").ToLowerInvariant();
             if (compact.StartsWith("terms", StringComparison.Ordinal)) return true;
@@ -37,11 +37,11 @@ namespace ReignBetaServer
             }
         }
 
-        private static void BindDialogueMarriageParticipants(Dictionary<string, object> raw,
+        internal static void BindDialogueMarriageParticipants(Dictionary<string, object> raw,
             Dictionary<string, object> terms, Dictionary<string, object> payload,
             string command, List<string> errors)
         {
-            if (command != "marriage_alliance" || !IsDialogueActionSource(ReadString(raw, "source", ""))) return;
+            if (command != "marriage_alliance" || !Program.IsDialogueActionSource(ReadString(raw, "source", ""))) return;
             Dictionary<string, object> hero = ReadDictionary(payload, "hero") ?? new Dictionary<string, object>();
             string player = FirstNonEmpty(ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId"),
                 ReadFirstString(hero, "mainHeroStringId", "playerHeroStringId"));
@@ -80,8 +80,8 @@ namespace ReignBetaServer
                 }
             }
             Dictionary<string, object> index = ReadDictionary(payload, "actionResolutionIndex");
-            Dictionary<string, object> playerRow = FindIndexedRow(index, "heroes", "heroStringId", player);
-            Dictionary<string, object> speakerRow = FindIndexedRow(index, "heroes", "heroStringId", speaker);
+            Dictionary<string, object> playerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", player);
+            Dictionary<string, object> speakerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", speaker);
             if (playerRow == null || speakerRow == null)
             {
                 errors.Add("Both consenting spouses must exist in the live hero index.");
@@ -126,13 +126,13 @@ namespace ReignBetaServer
                 ReadString(hero, "heroStringId", ""));
             if (string.IsNullOrWhiteSpace(player) || string.IsNullOrWhiteSpace(speaker)) return false;
             Dictionary<string, object> index = ReadDictionary(payload, "actionResolutionIndex");
-            Dictionary<string, object> playerRow = FindIndexedRow(index, "heroes", "heroStringId", player);
-            Dictionary<string, object> speakerRow = FindIndexedRow(index, "heroes", "heroStringId", speaker) ?? hero;
+            Dictionary<string, object> playerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", player);
+            Dictionary<string, object> speakerRow = Program.FindIndexedRow(index, "heroes", "heroStringId", speaker) ?? hero;
             return player.Equals(ReadString(speakerRow, "spouseId", ""), StringComparison.OrdinalIgnoreCase)
                 && speaker.Equals(ReadString(playerRow, "spouseId", ""), StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool HasUnconfirmedMarriageClaim(string reply, Dictionary<string, object> payload,
+        internal static bool HasUnconfirmedMarriageClaim(string reply, Dictionary<string, object> payload,
             Dictionary<string, object> hero)
         {
             string unquoted = Regex.Replace(reply ?? "", "[\\\"“][^\\\"”]*[\\\"”]|(?<!\\w)'[^']*'(?!\\w)", "");
@@ -141,7 +141,7 @@ namespace ReignBetaServer
                 RegexOptions.IgnoreCase) && !NativePlayerMarriageConfirmed(payload, hero);
         }
 
-        private static string FinalizeDialogueActionOutcome(string reply, Dictionary<string, object> payload,
+        internal static string FinalizeDialogueActionOutcome(string reply, Dictionary<string, object> payload,
             Dictionary<string, object> hero, List<Dictionary<string, object>> queued, List<string> errors)
         {
             bool queuedMarriage = (queued ?? new List<Dictionary<string, object>>()).Any(row =>
@@ -155,7 +155,7 @@ namespace ReignBetaServer
                     : "[Reign: The marriage has not been confirmed in the game. The ceremony described in dialogue did not complete it.]";
             }
             if ((queued == null || queued.Count == 0) && errors != null && errors.Count > 0)
-                return (reply ?? "").TrimEnd() + "\n\n" + DialogueActionFailureNotice;
+                return (reply ?? "").TrimEnd() + "\n\n" + Program.DialogueActionFailureNotice;
             return reply;
         }
     }

@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
 {
-    internal static partial class Program
+    internal static partial class CharactersService
     {
         private static readonly HashSet<string> DynamicCharacteristicCategories = new HashSet<string>(new[]
         {
@@ -15,7 +15,7 @@ namespace ReignBetaServer
             "local_connection", "skill_practice", "personal_value", "social_tendency", "aspiration"
         }, StringComparer.OrdinalIgnoreCase);
 
-        private const string DynamicCharacteristicsPromptPolicy =
+        internal const string DynamicCharacteristicsPromptPolicy =
             "Dynamic Characteristics are generated personal history: low-impact details the current NPC creates about their own past, habits, preferences, formative experiences, local ties, practiced skills, values, social tendencies, or aspirations. " +
             "They are soft character canon, not objective proof about the campaign world or another person. Emit exactly one dynamicCharacteristicWrites item whenever the visible reply actually introduces or materially develops a stable compatible self-detail; otherwise emit []. Do not omit the write merely because the detail appears in natural dialogue rather than a formal biography. " +
             "Do not create one merely because the player asks a recall question. Never use this lane for current location, current ownership, troop counts, titles, clan or kingdom membership, named relatives, marriages, deaths, crimes by another person, wars, conquests, rescues, gifts, or other externally verifiable events. " +
@@ -23,14 +23,14 @@ namespace ReignBetaServer
             "Use a stable topicKey such as upbringing_place, market_morning_habit, woodworking_training, or fear_of_deep_water. If an existing entry covers that topic, develop it consistently instead of writing a duplicate or contradiction. Authoritative native and world-history evidence always overrides soft canon. " +
             "A skill_practice detail may explain where or how the NPC practiced, but it never changes or outranks the supplied native skill value and proficiency description; do not turn low proficiency into factual expertise.";
 
-        private const string DynamicCharacteristicsOutputContract =
+        internal const string DynamicCharacteristicsOutputContract =
             "Required JSON field: dynamicCharacteristicWrites is an array containing at most one object with text, category, topicKey, confidence, importance, and sourceBasis. Before returning JSON, inspect the visible reply you wrote: if it establishes or materially develops a stable compatible self-detail, this array must contain that detail; use [] only when the reply contains no such detail. " +
             "text is a concise third-person fact about the speaking NPC which was actually expressed in the visible reply. category must be personal_history, formative_experience, habit, preference, aversion, local_connection, skill_practice, personal_value, social_tendency, or aspiration. " +
             "sourceBasis must be npc_generated_personal_history. Use [] when no compatible new personal detail was introduced." + NarrativeDevelopmentContract;
 
-        private static void EnsureDynamicCharacteristicsSchema(ReignDbConnection connection)
+        internal static void EnsureDynamicCharacteristicsSchema(ReignDbConnection connection)
         {
-            ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS dynamic_characteristics (
+            Program.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS dynamic_characteristics (
 characteristic_id TEXT PRIMARY KEY,
 owner_id TEXT NOT NULL,
 category TEXT NOT NULL DEFAULT 'personal_history',
@@ -55,12 +55,12 @@ first_ts INTEGER NOT NULL,
 last_ts INTEGER NOT NULL,
 repeat_count INTEGER NOT NULL DEFAULT 1,
 payload_json TEXT NOT NULL DEFAULT '{}');");
-            ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_key ON dynamic_characteristics(owner_id,normalized_key);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_status ON dynamic_characteristics(owner_id,status,last_ts DESC);");
-            ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_topic ON dynamic_characteristics(owner_id,topic_key,status);");
+            Program.ExecuteSql(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_key ON dynamic_characteristics(owner_id,normalized_key);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_owner_status ON dynamic_characteristics(owner_id,status,last_ts DESC);");
+            Program.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_dynamic_characteristic_topic ON dynamic_characteristics(owner_id,topic_key,status);");
         }
 
-        private static List<Dictionary<string, object>> NormalizeDynamicCharacteristicWrites(
+        internal static List<Dictionary<string, object>> NormalizeDynamicCharacteristicWrites(
             Dictionary<string, object> parsed,
             string heroId,
             Dictionary<string, object> profile,
@@ -83,13 +83,13 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             foreach (Dictionary<string, object> item in raw)
             {
                 string text = ReadFirstString(item, "text", "fact", "characteristic", "summary").Trim();
-                string category = NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
+                string category = Program.NormalizeLookup(ReadString(item, "category", "personal_history")).Replace(' ', '_').Replace('-', '_');
                 if (!DynamicCharacteristicCategories.Contains(category)) category = "personal_history";
                 string topicKey = NormalizeDynamicTopicKey(ReadFirstString(item, "topicKey", "topic_key"), category, text);
-                string sourceBasis = NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
+                string sourceBasis = Program.NormalizeLookup(ReadFirstString(item, "sourceBasis", "source_basis"));
                 if (string.IsNullOrWhiteSpace(sourceBasis)) sourceBasis = "npc_generated_personal_history";
                 string rejection = DynamicCharacteristicRejectionReason(text, heroId, profile, payload, visibleReply);
-                var evidence = BindConversationSource(item, CurrentConversationSources("", heroId, "", visibleReply,
+                var evidence = Program.BindConversationSource(item, Program.CurrentConversationSources("", heroId, "", visibleReply,
                     ReadString(payload, "sceneTurnId", "")), heroId, ReadString(payload, "sceneTurnId", ""));
                 if (ReadDictionary(item, "sourceEvidence") != null && ReadString(evidence, "status", "") != "supported_span")
                     rejection = "unverified_source_span";
@@ -103,8 +103,8 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     ["text"] = text,
                     ["category"] = category,
                     ["topicKey"] = topicKey,
-                    ["confidence"] = ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
-                    ["importance"] = ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
+                    ["confidence"] = Program.ClampDouble(ReadDouble(item, "confidence", 0.65d), 0.35d, 0.9d),
+                    ["importance"] = Program.ClampDouble(ReadDouble(item, "importance", 0.5d), 0.15d, 0.85d),
                     ["sourceBasis"] = sourceBasis,
                     ["sourceEvidence"] = evidence,
                     ["narrativeDevelopment"] = development,
@@ -154,7 +154,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             string name = FirstNonEmpty(ReadString(profile, "name", ""), "The speaking character");
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["text"] = LimitText(name + " " + thirdPersonVerb + " " + detail + ".", 500),
+                ["text"] = Program.LimitText(name + " " + thirdPersonVerb + " " + detail + ".", 500),
                 ["category"] = aversion ? "aversion" : sourceVerb.Equals("value", StringComparison.OrdinalIgnoreCase)
                     || sourceVerb.Equals("admire", StringComparison.OrdinalIgnoreCase) ? "personal_value" : "preference",
                 ["topicKey"] = "",
@@ -179,18 +179,18 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             string frequency = match.Groups[1].Value.Trim().ToLowerInvariant();
             string detail = Regex.Replace(match.Groups[2].Value.Trim(), @"\s+", " ")
                 .Trim(' ', ',', ';', ':', '-', '\u2014');
-            string normalized = NormalizeLookup(detail);
+            string normalized = Program.NormalizeLookup(detail);
             if (detail.Length < 3
                 || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
                 || Regex.IsMatch(normalized,
                     @"^(?:do|did|feel|find|keep|have|remember|think|believe|want|mean)\s+(?:it|this|that|so)\b",
                     RegexOptions.IgnoreCase)
-                || MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 2)
+                || Program.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 2)
                 return null;
             string name = FirstNonEmpty(ReadString(profile, "name", ""), "The speaking character");
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["text"] = LimitText(name + " " + frequency + " " + detail + ".", 500),
+                ["text"] = Program.LimitText(name + " " + frequency + " " + detail + ".", 500),
                 ["category"] = "habit",
                 ["topicKey"] = "",
                 ["confidence"] = 0.7d,
@@ -222,10 +222,10 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 string article = match.Groups[1].Value.Trim().ToLowerInvariant();
                 string detail = Regex.Replace(match.Groups[2].Value.Trim(), @"\s+", " ")
                     .Trim(' ', ',', ';', ':', '-', '\u2014');
-                string normalized = NormalizeLookup(detail);
+                string normalized = Program.NormalizeLookup(detail);
                 if (detail.Length < 3
                     || DynamicCharacteristicMatchIsMetalinguistic(reply, match, detail)
-                    || MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
+                    || Program.MemoryQueryTerms(detail).Distinct(StringComparer.OrdinalIgnoreCase).Count() < 1
                     || Regex.IsMatch(normalized,
                         @"^(?:record|records|ledger|list|account|accounts|track|watch|guard|troops?|soldiers?|gold|denars?|prisoners?|inventory)\b",
                         RegexOptions.IgnoreCase))
@@ -237,7 +237,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     // invention, this lets the normal grounding check prove even a
                     // one-word object ("I keep a die") without depending on the
                     // visible prose to repeat the speaker's full name.
-                    ["text"] = LimitText("I keep " + article + " " + detail + ".", 500),
+                    ["text"] = Program.LimitText("I keep " + article + " " + detail + ".", 500),
                     ["category"] = "personal_history",
                     ["topicKey"] = "",
                     ["confidence"] = 0.7d,
@@ -262,7 +262,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     RegexOptions.IgnoreCase);
         }
 
-        private static bool ReplyLikelyIntroducesDynamicCharacteristic(string visibleReply)
+        internal static bool ReplyLikelyIntroducesDynamicCharacteristic(string visibleReply)
         {
             string reply = visibleReply ?? "";
             if (InferExplicitDynamicPreferenceOrAversion(new Dictionary<string, object>(), reply) != null) return true;
@@ -274,13 +274,13 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
 
         private static string NormalizeDynamicTopicKey(string supplied, string category, string text)
         {
-            string value = Regex.Replace(NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
-            if (!string.IsNullOrWhiteSpace(value)) return LimitText(value, 80);
-            List<string> terms = MemoryQueryTerms(text).Take(5).ToList();
-            return LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
+            string value = Regex.Replace(Program.NormalizeLookup(supplied), @"[^a-z0-9]+", "_").Trim('_');
+            if (!string.IsNullOrWhiteSpace(value)) return Program.LimitText(value, 80);
+            List<string> terms = Program.MemoryQueryTerms(text).Take(5).ToList();
+            return Program.LimitText((category ?? "personal_history") + "_" + string.Join("_", terms), 80);
         }
 
-        private static string DynamicCharacteristicRejectionReason(string text, string heroId,
+        internal static string DynamicCharacteristicRejectionReason(string text, string heroId,
             Dictionary<string, object> profile, Dictionary<string, object> payload, string visibleReply)
         {
             string clean = (text ?? "").Trim();
@@ -292,8 +292,8 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 || visibleReply.IndexOf(FirstDynamicEvidencePhrase(clean), StringComparison.OrdinalIgnoreCase) < 0
                     && !HasDynamicTextEvidence(clean, visibleReply))
                 return "not_expressed_in_visible_reply";
-            if (IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
-            string q = NormalizeLookup(clean);
+            if (Program.IsConversationCharacteristicRhetoric(clean)) return "conversation_rhetoric_is_not_stable_characterization";
+            string q = Program.NormalizeLookup(clean);
             if (!DynamicCharacteristicIsAboutSpeaker(clean, profile))
                 return "not_about_speaking_character";
             if (Regex.IsMatch(q, @"\b(?:we|i)\s+(?:am|are|'m|'re)\s+(?:currently|presently|now)\s+(?:in|at)\b", RegexOptions.IgnoreCase)
@@ -303,7 +303,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                 || Regex.IsMatch(clean, @"\b[A-Z][\p{L}'-]+(?:'s|\u2019s)\s+(?i:wife|husband|spouse|father|mother|parent|son|daughter|child|brother|sister)\s+(?i:is|was|named|called)\s+(?!(?i:a|an|the)\b)[A-Z][\p{L}'-]+")
                 || Regex.IsMatch(q, @"\b(?:i am|i'm|he is|he's|she is|she's|they are|they're)\s+(?:unmarried|married|widowed)\b", RegexOptions.IgnoreCase))
                 return "family_links_require_native_evidence";
-            if (ContainsAny(q, "conquered ", "captured ", "declared war", "made peace", "became king", "became queen",
+            if (Program.ContainsAny(q, "conquered ", "captured ", "declared war", "made peace", "became king", "became queen",
                     "rules the kingdom", "owns the town", "owns the castle", "murdered ", "assassinated ", "saved your family"))
                 return "externally_verifiable_event_requires_world_history";
             if (Regex.IsMatch(q, @"\b\d+\s+(?:troops|men|soldiers|denars|gold)\b", RegexOptions.IgnoreCase))
@@ -316,7 +316,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return string.Join(" ", Regex.Split(text ?? "", @"\s+").Where(x => x.Length > 2).Take(3));
         }
 
-        private static bool HasDynamicTextEvidence(string summary, string visibleReply)
+        internal static bool HasDynamicTextEvidence(string summary, string visibleReply)
         {
             // Grounding must inspect the complete visible reply. MemoryQueryTerms intentionally
             // keeps only the first 32 distinct terms for retrieval, which made valid details late
@@ -333,7 +333,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return shared >= Math.Min(3, summaryTerms.Count);
         }
 
-        private static HashSet<string> DynamicEvidenceTerms(string text)
+        internal static HashSet<string> DynamicEvidenceTerms(string text)
         {
             HashSet<string> stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -372,7 +372,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
 
         private static bool DynamicCharacteristicIsAboutSpeaker(string text, Dictionary<string, object> profile)
         {
-            string normalized = NormalizeLookup(text);
+            string normalized = Program.NormalizeLookup(text);
             if (Regex.IsMatch(normalized, @"\b(i|my|me|mine|we|our|this character|the speaker)\b", RegexOptions.IgnoreCase)) return true;
             string fullName = ReadString(profile, "name", "").Trim();
             if (!string.IsNullOrWhiteSpace(fullName) && text.IndexOf(fullName, StringComparison.OrdinalIgnoreCase) >= 0) return true;
@@ -386,7 +386,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             return distinctiveNameTerms.Any(term => Regex.IsMatch(text, @"\b" + Regex.Escape(term) + @"\b", RegexOptions.IgnoreCase));
         }
 
-        private static Dictionary<string, object> StoreDynamicCharacteristicWrites(
+        internal static Dictionary<string, object> StoreDynamicCharacteristicWrites(
             string campaignId,
             string heroId,
             List<Dictionary<string, object>> writes,
@@ -406,10 +406,10 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
             string sessionId = ReadFirstString(conversationExchange, "sessionId", "session_id");
             string exchangeId = ReadFirstString(conversationExchange, "exchangeId", "exchange_id");
             List<string> turnIds = ReadStringList(conversationExchange, "turnIds");
-            List<string> knownBy = MergeStringLists(audienceIds, new[] { heroId });
+            List<string> knownBy = Program.MergeStringLists(audienceIds, new[] { heroId });
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             lock (NarrativeStateLock)
-            using (ReignDbConnection connection = OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaignId))
             {
                 foreach (Dictionary<string, object> write in writes.Take(1))
                 {
@@ -421,28 +421,28 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                         continue;
                     }
                     string text = ReadString(write, "text", "").Trim();
-                    string normalized = NormalizeLookup(text);
+                    string normalized = Program.NormalizeLookup(text);
                     if (string.IsNullOrWhiteSpace(normalized)) continue;
-                    string id = "dynamic_" + PromptHash(heroId + "|" + normalized).Substring(0, 24).ToLowerInvariant();
+                    string id = "dynamic_" + Program.PromptHash(heroId + "|" + normalized).Substring(0, 24).ToLowerInvariant();
                     string status = ReadString(write, "status", "rejected");
                     string topicKey = ReadString(write, "topicKey", "");
                     string rejection = ReadString(write, "rejectionReason", "");
-                    Dictionary<string, object> existing = QuerySql(connection,
+                    Dictionary<string, object> existing = Program.QuerySql(connection,
                         "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND normalized_key=$normalized LIMIT 1;",
                         new Dictionary<string, object> { ["owner"] = heroId, ["normalized"] = normalized }).FirstOrDefault();
                     if (existing != null)
                     {
-                        knownBy = MergeStringLists(knownBy, TextListFromJson(ReadString(existing, "known_by_json", "[]")));
-                        turnIds = MergeStringLists(turnIds, TextListFromJson(ReadString(existing, "source_turn_ids_json", "[]")));
+                        knownBy = Program.MergeStringLists(knownBy, Program.TextListFromJson(ReadString(existing, "known_by_json", "[]")));
+                        turnIds = Program.MergeStringLists(turnIds, Program.TextListFromJson(ReadString(existing, "source_turn_ids_json", "[]")));
                     }
                     if (existing == null && status.Equals("active", StringComparison.OrdinalIgnoreCase))
                     {
                         // Preserve the original and record the new rejected paraphrase with its own
                         // lineage. Changing a topic key must not create a second active self-story.
-                        var equivalent = QuerySql(connection,
+                        var equivalent = Program.QuerySql(connection,
                             "SELECT characteristic_id,text FROM dynamic_characteristics WHERE owner_id=$owner AND status='active' AND category<>'narrative_development' ORDER BY last_ts DESC LIMIT 250;",
                             new Dictionary<string, object> { ["owner"] = heroId })
-                            .FirstOrDefault(row => DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text));
+                            .FirstOrDefault(row => Program.DynamicCharacteristicsEquivalent(ReadString(row, "text", ""), text));
                         if (equivalent != null)
                         {
                             status = "rejected";
@@ -454,7 +454,7 @@ payload_json TEXT NOT NULL DEFAULT '{}');");
                     }
                     if (status.Equals("active", StringComparison.OrdinalIgnoreCase))
                     {
-                        Dictionary<string, object> conflict = QuerySql(connection, @"SELECT characteristic_id,text FROM dynamic_characteristics
+                        Dictionary<string, object> conflict = Program.QuerySql(connection, @"SELECT characteristic_id,text FROM dynamic_characteristics
 WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_key<>$normalized ORDER BY last_ts DESC LIMIT 1;",
                             new Dictionary<string, object> { ["owner"] = heroId, ["topic"] = topicKey, ["normalized"] = normalized }).FirstOrDefault();
                         if (conflict != null)
@@ -474,7 +474,7 @@ WHERE owner_id=$owner AND topic_key=$topic AND status='active' AND normalized_ke
                         ["sourceCorrelationId"] = ReadFirstString(payload, "correlationId", "requestId"),
                         ["audienceIds"] = knownBy
                     };
-                    ExecuteSql(connection, @"INSERT INTO dynamic_characteristics(
+                    Program.ExecuteSql(connection, @"INSERT INTO dynamic_characteristics(
 characteristic_id,owner_id,category,topic_key,text,normalized_key,status,confidence,importance,provenance,compatibility_status,rejection_reason,
 source_event_id,source_session_id,source_exchange_id,source_turn_ids_json,source_mode,location_id,world_day,known_by_json,first_ts,last_ts,repeat_count,payload_json)
 VALUES($id,$owner,$category,$topic,$text,$normalized,$status,$confidence,$importance,'npc_generated_personal_history',$compatibility,$rejection,
@@ -498,7 +498,7 @@ payload_json=$payload;",
                             ["turns"] = Json.Serialize(turnIds), ["mode"] = sourceMode ?? "", ["location"] = locationId ?? "",
                             ["day"] = worldDay, ["known"] = Json.Serialize(knownBy), ["ts"] = ts, ["payload"] = Json.Serialize(rowPayload)
                         });
-                    Dictionary<string, object> saved = QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE characteristic_id=$id LIMIT 1;",
+                    Dictionary<string, object> saved = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE characteristic_id=$id LIMIT 1;",
                         new Dictionary<string, object> { ["id"] = id }).FirstOrDefault() ?? new Dictionary<string, object>();
                     if (ReadString(saved, "status", status).Equals("active", StringComparison.OrdinalIgnoreCase)) stored.Add(saved); else rejected.Add(saved);
                 }
@@ -513,16 +513,16 @@ payload_json=$payload;",
 
         private static void ProjectDynamicCharacteristicsFile(string campaignId, string heroId, ReignDbConnection connection)
         {
-            List<Dictionary<string, object>> rows = QuerySql(connection,
+            List<Dictionary<string, object>> rows = Program.QuerySql(connection,
                 "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'superseded' THEN 1 ELSE 2 END,importance DESC,last_ts DESC LIMIT 250;",
                 new Dictionary<string, object> { ["owner"] = heroId });
             // Current narrative overrides must not disappear when ordinary memories fill
             // the bounded display projection. History remains in the temporal database.
-            var narrativeRows = QuerySql(connection,
+            var narrativeRows = Program.QuerySql(connection,
                 "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND category='narrative_development' AND status='active';",
                 new Dictionary<string, object> { ["owner"] = heroId });
             rows = rows.Concat(narrativeRows).GroupBy(x => ReadString(x, "characteristic_id", "")).Select(x => x.First()).ToList();
-            WriteJsonObject(CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
+            Program.WriteJsonObject(Program.CharacterFile(campaignId, heroId, "dynamic_characteristics.json"), new Dictionary<string, object>
             {
                 ["schemaVersion"] = 1,
                 ["sectionName"] = "Dynamic Characteristics",
@@ -534,16 +534,16 @@ payload_json=$payload;",
             });
         }
 
-        private static string FormatDynamicCharacteristicsForPrompt(Dictionary<string, object> document)
+        internal static string FormatDynamicCharacteristicsForPrompt(Dictionary<string, object> document)
         {
             return FormatDynamicCharacteristicsForPrompt(document, "");
         }
 
-        private static string FormatDynamicCharacteristicsForPrompt(
+        internal static string FormatDynamicCharacteristicsForPrompt(
             Dictionary<string, object> document,
             string relevanceQuery)
         {
-            List<Dictionary<string, object>> active = SelectNaturalDynamicCharacteristics(document, relevanceQuery)
+            List<Dictionary<string, object>> active = Program.SelectNaturalDynamicCharacteristics(document, relevanceQuery)
                 .Where(row => ReadString(row, "category", "") != "life_transition").ToList();
             if (active.Count == 0) return "";
             StringBuilder builder = new StringBuilder();
@@ -560,7 +560,7 @@ payload_json=$payload;",
             return builder.ToString().Trim();
         }
 
-        private static List<Dictionary<string, object>> RunDynamicCharacteristicsSelfTests()
+        internal static List<Dictionary<string, object>> RunDynamicCharacteristicsSelfTests()
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
             Action<string, bool, string, object> add = (id, pass, summary, data) => rows.Add(new Dictionary<string, object>
@@ -569,7 +569,7 @@ payload_json=$payload;",
             string hero = "npc_dynamic";
             Dictionary<string, object> profile = new Dictionary<string, object>
             { ["heroStringId"] = hero, ["name"] = "Purios", ["currentSettlementName"] = "Danustica", ["currentSettlementId"] = "town_ES1" };
-            UpsertCharacterProfile(campaign, profile);
+            Program.UpsertCharacterProfile(campaign, profile);
             Dictionary<string, object> payload = new Dictionary<string, object>
             { ["worldDay"] = 42d, ["playerHeroStringId"] = "main_hero", ["locationId"] = "town_ES1", ["mode"] = "dialogue" };
             Dictionary<string, object> parsed = new Dictionary<string, object>
@@ -591,7 +591,7 @@ payload_json=$payload;",
                 "event_a", "dialogue", "town_ES1", 100, new[] { hero, "main_hero" });
             add("compatible_personal_history_persists", ReadInt(stored, "storedCount", 0) == 1,
                 "A compatible self-created personal detail becomes durable soft canon with source lineage.", stored);
-            Dictionary<string, object> projected = ReadJsonObject(CharacterFile(campaign, hero, "dynamic_characteristics.json"));
+            Dictionary<string, object> projected = Program.ReadJsonObject(Program.CharacterFile(campaign, hero, "dynamic_characteristics.json"));
             string prompt = FormatDynamicCharacteristicsForPrompt(projected);
             add("active_entries_reach_prompt", prompt.Contains("market lanes", StringComparison.OrdinalIgnoreCase)
                 && prompt.Contains("soft personal canon", StringComparison.OrdinalIgnoreCase),
@@ -626,12 +626,12 @@ payload_json=$payload;",
             StoreDynamicCharacteristicWrites(campaign, hero, accepted, payload,
                 new Dictionary<string, object> { ["sessionId"] = "session_c", ["exchangeId"] = "exchange_c", ["turnIds"] = new List<string> { "turn_c" } },
                 "event_c", "dialogue", "town_ES1", 115, new[] { hero, "main_hero" });
-            using (ReignDbConnection connection = OpenCampaignConnection(campaign))
+            using (ReignDbConnection connection = Program.OpenCampaignConnection(campaign))
             {
-                Dictionary<string, object> duplicate = QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND status='active';",
+                Dictionary<string, object> duplicate = Program.QuerySql(connection, "SELECT * FROM dynamic_characteristics WHERE owner_id=$owner AND status='active';",
                     new Dictionary<string, object> { ["owner"] = hero }).Single();
                 add("duplicate_is_exactly_once", ReadInt(duplicate, "repeat_count", 0) == 3
-                    && TextListFromJson(ReadString(duplicate, "known_by_json", "[]")).Contains("npc_witness", StringComparer.OrdinalIgnoreCase),
+                    && Program.TextListFromJson(ReadString(duplicate, "known_by_json", "[]")).Contains("npc_witness", StringComparer.OrdinalIgnoreCase),
                     "Repeated details update one record, expand its audience, and never forget an earlier group witness.", duplicate);
             }
             Dictionary<string, object> badParsed = new Dictionary<string, object>
